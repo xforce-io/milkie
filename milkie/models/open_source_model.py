@@ -145,6 +145,6 @@ if __name__ == "__main__":
         ModelType.VICUNA, 
         OpenSourceConfig(
                 "lmsys/vicuna-7b-v1.5", 
-                "http://127.0.0.1:8000/v1").__dict__)
+                "http://127.0.0.1:18301/v1").__dict__)
     result = model.run(messages)
     print(result)
