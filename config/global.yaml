@@ -1,0 +1,21 @@
+memory:
+  - type: LONG_TERM
+    source: LOCAL 
+    path: ./data/santi/
+llm:  
+  type: AZURE_OPENAI
+  model: "gpt-35-turbo-16k"
+  deployment_name: "gpt-35-turbo-16k"
+  api_key: "41157f060dc04dea8dd063b8716ec721"
+  azure_endpoint: "https://artificial-intelligence-01.openai.azure.com/"
+  api_version: "2023-12-01-preview"
+  ctx_len: 2048
+embedding:
+  type: HUGGINGFACE
+  model: "BAAI/bge-large-zh-v1.5"
+index:
+  chunk_size: 512
+retrieval:
+  similarity_top_k: 30
+  reranker:
+    name: FLAGEMBED # FLAGEMBED | NONE

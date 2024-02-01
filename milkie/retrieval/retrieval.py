@@ -1,9 +1,40 @@
-from context import Context
+from llama_index import QueryBundle
+from milkie.context import Context
+from milkie.retrieval.reranker import Reranker
+from milkie.retrieval.retrievers import HybridRetriever
 
+from llama_index.retrievers import BM25Retriever
+from llama_index.query_engine import RetrieverQueryEngine
+from llama_index.response_synthesizers.type import ResponseMode
 
 class RetrievalModule:
-    def __init__(self, long_term_memory):
-        self.long_term_memory = long_term_memory
+    def __init__(self, context :Context):
+        self.context = context
+        self.retrievalConfig = context.config.retrievalConfig
+
+        self.denseRetriever = context.index.denseIndex.as_retriever(
+            similarity_top_k=self.retrievalConfig.similarityTopK//2)
+
+        self.sparseRetriever = BM25Retriever.from_defaults(
+            docstore=context.index.denseIndex.docstore,
+            similarity_top_k=self.retrievalConfig.similarityTopK//2
+        )
+
+        self.hybridRetriever = HybridRetriever(
+            self.denseRetriever, 
+            self.sparseRetriever)
+
+        nodePostProcessors = []
+        if self.retrievalConfig.reranker is not None:   
+            reranker = Reranker(self.retrievalConfig.reranker) 
+            nodePostProcessors.append(reranker.reranker)
+
+        context.engine = RetrieverQueryEngine.from_args(
+            retriever=self.hybridRetriever,
+            node_postprocessors=nodePostProcessors,
+            service_context=context.serviceContext,
+            response_mode=ResponseMode.REFINE)
 
     def retrieve(self, context :Context):
-        return self.long_term_memory.get(context, None)
+        result = context.engine.retrieve(QueryBundle(context.getCurQuery()))
+        context.setRetrievalResult(result)

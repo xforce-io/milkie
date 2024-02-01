@@ -1,9 +1,4 @@
-from tool import *
+from milkie.tools.tool import *
 
 kTools = [
-    ScreenShot(), 
-    OCR(), 
-    MouseMove(), 
-    Typein(),
-    Press()
 ]

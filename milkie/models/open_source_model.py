@@ -3,7 +3,7 @@ from typing import Any, Dict, List, Optional, Union
 
 from openai import OpenAI, Stream
 
-from milkie.configs import OPENAI_API_PARAMS, OpenSourceConfig, ChatGPTConfig
+from milkie.config.config import OPENAI_API_PARAMS, OpenSourceConfig, ChatGPTConfig
 from milkie.messages import OpenAIMessage
 from milkie.models import BaseModelBackend
 from milkie.types import ChatCompletion, ChatCompletionChunk, ModelType

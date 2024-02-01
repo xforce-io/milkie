@@ -7,7 +7,7 @@ from milkie.messages import OpenAIMessage
 from milkie.models import BaseModelBackend
 from milkie.types import ChatCompletion, ChatCompletionChunk, ModelType
 from milkie.utils import BaseTokenCounter, OpenAITokenCounter
-from milkie.configs import OPENAI_API_PARAMS_WITH_FUNCTIONS
+from milkie.config.config import OPENAI_API_PARAMS_WITH_FUNCTIONS
 
 
 class OpenAIModel(BaseModelBackend):

@@ -1,4 +1,5 @@
-from src.prompt.prompt_maker import PromptMaker
+
+from milkie.prompt.prompt_maker import PromptMaker
 
 
 class ActionModule:
