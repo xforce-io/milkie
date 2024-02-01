@@ -73,23 +73,22 @@ class Context:
 
     def __buildEmbedding(self, config :EmbeddingConfig):
         self.embedding = HuggingFaceEmbedding(
-            model_name=config.model)
+            model_name=config.model,
+            device="mps")
 
     def __buildMemory(self, config :List[MemoryTermConfig]):
-        self.memory = Memory(config)
         self.serviceContext = ServiceContext.from_defaults(
             embed_model=self.embedding,
             chunk_size=self.config.indexConfig.chunkSize,
             llm=self.llm,
             system_prompt=SystemPromptCn,)
-        self.nodes = self.serviceContext.node_parser.get_nodes_from_documents(self.memory.docSet[0])
-        self.storageContext = StorageContext.from_defaults()
-        self.storageContext.docstore.add_documents(self.nodes)
+
+        self.memory = Memory(config, self.serviceContext)
 
     def __buildIndex(self, indexConfig):
         denseIndex = VectorStoreIndex(
-            self.nodes,
-            storage_context=self.storageContext,
+            self.memory.nodes,
+            storage_context=self.memory.storageContext,
             service_context=self.serviceContext)
         
         self.index = Index(denseIndex)

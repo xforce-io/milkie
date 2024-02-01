@@ -1,10 +1,13 @@
 from typing import List
-from llama_index import SimpleDirectoryReader
+from llama_index import ServiceContext, SimpleDirectoryReader, StorageContext
 from milkie.config.config import LongTermMemorySource, MemoryTermConfig
 
 
 class Memory(object):
-    def __init__(self, memoryTermConfigs :List[MemoryTermConfig]):
+    def __init__(
+            self, 
+            memoryTermConfigs :List[MemoryTermConfig],
+            serviceContext :ServiceContext):
         self.docSet = []
         for memoryTermConfig in memoryTermConfigs:
             if memoryTermConfig.source == LongTermMemorySource.LOCAL.name:
@@ -12,6 +15,11 @@ class Memory(object):
                 self.docSet.append(docs)
             else:
                 raise Exception(f"Not supported long term memory type[{memoryTermConfig.source}]")
+
+        self.serviceContext = serviceContext
+        self.nodes = self.serviceContext.node_parser.get_nodes_from_documents(self.docSet[0])
+        self.storageContext = StorageContext.from_defaults()
+        self.storageContext.docstore.add_documents(self.nodes)
     
     def __buildDocsFromLongTermLocal(self, memoryTermConfig :MemoryTermConfig):
         return SimpleDirectoryReader(memoryTermConfig.path).load_data()

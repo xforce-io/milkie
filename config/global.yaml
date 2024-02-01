@@ -12,7 +12,7 @@ llm:
   ctx_len: 2048
 embedding:
   type: HUGGINGFACE
-  model: "BAAI/bge-large-zh-v1.5"
+  model: "BAAI/bge-base-zh-v1.5"
 index:
   chunk_size: 512
 retrieval:
