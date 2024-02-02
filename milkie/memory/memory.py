@@ -8,6 +8,9 @@ class Memory(object):
             self, 
             memoryTermConfigs :List[MemoryTermConfig],
             serviceContext :ServiceContext):
+        import pdb
+        pdb.set_trace()
+        
         self.docSet = []
         for memoryTermConfig in memoryTermConfigs:
             if memoryTermConfig.source == LongTermMemorySource.LOCAL.name:

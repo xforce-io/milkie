@@ -80,8 +80,7 @@ class Context:
         self.serviceContext = ServiceContext.from_defaults(
             embed_model=self.embedding,
             chunk_size=self.config.indexConfig.chunkSize,
-            llm=self.llm,
-            system_prompt=SystemPromptCn,)
+            llm=self.llm)
 
         self.memory = Memory(config, self.serviceContext)
 

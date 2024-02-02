@@ -30,8 +30,7 @@ class TestSuite(object):
         self.name = name
         self.testCases = testCases
 
-    def run(self, ex):
-        globalConfig = GlobalConfig("config/global.yaml")
+    def run(self, ex, globalConfig :GlobalConfig):
         agent = Agent(globalConfig)
         cnt = 0
         totalTime = 0

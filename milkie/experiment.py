@@ -1,6 +1,8 @@
 from sacred import Experiment
+from milkie.config.config import GlobalConfig
 
 from milkie.testsuite import TestCase, TestSuite
+from milkie.utils.data_utils import loadFromYaml
 
 TestCases = [
     TestCase("三体人用了什么方式来警告汪淼停止纳米材料研究", [["幽灵", "宇宙背景辐射"], "倒计时"]),
@@ -32,15 +34,20 @@ ex.observers.append(FileStorageObserver("my_runs"))
 
 @ex.config
 def theConfig():
-    ex.add_config("config/global.yaml")
+    reranker = "NONE"
+
+@ex.capture()
+def experiment(reranker):
+    configYaml = loadFromYaml("config/global.yaml")
+    configYaml["retrieval"]["reranker"]["name"] = reranker
+
+    globalConfig = GlobalConfig(configYaml)
+    TestSuite("三体", TestCases).run(ex, globalConfig)
 
 @ex.automain
 def mainFunc():
-    print("start experiment")
-    TestSuite("default", TestCases).run(ex)
-
-    ex.run(config_updates={"retrieval":{"reranker":{"name":"NONE"}}})
-    TestSuite("default", TestCases).run(ex)
+    for reranker in ["NONE", "FLAGEMBED"]:
+        experiment(reranker=reranker)
 
 if __name__ == "__main__":
     pass

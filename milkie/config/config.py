@@ -83,8 +83,11 @@ class RetrievalConfig(BaseConfig):
             self.reranker = None
 
 class GlobalConfig(BaseConfig):
-    def __init__(self, configPath):
+    def __init__(self, configPath :str):
         config = loadFromYaml(configPath)
+        self.__init__(config)
+
+    def __init__(self, config :dict):
         self.memoryConfig = self.__buildMemoryConfig(config["memory"])
         self.llmConfig = self.__buildLLMConfig(config["llm"])
         self.embeddingConfig = self.__buildEmbeddingConfig(config["embedding"])
