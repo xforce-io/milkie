@@ -54,7 +54,7 @@ class Context:
             self.llm = HuggingFaceLLM(
                 context_window=config.ctxLen,
                 max_new_tokens=256,
-                model_kwargs={"torch_dtype":torch.bfloat16},
+                model_kwargs={"torch_dtype":torch.bfloat16, "trust_remote_code" :True},
                 generate_kwargs={"temperature": 0, "do_sample": False},
                 system_prompt=SystemPromptCn,
                 query_wrapper_prompt=PromptTemplate("<|USER|>{query_str}<|ASSISTANT|>"),
@@ -62,7 +62,7 @@ class Context:
                 model_name=config.model,
                 device_map="auto",
                 stopping_ids=[50278, 50279, 50277, 1, 0],
-                tokenizer_kwargs={"max_length": config.ctxLen},
+                tokenizer_kwargs={"max_length": config.ctxLen, "use_fast": False, "trust_remote_code": True},
             )
         elif config.type == LLMType.AZURE_OPENAI:
             self.llm = AzureOpenAI(
@@ -74,7 +74,7 @@ class Context:
     def __buildEmbedding(self, config :EmbeddingConfig):
         self.embedding = HuggingFaceEmbedding(
             model_name=config.model,
-            device="mps")
+            device="cuda")
 
     def __buildMemory(self, config :List[MemoryTermConfig]):
         self.serviceContext = ServiceContext.from_defaults(

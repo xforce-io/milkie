@@ -47,6 +47,7 @@ def experiment(reranker):
 @ex.automain
 def mainFunc():
     for reranker in ["NONE", "FLAGEMBED"]:
+        print(f"execute experiment with reranker: {reranker}")
         experiment(reranker=reranker)
 
 if __name__ == "__main__":
