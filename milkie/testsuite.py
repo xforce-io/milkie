@@ -1,8 +1,8 @@
-import time
-from milkie.logger import logger
+import time, logging
 from milkie.agent import Agent
 from milkie.config.config import GlobalConfig
 
+logger = logging.getLogger(__name__)
 
 class TestCase(object):
     def __init__(self, query :str, answers :list) -> None:
