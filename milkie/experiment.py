@@ -38,10 +38,14 @@ def theConfig():
     chunkSize = 256
 
 @ex.capture()
-def experiment(reranker, chunk_size):
+def experiment(
+        reranker, 
+        chunk_size,
+        similarity_top_k):
     configYaml = loadFromYaml("config/global.yaml")
-    configYaml["retrieval"]["reranker"]["name"] = reranker
     configYaml["index"]["chunk_size"] = chunk_size
+    configYaml["retrieval"]["reranker"]["name"] = reranker
+    configYaml["retrieval"]["similarity_top_k"] = similarity_top_k
 
     globalConfig = GlobalConfig(configYaml)
     TestSuite("三体", TestCases).run(ex, globalConfig)
@@ -50,10 +54,12 @@ def experiment(reranker, chunk_size):
 def mainFunc():
     for reranker in ["FLAGEMBED"]:
         for chunkSize in [256, 512]:
-            print(f"reranker[{reranker}] chunkSize[{chunkSize}]")
-            experiment(
-                reranker=reranker, 
-                chunk_size=chunkSize)
+            for similarity_top_k in [30, 40, 50]:
+                print(f"reranker: {reranker}, chunkSize: {chunkSize}, similarity_top_k: {similarity_top_k}")
+                experiment(
+                    reranker=reranker, 
+                    chunk_size=chunkSize,
+                    similarity_top_k=similarity_top_k)
 
 if __name__ == "__main__":
     pass
