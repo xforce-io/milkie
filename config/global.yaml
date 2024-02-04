@@ -9,7 +9,7 @@ llm:
   api_key: "41157f060dc04dea8dd063b8716ec721"
   azure_endpoint: "https://artificial-intelligence-01.openai.azure.com/"
   api_version: "2023-12-01-preview"
-  ctx_len: 2048
+  ctx_len: 4096
 embedding:
   type: HUGGINGFACE
   model: "BAAI/bge-base-zh-v1.5"

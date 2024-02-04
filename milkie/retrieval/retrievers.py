@@ -28,11 +28,8 @@ class HybridRetriever(BaseRetriever):
 
                 theNode = nodeIdToNode.get(vectorNode.node_id)
                 if theNode is None:
-                    vectorNode.node.metadata["emb_score"] = vectorNode.score
                     nodes.append(vectorNode)
                     nodeIdToNode[vectorNode.node_id] = vectorNode
-                else:
-                    theNode.node.metadata["emb_score"] = vectorNode.score
 
         if self.sparseRetriever:
             bm25Nodes = self.sparseRetriever._retrieve(query_bundle)
@@ -40,9 +37,6 @@ class HybridRetriever(BaseRetriever):
             for bm25Node in bm25Nodes:
                 theNode = nodeIdToNode.get(bm25Node.node_id)
                 if theNode is None:
-                    bm25Node.node.metadata["bm25_score"] = bm25Node.score
                     nodes.append(bm25Node)
                     nodeIdToNode[bm25Node.node_id] = bm25Node
-                else:
-                    theNode.node.metadata["bm25_score"] = bm25Node.score
         return nodes

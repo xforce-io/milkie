@@ -33,7 +33,7 @@ class RetrievalModule:
             retriever=self.hybridRetriever,
             node_postprocessors=nodePostProcessors,
             service_context=context.serviceContext,
-            response_mode=ResponseMode.REFINE)
+            response_mode=ResponseMode.COMPACT)
 
     def retrieve(self, context :Context):
         result = context.engine.retrieve(QueryBundle(context.getCurQuery()))
