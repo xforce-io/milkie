@@ -72,8 +72,10 @@ class RerankConfig(BaseConfig):
 class RetrievalConfig(BaseConfig):
     def __init__(
             self, 
+            channelRecall:int,
             similarityTopK :int,
             rerankerConfig :RerankConfig):
+        self.channelRecall = channelRecall
         self.similarityTopK = similarityTopK 
         if rerankerConfig["name"] == RerankerType(0).name:
             self.reranker = RerankConfig(
@@ -141,5 +143,6 @@ class GlobalConfig(BaseConfig):
 
     def __buildRetrievalConfig(self, configRetrieval):
         return RetrievalConfig(
+            configRetrieval["channel_recall"],
             configRetrieval["similarity_top_k"],
             configRetrieval["reranker"])

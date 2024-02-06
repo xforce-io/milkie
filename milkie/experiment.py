@@ -41,10 +41,12 @@ def theConfig():
 def experiment(
         reranker, 
         chunk_size,
+        channel_recall,
         similarity_top_k):
     configYaml = loadFromYaml("config/global.yaml")
     configYaml["index"]["chunk_size"] = chunk_size
     configYaml["retrieval"]["reranker"]["name"] = reranker
+    configYaml["retrieval"]["channel_recall"] = channel_recall
     configYaml["retrieval"]["similarity_top_k"] = similarity_top_k
 
     globalConfig = GlobalConfig(configYaml)
@@ -53,13 +55,15 @@ def experiment(
 @ex.automain
 def mainFunc():
     for reranker in ["FLAGEMBED"]:
-        for chunkSize in [256, 512]:
-            for similarity_top_k in [30, 40, 50]:
-                print(f"reranker: {reranker}, chunkSize: {chunkSize}, similarity_top_k: {similarity_top_k}")
-                experiment(
-                    reranker=reranker, 
-                    chunk_size=chunkSize,
-                    similarity_top_k=similarity_top_k)
+        for chunkSize in [128, 256]:
+            for channel_recall in [20, 30, 40]:
+                for similarity_top_k in [20, 30]:
+                    print(f"reranker: {reranker}, chunkSize: {chunkSize}, channel_recall: {channel_recall}, similarity_top_k: {similarity_top_k}")
+                    experiment(
+                        reranker=reranker, 
+                        chunk_size=chunkSize,
+                        channel_recall=channel_recall,
+                        similarity_top_k=similarity_top_k)
 
 if __name__ == "__main__":
     pass

@@ -16,6 +16,7 @@ embedding:
 index:
   chunk_size: 512
 retrieval:
+  channel_recall: 30
   similarity_top_k: 30
   reranker:
     name: FLAGEMBED # FLAGEMBED | NONE

@@ -14,12 +14,11 @@ class RetrievalModule:
         self.retrievalConfig = context.config.retrievalConfig
 
         self.denseRetriever = context.index.denseIndex.as_retriever(
-            similarity_top_k=self.retrievalConfig.similarityTopK)
+            similarity_top_k=self.retrievalConfig.channelRecall)
 
         self.sparseRetriever = BM25Retriever.from_defaults(
             docstore=context.index.denseIndex.docstore,
-            similarity_top_k=self.retrievalConfig.similarityTopK
-        )
+            similarity_top_k=self.retrievalConfig.channelRecall)
 
         self.hybridRetriever = HybridRetriever(
             self.denseRetriever, 

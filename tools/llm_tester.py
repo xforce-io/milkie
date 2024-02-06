@@ -63,7 +63,7 @@ def testModel(modelName):
                 promptItem["prompt"], 
                 history=None)
         elif modelType == TypeModel.Baichuan:
-            model.generation_config = GenerationConfig.from_pretrained("baichuan-inc/Baichuan2-13B-Chat", revision="v2.0")
+            model.generation_config = GenerationConfig.from_pretrained(modelName)
             messages = []
             messages.append({"role": "user", "content": "%s" % promptItem["prompt"]})
             response = model.chat(tokenizer, messages)
