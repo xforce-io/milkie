@@ -36,4 +36,5 @@ if __name__ == "__main__":
     )
 
     memory = Memory([memoryTermConfig], ServiceContext.from_defaults())
+    import pdb; pdb.set_trace()
     print(len(memory.nodes))
