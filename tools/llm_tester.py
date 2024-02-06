@@ -31,15 +31,15 @@ def getPrompts():
 
 Prompts = getPrompts()
 
-def testModel(model):
-    tokenizer = AutoTokenizer.from_pretrained(model, trust_remote_code=True)
-    model = AutoModelForCausalLM.from_pretrained(model, device_map="auto", trust_remote_code=True).eval()
+def testModel(modelName):
+    tokenizer = AutoTokenizer.from_pretrained(modelName, trust_remote_code=True)
+    model = AutoModelForCausalLM.from_pretrained(modelName, device_map="auto", trust_remote_code=True).eval()
     for promptItem in Prompts:
         print("=================================================")
-        print("model:", model)
+        print("model:", modelName)
         print("prompt:", promptItem["name"])
         print("-------------------------------------------------")
-        response, history = model.chat(tokenizer, promptItem["prompt"], history=None)
+        response = model.chat(tokenizer, promptItem["prompt"])
         print(response)
 
 if __name__ == "__main__":
