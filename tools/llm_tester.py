@@ -31,7 +31,7 @@ def getPrompts():
 
 Prompts = getPrompts()
 
-def testModel(model, query):
+def testModel(model):
     tokenizer = AutoTokenizer.from_pretrained(model, trust_remote_code=True)
     model = AutoModelForCausalLM.from_pretrained(model, device_map="auto", trust_remote_code=True).eval()
     for promptItem in Prompts:
@@ -44,4 +44,4 @@ def testModel(model, query):
 
 if __name__ == "__main__":
     for model in Models:
-        testModel(model, Prompt)
+        testModel(model)
