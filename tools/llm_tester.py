@@ -1,12 +1,27 @@
 import os, glob
 from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers.generation.utils import GenerationConfig
+from enum import Enum
 
-Models = [
+ModelNames = [
     "/mnt/data1/.cache/modelscope/hub/qwen/Qwen-7B-Chat/",
     "/mnt/data1/.cache/modelscope/hub/qwen/Qwen-14B-Chat/",
     "/mnt/data1/.cache/modelscope/hub/baichuan-inc/Baichuan2-7B-Chat/",
     "/mnt/data1/.cache/modelscope/hub/baichuan-inc/Baichuan2-13B-Chat/",
 ]
+
+class TypeModel(Enum):
+    Qwen = 1
+    Baichuan = 2
+
+    @staticmethod
+    def detectModelType(modelName :str):
+        if modelName.find("qwen") >= 0:
+            return TypeModel.Qwen
+        elif modelName.find("baichuan") >= 0:
+            return TypeModel.Baichuan
+        else:
+            return None
 
 def getPrompts():
     directory_path = 'prompts'
@@ -35,13 +50,27 @@ def testModel(modelName):
     tokenizer = AutoTokenizer.from_pretrained(modelName, trust_remote_code=True)
     model = AutoModelForCausalLM.from_pretrained(modelName, device_map="auto", trust_remote_code=True).eval()
     for promptItem in Prompts:
+        modelType = TypeModel.detectModelType(modelName)
+        
         print("=================================================")
+        print("model type:", modelType)
         print("model:", modelName)
         print("prompt:", promptItem["name"])
         print("-------------------------------------------------")
-        response = model.chat(tokenizer, promptItem["prompt"])
+        if modelType == TypeModel.Qwen:
+            response, history = model.chat(
+                tokenizer, 
+                promptItem["prompt"], 
+                history=None)
+        elif modelType == TypeModel.Baichuan:
+            model.generation_config = GenerationConfig.from_pretrained("baichuan-inc/Baichuan2-13B-Chat", revision="v2.0")
+            messages = []
+            messages.append({"role": "user", "content": "%s" % promptItem["prompt"]})
+            response = model.chat(tokenizer, messages)
+        else:
+            raise Exception("Unknown model type")
         print(response)
 
 if __name__ == "__main__":
-    for model in Models:
+    for model in ModelNames:
         testModel(model)
