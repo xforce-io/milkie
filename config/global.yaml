@@ -15,6 +15,7 @@ embedding:
   model: "BAAI/bge-base-zh-v1.5"
 index:
   chunk_size: 512
+  chunk_overlap: 100
 retrieval:
   channel_recall: 30
   similarity_top_k: 30

@@ -55,7 +55,7 @@ def experiment(
 @ex.automain
 def mainFunc():
     for reranker in ["FLAGEMBED"]:
-        for chunkSize in [128, 256]:
+        for chunkSize in [256]:
             for channel_recall in [20, 30, 40]:
                 for similarity_top_k in [20, 30]:
                     print(f"reranker: {reranker}, chunkSize: {chunkSize}, channel_recall: {channel_recall}, similarity_top_k: {similarity_top_k}")

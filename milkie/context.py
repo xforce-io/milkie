@@ -80,6 +80,7 @@ class Context:
         self.serviceContext = ServiceContext.from_defaults(
             embed_model=self.embedding,
             chunk_size=self.config.indexConfig.chunkSize,
+            chunk_overlap=self.config.indexConfig.chunkOverlap,
             llm=self.llm)
 
         self.memory = Memory(config, self.serviceContext)

@@ -61,8 +61,12 @@ class EmbeddingConfig(BaseConfig):
         self.model = model 
 
 class IndexConfig(BaseConfig):
-    def __init__(self, chunkSize :int):
+    def __init__(
+            self, 
+            chunkSize :int,
+            chunkOverlap :int):
         self.chunkSize = chunkSize
+        self.chunkOverlap = chunkOverlap
 
 class RerankConfig(BaseConfig):
     def __init__(self, rerankerType :RerankerType, rerankTopK :int):
@@ -139,7 +143,9 @@ class GlobalConfig(BaseConfig):
             raise Exception("Embedding type not supported")
 
     def __buildIndexConfig(self, configIndex):
-        return IndexConfig(configIndex["chunk_size"])
+        return IndexConfig(
+            chunkSize=configIndex["chunk_size"],
+            chunkOverlap=configIndex["chunk_overlap"])
 
     def __buildRetrievalConfig(self, configRetrieval):
         return RetrievalConfig(
