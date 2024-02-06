@@ -1,5 +1,6 @@
 from llama_index import QueryBundle
 from milkie.context import Context
+from milkie.prompt.test_prompts import CANDIDATE_REFINE_PROMPT_IMPL
 from milkie.retrieval.position_reranker import PositionReranker
 from milkie.retrieval.reranker import Reranker
 from milkie.retrieval.retrievers import HybridRetriever
@@ -36,7 +37,8 @@ class RetrievalModule:
             retriever=self.hybridRetriever,
             node_postprocessors=nodePostProcessors,
             service_context=context.serviceContext,
-            response_mode=ResponseMode.COMPACT)
+            response_mode=ResponseMode.COMPACT,
+            refine_template=CANDIDATE_REFINE_PROMPT_IMPL,)
 
     def retrieve(self, context :Context):
         result = context.engine.retrieve(QueryBundle(context.getCurQuery()))

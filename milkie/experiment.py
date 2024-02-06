@@ -1,8 +1,12 @@
+import logging
 from sacred import Experiment
 from milkie.config.config import GlobalConfig
 
 from milkie.testsuite import TestCase, TestSuite
 from milkie.utils.data_utils import loadFromYaml
+
+logger = logging.getLogger(__name__)
+
 
 TestCases = [
     TestCase("三体人用了什么方式来警告汪淼停止纳米材料研究", [["幽灵", "宇宙背景辐射"], "倒计时"]),
@@ -56,9 +60,9 @@ def experiment(
 def mainFunc():
     for reranker in ["FLAGEMBED"]:
         for chunkSize in [256]:
-            for channel_recall in [20, 30, 40]:
+            for channel_recall in [30, 40]:
                 for similarity_top_k in [20, 30]:
-                    print(f"reranker: {reranker}, chunkSize: {chunkSize}, channel_recall: {channel_recall}, similarity_top_k: {similarity_top_k}")
+                    logging.info(f"reranker: {reranker}, chunkSize: {chunkSize}, channel_recall: {channel_recall}, similarity_top_k: {similarity_top_k}")
                     experiment(
                         reranker=reranker, 
                         chunk_size=chunkSize,
