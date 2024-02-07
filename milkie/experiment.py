@@ -31,6 +31,10 @@ TestCases = [
     TestCase("杀死申玉菲的凶手希望地球叛军统帅属于哪个派别", ["降临派"]),
 ]
 
+ModelQwen14bChat = "/mnt/data1/.cache/modelscope/hub/qwen/Qwen-14B-Chat/"
+ModelQwen15V14bChat = "/mnt/data1/.cache/modelscope/hub/qwen/Qwen1.5-14B-Chat/"
+ModelBaichuan13bChat = "/mnt/data1/.cache/modelscope/hub/baichuan-inc/Baichuan2-13B-Chat/"
+
 from sacred.observers import FileStorageObserver
 
 ex = Experiment()
@@ -38,33 +42,44 @@ ex.observers.append(FileStorageObserver("my_runs"))
 
 @ex.config
 def theConfig():
-    reranker = "NONE"
+    reranker = "FLAGEMBED"
     chunkSize = 256
 
 @ex.capture()
 def experiment(
-        reranker, 
-        chunk_size,
-        channel_recall,
-        similarity_top_k):
+        llm_model :str=None,
+        reranker :str=None, 
+        chunk_size :int=None,
+        channel_recall :int=None,
+        similarity_top_k :int=None):
     configYaml = loadFromYaml("config/global.yaml")
-    configYaml["index"]["chunk_size"] = chunk_size
-    configYaml["retrieval"]["reranker"]["name"] = reranker
-    configYaml["retrieval"]["channel_recall"] = channel_recall
-    configYaml["retrieval"]["similarity_top_k"] = similarity_top_k
+    if llm_model:
+        configYaml["llm"]["model"] = llm_model
+    
+    if chunk_size:
+        configYaml["index"]["chunk_size"] = chunk_size
+
+    if reranker:
+        configYaml["retrieval"]["reranker"]["name"] = reranker
+
+    if channel_recall:
+        configYaml["retrieval"]["channel_recall"] = channel_recall
+    
+    if similarity_top_k:
+        configYaml["retrieval"]["similarity_top_k"] = similarity_top_k
 
     globalConfig = GlobalConfig(configYaml)
     TestSuite("三体", TestCases).run(ex, globalConfig)
 
 @ex.automain
 def mainFunc():
-    for reranker in ["FLAGEMBED"]:
+    for llm_model in [ModelQwen14bChat, ModelQwen15V14bChat, ModelBaichuan13bChat]:
         for chunkSize in [256]:
-            for channel_recall in [30, 40]:
-                for similarity_top_k in [20, 30]:
-                    logging.info(f"reranker: {reranker}, chunkSize: {chunkSize}, channel_recall: {channel_recall}, similarity_top_k: {similarity_top_k}")
+            for channel_recall in [30]:
+                for similarity_top_k in [15, 20, 25]:
+                    logging.info(f"chunkSize: {chunkSize}, channel_recall: {channel_recall}, similarity_top_k: {similarity_top_k}")
                     experiment(
-                        reranker=reranker, 
+                        llm_model=llm_model,
                         chunk_size=chunkSize,
                         channel_recall=channel_recall,
                         similarity_top_k=similarity_top_k)
