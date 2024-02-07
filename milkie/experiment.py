@@ -74,15 +74,13 @@ def experiment(
 @ex.automain
 def mainFunc():
     for llm_model in [ModelQwen14bChat, ModelQwen15V14bChat, ModelBaichuan13bChat]:
-        for chunkSize in [256]:
-            for channel_recall in [30]:
-                for similarity_top_k in [15, 20, 25]:
-                    logging.info(f"chunkSize: {chunkSize}, channel_recall: {channel_recall}, similarity_top_k: {similarity_top_k}")
-                    experiment(
-                        llm_model=llm_model,
-                        chunk_size=chunkSize,
-                        channel_recall=channel_recall,
-                        similarity_top_k=similarity_top_k)
+        for channel_recall in [30]:
+            for similarity_top_k in [15, 20, 25]:
+                logger.info(f"llm_model: {llm_model}, channel_recall: {channel_recall}, similarity_top_k: {similarity_top_k}")
+                experiment(
+                    llm_model=llm_model,
+                    channel_recall=channel_recall,
+                    similarity_top_k=similarity_top_k)
 
 if __name__ == "__main__":
     pass
