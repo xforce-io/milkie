@@ -69,12 +69,14 @@ class Context:
                 azure_endpoint=config.azureEndpoint,
                 azure_deployment=config.deploymentName,
                 api_version=config.apiVersion,
-                api_key=config.apiKey)
+                api_key=config.apiKey,
+                system_prompt=SystemPromptCn,
+                temperature=0)
 
     def __buildEmbedding(self, config :EmbeddingConfig):
         self.embedding = HuggingFaceEmbedding(
             model_name=config.model,
-            device="cuda")
+            device=config.device)
 
     def __buildMemory(self, config :List[MemoryTermConfig]):
         self.serviceContext = ServiceContext.from_defaults(

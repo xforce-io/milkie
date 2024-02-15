@@ -27,6 +27,11 @@ class EmbeddingType(Enum):
 class RerankerType(Enum):
     FLAGEMBED = 0
 
+class Device(Enum):
+    CPU = 0
+    CUDA = 1
+    MPS = 2
+
 class MemoryTermConfig(BaseConfig):
     def __init__(
             self, 
@@ -56,9 +61,19 @@ class LLMConfig(BaseConfig):
         self.apiVersion = apiVersion
 
 class EmbeddingConfig(BaseConfig):
-    def __init__(self, type :EmbeddingType, model :str):
+    def __init__(
+            self, 
+            type :EmbeddingType, 
+            model :str,
+            device :Device):
         self.type = type
         self.model = model 
+        if device == Device.CPU.name:
+            self.device = "cpu"
+        elif device == Device.MPS.name:
+            self.device = "mps"
+        else:
+            self.device = "cuda"
 
 class IndexConfig(BaseConfig):
     def __init__(
@@ -138,7 +153,10 @@ class GlobalConfig(BaseConfig):
     
     def __buildEmbeddingConfig(self, configEmbedding):
         if configEmbedding["type"] == EmbeddingType(0).name:
-            return EmbeddingConfig(EmbeddingType(0), configEmbedding["model"])
+            return EmbeddingConfig(
+                EmbeddingType(0), 
+                configEmbedding["model"],
+                configEmbedding["device"])
         else:
             raise Exception("Embedding type not supported")
 

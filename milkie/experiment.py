@@ -31,9 +31,10 @@ TestCases = [
     TestCase("杀死申玉菲的凶手希望地球叛军统帅属于哪个派别", ["降临派"]),
 ]
 
-ModelQwen14bChat = "/mnt/data1/.cache/modelscope/hub/qwen/Qwen-14B-Chat/"
-ModelQwen15V14bChat = "/mnt/data1/.cache/modelscope/hub/qwen/Qwen1.5-14B-Chat/"
-ModelBaichuan13bChat = "/mnt/data1/.cache/modelscope/hub/baichuan-inc/Baichuan2-13B-Chat/"
+Prefix = "/mnt/data1/.cache/modelscope/hub/"
+ModelQwen14bChat = "qwen/Qwen-14B-Chat"
+ModelQwen15V14bChat = "qwen/Qwen1.5-14B-Chat"
+ModelBaichuan13bChat = "baichuan-inc/Baichuan2-13B-Chat"
 
 from sacred.observers import FileStorageObserver
 
@@ -73,9 +74,9 @@ def experiment(
 
 @ex.automain
 def mainFunc():
-    for llm_model in [ModelQwen14bChat, ModelQwen15V14bChat, ModelBaichuan13bChat]:
+    for llm_model in [ModelQwen14bChat]:
         for channel_recall in [30]:
-            for similarity_top_k in [15, 20, 25]:
+            for similarity_top_k in [30]:
                 logger.info(f"llm_model: {llm_model}, channel_recall: {channel_recall}, similarity_top_k: {similarity_top_k}")
                 experiment(
                     llm_model=llm_model,

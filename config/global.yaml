@@ -3,7 +3,7 @@ memory:
     source: LOCAL 
     path: ./data/santi/
 llm:  
-  type: AZURE_OPENAI
+  type: HUGGINGFACE
   model: "gpt-35-turbo-16k"
   deployment_name: "gpt-35-turbo-16k"
   api_key: "41157f060dc04dea8dd063b8716ec721"
@@ -13,6 +13,7 @@ llm:
 embedding:
   type: HUGGINGFACE
   model: "BAAI/bge-base-zh-v1.5"
+  device: MPS
 index:
   chunk_size: 512
   chunk_overlap: 100
