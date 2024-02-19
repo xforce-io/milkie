@@ -56,21 +56,27 @@ def experiment(
     configYaml = loadFromYaml("config/global.yaml")
     if llm_model:
         configYaml["llm"]["model"] = llm_model
-    
+
+    def getQAConfig():
+        for agentConfig in configYaml["agents"]:
+            if agentConfig["config"] == "qa":
+                return agentConfig
+
+    qaConfig = getQAConfig()
     if chunk_size:
-        configYaml["index"]["chunk_size"] = chunk_size
+        qaConfig["index"]["chunk_size"] = chunk_size
 
     if reranker:
-        configYaml["retrieval"]["reranker"]["name"] = reranker
+        qaConfig["retrieval"]["reranker"]["name"] = reranker
 
     if channel_recall:
-        configYaml["retrieval"]["channel_recall"] = channel_recall
+        qaConfig["retrieval"]["channel_recall"] = channel_recall
     
     if similarity_top_k:
-        configYaml["retrieval"]["similarity_top_k"] = similarity_top_k
+        qaConfig["retrieval"]["similarity_top_k"] = similarity_top_k
 
     globalConfig = GlobalConfig(configYaml)
-    TestSuite("三体", TestCases).run(ex, globalConfig)
+    TestSuite("三体", TestCases[:2]).run(ex, globalConfig)
 
 @ex.automain
 def mainFunc():

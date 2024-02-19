@@ -1,24 +1,38 @@
+from llama_index import Response
 from milkie.action import ActionModule
+from milkie.agent.base_agent import BaseAgent
 from milkie.config.config import GlobalConfig
 from milkie.context import Context
 from milkie.decision.decision import DecisionModule
 from milkie.grounding import GroundingModule
+from milkie.memory.memory_with_index import MemoryWithIndex
 from milkie.reasoning import ReasoningModule
 from milkie.retrieval.retrieval import RetrievalModule
 
-class Agent:
-    def __init__(self, globalConfig :GlobalConfig):
-        self.globalConfig = globalConfig 
-        self.context = Context(self.globalConfig)
-        self.working_memory = {}
-        self.long_term_memory = {}  # 根据需要设置
+class QAAgent(BaseAgent):
+
+    def __init__(
+            self, 
+            globalConfig :GlobalConfig,
+            context :Context,
+            config :str):
+        super().__init__(globalConfig, context, config)
+
+        self.memoryWithIndex = MemoryWithIndex(
+            context.settings,
+            self.config.memoryConfig,
+            self.config.indexConfig)
+
         self.grounding_module = GroundingModule()
-        self.retrieval_module = RetrievalModule(context=self.context)
+        self.retrieval_module = RetrievalModule(
+            qaAgentConfig=self.config,
+            memoryWithIndex=self.memoryWithIndex)
         self.reasoning_module = ReasoningModule()
-        self.decision_module = DecisionModule()
+        self.decision_module = DecisionModule(
+            engine=self.retrieval_module.engine)
         self.action_module = ActionModule()
 
-    def task(self, query):
+    def task(self, query) -> Response:
         self.context.setCurQuery(query)
         self.processRound(self.context)
         while not self._end():
@@ -42,13 +56,8 @@ class Agent:
     def __decision(self, context):
         return self.decision_module.decide(context)
 
-    def __action(self, context, instructions):
-        return self.action_module.act(instructions)
-
-    def __grounding(self, json_data):
-        self.grounding_module.update(json_data)
-        self.working_memory.update(self.grounding_module.get_data())
-
 if __name__ == "__main__":
-    agent = Agent(GlobalConfig("config/global.yaml"))
+    globalConfig = GlobalConfig("config/global.yaml")
+    context = Context(globalConfig)
+    agent = QAAgent(globalConfig, context, "qa")
     agent.task("你好")

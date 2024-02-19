@@ -1,9 +1,5 @@
-memory:
-  - type: LONG_TERM
-    source: LOCAL 
-    path: ./data/santi/
 llm:  
-  type: HUGGINGFACE
+  type: AZURE_OPENAI
   model: "gpt-35-turbo-16k"
   deployment_name: "gpt-35-turbo-16k"
   api_key: "41157f060dc04dea8dd063b8716ec721"
@@ -14,11 +10,20 @@ embedding:
   type: HUGGINGFACE
   model: "BAAI/bge-base-zh-v1.5"
   device: MPS
-index:
-  chunk_size: 512
-  chunk_overlap: 100
-retrieval:
-  channel_recall: 30
-  similarity_top_k: 30
-  reranker:
-    name: FLAGEMBED # FLAGEMBED | NONE
+agents:
+  - config: qa
+    type: QA
+    memory:
+      - type: LONG_TERM
+        source: LOCAL 
+        path: ./data/santi/
+    index:
+      chunk_size: 512
+      chunk_overlap: 100
+    retrieval:
+      channel_recall: 30
+      similarity_top_k: 30
+      reranker:
+        name: FLAGEMBED # FLAGEMBED | NONE
+  - config: query_rewrite
+    type: PROMPT
