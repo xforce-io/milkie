@@ -18,12 +18,13 @@ agents:
         source: LOCAL 
         path: ./data/santi/
     index:
-      chunk_size: 512
+      chunk_size: 256
       chunk_overlap: 100
     retrieval:
       channel_recall: 30
       similarity_top_k: 30
       reranker:
         name: FLAGEMBED # FLAGEMBED | NONE
+        model: abc
   - config: query_rewrite
     type: PROMPT

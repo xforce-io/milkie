@@ -141,8 +141,10 @@ class RerankConfig(BaseConfig):
     def __init__(
             self, 
             rerankerType :RerankerType, 
+            model :str,
             rerankTopK :int):
         self.rerankerType = rerankerType
+        self.model = model
         self.rerankTopK = rerankTopK
 
 class RetrievalConfig(BaseConfig):
@@ -156,6 +158,7 @@ class RetrievalConfig(BaseConfig):
         if rerankerConfig["name"] == RerankerType(0).name:
             self.reranker = RerankConfig(
                 rerankerType=rerankerConfig["name"],
+                model=rerankerConfig["model"],
                 rerankTopK=self.similarityTopK)
         else:
             self.reranker = None
