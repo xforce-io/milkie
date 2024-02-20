@@ -22,7 +22,7 @@ agents:
       chunk_overlap: 50
     retrieval:
       channel_recall: 30
-      similarity_top_k: 30
+      similarity_top_k: 20
       reranker:
         name: FLAGEMBED # FLAGEMBED | NONE
         model: abc

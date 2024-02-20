@@ -25,7 +25,7 @@ class Settings(object):
                 model_kwargs={"torch_dtype":torch.bfloat16, "trust_remote_code" :True},
                 generate_kwargs={"temperature": 0.1, "do_sample": False},
                 system_prompt=SystemPromptCn,
-                query_wrapper_prompt=PromptTemplate("{query_str}"),
+                query_wrapper_prompt=PromptTemplate("{query_str}<|ASSISTANT|>"),
                 tokenizer_name=config.model,
                 model_name=config.model,
                 device_map="auto",
