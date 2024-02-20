@@ -80,7 +80,7 @@ def experiment(
 
 @ex.automain
 def mainFunc():
-    for llm_model in [ModelQwen15V14bChat, ModelQwen14bChat, ModelBaichuan13bChat]:
+    for llm_model in [ModelBaichuan13bChat, ModelQwen14bChat]:
         for channel_recall in [30]:
             for similarity_top_k in [30]:
                 logger.info(f"llm_model: {llm_model}, channel_recall: {channel_recall}, similarity_top_k: {similarity_top_k}")
