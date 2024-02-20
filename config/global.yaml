@@ -19,7 +19,7 @@ agents:
         path: ./data/santi/
     index:
       chunk_size: 256
-      chunk_overlap: 100
+      chunk_overlap: 50
     retrieval:
       channel_recall: 30
       similarity_top_k: 30

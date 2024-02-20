@@ -33,7 +33,7 @@ class HybridRetriever(BaseRetriever):
 
         if self.sparseRetriever:
             bm25Nodes = self.sparseRetriever._retrieve(query_bundle)
-            logger.debug(f"dense_retriever_recall_num[{len(bm25Nodes)}]")
+            logger.debug(f"sparse_retriever_recall_num[{len(bm25Nodes)}]")
             for bm25Node in bm25Nodes:
                 theNode = nodeIdToNode.get(bm25Node.node_id)
                 if theNode is None:
