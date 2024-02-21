@@ -49,6 +49,7 @@ def theConfig():
 @ex.capture()
 def experiment(
         llm_model :str=None,
+        temperature :float=None,
         reranker :str=None, 
         chunk_size :int=None,
         channel_recall :int=None,
@@ -56,6 +57,9 @@ def experiment(
     configYaml = loadFromYaml("config/global.yaml")
     if llm_model:
         configYaml["llm"]["model"] = llm_model
+
+    if temperature:
+        configYaml["llm"]["temperature"] = temperature
 
     def getQAConfig():
         for agentConfig in configYaml["agents"]:
@@ -81,13 +85,15 @@ def experiment(
 @ex.automain
 def mainFunc():
     for llm_model in [ModelBaichuan13bChat, ModelQwen14bChat]:
-        for channel_recall in [30]:
-            for similarity_top_k in [20]:
-                logger.info(f"llm_model: {llm_model}, channel_recall: {channel_recall}, similarity_top_k: {similarity_top_k}")
-                experiment(
-                    llm_model=llm_model,
-                    channel_recall=channel_recall,
-                    similarity_top_k=similarity_top_k)
+        for channel_recall in [20, 30, 40]:
+            for similarity_top_k in [20, 30]:
+                for temperature in [0, 0.2, 0.6]:
+                    logger.info(f"Running experiment with llm_model={llm_model}, channel_recall={channel_recall}, similarity_top_k={similarity_top_k}, temperature={temperature}")
+                    experiment(
+                        temperature=temperature,
+                        llm_model=llm_model,
+                        channel_recall=channel_recall,
+                        similarity_top_k=similarity_top_k)
 
 if __name__ == "__main__":
     pass

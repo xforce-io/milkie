@@ -21,11 +21,12 @@ class Settings(object):
             logging.info(f"Building HuggingFaceLLM with model {config.model}")
             self.llm = HuggingFaceLLM(
                 context_window=config.ctxLen,
+                temperature=config.temperature,
                 max_new_tokens=256,
                 model_kwargs={"torch_dtype":torch.bfloat16, "trust_remote_code" :True},
                 generate_kwargs={"temperature": 0.1, "do_sample": False},
                 system_prompt=SystemPromptCn,
-                query_wrapper_prompt=PromptTemplate("{query_str}<|ASSISTANT|>"),
+                query_wrapper_prompt=PromptTemplate("{query_str}\n<|ASSISTANT|>\n"),
                 tokenizer_name=config.model,
                 model_name=config.model,
                 device_map="auto",
@@ -40,7 +41,7 @@ class Settings(object):
                 api_version=config.apiVersion,
                 api_key=config.apiKey,
                 system_prompt=SystemPromptCn,
-                temperature=0)
+                temperature=config.temperature)
 
     def __buildEmbedding(self, config :EmbeddingConfig):
         logging.info(f"Building HuggingFaceEmbedding with model {config.model}")

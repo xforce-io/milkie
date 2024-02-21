@@ -6,6 +6,7 @@ llm:
   azure_endpoint: "https://artificial-intelligence-01.openai.azure.com/"
   api_version: "2023-12-01-preview"
   ctx_len: 4096
+  temperature: 0
 embedding:
   type: HUGGINGFACE
   model: "BAAI/bge-base-zh-v1.5"

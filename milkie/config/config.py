@@ -71,6 +71,7 @@ class LLMConfig(BaseConfig):
             type :LLMType, 
             model :str, 
             ctxLen :int = 0,
+            temperature :float = 0,
             deploymentName :str = None,
             apiKey :str = None,
             azureEndpoint :str = None,
@@ -78,6 +79,7 @@ class LLMConfig(BaseConfig):
         self.type = type
         self.model = model
         self.ctxLen = ctxLen
+        self.temperature = temperature
         self.deploymentName = deploymentName
         self.apiKey = apiKey
         self.azureEndpoint = azureEndpoint
@@ -88,11 +90,13 @@ class LLMConfig(BaseConfig):
             return LLMConfig(
                 type=LLMType.HUGGINGFACE, 
                 model=config["model"],
-                ctxLen=config["ctx_len"])
+                ctxLen=config["ctx_len"],
+                temperature=config["temperature"])
         elif config["type"] == LLMType.AZURE_OPENAI.name:
             return LLMConfig(
                 type=LLMType.AZURE_OPENAI,
                 model=config["model"],
+                temperature=config["temperature"],
                 deploymentName=config["deployment_name"],
                 apiKey=config["api_key"],
                 azureEndpoint=config["azure_endpoint"],
