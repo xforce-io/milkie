@@ -21,10 +21,9 @@ class Settings(object):
             logging.info(f"Building HuggingFaceLLM with model {config.model}")
             self.llm = HuggingFaceLLM(
                 context_window=config.ctxLen,
-                temperature=config.temperature,
                 max_new_tokens=256,
                 model_kwargs={"torch_dtype":torch.bfloat16, "trust_remote_code" :True},
-                generate_kwargs={"temperature": 0.1, "do_sample": False},
+                generate_kwargs={"temperature": config.temperature, "do_sample": False},
                 system_prompt=SystemPromptCn,
                 query_wrapper_prompt=PromptTemplate("{query_str}\n<|ASSISTANT|>\n"),
                 tokenizer_name=config.model,
