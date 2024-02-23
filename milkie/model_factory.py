@@ -36,7 +36,8 @@ class ModelFactory:
 
     def getEmbedding(self, config :EmbeddingConfig):
         if config.model not in self.models:
-            self.embedding = HuggingFaceEmbedding(
+            self.models[config.model] = HuggingFaceEmbedding(
                 model_name=config.model,
                 device=config.device)
         logging.info(f"Building HuggingFaceEmbedding with model {config.model} from_cache{repr in self.models}")
+        return self.models[config.model]
