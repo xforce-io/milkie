@@ -1,6 +1,7 @@
 import logging
 from sacred import Experiment
 from milkie.config.config import GlobalConfig
+from milkie.model_factory import ModelFactory
 
 from milkie.testsuite import TestCase, TestSuite
 from milkie.utils.data_utils import loadFromYaml
@@ -40,6 +41,8 @@ from sacred.observers import FileStorageObserver
 
 ex = Experiment()
 ex.observers.append(FileStorageObserver("my_runs"))
+modelFactory = ModelFactory()
+
 
 @ex.config
 def theConfig():

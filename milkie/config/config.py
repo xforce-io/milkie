@@ -65,6 +65,7 @@ class MemoryConfig(BaseConfig):
             configs.append(memoryTermConfig)
         return MemoryConfig(memoryConfig=configs)
 
+@dataclass
 class LLMConfig(BaseConfig):
     def __init__(
             self, 
