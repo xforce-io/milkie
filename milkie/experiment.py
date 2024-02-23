@@ -83,7 +83,7 @@ def experiment(
         qaConfig["retrieval"]["similarity_top_k"] = similarity_top_k
 
     globalConfig = GlobalConfig(configYaml)
-    TestSuite("三体", TestCases).run(ex, globalConfig)
+    TestSuite("三体", TestCases).run(ex, globalConfig, modelFactory)
 
 @ex.automain
 def mainFunc():

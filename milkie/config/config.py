@@ -5,7 +5,7 @@ from typing import List
 from milkie.utils.data_utils import loadFromYaml
 
 
-@dataclass(frozen=True)
+@dataclass
 class BaseConfig(ABC):
     pass
 
