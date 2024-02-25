@@ -1,6 +1,7 @@
-from llama_index import QueryBundle
+from llama_index import QueryBundle, get_response_synthesizer
 from milkie.config.config import QAAgentConfig
 from milkie.context import Context
+from milkie.custom_refine_program import CustomRefineProgram
 from milkie.memory.memory_with_index import MemoryWithIndex
 from milkie.prompt.test_prompts import CANDIDATE_TEXT_QA_PROMPT_IMPL, CANDIDATE_REFINE_PROMPT_IMPL
 from milkie.retrieval.position_reranker import PositionReranker
@@ -37,13 +38,19 @@ class RetrievalModule:
             positionReranker = PositionReranker()
             nodePostProcessors.append(positionReranker)
 
+        responseSynthesizer = get_response_synthesizer(
+            service_context=memoryWithIndex.serviceContext,
+            program_factory=CustomRefineProgram(),
+        )
+
         self.engine = RetrieverQueryEngine.from_args(
             retriever=self.hybridRetriever,
             node_postprocessors=nodePostProcessors,
             service_context=memoryWithIndex.serviceContext,
             response_mode=ResponseMode.COMPACT,
             text_qa_template=CANDIDATE_TEXT_QA_PROMPT_IMPL,
-            refine_template=CANDIDATE_REFINE_PROMPT_IMPL,)
+            refine_template=CANDIDATE_REFINE_PROMPT_IMPL,
+            response_synthesizer=responseSynthesizer)
 
     def retrieve(self, context :Context):
         result = self.engine.retrieve(QueryBundle(context.getCurQuery()))

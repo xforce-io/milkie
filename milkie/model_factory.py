@@ -29,6 +29,7 @@ class ModelFactory:
                 device_map="auto",
                 stopping_ids=[50278, 50279, 50277, 1, 0],
                 tokenizer_kwargs={"max_length": config.ctxLen, "use_fast": False, "trust_remote_code": True},
+                is_chat_model=True,
             )
         logging.info(f"Building HuggingFaceLLM with model {config.model} from_cache{repr in self.models}")
         self.models[config.model].generate_kwargs["temperature"] = config.temperature
