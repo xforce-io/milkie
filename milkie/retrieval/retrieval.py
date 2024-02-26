@@ -1,7 +1,7 @@
 from llama_index import QueryBundle, get_response_synthesizer
 from milkie.config.config import QAAgentConfig
 from milkie.context import Context
-from milkie.custom_refine_program import CustomRefineProgram
+from milkie.custom_refine_program import CustomProgramFactory, CustomRefineProgram
 from milkie.memory.memory_with_index import MemoryWithIndex
 from milkie.prompt.test_prompts import CANDIDATE_TEXT_QA_PROMPT_IMPL, CANDIDATE_REFINE_PROMPT_IMPL
 from milkie.retrieval.position_reranker import PositionReranker
@@ -11,6 +11,7 @@ from milkie.retrieval.retrievers import HybridRetriever
 from llama_index.retrievers import BM25Retriever
 from llama_index.query_engine import RetrieverQueryEngine
 from llama_index.response_synthesizers.type import ResponseMode
+
 
 class RetrievalModule:
     def __init__(
@@ -40,7 +41,7 @@ class RetrievalModule:
 
         responseSynthesizer = get_response_synthesizer(
             service_context=memoryWithIndex.serviceContext,
-            program_factory=CustomRefineProgram(),
+            program_factory=CustomProgramFactory(memoryWithIndex.serviceContext.llm),
         )
 
         self.engine = RetrieverQueryEngine.from_args(
