@@ -192,9 +192,6 @@ class Refine(BaseSynthesizer):
         text_chunk: str,
         **response_kwargs: Any,
     ) -> RESPONSE_TEXT_TYPE:
-        fmt_text_chunk = truncate_text(text_chunk, 5000).replace("\n", "//")
-        logger.debug(f"> QA context: [{len(fmt_text_chunk)}|{fmt_text_chunk}]")
-
         """Give response given a query and a corresponding text chunk."""
         text_qa_template = self._text_qa_template.partial_format(query_str=query_str)
         text_chunks = self._service_context.prompt_helper.repack(
