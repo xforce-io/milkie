@@ -2,6 +2,7 @@ from llama_index import Response
 from llama_index.schema import TextNode
 
 from milkie.agent.base_agent import BaseAgent
+from milkie.memory.memory_with_index import MemoryWithIndex
 from milkie.retrieval.retrieval import RetrievalModule
 
 
@@ -13,8 +14,17 @@ class RetrievalAgent(BaseAgent):
             config):
         super().__init__(context, config)
 
+        if self.config.memoryConfig and self.config.indexConfig:
+            self.memoryWithIndex = MemoryWithIndex(
+                context.globalContext.settings,
+                self.config.memoryConfig,
+                self.config.indexConfig)
+        else:
+            self.memoryWithIndex = context.getGlobalContext().memoryWithIndex
+
         self.retrievalModule = RetrievalModule(
-            retrievalConfig=self.config.retrievalConfig
+            retrievalConfig=self.config.retrievalConfig,
+            memoryWithIndex=self.memoryWithIndex,
         )
 
     def task(self, query) -> Response:
