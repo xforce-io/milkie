@@ -218,8 +218,8 @@ class QAAgentConfig(SingleAgentConfig):
         return QAAgentConfig(
             config=config["config"],
             type=AgentType.QA,
-            memoryConfig=MemoryConfig.fromArgs(config["memory"]),
-            indexConfig=IndexConfig.fromArgs(config["index"]),
+            memoryConfig=MemoryConfig.fromArgs(config["memory"]) if "memory" in config else None,
+            indexConfig=IndexConfig.fromArgs(config["index"]) if "index" in config else None,
             retrievalConfig=RetrievalConfig.fromArgs(config["retrieval"]))
 
 def createAgentConfig(config :dict):

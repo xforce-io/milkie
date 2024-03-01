@@ -18,10 +18,13 @@ class QAAgent(BaseAgent):
             config :str):
         super().__init__(context, config)
 
-        self.memoryWithIndex = MemoryWithIndex(
-            context.globalContext.settings,
-            self.config.memoryConfig,
-            self.config.indexConfig)
+        if self.config.memoryConfig and self.config.indexConfig:
+            self.memoryWithIndex = MemoryWithIndex(
+                context.globalContext.settings,
+                self.config.memoryConfig,
+                self.config.indexConfig)
+        else:
+            self.memoryWithIndex = context.getGlobalContext().memoryWithIndex
 
         self.groundingModule = GroundingModule()
         self.retrievalModule = RetrievalModule(
