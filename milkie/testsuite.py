@@ -1,5 +1,6 @@
 import time, logging
 from milkie.agent.team.deepqa import DeepQA
+from milkie.agent.team.mrqa import MapReduceQA
 from milkie.config.config import GlobalConfig
 from milkie.context import Context
 from milkie.global_context import GlobalContext
@@ -41,7 +42,7 @@ class TestSuite(object):
             modelFactory :ModelFactory):
         globalContext = GlobalContext(globalConfig, modelFactory)
         context = Context(globalContext=globalContext)
-        agent = DeepQA(context, "qa")
+        agent = MapReduceQA(context, "retrieval")
 
         cnt = 0
         totalTime = 0

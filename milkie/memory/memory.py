@@ -24,7 +24,7 @@ class Memory(object):
         self.idToNodes = {}
         for node in self.nodes:
             node.text = node.text.strip().replace("\u3000", "")
-            self[node.id] = node
+            self.idToNodes[node.node_id] = node
         
         self.storageContext = StorageContext.from_defaults()
         self.storageContext.docstore.add_documents(self.nodes)
@@ -33,10 +33,10 @@ class Memory(object):
         return self.idToNodes.get(id)
 
     def getNextNode(self, node :BaseNode) -> BaseNode:
-        return self.getNodeFromId(node.next_node.id) if node.next_node else None
+        return self.getNodeFromId(node.next_node.node_id) if node.next_node else None
 
     def getPrevNode(self, node :BaseNode) -> BaseNode:
-        return self.getNodeFromId(node.prev_node.id) if node.prev_node else None
+        return self.getNodeFromId(node.prev_node.node_id) if node.prev_node else None
     
     def __buildDocsFromLongTermLocal(self, memoryTermConfig :MemoryTermConfig):
         return SimpleDirectoryReader(memoryTermConfig.path).load_data()
