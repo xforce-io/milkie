@@ -7,11 +7,9 @@ class BaseAgent(ABC):
 
     def __init__(
             self,
-            globalConfig :GlobalConfig,
             context :Context,
             config :str) -> None:
-        self.globalConfig = globalConfig
-        self.config = globalConfig.agentsConfig.getConfig(config)
+        self.config = context.globalContext.globalConfig.agentsConfig.getConfig(config)
         self.context = context
 
     @abstractmethod

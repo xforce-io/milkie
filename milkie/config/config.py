@@ -59,6 +59,9 @@ class MemoryConfig(BaseConfig):
         self.memoryConfig = memoryConfig
 
     def fromArgs(config :dict):
+        if not config:
+            return None
+        
         configs = []
         for singleConfig in config:
             memoryTermConfig = MemoryTermConfig.fromArgs(singleConfig)
@@ -140,7 +143,7 @@ class IndexConfig(BaseConfig):
     def fromArgs(config :dict):
         return IndexConfig(
             chunkSize=config["chunk_size"],
-            chunkOverlap=config["chunk_overlap"])
+            chunkOverlap=config["chunk_overlap"]) if config else None
 
 class RerankConfig(BaseConfig):
     def __init__(
@@ -253,6 +256,8 @@ class GlobalConfig(BaseConfig):
         self.llmConfig = LLMConfig.fromArgs(config["llm"])
         self.embeddingConfig = EmbeddingConfig.fromArgs(config["embedding"])
         self.agentsConfig :AgentsConfig = AgentsConfig.fromArgs(config["agents"])
+        self.memoryConfig = MemoryConfig.fromArgs(config["memory"])
+        self.indexConfig = IndexConfig.fromArgs(config["index"])
 
     def getLLMConfig(self):
         return self.llmConfig
@@ -262,3 +267,9 @@ class GlobalConfig(BaseConfig):
     
     def getAgentConfig(self, config :str):
         return self.agentsConfig.getConfig(config)
+
+    def getMemoryConfig(self):
+        return self.memoryConfig
+
+    def getIndexConfig(self):
+        return self.indexConfig

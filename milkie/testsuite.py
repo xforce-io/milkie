@@ -1,7 +1,8 @@
 import time, logging
-from milkie.agent.deepqa import DeepQA
+from milkie.agent.team.deepqa import DeepQA
 from milkie.config.config import GlobalConfig
 from milkie.context import Context
+from milkie.global_context import GlobalContext
 from milkie.model_factory import ModelFactory
 from milkie.settings import Settings
 
@@ -38,12 +39,9 @@ class TestSuite(object):
             ex, 
             globalConfig :GlobalConfig,
             modelFactory :ModelFactory):
-        settings = Settings(globalConfig, modelFactory)
-        context = Context(settings)
-        agent = DeepQA(
-            globalConfig,
-            context,
-            "qa")
+        globalContext = GlobalContext(globalConfig, modelFactory)
+        context = Context(globalContext=globalContext)
+        agent = DeepQA(context, "qa")
 
         cnt = 0
         totalTime = 0

@@ -9,28 +9,28 @@ from milkie.memory.memory_with_index import MemoryWithIndex
 from milkie.reasoning import ReasoningModule
 from milkie.retrieval.retrieval import RetrievalModule
 
+
 class QAAgent(BaseAgent):
 
     def __init__(
             self, 
-            globalConfig :GlobalConfig,
             context :Context,
             config :str):
-        super().__init__(globalConfig, context, config)
+        super().__init__(context, config)
 
         self.memoryWithIndex = MemoryWithIndex(
-            context.settings,
+            context.globalContext.settings,
             self.config.memoryConfig,
             self.config.indexConfig)
 
-        self.grounding_module = GroundingModule()
-        self.retrieval_module = RetrievalModule(
-            qaAgentConfig=self.config,
+        self.groundingModule = GroundingModule()
+        self.retrievalModule = RetrievalModule(
+            retrievalConfig=self.config.retrievalConfig,
             memoryWithIndex=self.memoryWithIndex)
-        self.reasoning_module = ReasoningModule()
-        self.decision_module = DecisionModule(
-            engine=self.retrieval_module.engine)
-        self.action_module = ActionModule()
+        self.reasoningModule = ReasoningModule()
+        self.decisionModule = DecisionModule(
+            engine=self.retrievalModule.engine)
+        self.actionModule = ActionModule()
 
     def task(self, query) -> Response:
         self.context.setCurQuery(query)
@@ -48,13 +48,13 @@ class QAAgent(BaseAgent):
         return True
 
     def __retrieval(self, context):
-        return self.retrieval_module.retrieve(context)
+        return self.retrievalModule.retrieve(context)
 
     def __reasoning(self, context):
-        return self.reasoning_module.reason(context)
+        return self.reasoningModule.reason(context)
 
     def __decision(self, context):
-        return self.decision_module.decide(context)
+        return self.decisionModule.decide(context)
 
 if __name__ == "__main__":
     globalConfig = GlobalConfig("config/global.yaml")

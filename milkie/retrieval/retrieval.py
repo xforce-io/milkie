@@ -1,7 +1,8 @@
+from typing import List
 from llama_index import QueryBundle, get_response_synthesizer
-from milkie.config.config import QAAgentConfig
+from milkie.config.config import RetrievalConfig
 from milkie.context import Context
-from milkie.custom_refine_program import CustomProgramFactory, CustomRefineProgram
+from milkie.custom_refine_program import CustomProgramFactory
 from milkie.memory.memory_with_index import MemoryWithIndex
 from milkie.prompt.test_prompts import CANDIDATE_REFINE_PROMPT_SEL, CANDIDATE_TEXT_QA_PROMPT_IMPL, CANDIDATE_REFINE_PROMPT_IMPL, CANDIDATE_TEXT_QA_PROMPT_SEL
 from milkie.retrieval.position_reranker import PositionReranker
@@ -11,14 +12,15 @@ from milkie.retrieval.retrievers import HybridRetriever
 from llama_index.retrievers import BM25Retriever
 from llama_index.query_engine import RetrieverQueryEngine
 from llama_index.response_synthesizers.type import ResponseMode
+from llama_index.schema import NodeWithScore
 
 
 class RetrievalModule:
     def __init__(
             self, 
-            qaAgentConfig :QAAgentConfig,
+            retrievalConfig :RetrievalConfig,
             memoryWithIndex :MemoryWithIndex):
-        self.retrievalConfig = qaAgentConfig.retrievalConfig
+        self.retrievalConfig = retrievalConfig
 
         self.denseRetriever = memoryWithIndex.index.denseIndex.as_retriever(
             similarity_top_k=self.retrievalConfig.channelRecall)
@@ -56,6 +58,7 @@ class RetrievalModule:
             refine_template=CANDIDATE_REFINE_PROMPT_IMPL,
             response_synthesizer=responseSynthesizer)
 
-    def retrieve(self, context :Context):
+    def retrieve(self, context :Context) -> List[NodeWithScore]:
         result = self.engine.retrieve(QueryBundle(context.getCurQuery()))
         context.setRetrievalResult(result)
+        return result

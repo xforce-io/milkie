@@ -7,6 +7,13 @@ llm:
   api_version: "2023-12-01-preview"
   ctx_len: 4096
   temperature: 0
+  memory:
+    - type: LONG_TERM
+      source: LOCAL 
+      path: ./data/santi/
+  index:
+    chunk_size: 256
+    chunk_overlap: 50
 embedding:
   type: HUGGINGFACE
   model: "BAAI/bge-base-zh-v1.5"
@@ -14,13 +21,14 @@ embedding:
 agents:
   - config: qa
     type: QA
-    memory:
-      - type: LONG_TERM
-        source: LOCAL 
-        path: ./data/santi/
-    index:
-      chunk_size: 256
-      chunk_overlap: 50
+    retrieval:
+      channel_recall: 30
+      similarity_top_k: 20
+      reranker:
+        name: FLAGEMBED # FLAGEMBED | NONE
+        model: abc
+  - config: retrieval
+    type: QA
     retrieval:
       channel_recall: 30
       similarity_top_k: 20

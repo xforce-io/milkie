@@ -11,16 +11,20 @@ class MemoryWithIndex():
             self,
             settings :Settings,
             memoryConfig :MemoryConfig,
-            indexConfig :IndexConfig):
+            indexConfig :IndexConfig,
+            serviceContext :ServiceContext):
         self.settings = settings
         self.memoryConfig = memoryConfig
         self.indexConfig = indexConfig
 
-        self.serviceContext = ServiceContext.from_defaults(
-            embed_model=settings.embedding,
-            chunk_size=indexConfig.chunkSize,
-            chunk_overlap=indexConfig.chunkOverlap,
-            llm=settings.llm)
+        if serviceContext:
+            self.serviceContext = serviceContext
+        else:
+            self.serviceContext = ServiceContext.from_defaults(
+                embed_model=settings.embedding,
+                chunk_size=indexConfig.chunkSize,
+                chunk_overlap=indexConfig.chunkOverlap,
+                llm=settings.llm)
 
         self.memory = Memory(
             memoryTermConfigs=memoryConfig.memoryConfig, 
