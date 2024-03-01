@@ -53,7 +53,6 @@ class ModelFactory:
                 model_name=config.model,
                 messages_to_prompt=messagesToPrompt,
                 device_map="auto",
-                stopping_ids=[50278, 50279, 50277, 1, 0],
                 tokenizer_kwargs={"max_length": config.ctxLen, "use_fast": False, "trust_remote_code": True},
                 is_chat_model=True,
             )
