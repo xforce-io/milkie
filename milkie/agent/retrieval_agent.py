@@ -31,7 +31,7 @@ class RetrievalAgent(BaseAgent):
         self.context.setCurQuery(query)
         self.retrievalModule.retrieve(self.context)
         retrievalResult = self.context.retrievalResult
-        response = Response()
+        response = Response(response="", source_nodes=None)
         blocks = []
         for result in retrievalResult:
             blocks += [self.__getBlockFromNode(result.node)]

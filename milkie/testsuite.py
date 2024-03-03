@@ -1,11 +1,9 @@
 import time, logging
-from milkie.agent.team.deepqa import DeepQA
 from milkie.agent.team.mrqa import MapReduceQA
 from milkie.config.config import GlobalConfig
 from milkie.context import Context
 from milkie.global_context import GlobalContext
 from milkie.model_factory import ModelFactory
-from milkie.settings import Settings
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +48,7 @@ class TestSuite(object):
             t0 = time.time()
             result = agent.task(testCase.query)
             t1 = time.time()
-            if testCase.check(result.response):
+            if testCase.check(result.response.message.content):
                 cnt += 1
                 logger.info(f"Testcase[{testCase.query}] passed cost[{t1-t0:.2f}]]")
             else:

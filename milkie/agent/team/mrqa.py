@@ -29,19 +29,15 @@ class MapReduceQA(Team):
         response = self.retrievalAgent.task(query)
         resps = []
         for block in response.metadata["blocks"]:
-            resp = self.mrqa.task(
+            resp = self.blockQA.task(
                 query,
-                {
-                    "query_str" : query,
-                    "context_str" : block
-                })
-            resps.append(resp.response)
+                query_str=query,
+                context_str=block)
+            resps.append(resp.response.message.content)
 
         sep = "\n-------------------\n"
         resp = self.blockSummary.task(
             query,
-            {
-                "query_str" : query,
-                "blocks" : sep.join(resps)
-            })
+            query_str=query,
+            blocks=sep.join(resps))
         return resp.response
