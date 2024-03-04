@@ -1,3 +1,4 @@
+import logging
 from abc import abstractmethod
 
 from llama_index import ChatPromptTemplate, Response
@@ -7,6 +8,7 @@ from milkie.agent.base_agent import BaseAgent
 from milkie.context import Context
 from milkie.prompt.prompt import Loader
 
+logger = logging.getLogger(__name__)
 
 class PromptAgent(BaseAgent):
 
@@ -27,9 +29,14 @@ class PromptAgent(BaseAgent):
                     role=MessageRole.USER)
             ]
         )
+
+        import time
+        t0 = time.time()
         response.response = self.context.globalContext.settings.llm.predict(
             prompt=chatPromptTmpl,
-            query_str=query,
-            kwargs=kwargs
+            **kwargs
         )
+        t1 = time.time()
+        answer = response.response.replace("\n", "//")
+        logger.debug(f"prompt_agent query[{query}] answer[{answer}] cost[{t1-t0}]")
         return response

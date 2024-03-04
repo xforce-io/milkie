@@ -33,7 +33,7 @@ class MapReduceQA(Team):
                 query,
                 query_str=query,
                 context_str=block)
-            resps.append(resp.response.message.content)
+            resps.append(resp.response)
 
         sep = "\n-------------------\n"
         resp = self.blockSummary.task(

@@ -48,7 +48,7 @@ class TestSuite(object):
             t0 = time.time()
             result = agent.task(testCase.query)
             t1 = time.time()
-            if testCase.check(result.response.message.content):
+            if testCase.check(result.response):
                 cnt += 1
                 logger.info(f"Testcase[{testCase.query}] passed cost[{t1-t0:.2f}]]")
             else:
