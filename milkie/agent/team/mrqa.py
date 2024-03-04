@@ -28,12 +28,17 @@ class MapReduceQA(Team):
     def task(self, query) -> Response:
         response = self.retrievalAgent.task(query)
         resps = []
+        maxCnt = 3
+        cnt = 0
         for block in response.metadata["blocks"]:
             resp = self.blockQA.task(
                 query,
                 query_str=query,
                 context_str=block)
             resps.append(resp.response)
+            cnt += 1
+            if cnt >= maxCnt:
+                break
 
         sep = "\n-------------------\n"
         resp = self.blockSummary.task(
