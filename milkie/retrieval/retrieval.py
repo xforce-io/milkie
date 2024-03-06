@@ -73,7 +73,9 @@ class RetrievalModule:
         curQuery = context.getCurQuery()
         if self.rewriteAgent:
             self.rewriteAgent.setContext(context)
-            rewriteResp = self.rewriteAgent.task(curQuery)
+            rewriteResp = self.rewriteAgent.task(
+                curQuery,
+                query_str=curQuery,)
             curQuery = rewriteResp.response
 
         result = self.engine.retrieve(QueryBundle(curQuery))

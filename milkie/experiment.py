@@ -53,6 +53,7 @@ def theConfig():
 
 @ex.capture()
 def experiment(
+        agentName :str,
         llm_model :str=None,
         temperature :float=None,
         reranker :str=None, 
@@ -67,38 +68,40 @@ def experiment(
     if temperature:
         configYaml["llm"]["temperature"] = temperature
 
-    def getQAConfig():
+    def getAgentConfig(name :str):
         for agentConfig in configYaml["agents"]:
-            if agentConfig["config"] == "qa":
+            if agentConfig["config"] == name:
                 return agentConfig
 
-    qaConfig = getQAConfig()
+    agentConfig = getAgentConfig(agentName)
     if reranker:
-        qaConfig["retrieval"]["reranker"]["name"] = reranker
+        agentConfig["retrieval"]["reranker"]["name"] = reranker
 
     if rewrite_strategy:
-        qaConfig["retrieval"]["rewrite_strategy"] = rewrite_strategy
+        agentConfig["retrieval"]["rewrite_strategy"] = rewrite_strategy
 
     if chunk_size:
-        qaConfig["index"]["chunk_size"] = chunk_size
+        agentConfig["index"]["chunk_size"] = chunk_size
 
     if channel_recall:
-        qaConfig["retrieval"]["channel_recall"] = channel_recall
+        agentConfig["retrieval"]["channel_recall"] = channel_recall
     
     if similarity_top_k:
-        qaConfig["retrieval"]["similarity_top_k"] = similarity_top_k
+        agentConfig["retrieval"]["similarity_top_k"] = similarity_top_k
 
     globalConfig = GlobalConfig(configYaml)
     TestSuite("三体", TestCases).run(ex, globalConfig, modelFactory)
 
 @ex.automain
 def mainFunc():
+    agentName = "retrieval"
     for llm_model in [ModelQwen14bChat, ModelBaichuan13bChat]:
         for rewrite_strategy in ["HYDE", "QUERY_REWRITE", "NONE"]:
             for channel_recall in [30]:
                 for similarity_top_k in [30]:
                     logger.info(f"llm_model[{llm_model}] rewrite_strategy[{rewrite_strategy}] channel_recall[{channel_recall}] similarity_top_k[{similarity_top_k}]")
                     experiment(
+                        agentName=agentName,
                         llm_model=llm_model,
                         rewrite_strategy=rewrite_strategy,
                         channel_recall=channel_recall,
