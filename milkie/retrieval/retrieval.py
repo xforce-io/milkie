@@ -1,7 +1,7 @@
 from typing import List
 from llama_index import QueryBundle, get_response_synthesizer
 from milkie.agent.prompt_agent import PromptAgent
-from milkie.config.config import RetrievalConfig
+from milkie.config.config import RetrievalConfig, RewriteStrategy
 from milkie.context import Context
 from milkie.custom_refine_program import CustomProgramFactory
 from milkie.memory.memory_with_index import MemoryWithIndex
@@ -21,7 +21,15 @@ class RetrievalModule:
             self, 
             retrievalConfig :RetrievalConfig,
             memoryWithIndex :MemoryWithIndex):
-        self.hydeAgent = PromptAgent(context=None, config="hyde")
+        self.rewriteAgent = None
+        if retrievalConfig.rewriteStrategy == RewriteStrategy.HYDE:
+            self.rewriteAgent = PromptAgent(
+                context=None, 
+                config="hyde")
+        elif retrievalConfig.rewriteStrategy == RewriteStrategy.QUERY_REWRITE:
+            self.rewriteAgent = PromptAgent(
+                context=None, 
+                config="query_rewrite")
         
         self.retrievalConfig = retrievalConfig
 
@@ -63,9 +71,9 @@ class RetrievalModule:
 
     def retrieve(self, context :Context) -> List[NodeWithScore]:
         curQuery = context.getCurQuery()
-        if self.retrievalConfig.rewriteStrategy == "hyde":
-            self.hydeAgent.setContext(context)
-            rewriteResp = self.hydeAgent.task(curQuery)
+        if self.rewriteAgent:
+            self.rewriteAgent.setContext(context)
+            rewriteResp = self.rewriteAgent.task(curQuery)
             curQuery = rewriteResp.response
 
         result = self.engine.retrieve(QueryBundle(curQuery))

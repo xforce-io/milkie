@@ -34,7 +34,8 @@ class Device(Enum):
 
 class RewriteStrategy(Enum):
     NONE = 0
-    HYDE = 1
+    QUERY_REWRITE = 1
+    HYDE = 2
 
 class MemoryTermConfig(BaseConfig):
     def __init__(
@@ -178,10 +179,14 @@ class RetrievalConfig(BaseConfig):
             self.reranker = None
 
     def fromArgs(config :dict):
+        rewriteStrategy = RewriteStrategy.NONE
+        if config["rewrite_strategy"] == RewriteStrategy.HYDE.name:
+            rewriteStrategy = RewriteStrategy.HYDE
+        elif config["rewrite_strategy"] == RewriteStrategy.QUERY_REWRITE.name:
+            rewriteStrategy = RewriteStrategy.QUERY_REWRITE
+            
         return RetrievalConfig(
-            rewriteStrategy=RewriteStrategy.HYDE 
-                if config["rewrite_strategy"] == RewriteStrategy.HYDE.name 
-                else RewriteStrategy.NONE,
+            rewriteStrategy=rewriteStrategy,
             channelRecall=config["channel_recall"],
             similarityTopK=config["similarity_top_k"],
             rerankerConfig=config["reranker"])
