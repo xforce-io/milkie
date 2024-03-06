@@ -32,6 +32,10 @@ class Device(Enum):
     CUDA = 1
     MPS = 2
 
+class RewriteStrategy(Enum):
+    NONE = 0
+    HYDE = 1
+
 class MemoryTermConfig(BaseConfig):
     def __init__(
             self, 
@@ -158,12 +162,14 @@ class RerankConfig(BaseConfig):
 class RetrievalConfig(BaseConfig):
     def __init__(
             self, 
-            channelRecall:int,
+            rewriteStrategy :RewriteStrategy,
+            channelRecall :int,
             similarityTopK :int,
             rerankerConfig :RerankConfig):
+        self.rewriteStrategy = rewriteStrategy
         self.channelRecall = channelRecall
         self.similarityTopK = similarityTopK 
-        if rerankerConfig["name"] == RerankerType(0).name:
+        if rerankerConfig["name"] == RerankerType.FLAGEMBED.name:
             self.reranker = RerankConfig(
                 rerankerType=rerankerConfig["name"],
                 model=rerankerConfig["model"],
@@ -173,6 +179,9 @@ class RetrievalConfig(BaseConfig):
 
     def fromArgs(config :dict):
         return RetrievalConfig(
+            rewriteStrategy=RewriteStrategy.HYDE 
+                if config["rewrite_strategy"] == RewriteStrategy.HYDE.name 
+                else RewriteStrategy.NONE,
             channelRecall=config["channel_recall"],
             similarityTopK=config["similarity_top_k"],
             rerankerConfig=config["reranker"])

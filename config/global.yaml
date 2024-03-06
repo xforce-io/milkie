@@ -30,6 +30,7 @@ agents:
   - config: retrieval
     type: QA
     retrieval:
+      rewrite_strategy: HYDE
       channel_recall: 30
       similarity_top_k: 20
       reranker:

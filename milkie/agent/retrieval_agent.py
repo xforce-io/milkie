@@ -43,7 +43,7 @@ class RetrievalAgent(BaseAgent):
         curNode = node
         while True:
             nextNode = self.context.getGlobalMemory().getNextNode(curNode)
-            if nextNode is None or len(block) > 2500:
+            if nextNode is None or len(block) > 3000:
                 break
 
             block += nextNode.get_text()

@@ -7,9 +7,12 @@ class BaseAgent(ABC):
 
     def __init__(
             self,
-            context :Context,
-            config :str) -> None:
-        self.config = context.globalContext.globalConfig.agentsConfig.getConfig(config)
+            context :Context=None,
+            config :str=None) -> None:
+        self.config = context.globalContext.globalConfig.agentsConfig.getConfig(config) if context else None
+        self.setContext(context, config)
+
+    def setContext(self, context :Context): 
         self.context = context
 
     @abstractmethod

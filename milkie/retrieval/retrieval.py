@@ -1,5 +1,6 @@
 from typing import List
 from llama_index import QueryBundle, get_response_synthesizer
+from milkie.agent.prompt_agent import PromptAgent
 from milkie.config.config import RetrievalConfig
 from milkie.context import Context
 from milkie.custom_refine_program import CustomProgramFactory
@@ -20,6 +21,8 @@ class RetrievalModule:
             self, 
             retrievalConfig :RetrievalConfig,
             memoryWithIndex :MemoryWithIndex):
+        self.hydeAgent = PromptAgent(context=None, config="hyde")
+        
         self.retrievalConfig = retrievalConfig
 
         self.denseRetriever = memoryWithIndex.index.denseIndex.as_retriever(
@@ -59,6 +62,12 @@ class RetrievalModule:
             response_synthesizer=responseSynthesizer)
 
     def retrieve(self, context :Context) -> List[NodeWithScore]:
-        result = self.engine.retrieve(QueryBundle(context.getCurQuery()))
+        curQuery = context.getCurQuery()
+        if self.retrievalConfig.rewriteStrategy == "hyde":
+            self.hydeAgent.setContext(context)
+            rewriteResp = self.hydeAgent.task(curQuery)
+            curQuery = rewriteResp.response
+
+        result = self.engine.retrieve(QueryBundle(curQuery))
         context.setRetrievalResult(result)
         return result
