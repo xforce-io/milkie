@@ -3,6 +3,7 @@ from sacred import Experiment
 from milkie.config.config import GlobalConfig
 from milkie.model_factory import ModelFactory
 from milkie.settings import Settings
+from milkie.strategy import Strategy, StrategyDeepQA, StrategyMRQA
 
 from milkie.testsuite import TestCase, TestSuite
 from milkie.utils.data_utils import loadFromYaml
@@ -53,7 +54,7 @@ def theConfig():
 
 @ex.capture()
 def experiment(
-        agentName :str,
+        strategy :Strategy,
         llm_model :str=None,
         temperature :float=None,
         reranker :str=None, 
@@ -73,7 +74,7 @@ def experiment(
             if agentConfig["config"] == name:
                 return agentConfig
 
-    agentConfig = getAgentConfig(agentName)
+    agentConfig = getAgentConfig(strategy.agentName)
     if reranker:
         agentConfig["retrieval"]["reranker"]["name"] = reranker
 
@@ -90,22 +91,22 @@ def experiment(
         agentConfig["retrieval"]["similarity_top_k"] = similarity_top_k
 
     globalConfig = GlobalConfig(configYaml)
-    TestSuite("三体", TestCases).run(ex, globalConfig, modelFactory)
+    TestSuite("三体", TestCases).run(ex, strategy, globalConfig, modelFactory)
 
 @ex.automain
 def mainFunc():
-    agentName = "retrieval"
-    for llm_model in [ModelQwen14bChat, ModelBaichuan13bChat]:
-        for rewrite_strategy in ["HYDE", "QUERY_REWRITE", "NONE"]:
-            for channel_recall in [30]:
-                for similarity_top_k in [30]:
-                    logger.info(f"llm_model[{llm_model}] rewrite_strategy[{rewrite_strategy}] channel_recall[{channel_recall}] similarity_top_k[{similarity_top_k}]")
-                    experiment(
-                        agentName=agentName,
-                        llm_model=llm_model,
-                        rewrite_strategy=rewrite_strategy,
-                        channel_recall=channel_recall,
-                        similarity_top_k=similarity_top_k)
+    for strategy in [StrategyMRQA(), StrategyDeepQA()]:
+        for llm_model in [ModelQwen14bChat, ModelBaichuan13bChat]:
+            for rewrite_strategy in ["HYDE", "QUERY_REWRITE", "NONE"]:
+                for channel_recall in [30]:
+                    for similarity_top_k in [30]:
+                        logger.info(f"strategy[{strategy.getAgentName()}] llm_model[{llm_model}] rewrite_strategy[{rewrite_strategy}] channel_recall[{channel_recall}] similarity_top_k[{similarity_top_k}]")
+                        experiment(
+                            strategy=strategy,
+                            llm_model=llm_model,
+                            rewrite_strategy=rewrite_strategy,
+                            channel_recall=channel_recall,
+                            similarity_top_k=similarity_top_k)
 
 if __name__ == "__main__":
     configYaml = loadFromYaml("config/global.yaml")

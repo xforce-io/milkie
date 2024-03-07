@@ -2,6 +2,7 @@ from llama_index import Response
 from llama_index.schema import TextNode
 
 from milkie.agent.base_agent import BaseAgent
+from milkie.context import Context
 from milkie.memory.memory_with_index import MemoryWithIndex
 from milkie.retrieval.retrieval import RetrievalModule
 
@@ -10,8 +11,8 @@ class RetrievalAgent(BaseAgent):
 
     def __init__(
             self,
-            context,
-            config):
+            context :Context,
+            config :str):
         super().__init__(context, config)
 
         if self.config.memoryConfig and self.config.indexConfig:
@@ -39,11 +40,18 @@ class RetrievalAgent(BaseAgent):
         return response
 
     def __getBlockFromNode(self, node :TextNode) ->str:
+        for i in range(2):
+            prevNode = self.context.getGlobalMemory().getPrevNode(node)
+            if prevNode is not None:
+                node = prevNode
+            else:
+                break
+        
         block = node.get_text()
         curNode = node
         while True:
             nextNode = self.context.getGlobalMemory().getNextNode(curNode)
-            if nextNode is None or len(block) > 3000:
+            if nextNode is None or len(block) > 2500:
                 break
 
             block += nextNode.get_text()

@@ -4,6 +4,7 @@ from milkie.config.config import GlobalConfig
 from milkie.context import Context
 from milkie.global_context import GlobalContext
 from milkie.model_factory import ModelFactory
+from milkie.strategy import Strategy
 
 logger = logging.getLogger(__name__)
 
@@ -35,12 +36,13 @@ class TestSuite(object):
 
     def run(
             self, 
+            strategy :Strategy,
             ex, 
             globalConfig :GlobalConfig,
             modelFactory :ModelFactory):
         globalContext = GlobalContext(globalConfig, modelFactory)
         context = Context(globalContext=globalContext)
-        agent = MapReduceQA(context, "retrieval")
+        agent = strategy.createAgent(context)
 
         cnt = 0
         totalTime = 0
