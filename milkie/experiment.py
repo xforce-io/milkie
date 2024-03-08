@@ -95,8 +95,8 @@ def experiment(
 
 @ex.automain
 def mainFunc():
-    for strategy in [StrategyMRQA(), StrategyDeepQA()]:
-        for llm_model in [ModelQwen14bChat, ModelBaichuan13bChat]:
+    for strategy in [StrategyDeepQA()]:
+        for llm_model in [ModelQwen14bChat, ModelBaichuan13bChat, ModelYi34]:
             for rewrite_strategy in ["HYDE", "QUERY_REWRITE", "NONE"]:
                 for channel_recall in [30]:
                     for similarity_top_k in [30]:

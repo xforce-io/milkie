@@ -45,4 +45,4 @@ class MapReduceQA(Team):
             query,
             query_str=query,
             blocks=sep.join(resps))
-        return resp.response
+        return resp
