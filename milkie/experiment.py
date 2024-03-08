@@ -75,7 +75,7 @@ def experiment(
             if agentConfig["config"] == name:
                 return agentConfig
 
-    agentConfig = getAgentConfig(strategy.agentName)
+    agentConfig = getAgentConfig(strategy.getAgentName())
     if reranker:
         agentConfig["retrieval"]["reranker"]["name"] = reranker
 
