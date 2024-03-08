@@ -27,6 +27,10 @@ class EmbeddingType(Enum):
 class RerankerType(Enum):
     FLAGEMBED = 0
 
+class RerankPosition(Enum):
+    NONE = 0
+    SIMPLE = 1
+
 class Device(Enum):
     CPU = 0
     CUDA = 1
@@ -155,10 +159,12 @@ class RerankConfig(BaseConfig):
             self, 
             rerankerType :RerankerType, 
             model :str,
-            rerankTopK :int):
+            rerankTopK :int,
+            rerankPosition :RerankPosition):
         self.rerankerType = rerankerType
         self.model = model
         self.rerankTopK = rerankTopK
+        self.rerankPosition = rerankPosition
 
 class RetrievalConfig(BaseConfig):
     def __init__(
@@ -170,13 +176,7 @@ class RetrievalConfig(BaseConfig):
         self.rewriteStrategy = rewriteStrategy
         self.channelRecall = channelRecall
         self.similarityTopK = similarityTopK 
-        if rerankerConfig["name"] == RerankerType.FLAGEMBED.name:
-            self.reranker = RerankConfig(
-                rerankerType=rerankerConfig["name"],
-                model=rerankerConfig["model"],
-                rerankTopK=self.similarityTopK)
-        else:
-            self.reranker = None
+        self.rerankerConfig = rerankerConfig
 
     def fromArgs(config :dict):
         rewriteStrategy = RewriteStrategy.NONE
@@ -184,12 +184,25 @@ class RetrievalConfig(BaseConfig):
             rewriteStrategy = RewriteStrategy.HYDE
         elif config["rewrite_strategy"] == RewriteStrategy.QUERY_REWRITE.name:
             rewriteStrategy = RewriteStrategy.QUERY_REWRITE
+
+        positionConfig = RerankPosition.NONE
+        if config["reranker"]["position"] == RerankPosition.SIMPLE.name:
+            positionConfig = RerankPosition.SIMPLE
             
+        if config["reranker"]["name"] == RerankerType.FLAGEMBED.name:
+            reranker = RerankConfig(
+                rerankerType=config["reranker"]["name"],
+                model=config["reranker"]["model"],
+                rerankTopK=config["similarity_top_k"],
+                rerankPosition=positionConfig)
+        else:
+            reranker = None
+
         return RetrievalConfig(
             rewriteStrategy=rewriteStrategy,
             channelRecall=config["channel_recall"],
             similarityTopK=config["similarity_top_k"],
-            rerankerConfig=config["reranker"])
+            rerankerConfig=reranker)
 
 class AgentType(Enum):
     QA = 0

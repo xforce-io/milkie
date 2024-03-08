@@ -49,8 +49,9 @@ class RetrievalModule:
             reranker = Reranker(self.retrievalConfig.reranker) 
             nodePostProcessors.append(reranker.reranker)
 
-            positionReranker = PositionReranker()
-            nodePostProcessors.append(positionReranker)
+            if self.retrievalConfig.reranker.positionReranker == PositionReranker.SIMPLE:
+                positionReranker = PositionReranker()
+                nodePostProcessors.append(positionReranker)
 
         responseSynthesizer = get_response_synthesizer(
             service_context=memoryWithIndex.serviceContext,

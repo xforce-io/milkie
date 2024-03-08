@@ -26,7 +26,8 @@ agents:
       similarity_top_k: 20
       reranker:
         name: FLAGEMBED # FLAGEMBED | NONE
-        model: abc
+        model: /mnt/data1/.cache/huggingface/hub/models--BAAI--bge-reranker-large/
+        position: SIMPLE
   - config: retrieval
     type: QA
     retrieval:
@@ -36,5 +37,6 @@ agents:
       reranker:
         name: FLAGEMBED # FLAGEMBED | NONE
         model: /mnt/data1/.cache/huggingface/hub/models--BAAI--bge-reranker-large/
+        position: SIMPLE
   - config: query_rewrite
     type: PROMPT

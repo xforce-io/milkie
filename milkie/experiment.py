@@ -58,6 +58,7 @@ def experiment(
         llm_model :str=None,
         temperature :float=None,
         reranker :str=None, 
+        rerank_position :str=None,
         rewrite_strategy :str=None,
         chunk_size :int=None,
         channel_recall :int=None,
@@ -78,6 +79,9 @@ def experiment(
     if reranker:
         agentConfig["retrieval"]["reranker"]["name"] = reranker
 
+    if rerank_position:
+        agentConfig["retrieval"]["reranker"]["position"] = rerank_position
+
     if rewrite_strategy:
         agentConfig["retrieval"]["rewrite_strategy"] = rewrite_strategy
 
@@ -96,17 +100,19 @@ def experiment(
 @ex.automain
 def mainFunc():
     for strategy in [StrategyDeepQA()]:
-        for llm_model in [ModelQwen14bChat, ModelBaichuan13bChat, ModelYi34]:
-            for rewrite_strategy in ["HYDE", "QUERY_REWRITE", "NONE"]:
-                for channel_recall in [30]:
-                    for similarity_top_k in [30]:
-                        logger.info(f"strategy[{strategy.getAgentName()}] llm_model[{llm_model}] rewrite_strategy[{rewrite_strategy}] channel_recall[{channel_recall}] similarity_top_k[{similarity_top_k}]")
-                        experiment(
-                            strategy=strategy,
-                            llm_model=llm_model,
-                            rewrite_strategy=rewrite_strategy,
-                            channel_recall=channel_recall,
-                            similarity_top_k=similarity_top_k)
+        for llm_model in [ModelQwen14bChat, ModelYi34]:
+            for rerank_position in ["SIMPLE", "NONE"]:
+                for rewrite_strategy in ["HYDE", "QUERY_REWRITE", "NONE"]:
+                    for channel_recall in [30]:
+                        for similarity_top_k in [30]:
+                            logger.info(f"strategy[{strategy}] llm_model[{llm_model}] rerank_position[{rerank_position}] rewrite_strategy[{rewrite_strategy}] channel_recall[{channel_recall}] similarity_top_k[{similarity_top_k}]")
+                            experiment(
+                                strategy=strategy,
+                                llm_model=llm_model,
+                                rerank_position=rerank_position,
+                                rewrite_strategy=rewrite_strategy,
+                                channel_recall=channel_recall,
+                                similarity_top_k=similarity_top_k)
 
 if __name__ == "__main__":
     configYaml = loadFromYaml("config/global.yaml")
