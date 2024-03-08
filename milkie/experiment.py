@@ -91,7 +91,7 @@ def experiment(
         agentConfig["retrieval"]["similarity_top_k"] = similarity_top_k
 
     globalConfig = GlobalConfig(configYaml)
-    TestSuite("三体", TestCases).run(ex, strategy, globalConfig, modelFactory)
+    TestSuite("三体", TestCases).run(strategy, ex, globalConfig, modelFactory)
 
 @ex.automain
 def mainFunc():
