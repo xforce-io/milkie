@@ -45,11 +45,11 @@ class RetrievalModule:
             self.sparseRetriever)
 
         nodePostProcessors = []
-        if self.retrievalConfig.reranker is not None:   
-            reranker = Reranker(self.retrievalConfig.reranker) 
+        if self.retrievalConfig.rerankerConfig is not None:   
+            reranker = Reranker(self.retrievalConfig.rerankerConfig) 
             nodePostProcessors.append(reranker.reranker)
 
-            if self.retrievalConfig.reranker.positionReranker == PositionReranker.SIMPLE:
+            if self.retrievalConfig.rerankerConfig.rerankPosition == PositionReranker.SIMPLE:
                 positionReranker = PositionReranker()
                 nodePostProcessors.append(positionReranker)
 
