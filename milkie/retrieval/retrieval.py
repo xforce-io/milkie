@@ -1,7 +1,7 @@
 from typing import List
 from llama_index import QueryBundle, get_response_synthesizer
 from milkie.agent.prompt_agent import PromptAgent
-from milkie.config.config import RetrievalConfig, RewriteStrategy
+from milkie.config.config import RerankPosition, RetrievalConfig, RewriteStrategy
 from milkie.context import Context
 from milkie.custom_refine_program import CustomProgramFactory
 from milkie.memory.memory_with_index import MemoryWithIndex
@@ -45,13 +45,13 @@ class RetrievalModule:
             self.sparseRetriever)
 
         nodePostProcessors = []
-        if self.retrievalConfig.rerankerConfig is not None:   
-            reranker = Reranker(self.retrievalConfig.rerankerConfig) 
+        reranker = Reranker(self.retrievalConfig.rerankerConfig) 
+        if reranker.reranker:
             nodePostProcessors.append(reranker.reranker)
 
-            if self.retrievalConfig.rerankerConfig.rerankPosition == PositionReranker.SIMPLE:
-                positionReranker = PositionReranker()
-                nodePostProcessors.append(positionReranker)
+        if self.retrievalConfig.rerankerConfig.rerankPosition == RerankPosition.SIMPLE:
+            positionReranker = PositionReranker()
+            nodePostProcessors.append(positionReranker)
 
         responseSynthesizer = get_response_synthesizer(
             service_context=memoryWithIndex.serviceContext,

@@ -25,7 +25,8 @@ class EmbeddingType(Enum):
     HUGGINGFACE = 0
 
 class RerankerType(Enum):
-    FLAGEMBED = 0
+    NONE = 0
+    FLAGEMBED = 1
 
 class RerankPosition(Enum):
     NONE = 0
@@ -179,6 +180,10 @@ class RetrievalConfig(BaseConfig):
         self.rerankerConfig = rerankerConfig
 
     def fromArgs(config :dict):
+        rerankerType = RerankerType.NONE
+        if config["reranker"]["name"] == RerankerType.FLAGEMBED.name:
+            rerankerType = RerankerType.FLAGEMBED
+        
         rewriteStrategy = RewriteStrategy.NONE
         if config["rewrite_strategy"] == RewriteStrategy.HYDE.name:
             rewriteStrategy = RewriteStrategy.HYDE
@@ -189,14 +194,11 @@ class RetrievalConfig(BaseConfig):
         if config["reranker"]["position"] == RerankPosition.SIMPLE.name:
             positionConfig = RerankPosition.SIMPLE
             
-        if config["reranker"]["name"] == RerankerType.FLAGEMBED.name:
-            reranker = RerankConfig(
-                rerankerType=config["reranker"]["name"],
-                model=config["reranker"]["model"],
-                rerankTopK=config["similarity_top_k"],
-                rerankPosition=positionConfig)
-        else:
-            reranker = None
+        reranker = RerankConfig(
+            rerankerType=rerankerType,
+            model=config["reranker"]["model"],
+            rerankTopK=config["similarity_top_k"],
+            rerankPosition=positionConfig)
 
         return RetrievalConfig(
             rewriteStrategy=rewriteStrategy,

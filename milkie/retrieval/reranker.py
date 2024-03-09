@@ -12,4 +12,4 @@ class Reranker:
                 top_n=rerankerConfig.rerankTopK,
                 use_fp16=True)
         else:
-            raise Exception(f"Not supported reranker type[{self.rerankerConfig.rerankerType}]")
+            self.reranker = None
