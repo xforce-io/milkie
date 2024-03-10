@@ -12,7 +12,11 @@ class Strategy(object):
     def getAgentName(self) -> str:
         pass
 
+    @abstractmethod
     def createAgent(self) -> BaseAgent:
+        pass
+
+    def __str__(self) -> str:
         pass
 
 class StrategyMRQA(Strategy):
@@ -24,6 +28,9 @@ class StrategyMRQA(Strategy):
     def createAgent(self, context :Context) -> BaseAgent:
         return MapReduceQA(context, self.agentName)
 
+    def __str__(self) -> str:
+        return "MRQA"
+
 class StrategyDeepQA(Strategy):
     
     def getAgentName(self) -> str:
@@ -32,3 +39,6 @@ class StrategyDeepQA(Strategy):
 
     def createAgent(self, context :Context) -> BaseAgent:
         return DeepQA(context, self.agentName)
+
+    def __str__(self) -> str:
+        return "DeepQA"

@@ -39,7 +39,8 @@ class TestSuite(object):
             strategy :Strategy,
             ex, 
             globalConfig :GlobalConfig,
-            modelFactory :ModelFactory):
+            modelFactory :ModelFactory, 
+            **kwargs):
         globalContext = GlobalContext(globalConfig, modelFactory)
         context = Context(globalContext=globalContext)
         agent = strategy.createAgent(context)
@@ -58,6 +59,8 @@ class TestSuite(object):
             totalTime += t1-t0
         logger.info(f"Running testsuite[{self.name}] "
                     f"accuracy[{cnt}/{len(self.testCases)}] "
+                    f"strategy[{strategy}] "
+                    f"kwargs[{kwargs}] "
                     f"cost[{totalTime}] "
                     f"avg[{totalTime/len(self.testCases)}] ")
         ex.log_scalar("succ", cnt)
