@@ -39,6 +39,7 @@ ModelYi34 = "/mnt/data1/.cache/huggingface/hub/01ai/Yi-34B-Chat/"
 Prefix = "/mnt/data1/.cache/modelscope/hub/"
 ModelBaichuan13bChat = Prefix+"baichuan-inc/Baichuan2-13B-Chat"
 ModelQwen14bChat = Prefix+"qwen/Qwen-14B-Chat"
+ModelQwenV15S14bChat = Prefix+"qwen/Qwen1.5-14B-Chat/"
 
 from sacred.observers import FileStorageObserver
 
@@ -98,7 +99,7 @@ def experiment(
 @ex.automain
 def mainFunc():
     for strategy in [StrategyDeepQA()]:
-        for llm_model in [ModelYi34]:
+        for llm_model in [ModelQwen14bChat, ModelQwenV15S14bChat]:
             for reranker in ["NONE", "FLAGEMBED"]:
                 for rerank_position in ["NONE", "SIMPLE"]:
                     for rewrite_strategy in ["NONE", "QUERY_REWRITE"]:
