@@ -25,7 +25,7 @@ class HybridRetriever(BaseRetriever):
             logger.debug(f"dense_retriever_recall_num[{len(vectorNodes)}]")
             for node in vectorNodes:
                 fmtText = truncate_text(node.node.text, 100).replace("\n", "//")
-                logger.debug(f"score[{node.score}] content[{fmtText}]")
+                logger.debug(f"score[{node.score:.2f}] content[{fmtText}]")
             
             for vectorNode in vectorNodes:
                 if vectorNode.score < 0.4:
@@ -42,7 +42,7 @@ class HybridRetriever(BaseRetriever):
             logger.debug(f"sparse_retriever_recall_num[{len(bm25Nodes)}]")
             for node in bm25Nodes:
                 fmtText = truncate_text(node.node.text, 100).replace("\n", "//")
-                logger.debug(f"score[{node.score}] content[{fmtText}]")
+                logger.debug(f"score[{node.score:.2f}] content[{fmtText}]")
 
             for bm25Node in bm25Nodes:
                 theNode = nodeIdToNode.get(bm25Node.node_id)
@@ -59,6 +59,10 @@ class HybridRetriever(BaseRetriever):
                 node.score = HybridRetriever.__calcRRF(node.score, 0)
 
         nodes.sort(key=lambda x: x.score, reverse=True)
+        logger.debug(f"final_recall[{len(nodes)}]")
+        for node in nodes:
+            fmtText = truncate_text(node.node.text, 100).replace("\n", "//")
+            logger.debug(f"score[{node.score:.2f}] content[{fmtText}]")
         return nodes
 
     def __calcRRF(score0, score1):
