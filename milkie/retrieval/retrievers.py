@@ -27,6 +27,8 @@ class HybridRetriever(BaseRetriever):
                 fmtText = truncate_text(node.node.text, 100).replace("\n", "//")
                 logger.debug(f"score[{node.score:.2f}] content[{fmtText}]")
             
+            vectorNodes.sort(key=lambda x: x.score, reverse=True)
+            rank = 1
             for vectorNode in vectorNodes:
                 if vectorNode.score < 0.4:
                     continue
@@ -35,7 +37,10 @@ class HybridRetriever(BaseRetriever):
                 if theNode is None:
                     nodes.append(vectorNode)
                     nodeIdToNode[vectorNode.node_id] = vectorNode
+                    vectorNode.score = rank
                     vectorNode.metadata["rrf"] = False
+                
+                rank += 1
 
         if self.sparseRetriever:
             bm25Nodes = self.sparseRetriever._retrieve(query_bundle)
@@ -44,19 +49,24 @@ class HybridRetriever(BaseRetriever):
                 fmtText = truncate_text(node.node.text, 100).replace("\n", "//")
                 logger.debug(f"score[{node.score:.2f}] content[{fmtText}]")
 
+            bm25Nodes.sort(key=lambda x: x.score, reverse=True)
+            rank = 1
             for bm25Node in bm25Nodes:
                 theNode = nodeIdToNode.get(bm25Node.node_id)
                 if theNode is None:
                     nodes.append(bm25Node)
                     nodeIdToNode[bm25Node.node_id] = bm25Node
+                    bm25Node.score = rank
                     bm25Node.metadata["rrf"] = False 
                 else:
                     theNode.metadata["rrf"] = True
                     theNode.score = HybridRetriever.__calcRRF(theNode.score, bm25Node.score)
+
+                rank += 1
         
         for node in nodes:
             if not node.metadata["rrf"]:
-                node.score = HybridRetriever.__calcRRF(node.score, 0)
+                node.score = HybridRetriever.__calcRRF(node.score, 100)
 
         nodes.sort(key=lambda x: x.score, reverse=True)
         logger.debug(f"final_recall[{len(nodes)}]")
@@ -65,5 +75,5 @@ class HybridRetriever(BaseRetriever):
             logger.debug(f"score[{node.score:.2f}] content[{fmtText}]")
         return nodes
 
-    def __calcRRF(score0, score1):
-        return 1.0/(60 + score0) + 1.0/(60 + score1)
+    def __calcRRF(rank0, rank1):
+        return 1.0/(60 + rank0) + 1.0/(60 + rank1)
