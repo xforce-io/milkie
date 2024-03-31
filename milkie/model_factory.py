@@ -38,31 +38,39 @@ def messagesToPrompt(messages: Sequence[ChatMessage]) -> str:
 class ModelFactory:
     
     def __init__(self) -> None:
-        self.models = {}
+        self.llmModel = None
+        self.embedModel = {}
 
     def getLLM(self, config :LLMConfig):
-        if config.model not in self.models:
-            self.models[config.model] = HuggingFaceLLM(
-                context_window=config.ctxLen,
-                max_new_tokens=256,
-                model_kwargs=config.modelArgs,
-                generate_kwargs=config.generationArgs,
-                system_prompt=SystemPromptCn,
-                query_wrapper_prompt=PromptTemplate("{query_str}\n<|ASSISTANT|>\n"),
-                tokenizer_name=config.model,
-                model_name=config.model,
-                messages_to_prompt=messagesToPrompt,
-                device_map="auto",
-                tokenizer_kwargs={"max_length": config.ctxLen, "use_fast": False, "trust_remote_code": True},
-                is_chat_model=True,
-            )
-        logging.info(f"Building HuggingFaceLLM with model {config.model} from_cache{repr in self.models} model_args{config.modelArgs} generation_args{config.generationArgs}")
-        return self.models[config.model]
+        llmModel = self.__setLLMModel(config)
+        logging.info(f"Building HuggingFaceLLM with model {config.model} model_args{config.modelArgs} generation_args{config.generationArgs}")
+        return llmModel
 
     def getEmbedding(self, config :EmbeddingConfig):
-        if config.model not in self.models:
-            self.models[config.model] = HuggingFaceEmbedding(
+        if config.model not in self.embedModel:
+            self.embedModel[config.model] = HuggingFaceEmbedding(
                 model_name=config.model,
                 device=config.device)
-        logging.info(f"Building HuggingFaceEmbedding with model {config.model} from_cache{repr in self.models}")
-        return self.models[config.model]
+        logging.info(f"Building HuggingFaceEmbedding with model {config.model} from_cache{repr in self.embedModel}")
+        return self.embedModel[config.model]
+
+    def __setLLMModel(self, config :LLMConfig):
+        if self.llmModel is not None:
+            self.llmModel.close()
+            del self.llmModel
+
+        self.llmModel = HuggingFaceLLM(
+            context_window=config.ctxLen,
+            max_new_tokens=256,
+            model_kwargs=config.modelArgs.toJson(),
+            generate_kwargs=config.generationArgs.toJson(),
+            system_prompt=SystemPromptCn,
+            query_wrapper_prompt=PromptTemplate("{query_str}\n<|ASSISTANT|>\n"),
+            tokenizer_name=config.model,
+            model_name=config.model,
+            messages_to_prompt=messagesToPrompt,
+            device_map="auto",
+            tokenizer_kwargs={"max_length": config.ctxLen, "use_fast": False, "trust_remote_code": True},
+            is_chat_model=True,
+        )
+        return self.llmModel

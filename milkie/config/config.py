@@ -84,16 +84,16 @@ class LLMModelArgs(BaseConfig):
     def __init__(
             self,
             attnImplementation :str, 
-            loadIn8Bits :bool):
+            loadIn8Bit :bool):
         self.attnImplementation = attnImplementation
-        self.loadIn8Bits = loadIn8Bits
+        self.loadIn8Bit = loadIn8Bit
         self.torchDtype = torch.bfloat16
         self.trustRemoteCode = True
 
     def fromArgs(config :dict):
        llmModelArgs = LLMModelArgs(
            attnImplementation=config["attn_implementation"] if "attn_implementation" in config else None,
-           loadIn8Bits=config["load_in_8bit"] if "load_in_8bit" in config else None,
+           loadIn8Bit=config["load_in_8bit"] if "load_in_8bit" in config else None,
        )
        return llmModelArgs
 
@@ -103,10 +103,10 @@ class LLMModelArgs(BaseConfig):
             "trust_remote_code": self.trustRemoteCode,
         }
 
-        if self.attn_implementation:
-            result["attn_implementation"] = self.attn_implementation
-        if self.loadIn8Bits != None:
-            result["load_in_8bits"] = self.loadIn8Bits
+        if self.attnImplementation:
+            result["attn_implementation"] = self.attnImplementation
+        if self.loadIn8Bit != None:
+            result["load_in_8bit"] = self.loadIn8Bit
         return result
    
 class LLMGenerationArgs(BaseConfig):
@@ -152,7 +152,6 @@ class LLMConfig(BaseConfig):
             type :LLMType, 
             model :str, 
             ctxLen :int = 0,
-            temperature :float = 0,
             deploymentName :str = None,
             apiKey :str = None,
             azureEndpoint :str = None,
@@ -162,7 +161,6 @@ class LLMConfig(BaseConfig):
         self.type = type
         self.model = model
         self.ctxLen = ctxLen
-        self.temperature = temperature
         self.deploymentName = deploymentName
         self.apiKey = apiKey
         self.azureEndpoint = azureEndpoint
@@ -178,14 +176,12 @@ class LLMConfig(BaseConfig):
                 type=LLMType.HUGGINGFACE, 
                 model=config["model"],
                 ctxLen=config["ctx_len"],
-                temperature=config["temperature"],
                 modelArgs=modelArgs,
                 generationArgs=generationArgs)
         elif config["type"] == LLMType.AZURE_OPENAI.name:
             return LLMConfig(
                 type=LLMType.AZURE_OPENAI,
                 model=config["model"],
-                temperature=config["temperature"],
                 deploymentName=config["deployment_name"],
                 apiKey=config["api_key"],
                 azureEndpoint=config["azure_endpoint"],
