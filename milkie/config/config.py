@@ -2,6 +2,8 @@ from abc import ABC
 from dataclasses import dataclass
 from typing import List
 
+import torch
+
 from milkie.utils.data_utils import loadFromYaml
 
 
@@ -78,6 +80,71 @@ class MemoryConfig(BaseConfig):
             configs.append(memoryTermConfig)
         return MemoryConfig(memoryConfig=configs)
 
+class LLMModelArgs(BaseConfig):
+    def __init__(
+            self,
+            attnImplementation :str, 
+            loadIn8Bits :bool):
+        self.attnImplementation = attnImplementation
+        self.loadIn8Bits = loadIn8Bits
+        self.torchDtype = torch.bfloat16
+        self.trustRemoteCode = True
+
+    def fromArgs(config :dict):
+       llmModelArgs = LLMModelArgs(
+           attnImplementation=config["attn_implementation"] if "attn_implementation" in config else None,
+           loadIn8Bits=config["load_in_8bit"] if "load_in_8bit" in config else None,
+       )
+       return llmModelArgs
+
+    def toJson(self):
+        result = {
+            "torch_dtype": self.torchDtype,
+            "trust_remote_code": self.trustRemoteCode,
+        }
+
+        if self.attn_implementation:
+            result["attn_implementation"] = self.attn_implementation
+        if self.loadIn8Bits != None:
+            result["load_in_8bits"] = self.loadIn8Bits
+        return result
+   
+class LLMGenerationArgs(BaseConfig):
+    def __init__(
+            self,
+            repetitionPenalty: float,
+            temperature :float,
+            doSample :bool,
+            useCache :bool,
+            promptLookupNumTokens: int):
+        self.repetitionPenalty = repetitionPenalty
+        self.temperature = temperature
+        self.doSample = doSample
+        self.useCache = useCache
+        self.promptLookupNumTokens = promptLookupNumTokens
+
+    def fromArgs(config :dict):
+        llmGenerationArgs = LLMGenerationArgs(
+            repetitionPenalty=config["repetition_penalty"] if "repetition_penalty" in config else 1.0,
+            temperature=config["temperature"] if "temperature" in config else 0,
+            doSample=config["do_sample"] if "do_sample" in config else False,
+            useCache=config["use_cache"] if "use_cache" in config else True,
+            promptLookupNumTokens=config["prompt_lookup_num_tokens"] if "prompt_lookup_num_tokens" in config else None,
+        )
+        return llmGenerationArgs
+
+    def toJson(self):
+        result = {
+            "repetition_penalty": self.repetitionPenalty,
+            "temperature": self.temperature,
+            "do_sample": self.doSample,
+            "use_cache": self.useCache,
+        }
+
+        if self.promptLookupNumTokens:
+            result["prompt_lookup_num_tokens"] = self.promptLookupNumTokens
+        return result
+
 @dataclass
 class LLMConfig(BaseConfig):
     def __init__(
@@ -89,7 +156,9 @@ class LLMConfig(BaseConfig):
             deploymentName :str = None,
             apiKey :str = None,
             azureEndpoint :str = None,
-            apiVersion :str = None):
+            apiVersion :str = None,
+            modelArgs :LLMModelArgs = None,
+            generationArgs :LLMGenerationArgs = None):
         self.type = type
         self.model = model
         self.ctxLen = ctxLen
@@ -98,14 +167,20 @@ class LLMConfig(BaseConfig):
         self.apiKey = apiKey
         self.azureEndpoint = azureEndpoint
         self.apiVersion = apiVersion
+        self.modelArgs = modelArgs
+        self.generationArgs = generationArgs
     
     def fromArgs(config :dict):
+        modelArgs = LLMModelArgs.fromArgs(config["model_args"])
+        generationArgs = LLMGenerationArgs.fromArgs(config["generation_args"])
         if config["type"] == LLMType.HUGGINGFACE.name:
             return LLMConfig(
                 type=LLMType.HUGGINGFACE, 
                 model=config["model"],
                 ctxLen=config["ctx_len"],
-                temperature=config["temperature"])
+                temperature=config["temperature"],
+                modelArgs=modelArgs,
+                generationArgs=generationArgs)
         elif config["type"] == LLMType.AZURE_OPENAI.name:
             return LLMConfig(
                 type=LLMType.AZURE_OPENAI,
@@ -114,7 +189,9 @@ class LLMConfig(BaseConfig):
                 deploymentName=config["deployment_name"],
                 apiKey=config["api_key"],
                 azureEndpoint=config["azure_endpoint"],
-                apiVersion=config["api_version"])
+                apiVersion=config["api_version"],
+                modelArgs=modelArgs,
+                generationArgs=generationArgs)
         else:
             raise Exception("LLM type not supported")
 

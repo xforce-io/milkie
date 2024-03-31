@@ -61,8 +61,26 @@ def experiment(
     if "llm_model" in kwargs:
         configYaml["llm"]["model"] = kwargs["llm_model"]
 
+    if "load_in_8bit" in kwargs:
+        configYaml["llm"]["model_args"]["load_in_8bit"] = kwargs["load_in_8bit"]
+
+    if "attn_implementation" in kwargs:
+        configYaml["llm"]["model_args"]["attn_implementation"] = kwargs["attn_implementation"]
+
+    if "repetition_penalty" in kwargs:
+        configYaml["llm"]["generation_args"]["repetition_penalty"] = kwargs["repetition_penalty"]
+
     if "temperature" in kwargs:
-        configYaml["llm"]["temperature"] = kwargs["temperature"]
+        configYaml["llm"]["generation_args"]["temperature"] = kwargs["temperature"]
+
+    if "do_sample" in kwargs:
+        configYaml["llm"]["generation_args"]["do_sample"] = kwargs["do_sample"]
+    
+    if "use_cache" in kwargs:
+        configYaml["llm"]["generation_args"]["use_cache"] = kwargs["use_cache"]
+        
+    if "prompt_lookup_num_tokens" in kwargs:
+        configYaml["llm"]["generation_args"]["prompt_lookup_num_tokens"] = kwargs["prompt_lookup_num_tokens"]
 
     def getAgentConfig(name :str):
         for agentConfig in configYaml["agents"]:
@@ -99,20 +117,24 @@ def experiment(
 @ex.automain
 def mainFunc():
     for strategy in [StrategyDeepQA()]:
-        for llm_model in [ModelQwen14bChat, ModelQwenV15S14bChat]:
-            for reranker in ["NONE", "FLAGEMBED"]:
-                for rerank_position in ["NONE", "SIMPLE"]:
-                    for rewrite_strategy in ["NONE", "QUERY_REWRITE"]:
-                        for channel_recall in [30]:
-                            for similarity_top_k in [30]:
-                                experiment(
-                                    strategy=strategy,
-                                    llm_model=llm_model,
-                                    reranker=reranker,
-                                    rerank_position=rerank_position,
-                                    rewrite_strategy=rewrite_strategy,
-                                    channel_recall=channel_recall,
-                                    similarity_top_k=similarity_top_k)
+        for llm_model in [ModelQwenV15S14bChat]:
+            for attn_implementation in ["flash_attention_2", None]:
+                for use_cache in [True, False]:
+                    for load_in_8bit in [True, False]:
+                        for prompt_lookup_num_tokens in [20, None]:
+                            experiment(
+                                strategy=strategy,
+                                llm_model=llm_model,
+                                reranker="FLAGEMBED",
+                                rerank_position="NONE",
+                                rewrite_strategy="QUERY_REWRITE",
+                                channel_recall=30,
+                                similarity_top_k=30,
+                                attn_implementation=attn_implementation,
+                                use_cache=use_cache,
+                                load_in_8bit=load_in_8bit,
+                                prompt_lookup_num_tokens=prompt_lookup_num_tokens)
+                                
 
 if __name__ == "__main__":
     configYaml = loadFromYaml("config/global.yaml")

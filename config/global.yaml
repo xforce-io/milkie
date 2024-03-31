@@ -6,7 +6,14 @@ llm:
   azure_endpoint: "https://artificial-intelligence-01.openai.azure.com/"
   api_version: "2023-12-01-preview"
   ctx_len: 4096
-  temperature: 0
+  model_args:
+    load_in_8bit: False
+  generation_args:
+    repetition_penalty: 1.0
+    temperature: 0
+    do_sample: False
+    use_cache: True
+    prompt_lookup_num_tokens: 20
 memory:
   - type: LONG_TERM
     source: LOCAL 

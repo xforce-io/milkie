@@ -45,8 +45,8 @@ class ModelFactory:
             self.models[config.model] = HuggingFaceLLM(
                 context_window=config.ctxLen,
                 max_new_tokens=256,
-                model_kwargs={"torch_dtype":torch.bfloat16, "trust_remote_code": True},
-                generate_kwargs={"temperature": config.temperature, "do_sample": False},
+                model_kwargs=config.modelArgs,
+                generate_kwargs=config.generationArgs,
                 system_prompt=SystemPromptCn,
                 query_wrapper_prompt=PromptTemplate("{query_str}\n<|ASSISTANT|>\n"),
                 tokenizer_name=config.model,
@@ -56,8 +56,7 @@ class ModelFactory:
                 tokenizer_kwargs={"max_length": config.ctxLen, "use_fast": False, "trust_remote_code": True},
                 is_chat_model=True,
             )
-        logging.info(f"Building HuggingFaceLLM with model {config.model} from_cache{repr in self.models}")
-        self.models[config.model].generate_kwargs["temperature"] = config.temperature
+        logging.info(f"Building HuggingFaceLLM with model {config.model} from_cache{repr in self.models} model_args{config.modelArgs} generation_args{config.generationArgs}")
         return self.models[config.model]
 
     def getEmbedding(self, config :EmbeddingConfig):
