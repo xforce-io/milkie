@@ -36,7 +36,8 @@ class Loader:
                 prompts = []
                 content = ""
                 for line in file.readlines():
-                    if len(line.strip().replace(Loader.Sep, "")) == 0:
+                    stripped = line.strip() 
+                    if len(stripped) != 0 and len(stripped.replace(Loader.Sep, "")) == 0:
                         if len(content) > 0:
                             prompts.append(Prompt(content))
                             content = ""
