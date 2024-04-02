@@ -43,6 +43,9 @@ class Loader:
                             content = ""
                     else:
                         content += line
+                
+                if len(content) > 0:
+                    prompts.append(Prompt(content))
 
                 results[file_name] = prompts
         return results
