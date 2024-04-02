@@ -5,7 +5,7 @@ from milkie.config.config import GlobalConfig
 from milkie.context import Context
 from milkie.global_context import GlobalContext
 from milkie.model_factory import ModelFactory
-from milkie.prompt.prompt import GLoader
+from milkie.prompt.prompt import Loader
 from milkie.settings import Settings
 from milkie.strategy import Strategy, StrategyPrompt
 
@@ -55,7 +55,7 @@ def experiment(
     if "prompt_lookup_num_tokens" in kwargs:
         configYaml["llm"]["generation_args"]["prompt_lookup_num_tokens"] = kwargs["prompt_lookup_num_tokens"]
 
-    promptDict = GLoader.loadByPrefix("speed/prompts", "prompt_")
+    promptDict = Loader.loadByPrefix("speed/prompts", "prompt_")
     globalConfig = GlobalConfig(configYaml)
     globalContext = GlobalContext(globalConfig, modelFactory)
     context = Context(globalContext=globalContext)
@@ -65,10 +65,11 @@ def experiment(
     cnt = 0
     for (_, prompts) in promptDict.items():
         for prompt in prompts:
+            content = prompt.getContent()
             t0 = time.time()
-            result = agent.task(prompt)
+            result = agent.task(content)
             t1 = time.time()
-            logger.info(f"Testcase[{prompt[:5]}] Ans[{result}] cost[{t1-t0:.2f}]]")
+            logger.info(f"Testcase[{content[:5]}] Ans[{result}] cost[{t1-t0:.2f}]]")
             totalTime += t1-t0
             cnt += 1
     logger.info(f"Running "
@@ -80,6 +81,7 @@ def experiment(
 
 @ex.automain
 def mainFunc():
+    logger.info("starting speed test")
     for strategy in [StrategyPrompt()]:
         for llm_model in [ModelQwenV15S14bChat]:
             for attn_implementation in ["flash_attention_2", None]:
