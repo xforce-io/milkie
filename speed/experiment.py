@@ -55,7 +55,7 @@ def experiment(
     if "prompt_lookup_num_tokens" in kwargs:
         configYaml["llm"]["generation_args"]["prompt_lookup_num_tokens"] = kwargs["prompt_lookup_num_tokens"]
 
-    promptDict = GLoader.loadByPrefix(directory="speed/prompts", promptPrefix="prompt_")
+    promptDict = GLoader.loadByPrefix("speed/prompts", "prompt_")
     globalConfig = GlobalConfig(configYaml)
     globalContext = GlobalContext(globalConfig, modelFactory)
     context = Context(globalContext=globalContext)

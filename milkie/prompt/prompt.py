@@ -21,8 +21,8 @@ class Loader:
         return content
 
     def loadByPrefix(
-            promptPrefix :str=PromptPrefix, 
-            directory :str=PromptDir) -> dict:
+            directory :str=PromptDir,
+            promptPrefix :str=PromptPrefix) -> dict:
         filepaths = glob.glob(os.path.join(directory, f"{promptPrefix}*"))
         filePostfix = ".txt"
         results = {}
