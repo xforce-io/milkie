@@ -42,3 +42,12 @@ class StrategyDeepQA(Strategy):
 
     def __str__(self) -> str:
         return "DeepQA"
+
+class StrategyPrompt(Strategy):
+    
+    def getAgentName(self) -> str:
+        self.agentName = "prompt"
+        return self.agentName
+
+    def createAgent(self, context :Context) -> BaseAgent:
+        return 
