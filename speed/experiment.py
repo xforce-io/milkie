@@ -57,7 +57,6 @@ def experiment(
 
     prompts = GLoader.loadByPrefix()
     globalConfig = GlobalConfig(configYaml)
-    agent = PromptAgent(globalConfig)
     globalContext = GlobalContext(globalConfig, modelFactory)
     context = Context(globalContext=globalContext)
     agent = strategy.createAgent(context)

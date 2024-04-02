@@ -1,6 +1,7 @@
 from abc import abstractmethod
 
 from milkie.agent.base_agent import BaseAgent
+from milkie.agent.prompt_agent import PromptAgent
 from milkie.agent.team.deepqa import DeepQA
 from milkie.agent.team.mrqa import MapReduceQA
 from milkie.context import Context
@@ -20,9 +21,11 @@ class Strategy(object):
         pass
 
 class StrategyMRQA(Strategy):
+
+    def __init__(self) -> None:
+        self.agentName = "retrieval"
     
     def getAgentName(self) -> str:
-        self.agentName = "retrieval"
         return self.agentName
 
     def createAgent(self, context :Context) -> BaseAgent:
@@ -32,9 +35,11 @@ class StrategyMRQA(Strategy):
         return "MRQA"
 
 class StrategyDeepQA(Strategy):
+
+    def __init__(self) -> None:
+        self.agentName = "qa"
     
     def getAgentName(self) -> str:
-        self.agentName = "qa"
         return self.agentName
 
     def createAgent(self, context :Context) -> BaseAgent:
@@ -44,10 +49,15 @@ class StrategyDeepQA(Strategy):
         return "DeepQA"
 
 class StrategyPrompt(Strategy):
+
+    def __init__(self) -> None:
+        self.agentName = "prompt"
     
     def getAgentName(self) -> str:
-        self.agentName = "prompt"
         return self.agentName
 
     def createAgent(self, context :Context) -> BaseAgent:
-        return 
+        return PromptAgent(context, self.agentName)
+
+    def __str__(self) -> str:
+        return "Prompt"

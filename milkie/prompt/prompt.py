@@ -12,6 +12,8 @@ class Prompt:
         return self.content
 
 class Loader:
+    Sep = "~"
+    
     def load(name :str) -> str:
         pathPrompt = f"{PromptDir}{name}.txt"
         with open(pathPrompt, 'r') as file:
@@ -30,7 +32,18 @@ class Loader:
                 file_name = file_name[len(prefix):]
                 if file_name.endswith(filePostfix):
                     file_name = file_name[:-len(filePostfix)]
-                results[file_name] = file.read()
+
+                prompts = []
+                content = ""
+                for line in file.readlines():
+                    if len(line.strip().replace(Loader.Sep, "")) == 0:
+                        if len(content) > 0:
+                            prompts.append(Prompt(content))
+                            content = ""
+                    else:
+                        content += line
+
+                results[file_name] = prompts
         return results
 
 GLoader = Loader()
