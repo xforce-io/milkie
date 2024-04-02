@@ -55,24 +55,27 @@ def experiment(
     if "prompt_lookup_num_tokens" in kwargs:
         configYaml["llm"]["generation_args"]["prompt_lookup_num_tokens"] = kwargs["prompt_lookup_num_tokens"]
 
-    prompts = GLoader.loadByPrefix()
+    promptDict = GLoader.loadByPrefix()
     globalConfig = GlobalConfig(configYaml)
     globalContext = GlobalContext(globalConfig, modelFactory)
     context = Context(globalContext=globalContext)
     agent = strategy.createAgent(context)
 
     totalTime = 0
-    for (_, prompt) in prompts.items():
-        t0 = time.time()
-        result = agent.task(prompt)
-        t1 = time.time()
-        logger.info(f"Testcase[{prompt[:5]}] Ans[{result}] cost[{t1-t0:.2f}]]")
-        totalTime += t1-t0
+    cnt = 0
+    for (_, prompts) in promptDict.items():
+        for prompt in prompts:
+            t0 = time.time()
+            result = agent.task(prompt)
+            t1 = time.time()
+            logger.info(f"Testcase[{prompt[:5]}] Ans[{result}] cost[{t1-t0:.2f}]]")
+            totalTime += t1-t0
+            cnt += 1
     logger.info(f"Running "
                 f"kwargs[{kwargs}] "
                 f"cost[{totalTime}] "
-                f"avg[{totalTime/len(prompts)}] ")
-    ex.log_scalar("total", len(prompts))
+                f"avg[{totalTime/cnt}] ")
+    ex.log_scalar("total", cnt)
     ex.log_scalar("costMs", totalTime)
 
 @ex.automain
