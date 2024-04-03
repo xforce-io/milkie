@@ -26,20 +26,13 @@ class CustomRefineProgram(BasePydanticProgram):
     def __call__(self, *args: Any, **kwds: Any) -> StructuredRefineResponse:
         import time
         t0 = time.time()
-        answer = self._llm.predict(
+        answer, _ = self._llm.predict(
             self._prompt, 
             **kwds,
         ).strip()
         t1 = time.time()
         qanswer = answer.replace("\n", "//")
         logger.debug(f"llm_call answer[{qanswer}] cost[{t1-t0}]")	
-        return StructuredRefineResponse(answer=answer, query_satisfied=True)
-
-    async def acall(self, *args: Any, **kwds: Any) -> StructuredRefineResponse:
-        answer = await self._llm.apredict(
-            self._prompt,
-            **kwds,
-        )
         return StructuredRefineResponse(answer=answer, query_satisfied=True)
 
 class CustomProgramFactory:

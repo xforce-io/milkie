@@ -32,10 +32,11 @@ class PromptAgent(BaseAgent):
 
         import time
         t0 = time.time()
-        response.response = self.context.globalContext.settings.llm.predict(
+        response.response, numTokens = self.context.globalContext.settings.llm.predict(
             prompt=chatPromptTmpl,
             **kwargs)
         t1 = time.time()
         answer = response.response.replace("\n", "//")
+        response.metadata["numTokens"] = numTokens
         logger.debug(f"prompt_agent query[{query}] answer[{answer}] cost[{t1-t0}]")
         return response

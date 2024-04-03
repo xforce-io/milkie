@@ -7,6 +7,7 @@ from llama_index.embeddings import HuggingFaceEmbedding
 from llama_index.llms.types import MessageRole, ChatMessage
 from llama_index.indices.utils import truncate_text
 
+from milkie.llm.enhanced_hf_llm import EnhancedHFLLM
 from milkie.prompt.prompt import Loader
 from milkie.config.config import EmbeddingConfig, LLMConfig
 
@@ -59,7 +60,7 @@ class ModelFactory:
             self.llmModel.close()
             del self.llmModel
 
-        self.llmModel = HuggingFaceLLM(
+        self.llmModel = EnhancedHFLLM(
             context_window=config.ctxLen,
             max_new_tokens=256,
             model_kwargs=config.modelArgs.toJson(),

@@ -63,21 +63,24 @@ def experiment(
     context = Context(globalContext=globalContext)
     agent = strategy.createAgent(context)
 
-    totalTime = 0
     cnt = 0
+    totalTime = 0
+    totalTokens = 0
     for (_, prompts) in promptDict.items():
         for prompt in prompts:
             content = prompt.getContent()
             t0 = time.time()
             result = agent.task(content)
+            totalTokens += result.metadata["numTokens"]
             t1 = time.time()
             logger.info(f"Testcase[{content[:5]}] Ans[{result}] cost[{t1-t0:.2f}]]")
             totalTime += t1-t0
             cnt += 1
     logger.info(f"Running "
                 f"kwargs[{kwargs}] "
-                f"cost[{totalTime}] "
-                f"avg[{totalTime/cnt}] ")
+                f"costSec[{totalTime}] "
+                f"avgLatSec[{totalTime/cnt}] "
+                f"tokensPerSec[{float(totalTokens)/totalTime}] ")
     ex.log_scalar("total", cnt)
     ex.log_scalar("costMs", totalTime)
 
