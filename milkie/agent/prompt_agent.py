@@ -18,14 +18,14 @@ class PromptAgent(BaseAgent):
             config :str) -> None:
         super.__init__(context, config)
 
-        self.prompt = Loader.load(config)
+        self.prompt = Loader.load(config) if config else None
 
     def task(self, query, **kwargs) -> Response:
         response = Response(response="", source_nodes=None)
         chatPromptTmpl = ChatPromptTemplate(
             message_templates=[
                 ChatMessage(
-                    content=self.prompt,
+                    content=self.prompt if self.prompt else query,
                     role=MessageRole.USER)
             ]
         )

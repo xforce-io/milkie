@@ -7,7 +7,7 @@ from milkie.global_context import GlobalContext
 from milkie.model_factory import ModelFactory
 from milkie.prompt.prompt import Loader
 from milkie.settings import Settings
-from milkie.strategy import Strategy, StrategyPrompt
+from milkie.strategy import Strategy, StrategyRaw
 
 from milkie.utils.data_utils import loadFromYaml
 
@@ -57,6 +57,8 @@ def experiment(
 
     promptDict = Loader.loadByPrefix("speed/prompts", "prompt_")
     globalConfig = GlobalConfig(configYaml)
+
+    globalConfig.memoryConfig = None
     globalContext = GlobalContext(globalConfig, modelFactory)
     context = Context(globalContext=globalContext)
     agent = strategy.createAgent(context)
@@ -82,12 +84,15 @@ def experiment(
 @ex.automain
 def mainFunc():
     logger.info("starting speed test")
-    for strategy in [StrategyPrompt()]:
+    for strategy in [StrategyRaw()]:
         for llm_model in [ModelQwenV15S14bChat]:
             for attn_implementation in ["flash_attention_2", None]:
                 for use_cache in [True, False]:
                     for load_in_8bit in [True, False]:
                         for prompt_lookup_num_tokens in [20, None]:
+                            if prompt_lookup_num_tokens and not use_cache:
+                                continue
+                            
                             experiment(
                                 strategy=strategy,
                                 llm_model=llm_model,
