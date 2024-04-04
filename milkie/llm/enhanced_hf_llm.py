@@ -1,3 +1,4 @@
+import torch
 from typing import Any, Callable, Optional, Sequence
 from llama_index import BasePromptTemplate
 from llama_index.llms.types import ChatMessage
@@ -18,6 +19,8 @@ class EnhancedHFLLM(HuggingFaceLLM) :
             is_chat_model: bool, 
             system_prompt: str, 
             messages_to_prompt: Optional[Callable[[Sequence[ChatMessage]], str]]) -> None:
+        compile = model_kwargs.pop("compile", False)
+
         super().__init__(
             context_window=context_window, 
             max_new_tokens=max_new_tokens, 
@@ -30,6 +33,10 @@ class EnhancedHFLLM(HuggingFaceLLM) :
             is_chat_model=is_chat_model, 
             system_prompt=system_prompt, 
             messages_to_prompt=messages_to_prompt)
+
+        #refer suggestions from https://pytorch.org/blog/accelerating-generative-ai-2/
+        if compile:
+            self._model = torch.compile(self._model, mode="reduce-overhead", fullgraph=True)
     
     def predict(
             self, 

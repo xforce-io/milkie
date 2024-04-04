@@ -39,6 +39,9 @@ def experiment(
 
     if "attn_implementation" in kwargs:
         configYaml["llm"]["model_args"]["attn_implementation"] = kwargs["attn_implementation"]
+    
+    if "compile" in kwargs:
+        configYaml["llm"]["model_args"]["compile"] = kwargs["compile"]
 
     if "repetition_penalty" in kwargs:
         configYaml["llm"]["generation_args"]["repetition_penalty"] = kwargs["repetition_penalty"]
