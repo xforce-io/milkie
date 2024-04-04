@@ -21,7 +21,7 @@ class PromptAgent(BaseAgent):
         self.prompt = Loader.load(config) if config else None
 
     def task(self, query, **kwargs) -> Response:
-        response = Response(response="", source_nodes=None)
+        response = Response(response="", source_nodes=None, metadata={})
         chatPromptTmpl = ChatPromptTemplate(
             message_templates=[
                 ChatMessage(

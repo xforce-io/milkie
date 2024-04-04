@@ -1,6 +1,7 @@
 from abc import ABC
 from dataclasses import dataclass
 from typing import List
+from transformers import BitsAndBytesConfig
 
 import torch
 
@@ -44,6 +45,11 @@ class RewriteStrategy(Enum):
     QUERY_REWRITE = 1
     HYDE = 2
 
+class QuantizationType(Enum):
+    NONE = 0
+    INT8 = 1
+    INT4 = 2
+
 class MemoryTermConfig(BaseConfig):
     def __init__(
             self, 
@@ -84,18 +90,23 @@ class LLMModelArgs(BaseConfig):
     def __init__(
             self,
             attnImplementation :str, 
-            loadIn8Bit :bool):
+            quantizationType :QuantizationType):
         self.attnImplementation = attnImplementation
-        self.loadIn8Bit = loadIn8Bit
+        self.quantizationType = quantizationType
         self.torchDtype = torch.bfloat16
         self.trustRemoteCode = True
 
     def fromArgs(config :dict):
-       llmModelArgs = LLMModelArgs(
+        quantizationType = QuantizationType.NONE
+        if config["quantization_type"] == QuantizationType.INT8.name:
+            quantizationType = QuantizationType.INT8
+        elif config["quantization_type"] == QuantizationType.INT4.name:
+            quantizationType = QuantizationType.INT4
+        
+        llmModelArgs = LLMModelArgs(
            attnImplementation=config["attn_implementation"] if "attn_implementation" in config else None,
-           loadIn8Bit=config["load_in_8bit"] if "load_in_8bit" in config else None,
-       )
-       return llmModelArgs
+           quantizationType=quantizationType)
+        return llmModelArgs
 
     def toJson(self):
         result = {
@@ -105,8 +116,15 @@ class LLMModelArgs(BaseConfig):
 
         if self.attnImplementation:
             result["attn_implementation"] = self.attnImplementation
-        if self.loadIn8Bit != None:
-            result["load_in_8bit"] = self.loadIn8Bit
+
+        quantizationConfig = None
+        if self.quantizationType == QuantizationType.INT8:
+            quantizationConfig = BitsAndBytesConfig(load_in_8bit=True)
+        elif self.quantizationType == QuantizationType.INT4:
+            quantizationConfig = BitsAndBytesConfig(load_in_4bit=True)
+        
+        if quantizationConfig:
+            result["quantization_config"] = quantizationConfig
         return result
    
 class LLMGenerationArgs(BaseConfig):

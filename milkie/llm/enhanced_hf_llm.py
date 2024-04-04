@@ -35,7 +35,7 @@ class EnhancedHFLLM(HuggingFaceLLM) :
             self, 
             prompt: BasePromptTemplate, 
             **prompt_args: Any) -> str:
-        self._log_template_data(self, prompt, **prompt_args)
+        self._log_template_data(prompt, **prompt_args)
 
         if self.metadata.is_chat_model:
             messages = self._get_messages(prompt, **prompt_args)
@@ -46,3 +46,6 @@ class EnhancedHFLLM(HuggingFaceLLM) :
             response = self.complete(formatted_prompt)
             output = response.text
         return (self._parse_output(output), len(response.raw["model_output"][0]))
+
+    def get_memory_footprint(self) -> int:
+        return self._model.get_memory_footprint()

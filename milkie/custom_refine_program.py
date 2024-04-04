@@ -29,8 +29,10 @@ class CustomRefineProgram(BasePydanticProgram):
         answer, _ = self._llm.predict(
             self._prompt, 
             **kwds,
-        ).strip()
+        )
         t1 = time.time()
+
+        answer = answer.strip()
         qanswer = answer.replace("\n", "//")
         logger.debug(f"llm_call answer[{qanswer}] cost[{t1-t0}]")	
         return StructuredRefineResponse(answer=answer, query_satisfied=True)
