@@ -37,6 +37,7 @@ class EnhancedHFLLM(HuggingFaceLLM) :
         #refer suggestions from https://pytorch.org/blog/accelerating-generative-ai-2/
         if compile:
             self._model = torch.compile(self._model, mode="reduce-overhead", fullgraph=True)
+        model_kwargs["compile"] = compile
     
     def predict(
             self, 

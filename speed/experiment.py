@@ -93,20 +93,22 @@ def mainFunc():
     logger.info("starting speed test")
     for strategy in [StrategyRaw()]:
         for llm_model in [ModelQwenV15S14bChat]:
-            for attn_implementation in ["flash_attention_2", None]:
-                for use_cache in [True, False]:
-                    for quantization_type in [None, "INT4", "INT8"]:
-                        for prompt_lookup_num_tokens in [20, None]:
-                            if prompt_lookup_num_tokens and not use_cache:
-                                continue
-                            
-                            experiment(
-                                strategy=strategy,
-                                llm_model=llm_model,
-                                attn_implementation=attn_implementation,
-                                use_cache=use_cache,
-                                quantization_type=quantization_type,
-                                prompt_lookup_num_tokens=prompt_lookup_num_tokens)
+            for compile in [True, False]:
+                for attn_implementation in ["flash_attention_2", None]:
+                    for use_cache in [True, False]:
+                        for quantization_type in [None, "INT4", "INT8"]:
+                            for prompt_lookup_num_tokens in [20, None]:
+                                if prompt_lookup_num_tokens and not use_cache:
+                                    continue
+                                
+                                experiment(
+                                    strategy=strategy,
+                                    llm_model=llm_model,
+                                    attn_implementation=attn_implementation,
+                                    use_cache=use_cache,
+                                    quantization_type=quantization_type,
+                                    compile=compile,
+                                    prompt_lookup_num_tokens=prompt_lookup_num_tokens)
                                 
 
 if __name__ == "__main__":
