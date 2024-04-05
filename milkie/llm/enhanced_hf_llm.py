@@ -67,15 +67,16 @@ class EnhancedHFLLM(HuggingFaceLLM) :
 
     def __getSingleParameterSizeInBytes(self):
         type_to_size = {
-            'float32': 4,
-            'float16': 2,
-            'float64': 8,
-            'int8': 1,
-            'int16': 2,
-            'int32': 4,
+            torch.float32: 4,
+            torch.float16: 2,
+            torch.bfloat16: 2,
+            torch.float64: 8,
+            torch.int8: 1,
+            torch.int16: 2,
+            torch.int32: 4,
         }
 
-        dtype = self._model.parameters()[0].dtype
+        dtype = self._model.dtype
         size = type_to_size.get(dtype, None)
         if size is None:
             raise ValueError(f"Unsupported data type: {dtype}")
