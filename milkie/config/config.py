@@ -135,11 +135,19 @@ class LLMModelArgs(BaseConfig):
         return result
 
     def __repr__(self) -> str:
-        result = self.toJson()        
-        del result["quantization_config"]
+        result = {
+            "torch_dtype": self.torchDtype,
+            "trust_remote_code": self.trustRemoteCode,
+        }
+
+        if self.attnImplementation:
+            result["attn_implementation"] = self.attnImplementation
+
         result["quantization_type"] = self.quantizationType.name
-        return json.dumps(result)
-   
+        if self.compile:
+            result["compile"] = self.compile
+        return result
+        
 class LLMGenerationArgs(BaseConfig):
     def __init__(
             self,
