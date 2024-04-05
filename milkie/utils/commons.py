@@ -1,7 +1,9 @@
 import inspect
+import logging
 import os
 import re
 import socket
+import subprocess
 import time
 import zipfile
 from functools import wraps
@@ -24,6 +26,7 @@ from milkie.types import ModelType, TaskType
 
 F = TypeVar('F', bound=Callable[..., Any])
 
+logger = logging.getLogger(__name__)
 
 def openai_api_key_required(func: F) -> F:
     r"""Decorator that checks if the OpenAI API key is available in the
@@ -232,3 +235,13 @@ def check_server_running(server_url: str) -> bool:
 
     # if the port is open, the result should be 0.
     return result == 0
+
+def getMemStat():
+    logger.info("================Getting GPU memory status====================")
+    result = subprocess.run(['nvidia-smi', '--query-gpu=memory.total,memory.used,memory.free', '--format=csv,noheader,nounits'], stdout=subprocess.PIPE)
+    output = result.stdout.decode('utf-8')
+    lines = output.strip().split('\n')
+    for line in lines:
+        total, used, free = line.split(',')
+        logger.info(f"Total memory: {total} MB, Used memory: {used} MB, Free memory: {free} MB")
+    logger.info("============================================================")
