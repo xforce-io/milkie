@@ -9,6 +9,7 @@ from milkie.prompt.prompt import Loader
 from milkie.settings import Settings
 from milkie.strategy import Strategy, StrategyRaw
 
+from milkie.utils.commons import getMemStat
 from milkie.utils.data_utils import loadFromYaml
 
 logger = logging.getLogger(__name__)
@@ -79,14 +80,20 @@ def experiment(
             logger.info(f"Testcase[{content[:5]}] Ans[{result}] cost[{t1-t0:.2f}]]")
             totalTime += t1-t0
             cnt += 1
+    tokensPerSec = float(totalTokens)/totalTime
+
+    #TODO: 1.412 is observered from the A800 GPU, need to remove this hard code
     logger.info(f"Running "
                 f"kwargs[{kwargs}] "
                 f"costSec[{totalTime}] "
                 f"avgLatSec[{totalTime/cnt}] "
-                f"tokensPerSec[{float(totalTokens)/totalTime}] "
-                f"memory[{globalContext.settings.llm.getMem()}] ")
+                f"tokensPerSec[{tokensPerSec}] "
+                f"memory[{globalContext.settings.llm.getMem()}] "
+                f"mbu[{globalContext.settings.llm.getMBU(tokensPerSec, 1.412 * 1024**4)}] ")
     ex.log_scalar("total", cnt)
     ex.log_scalar("costMs", totalTime)
+
+    getMemStat()
 
 @ex.automain
 def mainFunc():

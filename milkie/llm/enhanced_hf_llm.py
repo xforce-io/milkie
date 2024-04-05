@@ -57,3 +57,26 @@ class EnhancedHFLLM(HuggingFaceLLM) :
 
     def getMem(self) -> float:
         return round(self._model.get_memory_footprint()/(1024*1024*1024), 2)
+
+    def getNumParams(self) -> int:
+        return sum(p.numel() for p in self._model.parameters())
+
+    #get memory bandwidth utilization
+    def getMBU(self, tokensPerSec :float, memBandwidth :float) -> float:
+        return self.getNumParams() * self.__getSingleParameterSizeInBytes() * tokensPerSec / memBandwidth
+
+    def __getSingleParameterSizeInBytes(self):
+        type_to_size = {
+            'float32': 4,
+            'float16': 2,
+            'float64': 8,
+            'int8': 1,
+            'int16': 2,
+            'int32': 4,
+        }
+
+        dtype = self._model.parameters()[0].dtype
+        size = type_to_size.get(dtype, None)
+        if size is None:
+            raise ValueError(f"Unsupported data type: {dtype}")
+        return size
