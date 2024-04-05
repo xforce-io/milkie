@@ -67,9 +67,9 @@ class EnhancedHFLLM(HuggingFaceLLM) :
 
     def __getSingleParameterSizeInBytes(self):
         type_to_size = {
-            torch.float32: 4,
             torch.float16: 2,
             torch.bfloat16: 2,
+            torch.float32: 4,
             torch.float64: 8,
             torch.int8: 1,
             torch.int16: 2,

@@ -40,10 +40,16 @@ class ModelFactory:
     
     def __init__(self) -> None:
         self.llmModel = None
+        self.signatureLLMModel = None
         self.embedModel = {}
 
     def getLLM(self, config :LLMConfig):
+        signatureModel = self.__getSignatureModel(config)
+        if signatureModel == self.signatureLLMModel:
+            return self.llmModel
+
         llmModel = self.__setLLMModel(config)
+        self.signatureLLMModel = signatureModel
         return llmModel
 
     def getEmbedding(self, config :EmbeddingConfig):
@@ -58,6 +64,7 @@ class ModelFactory:
         if self.llmModel is not None:
             self.llmModel.close()
             del self.llmModel
+            self.llmModel = None
 
         self.llmModel = EnhancedHFLLM(
             context_window=config.ctxLen,
@@ -72,5 +79,8 @@ class ModelFactory:
             tokenizer_kwargs={"max_length": config.ctxLen, "use_fast": False, "trust_remote_code": True},
             is_chat_model=True,
         )
-        logging.info(f"Building HuggingFaceLLM with model {config.model} model_args[{config.modelArgs.toJson()}] memory{self.llmModel.getMem()}GB")
+        logging.info(f"Building HuggingFaceLLM with model {config.model} model_args[{repr(config.modelArgs)}] memory[{self.llmModel.getMem()}GB]")
         return self.llmModel
+    
+    def __getSignatureModel(self, config :LLMConfig):
+        return "%s-%s" % (config.model, config.modelArgs.toJson())

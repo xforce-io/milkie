@@ -1,5 +1,6 @@
 from abc import ABC
 from dataclasses import dataclass
+import json
 from typing import List
 from transformers import BitsAndBytesConfig
 
@@ -132,6 +133,12 @@ class LLMModelArgs(BaseConfig):
         if self.compile:
             result["compile"] = self.compile
         return result
+
+    def __repr__(self) -> str:
+        result = self.toJson()        
+        del result["quantization_config"]
+        result["quantization_type"] = self.quantizationType.name
+        return json.dumps(result)
    
 class LLMGenerationArgs(BaseConfig):
     def __init__(
