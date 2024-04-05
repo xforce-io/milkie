@@ -55,5 +55,5 @@ class EnhancedHFLLM(HuggingFaceLLM) :
             output = response.text
         return (self._parse_output(output), len(response.raw["model_output"][0]))
 
-    def get_memory_footprint(self) -> int:
-        return self._model.get_memory_footprint()
+    def getMem(self) -> float:
+        return round(self._model.get_memory_footprint()/(1024*1024*1024), 2)

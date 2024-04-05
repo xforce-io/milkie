@@ -84,7 +84,7 @@ def experiment(
                 f"costSec[{totalTime}] "
                 f"avgLatSec[{totalTime/cnt}] "
                 f"tokensPerSec[{float(totalTokens)/totalTime}] "
-                f"memory[{globalContext.settings.llm.get_memory_footprint()}] ")
+                f"memory[{globalContext.settings.llm.getMem()}] ")
     ex.log_scalar("total", cnt)
     ex.log_scalar("costMs", totalTime)
 
@@ -93,7 +93,7 @@ def mainFunc():
     logger.info("starting speed test")
     for strategy in [StrategyRaw()]:
         for llm_model in [ModelQwenV15S14bChat]:
-            for compile in [True, False]:
+            for compile in [False, True]:
                 for attn_implementation in ["flash_attention_2", None]:
                     for use_cache in [True, False]:
                         for quantization_type in [None, "INT4", "INT8"]:

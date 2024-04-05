@@ -44,7 +44,6 @@ class ModelFactory:
 
     def getLLM(self, config :LLMConfig):
         llmModel = self.__setLLMModel(config)
-        logging.info(f"Building HuggingFaceLLM with model {config.model} model_args{config.modelArgs} generation_args{config.generationArgs} memory{round(llmModel.get_memory_footprint()/(1024*1024*1024), 2)}GB")
         return llmModel
 
     def getEmbedding(self, config :EmbeddingConfig):
@@ -73,4 +72,5 @@ class ModelFactory:
             tokenizer_kwargs={"max_length": config.ctxLen, "use_fast": False, "trust_remote_code": True},
             is_chat_model=True,
         )
+        logging.info(f"Building HuggingFaceLLM with model {config.model} model_args{config.modelArgs} generation_args{config.generationArgs} memory{self.llmModel.getMem()}GB")
         return self.llmModel
