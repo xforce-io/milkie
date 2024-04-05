@@ -47,11 +47,11 @@ class ModelFactory:
         return llmModel
 
     def getEmbedding(self, config :EmbeddingConfig):
+        logging.info(f"Building HuggingFaceEmbedding with model {config.model} from_cache[{config.model in self.embedModel}]")
         if config.model not in self.embedModel:
             self.embedModel[config.model] = HuggingFaceEmbedding(
                 model_name=config.model,
                 device=config.device)
-        logging.info(f"Building HuggingFaceEmbedding with model {config.model} from_cache{repr in self.embedModel}")
         return self.embedModel[config.model]
 
     def __setLLMModel(self, config :LLMConfig):
@@ -72,5 +72,5 @@ class ModelFactory:
             tokenizer_kwargs={"max_length": config.ctxLen, "use_fast": False, "trust_remote_code": True},
             is_chat_model=True,
         )
-        logging.info(f"Building HuggingFaceLLM with model {config.model} model_args{config.modelArgs} generation_args{config.generationArgs} memory{self.llmModel.getMem()}GB")
+        logging.info(f"Building HuggingFaceLLM with model {config.model} model_args[{config.modelArgs.toJson()}] memory{self.llmModel.getMem()}GB")
         return self.llmModel
