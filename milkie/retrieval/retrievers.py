@@ -1,10 +1,10 @@
 import logging
 from typing import List
 from llama_index import VectorStoreIndex
-from llama_index.indices.query.schema import QueryBundle
-from llama_index.retrievers import BaseRetriever, BM25Retriever
-from llama_index.schema import NodeWithScore
-from llama_index.indices.utils import truncate_text
+from llama_index.legacy.schema import QueryBundle
+from llama_index.legacy.retrievers import BaseRetriever, BM25Retriever
+from llama_index.legacy.schema import NodeWithScore
+from llama_index.legacy.indices.utils import truncate_text
 
 logger = logging.getLogger(__name__)
 

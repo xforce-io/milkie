@@ -1,6 +1,6 @@
 from typing import List
 from llama_index import Response
-from llama_index.schema import NodeWithScore
+from llama_index.core.base.response.schema import NodeWithScore
 
 from milkie.global_context import GlobalContext
 

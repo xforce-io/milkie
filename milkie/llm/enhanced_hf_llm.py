@@ -1,8 +1,8 @@
 import torch
 from typing import Any, Callable, Optional, Sequence
-from llama_index import BasePromptTemplate
-from llama_index.llms.types import ChatMessage
-from llama_index.llms import HuggingFaceLLM
+from llama_index.core.prompts.base import BasePromptTemplate
+from llama_index.legacy.core.llms.types import ChatMessage
+from llama_index.legacy.llms.huggingface import HuggingFaceLLM
 
 class EnhancedHFLLM(HuggingFaceLLM) :
 
@@ -46,7 +46,7 @@ class EnhancedHFLLM(HuggingFaceLLM) :
         self._log_template_data(prompt, **prompt_args)
 
         if self.metadata.is_chat_model:
-            messages = self._get_messages(prompt, **prompt_args)
+            messages = self._get_messages(prompt, **prompt_args).to(self.device)
             response = self.chat(messages)
             output = response.message.content or ""
         else:

@@ -10,10 +10,10 @@ from milkie.retrieval.position_reranker import PositionReranker
 from milkie.retrieval.reranker import Reranker
 from milkie.retrieval.retrievers import HybridRetriever
 
-from llama_index.retrievers import BM25Retriever
-from llama_index.query_engine import RetrieverQueryEngine
-from llama_index.response_synthesizers.type import ResponseMode
-from llama_index.schema import NodeWithScore
+from llama_index.legacy.retrievers import BM25Retriever
+from llama_index.legacy.query_engine import RetrieverQueryEngine
+from llama_index.legacy.response_synthesizers.type import ResponseMode
+from llama_index.legacy.schema import NodeWithScore
 
 
 class RetrievalModule:

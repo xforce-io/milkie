@@ -123,7 +123,7 @@ if __name__ == "__main__":
     globalConfig = GlobalConfig(configYaml)
     settings = Settings(globalConfig, modelFactory)
 
-    from llama_index.llms.types import ChatMessage, MessageRole
+    from llama_index.legacy.llms.types import ChatMessage, MessageRole
     
     messages = []
     messages.append(ChatMessage(
