@@ -1,5 +1,5 @@
-from llama_index import Response
-from llama_index.schema import TextNode
+from llama_index.legacy.core.response.schema import Response
+from llama_index.legacy.schema import TextNode
 
 from milkie.agent.base_agent import BaseAgent
 from milkie.context import Context

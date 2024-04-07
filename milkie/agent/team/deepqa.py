@@ -1,4 +1,4 @@
-from llama_index import Response
+from llama_index.legacy.core.response.schema import Response
 from milkie.agent.qa_agent import QAAgent
 from milkie.agent.team.team import Team
 from milkie.config.config import GlobalConfig

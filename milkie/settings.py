@@ -1,9 +1,7 @@
 import logging
-from llama_index import PromptTemplate
-import torch
 from milkie.config.config import EmbeddingConfig, GlobalConfig, LLMConfig, LLMType
 
-from llama_index.llms import HuggingFaceLLM, AzureOpenAI
+from llama_index.legacy.llms import AzureOpenAI
 
 from milkie.model_factory import ModelFactory
 from milkie.prompt.prompt import Loader

@@ -1,11 +1,9 @@
 from typing import Sequence
-import torch
-import logging, json
-from llama_index import PromptTemplate
-from llama_index.llms import HuggingFaceLLM
-from llama_index.embeddings import HuggingFaceEmbedding
-from llama_index.llms.types import MessageRole, ChatMessage
-from llama_index.indices.utils import truncate_text
+import logging
+from llama_index.legacy.prompts.base import PromptTemplate
+from llama_index.legacy.embeddings.huggingface import HuggingFaceEmbedding
+from llama_index.legacy.core.llms.types import MessageRole, ChatMessage
+from llama_index.legacy.utils import truncate_text
 
 from milkie.llm.enhanced_hf_llm import EnhancedHFLLM
 from milkie.prompt.prompt import Loader

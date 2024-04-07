@@ -1,4 +1,4 @@
-from llama_index import Response
+from llama_index.legacy.core.response.schema import Response
 
 from milkie.agent.base_agent import BaseAgent
 

@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
-from llama_index import Response
+from llama_index.legacy.core.response.schema import Response
+
 from milkie.config.config import GlobalConfig
 from milkie.context import Context
 
