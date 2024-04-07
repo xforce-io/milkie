@@ -1,4 +1,5 @@
-from llama_index import ServiceContext, VectorStoreIndex
+from llama_index.legacy.service_context import ServiceContext
+from llama_index.legacy.indices.vector_store.base import VectorStoreIndex
 from milkie.config.config import IndexConfig, MemoryConfig
 from milkie.index.index import Index
 from milkie.memory.memory import Memory

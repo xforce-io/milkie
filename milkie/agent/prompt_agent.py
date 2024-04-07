@@ -1,8 +1,9 @@
 import logging
 from abc import abstractmethod
 
-from llama_index.legacy.prompts import ChatPromptTemplate, Response
-from llama_index.llms.types import ChatMessage, MessageRole
+from llama_index.legacy.response.schema import Response
+from llama_index.legacy.prompts import ChatPromptTemplate
+from llama_index.legacy.llms.types import ChatMessage, MessageRole
 
 from milkie.agent.base_agent import BaseAgent
 from milkie.context import Context
