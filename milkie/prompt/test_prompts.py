@@ -1,9 +1,8 @@
-from llama_index import ChatPromptTemplate, SelectorPromptTemplate
-from llama_index.prompts.base import PromptTemplate
-from llama_index.prompts.prompt_type import PromptType
-from llama_index.prompts.default_prompts import DEFAULT_TEXT_QA_PROMPT
-from llama_index.prompts.utils import is_chat_model
-from llama_index.llms.types import ChatMessage, MessageRole
+from llama_index.legacy.prompts.base import ChatPromptTemplate, SelectorPromptTemplate
+from llama_index.legacy.prompts.base import PromptTemplate
+from llama_index.legacy.prompts.prompt_type import PromptType
+from llama_index.legacy.prompts.utils import is_chat_model
+from llama_index.legacy.llms.types import ChatMessage, MessageRole
 
 from milkie.prompt.prompt import Loader
 

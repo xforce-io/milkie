@@ -1,8 +1,14 @@
 import torch
 from typing import Any, Callable, Optional, Sequence
 from llama_index.core.prompts.base import BasePromptTemplate
-from llama_index.legacy.core.llms.types import ChatMessage
+from llama_index.legacy.core.llms.types import ChatMessage, ChatResponse, CompletionResponse
 from llama_index.legacy.llms.huggingface import HuggingFaceLLM
+from llama_index.legacy.llms.generic_utils import (
+    completion_response_to_chat_response,
+)
+from llama_index.legacy.llms.base import (
+    llm_chat_callback,
+)
 
 class EnhancedHFLLM(HuggingFaceLLM) :
 
@@ -46,14 +52,14 @@ class EnhancedHFLLM(HuggingFaceLLM) :
         self._log_template_data(prompt, **prompt_args)
 
         if self.metadata.is_chat_model:
-            messages = self._get_messages(prompt, **prompt_args).to(self.device)
-            response = self.chat(messages)
+            messages = self._get_messages(prompt, **prompt_args)
+            response = self.__chat(messages)
             output = response.message.content or ""
         else:
             formatted_prompt = self._get_prompt(prompt, **prompt_args)
             response = self.complete(formatted_prompt)
             output = response.text
-        return (self._parse_output(output), len(response.raw["model_output"][0]))
+        return (self._parse_output(output), len(response.raw["model_output"][0]) - len(response.raw["model_input"][0]))
 
     def getMem(self) -> float:
         return round(self._model.get_memory_footprint()/(1024*1024*1024), 2)
@@ -81,3 +87,40 @@ class EnhancedHFLLM(HuggingFaceLLM) :
         if size is None:
             raise ValueError(f"Unsupported data type: {dtype}")
         return size
+
+    def __chat(self, messages: Sequence[ChatMessage], **kwargs: Any) -> ChatResponse:
+        prompt = self.messages_to_prompt(messages)
+        completion_response = self.__complete(prompt, formatted=True, **kwargs)
+        return completion_response_to_chat_response(completion_response)
+
+    def __complete(
+        self, prompt: str, formatted: bool = False, **kwargs: Any
+    ) -> CompletionResponse:
+        """Completion endpoint."""
+        full_prompt = prompt
+        if not formatted:
+            if self.query_wrapper_prompt:
+                full_prompt = self.query_wrapper_prompt.format(query_str=prompt)
+            if self.system_prompt:
+                full_prompt = f"{self.system_prompt} {full_prompt}"
+
+        inputs = self._tokenizer(full_prompt, return_tensors="pt")
+        inputs = inputs.to(self._model.device)
+
+        for key in self.tokenizer_outputs_to_remove:
+            if key in inputs:
+                inputs.pop(key, None)
+
+        tokens = self._model.generate(
+            **inputs,
+            max_new_tokens=self.max_new_tokens,
+            stopping_criteria=self._stopping_criteria,
+            **self.generate_kwargs,
+        )
+        completion_tokens = tokens[0][inputs["input_ids"].size(1) :]
+        completion = self._tokenizer.decode(completion_tokens, skip_special_tokens=True)
+
+        return CompletionResponse(
+            text=completion, 
+            raw={"model_output": tokens, "model_input": inputs["input_ids"]})
+

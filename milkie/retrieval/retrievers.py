@@ -1,6 +1,6 @@
 import logging
 from typing import List
-from llama_index import VectorStoreIndex
+from llama_index.legacy.indices.vector_store.base import VectorStoreIndex
 from llama_index.legacy.schema import QueryBundle
 from llama_index.legacy.retrievers import BaseRetriever, BM25Retriever
 from llama_index.legacy.schema import NodeWithScore

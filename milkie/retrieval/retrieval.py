@@ -1,5 +1,6 @@
 from typing import List
-from llama_index import QueryBundle, get_response_synthesizer
+from llama_index.legacy.schema import QueryBundle
+from llama_index.legacy.response_synthesizers.factory import get_response_synthesizer
 from milkie.agent.prompt_agent import PromptAgent
 from milkie.config.config import RerankPosition, RetrievalConfig, RewriteStrategy
 from milkie.context import Context
