@@ -45,6 +45,7 @@ class EnhancedHFLLM(HuggingFaceLLM) :
             self._model = torch.compile(self._model, mode="reduce-overhead", fullgraph=True)
         model_kwargs["compile"] = compile
     
+    @torch.inference_mode()
     def predict(
             self, 
             prompt: BasePromptTemplate, 

@@ -44,6 +44,12 @@ def experiment(
     if "compile" in kwargs:
         configYaml["llm"]["model_args"]["compile"] = kwargs["compile"]
 
+    if "use_sliding_window" in kwargs:
+        configYaml["llm"]["model_args"]["use_sliding_window"] = kwargs["use_sliding_window"]
+        
+    if "sliding_window" in kwargs:
+        configYaml["llm"]["model_args"]["sliding_window"] = kwargs["sliding_window"]
+
     if "repetition_penalty" in kwargs:
         configYaml["llm"]["generation_args"]["repetition_penalty"] = kwargs["repetition_penalty"]
 
@@ -101,22 +107,33 @@ def mainFunc():
     for strategy in [StrategyRaw()]:
         for llm_model in [ModelQwenV15S14bChat]:
             for compile in [False, True]:
-                for attn_implementation in ["flash_attention_2", None]:
-                    for use_cache in [True, False]:
-                        for quantization_type in [None, "INT4", "INT8"]:
-                            for prompt_lookup_num_tokens in [20, None]:
-                                if prompt_lookup_num_tokens and not use_cache:
-                                    continue
-                                
-                                experiment(
-                                    strategy=strategy,
-                                    llm_model=llm_model,
-                                    attn_implementation=attn_implementation,
-                                    use_cache=use_cache,
-                                    quantization_type=quantization_type,
-                                    compile=compile,
-                                    prompt_lookup_num_tokens=prompt_lookup_num_tokens)
-                                
+                for attn_implementation in ["flash_attention_2", "sdpa", None]:
+                    rangeUseSlidingWindow = [False]
+                    if attn_implementation == "flash_attention_2":
+                        rangeUseSlidingWindow = [True, False]
+
+                    for use_sliding_window in rangeUseSlidingWindow:
+                        rangeSliding = [32*1024]
+                        if use_sliding_window:
+                            rangeSliding = [512, 1024, 2048]
+
+                        for sliding_window in rangeSliding: 
+                            for use_cache in [True]:
+                                for quantization_type in [None]:
+                                    for prompt_lookup_num_tokens in [None]:
+                                        if prompt_lookup_num_tokens and not use_cache:
+                                            continue
+
+                                        experiment(
+                                            strategy=strategy,
+                                            llm_model=llm_model,
+                                            attn_implementation=attn_implementation,
+                                            use_cache=use_cache,
+                                            quantization_type=quantization_type,
+                                            compile=compile,
+                                            prompt_lookup_num_tokens=prompt_lookup_num_tokens,
+                                            use_sliding_window=use_sliding_window,
+                                            sliding_window=sliding_window)
 
 if __name__ == "__main__":
     configYaml = loadFromYaml("config/global.yaml")
