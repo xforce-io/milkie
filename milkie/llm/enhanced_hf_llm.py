@@ -48,7 +48,7 @@ class EnhancedHFLLM(EnhancedLLM) :
     def predict(
             self, 
             prompt: BasePromptTemplate, 
-            **prompt_args: Any) -> str:
+            **prompt_args: Any):
         self._llm._log_template_data(prompt, **prompt_args)
 
         if self._llm.metadata.is_chat_model:

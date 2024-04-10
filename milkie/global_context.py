@@ -18,7 +18,7 @@ class GlobalContext():
             embed_model=self.settings.embedding,
             chunk_size=globalConfig.indexConfig.chunkSize if globalConfig.indexConfig else None,
             chunk_overlap=globalConfig.indexConfig.chunkOverlap if globalConfig.indexConfig else None,
-            llm=self.settings.llm)
+            llm=self.settings.llm.getLLM())
 
         if globalConfig.memoryConfig and globalConfig.indexConfig:
             self.memoryWithIndex = MemoryWithIndex(

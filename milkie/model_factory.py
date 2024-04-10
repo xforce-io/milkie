@@ -37,18 +37,18 @@ def messagesToPrompt(messages: Sequence[ChatMessage]) -> str:
 class ModelFactory:
     
     def __init__(self) -> None:
-        self.llmModel = None
+        self.llm = None
         self.signatureLLMModel = None
         self.embedModel = {}
 
     def getLLM(self, config :LLMConfig):
         signatureModel = self.__getSignatureModel(config)
         if signatureModel == self.signatureLLMModel:
-            return self.llmModel.getLLM()
+            return self.llm
 
-        llmModel = self.__setLLMModel(config)
+        llm = self.__setLLMModel(config)
         self.signatureLLMModel = signatureModel
-        return llmModel.getLLM()
+        return llm
 
     def getEmbedding(self, config :EmbeddingConfig):
         logging.info(f"Building HuggingFaceEmbedding with model {config.model} from_cache[{config.model in self.embedModel}]")
@@ -59,12 +59,12 @@ class ModelFactory:
         return self.embedModel[config.model]
 
     def __setLLMModel(self, config :LLMConfig):
-        if self.llmModel is not None:
-            self.llmModel.close()
-            del self.llmModel
-            self.llmModel = None
+        if self.llm is not None:
+            self.llm.close()
+            del self.llm
+            self.llm = None
 
-        self.llmModel = EnhancedHFLLM(
+        self.llm = EnhancedHFLLM(
             context_window=config.ctxLen,
             max_new_tokens=256,
             model_kwargs=config.modelArgs.toJson(),
@@ -77,8 +77,8 @@ class ModelFactory:
             tokenizer_kwargs={"max_length": config.ctxLen, "use_fast": False, "trust_remote_code": True},
             is_chat_model=True,
         )
-        logging.info(f"Building HuggingFaceLLM with model {config.model} model_args[{repr(config.modelArgs)}] memory[{self.llmModel.getMem()}GB]")
-        return self.llmModel
+        logging.info(f"Building HuggingFaceLLM with model {config.model} model_args[{repr(config.modelArgs)}] memory[{self.llm.getMem()}GB]")
+        return self.llm
     
     def __getSignatureModel(self, config :LLMConfig):
         return "%s-%s" % (config.model, config.modelArgs.toJson())
