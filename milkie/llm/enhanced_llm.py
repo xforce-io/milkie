@@ -13,6 +13,9 @@ class EnhancedLLM(object):
     def __init__(self) -> None:
         self._llm :LLM = None
 
+    def getLLM(self) -> LLM:
+        return self._llm
+
     def getMem(self) -> float:
         return round(self._getModel().get_memory_footprint()/(1024*1024*1024), 2)
 

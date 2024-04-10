@@ -44,11 +44,11 @@ class ModelFactory:
     def getLLM(self, config :LLMConfig):
         signatureModel = self.__getSignatureModel(config)
         if signatureModel == self.signatureLLMModel:
-            return self.llmModel
+            return self.llmModel.getLLM()
 
         llmModel = self.__setLLMModel(config)
         self.signatureLLMModel = signatureModel
-        return llmModel
+        return llmModel.getLLM()
 
     def getEmbedding(self, config :EmbeddingConfig):
         logging.info(f"Building HuggingFaceEmbedding with model {config.model} from_cache[{config.model in self.embedModel}]")
