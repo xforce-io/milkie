@@ -16,8 +16,9 @@ class EnhancedLLM(object):
     def getLLM(self) -> LLM:
         return self._llm
 
+    @abstractmethod
     def getMem(self) -> float:
-        return round(self._getModel().get_memory_footprint()/(1024*1024*1024), 2)
+        return -1
 
     def getNumParams(self) -> int:
         return sum(p.numel() for p in self._getModel().parameters())

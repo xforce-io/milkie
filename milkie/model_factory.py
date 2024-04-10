@@ -6,6 +6,7 @@ from llama_index.legacy.core.llms.types import MessageRole, ChatMessage
 from llama_index.legacy.utils import truncate_text
 
 from milkie.llm.enhanced_hf_llm import EnhancedHFLLM
+from milkie.llm.enhanced_vllm import EnhancedVLLM
 from milkie.prompt.prompt import Loader
 from milkie.config.config import EmbeddingConfig, LLMConfig
 
@@ -60,7 +61,6 @@ class ModelFactory:
 
     def __setLLMModel(self, config :LLMConfig):
         if self.llm is not None:
-            self.llm.close()
             del self.llm
             self.llm = None
 
@@ -77,6 +77,10 @@ class ModelFactory:
             tokenizer_kwargs={"max_length": config.ctxLen, "use_fast": False, "trust_remote_code": True},
             is_chat_model=True,
         )
+        self.llm = EnhancedVLLM(
+            model_name=config.model,
+            max_new_tokens=256,
+            message_to_prompt=messagesToPrompt)
         logging.info(f"Building HuggingFaceLLM with model {config.model} model_args[{repr(config.modelArgs)}] memory[{self.llm.getMem()}GB]")
         return self.llm
     

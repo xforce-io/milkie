@@ -41,9 +41,9 @@ class EnhancedHFLLM(EnhancedLLM) :
             self._llm._model = torch.compile(self._getModel(), mode="reduce-overhead", fullgraph=True)
         model_kwargs["compile"] = compile
 
-    def _getModel(self):
-        return self._llm._model
-    
+    def getMem(self) -> float:
+        return round(self._getModel().get_memory_footprint()/(1024*1024*1024), 2)
+
     @torch.inference_mode()
     def predict(
             self, 
@@ -60,7 +60,10 @@ class EnhancedHFLLM(EnhancedLLM) :
         
         return (self._llm._parse_output(output), len(response.raw["model_output"][0]) - len(response.raw["model_input"][0]))
 
-    def __complete(
+    def _getModel(self):
+        return self._llm._model
+    
+    def _complete(
         self, prompt: str, formatted: bool = False, **kwargs: Any
     ) -> CompletionResponse:
         """Completion endpoint."""
