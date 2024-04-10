@@ -115,7 +115,7 @@ class LLMModelArgs(BaseConfig):
             quantizationType=quantizationType,
             compile=config["compile"] if "compile" in config else False,
             useSlidingWindow=config["use_sliding_window"] if "use_sliding_window" in config else False,
-            slidingWindow=config["sliding_window"]) if "sliding_window" in config else 32*1024,
+            slidingWindow=config["sliding_window"] if "sliding_window" in config else 32*1024)
         return llmModelArgs
 
     def toJson(self):
@@ -188,8 +188,6 @@ class LLMGenerationArgs(BaseConfig):
             "temperature": self.temperature,
             "do_sample": self.doSample,
             "use_cache": self.useCache,
-            "use_sliding_window" : True,
-            "sliding_window": 200,
         }
 
         if self.promptLookupNumTokens:
