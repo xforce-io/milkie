@@ -2,6 +2,7 @@ from abc import abstractmethod
 from typing import Any, Sequence
 from llama_index_client import ChatMessage
 from llama_index.legacy.core.llms.types import ChatResponse
+from llama_index.core.llms.llm import LLM
 import torch
 from llama_index.legacy.llms.generic_utils import (
     completion_response_to_chat_response,
@@ -10,28 +11,32 @@ from llama_index.legacy.llms.generic_utils import (
 class EnhancedLLM(object):
 
     def __init__(self) -> None:
-        self._model = None
+        self._llm :LLM = None
 
     def getMem(self) -> float:
-        return round(self._model.get_memory_footprint()/(1024*1024*1024), 2)
+        return round(self._getModel().get_memory_footprint()/(1024*1024*1024), 2)
 
     def getNumParams(self) -> int:
-        return sum(p.numel() for p in self._model.parameters())
+        return sum(p.numel() for p in self._getModel().parameters())
 
     #get memory bandwidth utilization
     def getMBU(self, tokensPerSec :float, memBandwidth :float) -> float:
-        return self.getNumParams() * self.__getSingleParameterSizeInBytes() * tokensPerSec / memBandwidth
+        return self.getNumParams() * self._getSingleParameterSizeInBytes() * tokensPerSec / memBandwidth
 
-    def __chat(self, messages: Sequence[ChatMessage], **kwargs: Any) -> ChatResponse:
-        prompt = self._model.messages_to_prompt(messages)
-        completion_response = self.__complete(prompt, formatted=True, **kwargs)
+    @abstractmethod
+    def _getModel(self):
+        return None
+
+    def _chat(self, messages: Sequence[ChatMessage], **kwargs: Any) -> ChatResponse:
+        prompt = self._llm.messages_to_prompt(messages)
+        completion_response = self._complete(prompt, formatted=True, **kwargs)
         return completion_response_to_chat_response(completion_response)
 
     @abstractmethod
-    def __complete(self, prompt: str, formatted: bool = False, **kwargs: Any) -> Any:
+    def _complete(self, prompt: str, formatted: bool = False, **kwargs: Any) -> Any:
         pass
 
-    def __getSingleParameterSizeInBytes(self):
+    def _getSingleParameterSizeInBytes(self):
         type_to_size = {
             torch.float16: 2,
             torch.bfloat16: 2,
@@ -42,7 +47,7 @@ class EnhancedLLM(object):
             torch.int32: 4,
         }
 
-        dtype = self._model.dtype
+        dtype = self._getModel().dtype
         size = type_to_size.get(dtype, None)
         if size is None:
             raise ValueError(f"Unsupported data type: {dtype}")
