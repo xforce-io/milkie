@@ -8,7 +8,7 @@ from llama_index.legacy.utils import truncate_text
 from milkie.llm.enhanced_hf_llm import EnhancedHFLLM
 from milkie.llm.enhanced_vllm import EnhancedVLLM
 from milkie.prompt.prompt import Loader
-from milkie.config.config import EmbeddingConfig, LLMConfig
+from milkie.config.config import FRAMEWORK, EmbeddingConfig, LLMConfig
 
 logger = logging.getLogger(__name__)
 
@@ -64,23 +64,26 @@ class ModelFactory:
             del self.llm
             self.llm = None
 
-        self.llm = EnhancedHFLLM(
-            context_window=config.ctxLen,
-            max_new_tokens=256,
-            model_kwargs=config.modelArgs.toJson(),
-            generate_kwargs=config.generationArgs.toJson(),
-            system_prompt=SystemPromptCn,
-            query_wrapper_prompt=PromptTemplate("{query_str}\n<|ASSISTANT|>\n"),
-            tokenizer_name=config.model,
-            model_name=config.model,
-            messages_to_prompt=messagesToPrompt,
-            tokenizer_kwargs={"max_length": config.ctxLen, "use_fast": False, "trust_remote_code": True},
-            is_chat_model=True,
-        )
-        self.llm = EnhancedVLLM(
-            model_name=config.model,
-            max_new_tokens=256,
-            message_to_prompt=messagesToPrompt)
+        if config.framework == FRAMEWORK.VLLM.name:
+            self.llm = EnhancedVLLM(
+                model_name=config.model,
+                max_new_tokens=256,
+                message_to_prompt=messagesToPrompt)
+        else :
+            self.llm = EnhancedHFLLM(
+                context_window=config.ctxLen,
+                max_new_tokens=256,
+                model_kwargs=config.modelArgs.toJson(),
+                generate_kwargs=config.generationArgs.toJson(),
+                system_prompt=SystemPromptCn,
+                query_wrapper_prompt=PromptTemplate("{query_str}\n<|ASSISTANT|>\n"),
+                tokenizer_name=config.model,
+                model_name=config.model,
+                messages_to_prompt=messagesToPrompt,
+                tokenizer_kwargs={"max_length": config.ctxLen, "use_fast": False, "trust_remote_code": True},
+                is_chat_model=True,
+            )
+
         logging.info(f"Building HuggingFaceLLM with model {config.model} model_args[{repr(config.modelArgs)}] memory[{self.llm.getMem()}GB]")
         return self.llm
     

@@ -1,7 +1,7 @@
 import time, logging
 from sacred import Experiment
 from milkie.agent.prompt_agent import PromptAgent
-from milkie.config.config import GlobalConfig
+from milkie.config.config import FRAMEWORK, GlobalConfig
 from milkie.context import Context
 from milkie.global_context import GlobalContext
 from milkie.model_factory import ModelFactory
@@ -34,6 +34,9 @@ def experiment(
     configYaml = loadFromYaml("config/global.yaml")
     if "llm_model" in kwargs:
         configYaml["llm"]["model"] = kwargs["llm_model"]
+
+    if "framework" in kwargs:
+        configYaml["llm"]["framework"] = kwargs["framework"]
 
     if "quantization_type" in kwargs:
         configYaml["llm"]["model_args"]["quantization_type"] = kwargs["quantization_type"]
@@ -106,34 +109,21 @@ def mainFunc():
     logger.info("starting speed test")
     for strategy in [StrategyRaw()]:
         for llm_model in [ModelQwenV15S14bChat]:
-            for compile in [False, True]:
-                for attn_implementation in ["flash_attention_2", "sdpa", None]:
-                    rangeUseSlidingWindow = [False]
-                    if attn_implementation == "flash_attention_2":
-                        rangeUseSlidingWindow = [True, False]
+            for framework in [FRAMEWORK.VLLM.name, FRAMEWORK.HUGGINGFACE.name]:
+                for use_cache in [True]:
+                    for quantization_type in [None]:
+                        for prompt_lookup_num_tokens in [None]:
+                            if prompt_lookup_num_tokens and not use_cache:
+                                continue
 
-                    for use_sliding_window in rangeUseSlidingWindow:
-                        rangeSliding = [32*1024]
-                        if use_sliding_window:
-                            rangeSliding = [512, 1024, 2048]
-
-                        for sliding_window in rangeSliding: 
-                            for use_cache in [True]:
-                                for quantization_type in [None]:
-                                    for prompt_lookup_num_tokens in [None]:
-                                        if prompt_lookup_num_tokens and not use_cache:
-                                            continue
-
-                                        experiment(
-                                            strategy=strategy,
-                                            llm_model=llm_model,
-                                            attn_implementation=attn_implementation,
-                                            use_cache=use_cache,
-                                            quantization_type=quantization_type,
-                                            compile=compile,
-                                            prompt_lookup_num_tokens=prompt_lookup_num_tokens,
-                                            use_sliding_window=use_sliding_window,
-                                            sliding_window=sliding_window)
+                            experiment(
+                                strategy=strategy,
+                                llm_model=llm_model,
+                                framework=framework,
+                                use_cache=use_cache,
+                                quantization_type=quantization_type,
+                                compile=compile,
+                            prompt_lookup_num_tokens=prompt_lookup_num_tokens)
 
 if __name__ == "__main__":
     configYaml = loadFromYaml("config/global.yaml")

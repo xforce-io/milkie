@@ -25,6 +25,10 @@ class LLMType(Enum):
     HUGGINGFACE = 0
     AZURE_OPENAI = 1
 
+class FRAMEWORK(Enum):
+    HUGGINGFACE = 0
+    VLLM = 1
+
 class EmbeddingType(Enum):
     HUGGINGFACE = 0
 
@@ -201,6 +205,7 @@ class LLMConfig(BaseConfig):
             type :LLMType, 
             model :str, 
             ctxLen :int = 0,
+            framework :FRAMEWORK = FRAMEWORK.HUGGINGFACE,
             deploymentName :str = None,
             apiKey :str = None,
             azureEndpoint :str = None,
@@ -210,6 +215,7 @@ class LLMConfig(BaseConfig):
         self.type = type
         self.model = model
         self.ctxLen = ctxLen
+        self.framework = framework
         self.deploymentName = deploymentName
         self.apiKey = apiKey
         self.azureEndpoint = azureEndpoint
@@ -218,6 +224,10 @@ class LLMConfig(BaseConfig):
         self.generationArgs = generationArgs
     
     def fromArgs(config :dict):
+        framework = FRAMEWORK.HUGGINGFACE
+        if config["framework"] == FRAMEWORK.VLLM.name:
+            framework = FRAMEWORK.VLLM
+        
         modelArgs = LLMModelArgs.fromArgs(config["model_args"])
         generationArgs = LLMGenerationArgs.fromArgs(config["generation_args"])
         if config["type"] == LLMType.HUGGINGFACE.name:
@@ -225,6 +235,7 @@ class LLMConfig(BaseConfig):
                 type=LLMType.HUGGINGFACE, 
                 model=config["model"],
                 ctxLen=config["ctx_len"],
+                framework=framework,
                 modelArgs=modelArgs,
                 generationArgs=generationArgs)
         elif config["type"] == LLMType.AZURE_OPENAI.name:
