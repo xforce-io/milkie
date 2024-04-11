@@ -1,6 +1,5 @@
 import torch
 from typing import Any, Callable, Optional, Sequence
-from llama_index.core.prompts.base import BasePromptTemplate
 from llama_index.legacy.core.llms.types import ChatMessage, CompletionResponse
 from llama_index.legacy.llms.huggingface import HuggingFaceLLM
 
@@ -44,22 +43,6 @@ class EnhancedHFLLM(EnhancedLLM) :
     def getMem(self) -> float:
         return round(self._getModel().get_memory_footprint()/(1024*1024*1024), 2)
 
-    @torch.inference_mode()
-    def predict(
-            self, 
-            prompt: BasePromptTemplate, 
-            **prompt_args: Any):
-        self._llm._log_template_data(prompt, **prompt_args)
-
-        if self._llm.metadata.is_chat_model:
-            messages = self._llm._get_messages(prompt, **prompt_args)
-            response = self._chat(messages)
-            output = response.message.content or ""
-        else:
-            raise NotImplementedError("predict not implemented for non-chat models")
-        
-        return (self._llm._parse_output(output), len(response.raw["model_output"][0]) - len(response.raw["model_input"][0]))
-
     def _getModel(self):
         return self._llm._model
     
@@ -89,8 +72,7 @@ class EnhancedHFLLM(EnhancedLLM) :
         )
         completion_tokens = tokens[0][inputs["input_ids"].size(1) :]
         completion = self._llm._tokenizer.decode(completion_tokens, skip_special_tokens=True)
-
         return CompletionResponse(
             text=completion, 
-            raw={"model_output": tokens, "model_input": inputs["input_ids"]})
+            raw={"model_output": tokens[0][len(inputs["input_ids"][0]):]})
 

@@ -1,4 +1,5 @@
 from typing import Any, Callable, Optional, Sequence
+from vllm import SamplingParams
 from llama_index.llms.vllm import Vllm
 from llama_index_client import BasePromptTemplate, ChatMessage
 from llama_index.legacy.core.llms.types import ChatMessage, CompletionResponse
@@ -21,22 +22,13 @@ class EnhancedVLLM(EnhancedLLM):
     def _getModel(self):
         return self._llm._client
 
-    @torch.inference_mode()
-    def predict(
-            self, 
-            prompt: BasePromptTemplate, 
-            **prompt_args: Any) -> str:
-        if self._llm.metadata.is_chat_model:
-            messages = self._llm._get_messages(prompt, **prompt_args)
-            response = self._chat(messages)
-            output = response.message.content or ""
-        else:
-            raise NotImplementedError("predict not implemented for non-chat models")
-        
-        return (self._llm._parse_output(output), len(response.raw["model_output"][0]) - len(response.raw["model_input"][0]))
-
-
-    def __complete(
+    def _complete(
         self, prompt: str, formatted: bool = False, **kwargs: Any
     ) -> CompletionResponse:
-        return self._llm.complete(prompt, formatted=formatted, **kwargs)
+        kwargs = kwargs if kwargs else {}
+        params = {**self._model_kwargs, **kwargs}
+        sampling_params = SamplingParams(**params)
+        outputs = self._getModel().generate([prompt], sampling_params)
+        return CompletionResponse(
+            text=outputs[0].outputs[0].text,
+            raw={"model_output": outputs[0].outputs[0].token_ids},)
