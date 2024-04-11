@@ -39,7 +39,6 @@ class EnhancedLLM(object):
             output = response.message.content or ""
         else:
             raise NotImplementedError("predict not implemented for non-chat models")
-        
         return (self._llm._parse_output(output), len(response.raw["model_output"]))
 
     @abstractmethod
