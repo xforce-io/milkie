@@ -36,7 +36,7 @@ class EnhancedVLLM(EnhancedLLM):
         self, prompt: str, formatted: bool = False, **kwargs: Any
     ) -> CompletionResponse:
         kwargs = kwargs if kwargs else {}
-        params = {**self._model_kwargs, **kwargs}
+        params = {**self._llm._model_kwargs, **kwargs}
         sampling_params = SamplingParams(**params)
         outputs = self._getModel().generate([prompt], sampling_params)
         return CompletionResponse(

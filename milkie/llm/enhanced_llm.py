@@ -21,8 +21,9 @@ class EnhancedLLM(object):
     def getMem(self) -> float:
         return -1
 
+    @abstractmethod
     def getNumParams(self) -> int:
-        return sum(p.numel() for p in self._getModel().parameters())
+        return 0
 
     #get memory bandwidth utilization
     def getMBU(self, tokensPerSec :float, memBandwidth :float) -> float:
