@@ -17,7 +17,8 @@ class EnhancedVLLM(EnhancedLLM):
             tensor_parallel_size=1,
             max_new_tokens=max_new_tokens,
             vllm_kwargs={"swap_space":1, "gpu_memory_utilization":0.5},
-            messages_to_prompt=message_to_prompt)
+            messages_to_prompt=message_to_prompt,
+            dtype="auto",)
 
     @torch.inference_mode()
     def predict(
@@ -42,3 +43,14 @@ class EnhancedVLLM(EnhancedLLM):
         return CompletionResponse(
             text=outputs[0].outputs[0].text,
             raw={"model_output": outputs[0].outputs[0].token_ids},)
+
+    def _getSingleParameterSizeInBytes(self):
+        type_to_size = {
+            "auto": 2,
+        }
+
+        dtype = self._llm.dtype
+        size = type_to_size.get(dtype, None)
+        if size is None:
+            raise ValueError(f"Unsupported data type: {dtype}")
+        return size

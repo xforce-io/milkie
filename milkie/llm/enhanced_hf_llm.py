@@ -79,3 +79,19 @@ class EnhancedHFLLM(EnhancedLLM) :
             text=completion, 
             raw={"model_output": tokens[0][len(inputs["input_ids"][0]):]})
 
+    def _getSingleParameterSizeInBytes(self):
+        type_to_size = {
+            torch.float16: 2,
+            torch.bfloat16: 2,
+            torch.float32: 4,
+            torch.float64: 8,
+            torch.int8: 1,
+            torch.int16: 2,
+            torch.int32: 4,
+        }
+
+        dtype = self._getModel().dtype
+        size = type_to_size.get(dtype, None)
+        if size is None:
+            raise ValueError(f"Unsupported data type: {dtype}")
+        return size
