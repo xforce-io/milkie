@@ -96,14 +96,10 @@ class LLMModelArgs(BaseConfig):
             self,
             attnImplementation :str, 
             quantizationType :QuantizationType,
-            compile :bool,
-            useSlidingWindow :bool,
-            slidingWindow :int):
+            compile :bool):
         self.attnImplementation = attnImplementation
         self.quantizationType = quantizationType
         self.compile = compile
-        self.useSlidingWindow = useSlidingWindow
-        self.slidingWindow = slidingWindow
         self.torchDtype = torch.bfloat16
         self.trustRemoteCode = True
 
@@ -117,15 +113,11 @@ class LLMModelArgs(BaseConfig):
         llmModelArgs = LLMModelArgs(
             attnImplementation=config["attn_implementation"] if "attn_implementation" in config else None,
             quantizationType=quantizationType,
-            compile=config["compile"] if "compile" in config else False,
-            useSlidingWindow=config["use_sliding_window"] if "use_sliding_window" in config else False,
-            slidingWindow=config["sliding_window"] if "sliding_window" in config else 32*1024)
+            compile=config["compile"] if "compile" in config else False)
         return llmModelArgs
 
     def toJson(self):
         result = {
-            "use_sliding_window": self.useSlidingWindow,
-            "sliding_window": self.slidingWindow,
             "torch_dtype": self.torchDtype,
             "trust_remote_code": self.trustRemoteCode,
         }
@@ -148,8 +140,6 @@ class LLMModelArgs(BaseConfig):
 
     def __repr__(self) -> str:
         result = {
-            "use_sliding_window": self.useSlidingWindow,
-            "sliding_window": self.slidingWindow,
             "torch_dtype": str(self.torchDtype),
             "trust_remote_code": self.trustRemoteCode,
         }
