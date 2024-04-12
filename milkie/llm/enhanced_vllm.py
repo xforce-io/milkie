@@ -14,7 +14,7 @@ class EnhancedVLLM(EnhancedLLM):
             message_to_prompt: Optional[Callable[[Sequence[ChatMessage]], str]]):
         self._llm = Vllm(
             model=model_name,
-            tensor_parallel_size=1,
+            tensor_parallel_size=2,
             max_new_tokens=max_new_tokens,
             vllm_kwargs={"swap_space":1, "gpu_memory_utilization":1.0},
             messages_to_prompt=message_to_prompt,
