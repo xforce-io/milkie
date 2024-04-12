@@ -8,7 +8,7 @@ llm:
   api_version: "2023-12-01-preview"
   ctx_len: 4096
   model_args:
-    compile: False
+    torch_compile: False
     quantization_type: NONE
   generation_args:
     repetition_penalty: 1.0

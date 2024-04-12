@@ -96,10 +96,10 @@ class LLMModelArgs(BaseConfig):
             self,
             attnImplementation :str, 
             quantizationType :QuantizationType,
-            compile :bool):
+            torchCompile :bool):
         self.attnImplementation = attnImplementation
         self.quantizationType = quantizationType
-        self.compile = compile
+        self.torchCompile = torchCompile
         self.torchDtype = torch.bfloat16
         self.trustRemoteCode = True
 
@@ -113,7 +113,7 @@ class LLMModelArgs(BaseConfig):
         llmModelArgs = LLMModelArgs(
             attnImplementation=config["attn_implementation"] if "attn_implementation" in config else None,
             quantizationType=quantizationType,
-            compile=config["compile"] if "compile" in config else False)
+            torchCompile=config["torch_compile"] if "torch_compile" in config else False)
         return llmModelArgs
 
     def toJson(self):
@@ -134,8 +134,8 @@ class LLMModelArgs(BaseConfig):
         if quantizationConfig:
             result["quantization_config"] = quantizationConfig
 
-        if self.compile:
-            result["compile"] = self.compile
+        if self.torchCompile:
+            result["torch_compile"] = self.torchCompile
         return result
 
     def __repr__(self) -> str:
@@ -148,8 +148,8 @@ class LLMModelArgs(BaseConfig):
             result["attn_implementation"] = self.attnImplementation
 
         result["quantization_type"] = self.quantizationType.name
-        if self.compile:
-            result["compile"] = self.compile
+        if self.torchCompile:
+            result["torch_compile"] = self.torchCompile
         return json.dumps(result)
         
 class LLMGenerationArgs(BaseConfig):

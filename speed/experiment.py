@@ -44,14 +44,8 @@ def experiment(
     if "attn_implementation" in kwargs:
         configYaml["llm"]["model_args"]["attn_implementation"] = kwargs["attn_implementation"]
     
-    if "compile" in kwargs:
-        configYaml["llm"]["model_args"]["compile"] = kwargs["compile"]
-
-    if "use_sliding_window" in kwargs:
-        configYaml["llm"]["model_args"]["use_sliding_window"] = kwargs["use_sliding_window"]
-        
-    if "sliding_window" in kwargs:
-        configYaml["llm"]["model_args"]["sliding_window"] = kwargs["sliding_window"]
+    if "torch_compile" in kwargs:
+        configYaml["llm"]["model_args"]["torch_compile"] = kwargs["torch_compile"]
 
     if "repetition_penalty" in kwargs:
         configYaml["llm"]["generation_args"]["repetition_penalty"] = kwargs["repetition_penalty"]
@@ -122,8 +116,7 @@ def mainFunc():
                                 framework=framework,
                                 use_cache=use_cache,
                                 quantization_type=quantization_type,
-                                compile=compile,
-                            prompt_lookup_num_tokens=prompt_lookup_num_tokens)
+                                prompt_lookup_num_tokens=prompt_lookup_num_tokens)
 
 if __name__ == "__main__":
     configYaml = loadFromYaml("config/global.yaml")

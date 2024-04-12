@@ -20,7 +20,7 @@ class EnhancedHFLLM(EnhancedLLM) :
             is_chat_model: bool, 
             system_prompt: str, 
             messages_to_prompt: Optional[Callable[[Sequence[ChatMessage]], str]]) -> None:
-        compile = model_kwargs.pop("compile", False)
+        compile = model_kwargs.pop("torch_compile", False)
 
         self._llm = HuggingFaceLLM(
             context_window=context_window, 
@@ -38,7 +38,7 @@ class EnhancedHFLLM(EnhancedLLM) :
         #refer suggestions from https://pytorch.org/blog/accelerating-generative-ai-2/
         if compile:
             self._llm._model = torch.compile(self._getModel(), mode="reduce-overhead", fullgraph=True)
-        model_kwargs["compile"] = compile
+        model_kwargs["torch_compile"] = compile
 
     def getMem(self) -> float:
         return round(self._getModel().get_memory_footprint()/(1024*1024*1024), 2)
