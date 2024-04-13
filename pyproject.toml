@@ -10,8 +10,15 @@ python = "^3.9"
 torch = "^2.1.2"
 openai = "^1.3.5"
 bitsandbytes = "^0.43"
-vllm = "^0.4.0.post1"
+vllm = "^0.4"
 transformers = "^4.39.3"
+sacred = "^0.8"
+paddleocr = "^2.7"
+common = "^0.1"
+paddle = "^1"
+paddlepaddle = "^2.6"
+llama_index = "^0.10"
+llama-index-llms-vllm = "*"
 
 [build-system]
 requires = ["poetry-core"]
