@@ -88,4 +88,4 @@ class ModelFactory:
         return self.llm
     
     def __getSignatureModel(self, config :LLMConfig):
-        return "%s-%s" % (config.model, config.modelArgs.toJson())
+        return "%s-%s-%s" % (config.model, config.framework, config.modelArgs.toJson())

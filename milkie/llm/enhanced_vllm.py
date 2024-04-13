@@ -16,7 +16,7 @@ class EnhancedVLLM(EnhancedLLM):
             model=model_name,
             tensor_parallel_size=1,
             max_new_tokens=max_new_tokens,
-            vllm_kwargs={"swap_space":1, "gpu_memory_utilization":1.0},
+            vllm_kwargs={"gpu_memory_utilization":0.75},
             messages_to_prompt=message_to_prompt,
             dtype="auto",)
 

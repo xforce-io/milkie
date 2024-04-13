@@ -17,7 +17,7 @@ class PromptAgent(BaseAgent):
             self,
             context :Context,
             config :str) -> None:
-        super.__init__(context, config)
+        super().__init__(context, config)
 
         self.prompt = Loader.load(config) if config else None
 
