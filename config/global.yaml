@@ -1,4 +1,4 @@
-llm:  
+llm:
   type: HUGGINGFACE
   model: /mnt/data1/.cache/huggingface/hub/01ai/Yi-34B-Chat/
   framework : HUGGINGFACE
@@ -18,7 +18,7 @@ llm:
     prompt_lookup_num_tokens: 20
 memory:
   - type: LONG_TERM
-    source: LOCAL 
+    source: LOCAL
     path: ./data/santi/
 index:
   chunk_size: 256
@@ -31,6 +31,7 @@ agents:
   - config: qa
     type: QA
     retrieval:
+      rewrite_strategy: HYDE
       channel_recall: 30
       similarity_top_k: 20
       reranker:
