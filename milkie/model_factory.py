@@ -64,7 +64,7 @@ class ModelFactory:
             del self.llm
             self.llm = None
 
-        if config.framework == FRAMEWORK.VLLM.name:
+        if config.framework == FRAMEWORK.VLLM:
             self.llm = EnhancedVLLM(
                 model_name=config.model,
                 max_new_tokens=256,
