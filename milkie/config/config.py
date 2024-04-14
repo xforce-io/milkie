@@ -196,7 +196,7 @@ class LLMConfig(BaseConfig):
             model :str, 
             ctxLen :int = 0,
             framework :FRAMEWORK = FRAMEWORK.HUGGINGFACE,
-            device :str = None,
+            device :int = None,
             deploymentName :str = None,
             apiKey :str = None,
             azureEndpoint :str = None,

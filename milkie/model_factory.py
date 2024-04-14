@@ -67,11 +67,13 @@ class ModelFactory:
         if config.framework == FRAMEWORK.VLLM:
             self.llm = EnhancedVLLM(
                 model_name=config.model,
+                device=config.device,
                 max_new_tokens=256,
                 message_to_prompt=messagesToPrompt)
         else :
             self.llm = EnhancedHFLLM(
                 context_window=config.ctxLen,
+                device=config.device,
                 max_new_tokens=256,
                 model_kwargs=config.modelArgs.toJson(),
                 generate_kwargs=config.generationArgs.toJson(),

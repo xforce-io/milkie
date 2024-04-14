@@ -13,6 +13,9 @@ class EnhancedVLLM(EnhancedLLM):
             device :str,
             max_new_tokens: int,
             message_to_prompt: Optional[Callable[[Sequence[ChatMessage]], str]]):
+        if device is not None:
+            torch.cuda.set_device(device)
+
         self._llm = Vllm(
             model=model_name,
             tensor_parallel_size=1,
@@ -22,7 +25,7 @@ class EnhancedVLLM(EnhancedLLM):
             dtype="auto",)
         
         if device:
-            self._llm._client.to(device)
+            self._llm._client.set_device(device)
 
     @torch.inference_mode()
     def predict(

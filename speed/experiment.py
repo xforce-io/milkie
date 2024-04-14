@@ -109,7 +109,7 @@ def mainFunc():
         for llm_model in [ModelQwenV15S14bChat]:
             device = None
             if llm_model == ModelQwenV15S14bChat:
-                device = "cuda:0"
+                device = 0
 
             for framework in [FRAMEWORK.VLLM.name, FRAMEWORK.HUGGINGFACE.name]:
                 for use_cache in [True]:

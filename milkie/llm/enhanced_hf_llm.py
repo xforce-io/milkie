@@ -14,7 +14,7 @@ class EnhancedHFLLM(EnhancedLLM) :
             query_wrapper_prompt: str, 
             tokenizer_name: str, 
             model_name: str, 
-            device: str,
+            device: int,
             tokenizer_kwargs: dict, 
             model_kwargs: dict, 
             generate_kwargs: dict, 
@@ -22,6 +22,9 @@ class EnhancedHFLLM(EnhancedLLM) :
             system_prompt: str, 
             messages_to_prompt: Optional[Callable[[Sequence[ChatMessage]], str]]) -> None:
         compile = model_kwargs.pop("torch_compile", False)
+
+        if device is not None:
+            torch.cuda.set_device(device)
 
         self._llm = HuggingFaceLLM(
             context_window=context_window, 
@@ -40,9 +43,6 @@ class EnhancedHFLLM(EnhancedLLM) :
         if compile:
             self._llm._model = torch.compile(self._getModel(), mode="reduce-overhead", fullgraph=True)
         model_kwargs["torch_compile"] = compile
-
-        if device:
-            self._llm._model.to(device)
 
     def getMem(self) -> float:
         return round(self._getModel().get_memory_footprint()/(1024*1024*1024), 2)
