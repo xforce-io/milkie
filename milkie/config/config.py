@@ -196,6 +196,7 @@ class LLMConfig(BaseConfig):
             model :str, 
             ctxLen :int = 0,
             framework :FRAMEWORK = FRAMEWORK.HUGGINGFACE,
+            device :str = None,
             deploymentName :str = None,
             apiKey :str = None,
             azureEndpoint :str = None,
@@ -206,6 +207,7 @@ class LLMConfig(BaseConfig):
         self.model = model
         self.ctxLen = ctxLen
         self.framework = framework
+        self.device = device
         self.deploymentName = deploymentName
         self.apiKey = apiKey
         self.azureEndpoint = azureEndpoint
@@ -217,6 +219,10 @@ class LLMConfig(BaseConfig):
         framework = FRAMEWORK.HUGGINGFACE
         if config["framework"] == FRAMEWORK.VLLM.name:
             framework = FRAMEWORK.VLLM
+
+        device = None
+        if "device" in config.keys():
+            device = config["device"]
         
         modelArgs = LLMModelArgs.fromArgs(config["model_args"])
         generationArgs = LLMGenerationArgs.fromArgs(config["generation_args"])
@@ -226,6 +232,7 @@ class LLMConfig(BaseConfig):
                 model=config["model"],
                 ctxLen=config["ctx_len"],
                 framework=framework,
+                device=device,
                 modelArgs=modelArgs,
                 generationArgs=generationArgs)
         elif config["type"] == LLMType.AZURE_OPENAI.name:

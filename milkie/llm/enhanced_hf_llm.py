@@ -14,6 +14,7 @@ class EnhancedHFLLM(EnhancedLLM) :
             query_wrapper_prompt: str, 
             tokenizer_name: str, 
             model_name: str, 
+            device: str,
             tokenizer_kwargs: dict, 
             model_kwargs: dict, 
             generate_kwargs: dict, 
@@ -39,6 +40,9 @@ class EnhancedHFLLM(EnhancedLLM) :
         if compile:
             self._llm._model = torch.compile(self._getModel(), mode="reduce-overhead", fullgraph=True)
         model_kwargs["torch_compile"] = compile
+
+        if device:
+            self._llm._model.to(device)
 
     def getMem(self) -> float:
         return round(self._getModel().get_memory_footprint()/(1024*1024*1024), 2)

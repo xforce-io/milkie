@@ -10,6 +10,7 @@ from milkie.llm.enhanced_llm import EnhancedLLM
 class EnhancedVLLM(EnhancedLLM):
     def __init__(self,
             model_name: str,
+            device :str,
             max_new_tokens: int,
             message_to_prompt: Optional[Callable[[Sequence[ChatMessage]], str]]):
         self._llm = Vllm(
@@ -19,6 +20,9 @@ class EnhancedVLLM(EnhancedLLM):
             vllm_kwargs={"gpu_memory_utilization":0.75},
             messages_to_prompt=message_to_prompt,
             dtype="auto",)
+        
+        if device:
+            self._llm._client.to(device)
 
     @torch.inference_mode()
     def predict(

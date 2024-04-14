@@ -19,6 +19,7 @@ paddle = "^1"
 paddlepaddle = "^2.6"
 llama_index = "^0.10"
 llama-index-llms-vllm = "*"
+flash-attn = "^2.5.7"
 
 [build-system]
 requires = ["poetry-core"]

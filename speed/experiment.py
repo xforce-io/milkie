@@ -21,6 +21,7 @@ ModelBaichuan13bChat = Prefix+"baichuan-inc/Baichuan2-13B-Chat"
 ModelQwen14bChat = Prefix+"qwen/Qwen-14B-Chat"
 ModelQwenV15S14bChat = Prefix+"qwen/Qwen1.5-14B-Chat/"
 
+
 from sacred.observers import FileStorageObserver
 
 ex = Experiment()
@@ -37,6 +38,9 @@ def experiment(
 
     if "framework" in kwargs:
         configYaml["llm"]["framework"] = kwargs["framework"]
+
+    if "device" in kwargs:
+        configYaml["llm"]["device"] = kwargs["device"]
 
     if "quantization_type" in kwargs:
         configYaml["llm"]["model_args"]["quantization_type"] = kwargs["quantization_type"]
@@ -103,6 +107,10 @@ def mainFunc():
     logger.info("starting speed test")
     for strategy in [StrategyRaw()]:
         for llm_model in [ModelQwenV15S14bChat]:
+            device = None
+            if llm_model == ModelQwenV15S14bChat:
+                device = "cuda:0"
+
             for framework in [FRAMEWORK.VLLM.name, FRAMEWORK.HUGGINGFACE.name]:
                 for use_cache in [True]:
                     for quantization_type in [None]:
@@ -114,6 +122,7 @@ def mainFunc():
                                 strategy=strategy,
                                 llm_model=llm_model,
                                 framework=framework,
+                                device=device,
                                 use_cache=use_cache,
                                 quantization_type=quantization_type,
                                 prompt_lookup_num_tokens=prompt_lookup_num_tokens)
