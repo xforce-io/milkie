@@ -100,7 +100,7 @@ class LLMModelArgs(BaseConfig):
         self.attnImplementation = attnImplementation
         self.quantizationType = quantizationType
         self.torchCompile = torchCompile
-        self.torchDtype = torch.bfloat16
+        self.torchDtype = torch.float16
         self.trustRemoteCode = True
 
     def fromArgs(config :dict):

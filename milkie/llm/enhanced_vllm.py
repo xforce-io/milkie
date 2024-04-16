@@ -24,9 +24,6 @@ class EnhancedVLLM(EnhancedLLM):
             messages_to_prompt=message_to_prompt,
             dtype="auto",)
         
-        if device:
-            self._llm._client.set_device(device)
-
     @torch.inference_mode()
     def predict(
             self, 
