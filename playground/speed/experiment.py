@@ -20,7 +20,9 @@ Prefix = "/mnt/data1/.cache/modelscope/hub/"
 ModelBaichuan13bChat = Prefix+"baichuan-inc/Baichuan2-13B-Chat"
 ModelQwen14bChat = Prefix+"qwen/Qwen-14B-Chat"
 ModelQwenV15S14bChat = Prefix+"qwen/Qwen1.5-14B-Chat/"
-
+ModelQwenV15S14bGPTQINT4Chat = Prefix+"qwen/Qwen1___5-14B-Chat-GPTQ-Int4/"
+ModelQwenV15S14bGPTQINT8Chat = Prefix+"qwen/Qwen1___5-14B-Chat-GPTQ-Int8/"
+ModelQwenV15S14bAWQChat = Prefix+"qwen/Qwen1___5-14B-Chat-AWQ/"
 
 from sacred.observers import FileStorageObserver
 
