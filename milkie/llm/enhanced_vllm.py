@@ -1,6 +1,6 @@
 from typing import Any, Callable, Optional, Sequence
 from vllm import SamplingParams
-from llama_index.llms.vllm import Vllm
+from llama_index.legacy.llms.vllm import Vllm
 from llama_index_client import BasePromptTemplate, ChatMessage
 from llama_index.legacy.core.llms.types import ChatMessage, CompletionResponse
 import torch

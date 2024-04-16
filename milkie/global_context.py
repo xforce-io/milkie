@@ -1,4 +1,5 @@
-from llama_index.core.service_context import ServiceContext
+from llama_index.legacy.service_context import ServiceContext
+
 from milkie.config.config import GlobalConfig
 from milkie.memory.memory_with_index import MemoryWithIndex
 from milkie.settings import Settings

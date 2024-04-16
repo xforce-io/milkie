@@ -56,7 +56,7 @@ class RetrievalModule:
 
         responseSynthesizer = get_response_synthesizer(
             service_context=memoryWithIndex.serviceContext,
-            program_factory=CustomProgramFactory(memoryWithIndex.serviceContext.llm),
+            program_factory=CustomProgramFactory(memoryWithIndex.settings.llm),
             structured_answer_filtering=True,
             text_qa_template=CANDIDATE_TEXT_QA_PROMPT_SEL,
             refine_template=CANDIDATE_REFINE_PROMPT_SEL,

@@ -3,7 +3,7 @@ from typing import Any, Sequence
 from llama_index_client import ChatMessage
 from llama_index.legacy.core.llms.types import ChatResponse
 from llama_index.core.prompts.base import BasePromptTemplate
-from llama_index.core.llms.llm import LLM
+from llama_index.legacy.llms.llm import LLM
 import torch
 from llama_index.legacy.llms.generic_utils import (
     completion_response_to_chat_response,
