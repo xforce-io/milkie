@@ -1,6 +1,13 @@
 from typing import List
+import jieba
+
 from llama_index.legacy.schema import QueryBundle
 from llama_index.legacy.response_synthesizers.factory import get_response_synthesizer
+from llama_index.legacy.retrievers import BM25Retriever
+from llama_index.legacy.query_engine import RetrieverQueryEngine
+from llama_index.legacy.response_synthesizers.type import ResponseMode
+from llama_index.legacy.schema import NodeWithScore
+
 from milkie.agent.prompt_agent import PromptAgent
 from milkie.config.config import RerankPosition, RetrievalConfig, RewriteStrategy
 from milkie.context import Context
@@ -11,11 +18,8 @@ from milkie.retrieval.position_reranker import PositionReranker
 from milkie.retrieval.reranker import Reranker
 from milkie.retrieval.retrievers import HybridRetriever
 
-from llama_index.legacy.retrievers import BM25Retriever
-from llama_index.legacy.query_engine import RetrieverQueryEngine
-from llama_index.legacy.response_synthesizers.type import ResponseMode
-from llama_index.legacy.schema import NodeWithScore
-
+def chineseTokenizer(text):
+    return jieba.cut(text, cut_all=False)
 
 class RetrievalModule:
     def __init__(
@@ -39,7 +43,8 @@ class RetrievalModule:
 
         self.sparseRetriever = BM25Retriever.from_defaults(
             docstore=memoryWithIndex.index.denseIndex.docstore,
-            similarity_top_k=self.retrievalConfig.channelRecall)
+            similarity_top_k=self.retrievalConfig.channelRecall,
+            tokenizer=chineseTokenizer,)
 
         self.hybridRetriever = HybridRetriever(
             self.denseRetriever, 

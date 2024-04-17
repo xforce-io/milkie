@@ -1,6 +1,6 @@
 import logging
 from sacred import Experiment
-from milkie.config.config import GlobalConfig
+from milkie.config.config import FRAMEWORK, GlobalConfig
 from milkie.model_factory import ModelFactory
 from milkie.strategy import Strategy, StrategyDeepQA
 
@@ -117,14 +117,16 @@ def experiment(
 def mainFunc():
     for strategy in [StrategyDeepQA()]:
         for llm_model in [ModelQwenV15S14bChat]:
-            experiment(
-                strategy=strategy,
-                llm_model=llm_model,
-                reranker="FLAGEMBED",
-                rerank_position="NONE",
-                rewrite_strategy="QUERY_REWRITE",
-                channel_recall=30,
-                similarity_top_k=30)
+            for framework in [FRAMEWORK.HUGGINGFACE, FRAMEWORK.VLLM]:
+                experiment(
+                    strategy=strategy,
+                    llm_model=llm_model,
+                    framework=framework,
+                    reranker="FLAGEMBED",
+                    rerank_position="NONE",
+                    rewrite_strategy="QUERY_REWRITE",
+                    channel_recall=30,
+                    similarity_top_k=30)
                                 
 
 if __name__ == "__main__":

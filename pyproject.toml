@@ -23,6 +23,7 @@ flash-attn = "^2.5.7"
 optimum = "*"
 auto-gptq = "*"
 autoawq = "*"
+jieba = "*"
 
 [build-system]
 requires = ["poetry-core"]
