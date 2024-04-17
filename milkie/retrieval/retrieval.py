@@ -18,8 +18,8 @@ from milkie.retrieval.position_reranker import PositionReranker
 from milkie.retrieval.reranker import Reranker
 from milkie.retrieval.retrievers import HybridRetriever
 
-def chineseTokenizer(text):
-    return jieba.cut(text, cut_all=False)
+def chineseTokenizer(text) :
+    return list(jieba.cut(text, cut_all=False))
 
 class RetrievalModule:
     def __init__(

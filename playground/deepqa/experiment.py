@@ -4,7 +4,7 @@ from milkie.config.config import FRAMEWORK, GlobalConfig
 from milkie.model_factory import ModelFactory
 from milkie.strategy import Strategy, StrategyDeepQA
 
-from milkie.testsuite import TestCase, TestSuite
+from milkie.benchmark.testsuite import TestCase, TestSuite
 from milkie.utils.data_utils import loadFromYaml
 
 logger = logging.getLogger(__name__)
@@ -118,16 +118,16 @@ def mainFunc():
     for strategy in [StrategyDeepQA()]:
         for llm_model in [ModelQwenV15S14bChat]:
             for framework in [FRAMEWORK.HUGGINGFACE, FRAMEWORK.VLLM]:
-                experiment(
-                    strategy=strategy,
-                    llm_model=llm_model,
-                    framework=framework,
-                    reranker="FLAGEMBED",
-                    rerank_position="NONE",
-                    rewrite_strategy="QUERY_REWRITE",
-                    channel_recall=30,
-                    similarity_top_k=30)
-                                
+                for rewrite_strategy in ["QUERY_REWRITE", "NONE"]:
+                    experiment(
+                        strategy=strategy,
+                        llm_model=llm_model,
+                        framework=framework,
+                        reranker="FLAGEMBED",
+                        rerank_position="NONE",
+                        rewrite_strategy=rewrite_strategy,
+                        channel_recall=30,
+                        similarity_top_k=20)
 
 if __name__ == "__main__":
     pass

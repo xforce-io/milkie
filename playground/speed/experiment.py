@@ -1,12 +1,11 @@
 import time, logging
 from sacred import Experiment
-from milkie.agent.prompt_agent import PromptAgent
+from milkie.benchmark.benchtype import BenchTypeKeyword, Benchmarks
 from milkie.config.config import FRAMEWORK, GlobalConfig
 from milkie.context import Context
 from milkie.global_context import GlobalContext
 from milkie.model_factory import ModelFactory
 from milkie.prompt.prompt import Loader
-from milkie.settings import Settings
 from milkie.strategy import Strategy, StrategyRaw
 
 from milkie.utils.commons import getMemStat
@@ -76,14 +75,21 @@ def experiment(
     context = Context(globalContext=globalContext)
     agent = strategy.createAgent(context)
 
+    benchmarks = Benchmarks([
+        BenchTypeKeyword("benchmark/410_key.jsonl"),
+        BenchTypeKeyword("benchmark/fd100_key.jsonl"),
+    ])
+
     cnt = 0
     totalTime = 0
     totalTokens = 0
+    pairsTestcaseAndResp = []
     for (_, prompts) in promptDict.items():
         for prompt in prompts:
             content = prompt.getContent()
             t0 = time.time()
             result = agent.task(content)
+            pairsTestcaseAndResp.append((content, result))
             totalTokens += result.metadata["numTokens"]
             t1 = time.time()
             logger.info(f"Testcase[{content[:5]}] Ans[{result}] cost[{t1-t0:.2f}]]")
@@ -92,6 +98,7 @@ def experiment(
     tokensPerSec = float(totalTokens)/totalTime
 
     #TODO: 1.412 is observered from the A800 GPU, need to remove this hard code
+    benchmarks.evalAndReport(pairsTestcaseAndResp)
     logger.info(f"Running "
                 f"kwargs[{kwargs}] "
                 f"costSec[{totalTime}] "

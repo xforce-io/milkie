@@ -1,5 +1,4 @@
 import time, logging
-from milkie.agent.team.mrqa import MapReduceQA
 from milkie.config.config import GlobalConfig
 from milkie.context import Context
 from milkie.global_context import GlobalContext
