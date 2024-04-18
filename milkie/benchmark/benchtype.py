@@ -19,29 +19,37 @@ def jsonToFilter(config, text):
 class KeywordFilter:
     
     def __init__(self, config) -> None:
-        self.isOr = False
+        self.isOr = None
         if '$and' in config:
-            self.subFilters = [KeywordFilter(cond) for cond in config['$and']]
+            self.filters = [KeywordFilter(cond) for cond in config['$and']]
+            self.isOr = False
         elif '$or' in config:
-            self.subFilters = [KeywordFilter(cond) for cond in config['$or']]
+            self.filters = [KeywordFilter(cond) for cond in config['$or']]
             self.isOr = True
+            
         elif isinstance(config, str):
-            self.subFilters = [KeywordFilter(config)]
+            self.filters = config
+        elif isinstance(config, dict):
+            self.filters = None
         else:
             raise ValueError("Unknown filter format")
     
     def match(self, text) -> bool:
-        if self.isOr:
-            return any(subFilter.match(text) for subFilter in self.subFilters)
+        if self.isOr == None:
+            return text in self.filters
+        elif self.filters == None:
+            return any(keyword in text for keyword in ["不知道", "不确定", "未找到"])
+        elif self.isOr:
+            return any(subFilter.match(text) for subFilter in self.filters)
         else:
-            return all(subFilter.match(text) for subFilter in self.subFilters)
+            return all(subFilter.match(text) for subFilter in self.filters)
 
 class TestcaseKeyword:
     
     def __init__(self, config) -> None:
         self.input = config["input"]
         self.context = config["context"]
-        self.filter = KeywordFilter(config["keypoints"])
+        self.filter = KeywordFilter(json.loads(config["keypoints"]))
     
     def eval(self, resp) -> bool:
         return self.filter.match(resp)
@@ -63,8 +71,11 @@ class BenchTypeKeyword(BenchType):
         with open(filepathTest, 'r') as file:
             for line in file:
                 jsonObj = json.loads(line)
-                testcase = TestcaseKeyword(jsonObj)
-                testcases.append(testcase)
+                try:
+                    testcase = TestcaseKeyword(jsonObj)
+                    testcases.append(testcase)
+                except Exception as e:
+                    logger.error(f"Error[{e}] in parsing line[{line}]")
     
     def eval(self, pairsTestcaseAndResp :list):
         for testcase, resp in pairsTestcaseAndResp:
