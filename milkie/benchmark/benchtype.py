@@ -1,8 +1,10 @@
 from abc import abstractmethod
 import logging
 import json
+from llama_index.legacy.response.schema import Response
 
 logger = logging.getLogger(__name__)
+promptQA = Pro
 
 def jsonToFilter(config, text):
     if '$and' in config:
@@ -26,7 +28,7 @@ class KeywordFilter:
         elif '$or' in config:
             self.filters = [KeywordFilter(cond) for cond in config['$or']]
             self.isOr = True
-            
+
         elif isinstance(config, str):
             self.filters = config
         elif isinstance(config, dict):
@@ -50,6 +52,11 @@ class TestcaseKeyword:
         self.input = config["input"]
         self.context = config["context"]
         self.filter = KeywordFilter(json.loads(config["keypoints"]))
+
+    def getQuery(self, prompt):
+        return prompt.format(
+            query_str=self.input, 
+            context_str=self.context)
     
     def eval(self, resp) -> bool:
         return self.filter.match(resp)
@@ -67,18 +74,20 @@ class BenchTypeKeyword(BenchType):
         self.succ = 0
         self.fail = 0
         
-        testcases = []
+        self.testcases = []
         with open(filepathTest, 'r') as file:
             for line in file:
                 jsonObj = json.loads(line)
                 try:
                     testcase = TestcaseKeyword(jsonObj)
-                    testcases.append(testcase)
+                    self.testcases.append(testcase)
                 except Exception as e:
                     logger.error(f"Error[{e}] in parsing line[{line}]")
     
-    def eval(self, pairsTestcaseAndResp :list):
-        for testcase, resp in pairsTestcaseAndResp:
+    def eval(self, agent: callable[[str], Response], prompt):
+        for testcase in self.testcases:
+            query = testcase.getQuery(prompt)
+            resp = agent(query)
             if testcase.eval(resp):
                 self.succ += 1
             else:
@@ -92,14 +101,14 @@ class Benchmarks(object):
     def __init__(self, benchmarks :list) -> None:
         self.benchmarks = benchmarks
 
-    def eval(self, pairsTestcaseAndResp :list):
+    def eval(self, agent: callable[[str], Response], prompt):
         for benchmark in self.benchmarks:
-            benchmark.eval(pairsTestcaseAndResp)
+            benchmark.eval(agent, prompt)
 
     def report(self):
         for benchmark in self.benchmarks:
             logger.info(f"benchmark[{benchmark.filepathTest}] succ[{benchmark.succ}] fail[{benchmark.fail}] accuracy[{benchmark.getAccuracy()}]")
     
-    def evalAndReport(self, pairsTestcaseAndResp :list):
-        self.eval(pairsTestcaseAndResp)
+    def evalAndReport(self, agent: callable[[str], Response], prompt):
+        self.eval(agent=agent, prompt=prompt)
         self.report()

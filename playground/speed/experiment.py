@@ -29,6 +29,8 @@ ex = Experiment()
 ex.observers.append(FileStorageObserver("my_runs"))
 modelFactory = ModelFactory()
 
+promptQA = Loader.load("qa_init")
+
 @ex.capture()
 def experiment(
         strategy :Strategy,
@@ -67,7 +69,6 @@ def experiment(
     if "prompt_lookup_num_tokens" in kwargs:
         configYaml["llm"]["generation_args"]["prompt_lookup_num_tokens"] = kwargs["prompt_lookup_num_tokens"]
 
-    promptDict = Loader.loadByPrefix("speed/prompts", "prompt_")
     globalConfig = GlobalConfig(configYaml)
 
     globalConfig.memoryConfig = None
@@ -83,22 +84,22 @@ def experiment(
     cnt = 0
     totalTime = 0
     totalTokens = 0
-    pairsTestcaseAndResp = []
-    for (_, prompts) in promptDict.items():
-        for prompt in prompts:
-            content = prompt.getContent()
-            t0 = time.time()
-            result = agent.task(content)
-            pairsTestcaseAndResp.append((content, result))
-            totalTokens += result.metadata["numTokens"]
-            t1 = time.time()
-            logger.info(f"Testcase[{content[:5]}] Ans[{result}] cost[{t1-t0:.2f}]]")
-            totalTime += t1-t0
-            cnt += 1
+
+    def agentTask(content):
+        nonlocal agent, cnt, totalTime, totalTokens
+        t0 = time.time()
+        resp = agent.task(content)
+        t1 = time.time()
+        totalTokens += resp.metadata["numTokens"]
+        totalTime += t1-t0
+        cnt += 1
+        logger.info(f"Testcase[{content[:5]}] Ans[{resp}] cost[{t1-t0:.2f}]]")
+        return resp  
+
     tokensPerSec = float(totalTokens)/totalTime
+    benchmarks.evalAndReport(agent=agentTask, prompt=promptQA)
 
     #TODO: 1.412 is observered from the A800 GPU, need to remove this hard code
-    benchmarks.evalAndReport(pairsTestcaseAndResp)
     logger.info(f"Running "
                 f"kwargs[{kwargs}] "
                 f"costSec[{totalTime}] "
