@@ -96,8 +96,8 @@ def experiment(
         logger.info(f"Testcase[{content[:5]}] Ans[{resp}] cost[{t1-t0:.2f}]]")
         return resp  
 
-    tokensPerSec = float(totalTokens)/totalTime
     benchmarks.evalAndReport(agent=agentTask, prompt=promptQA)
+    tokensPerSec = float(totalTokens)/totalTime
 
     #TODO: 1.412 is observered from the A800 GPU, need to remove this hard code
     logger.info(f"Running "
