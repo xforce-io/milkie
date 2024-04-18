@@ -88,12 +88,11 @@ def experiment(
     def agentTask(content, **kwargs):
         nonlocal agent, cnt, totalTime, totalTokens
         t0 = time.time()
-        resp = agent.task(content, kwargs)
+        resp = agent.task(content, **kwargs)
         t1 = time.time()
         totalTokens += resp.metadata["numTokens"]
         totalTime += t1-t0
         cnt += 1
-        logger.info(f"Testcase[{content[:5]}] Ans[{resp}] cost[{t1-t0:.2f}]]")
         return resp  
 
     benchmarks.evalAndReport(agent=agentTask, prompt=promptQA)

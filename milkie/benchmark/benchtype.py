@@ -86,9 +86,11 @@ class BenchTypeKeyword(BenchType):
                 query_str=testcase.input, 
                 context_str=testcase.context)
             if testcase.eval(resp):
+                logger.info(f"Testcase[{testcase.input[:5]}] Ans[{resp}] succ")
                 self.succ += 1
             else:
                 self.fail += 1
+                logger.info(f"Testcase[{testcase.input[:5]}] Ans[{resp}] fail")
 
     def getAccuracy(self) -> float:
         return float(self.succ) / (self.succ + self.fail)
