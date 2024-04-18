@@ -1,6 +1,7 @@
 from abc import abstractmethod
 import logging
 import json
+from typing import Callable
 from llama_index.legacy.response.schema import Response
 
 logger = logging.getLogger(__name__)
@@ -55,11 +56,6 @@ class TestcaseKeyword:
     def eval(self, resp) -> bool:
         return self.filter.match(resp.response)
 
-class TypeAgent(object):
-    
-    def __call__(self, prompt :str, **kwds: str) -> Response:
-        pass
-
 class BenchType(object):
 
     @abstractmethod
@@ -83,7 +79,7 @@ class BenchTypeKeyword(BenchType):
                 except Exception as e:
                     logger.error(f"Error[{e}] in parsing line[{line}]")
     
-    def eval(self, agent: TypeAgent, prompt):
+    def eval(self, agent: Callable[[str, dict], Response], prompt):
         for testcase in self.testcases:
             resp = agent(
                 prompt, 
@@ -102,7 +98,7 @@ class Benchmarks(object):
     def __init__(self, benchmarks :list) -> None:
         self.benchmarks = benchmarks
 
-    def eval(self, agent: TypeAgent, prompt):
+    def eval(self, agent: Callable[[str, dict], Response], prompt):
         for benchmark in self.benchmarks:
             benchmark.eval(agent, prompt)
 
@@ -110,6 +106,6 @@ class Benchmarks(object):
         for benchmark in self.benchmarks:
             logger.info(f"benchmark[{benchmark.filepathTest}] succ[{benchmark.succ}] fail[{benchmark.fail}] accuracy[{benchmark.getAccuracy()}]")
     
-    def evalAndReport(self, agent: TypeAgent, prompt):
+    def evalAndReport(self, agent: Callable[[str, dict], Response], prompt):
         self.eval(agent=agent, prompt=prompt)
         self.report()

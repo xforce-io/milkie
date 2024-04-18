@@ -85,10 +85,10 @@ def experiment(
     totalTime = 0
     totalTokens = 0
 
-    def agentTask(content):
+    def agentTask(content, **kwargs):
         nonlocal agent, cnt, totalTime, totalTokens
         t0 = time.time()
-        resp = agent.task(content)
+        resp = agent.task(content, kwargs)
         t1 = time.time()
         totalTokens += resp.metadata["numTokens"]
         totalTime += t1-t0
