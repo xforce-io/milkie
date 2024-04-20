@@ -48,6 +48,21 @@ class EnhancedVLLM(EnhancedLLM):
             text=outputs[0].outputs[0].text,
             raw={"model_output": outputs[0].outputs[0].token_ids},)
 
+    def _completeBatch(
+        self, prompts: list[str], formatted: bool = False, **kwargs: Any
+    ) -> list[CompletionResponse]:
+        kwargs = kwargs if kwargs else {}
+        params = {**self._llm._model_kwargs, **kwargs}
+        sampling_params = SamplingParams(**params)
+        outputs = self._getModel().generate(prompts, sampling_params)
+
+        result = []
+        for output in outputs:
+            result += [CompletionResponse(
+                text=outputs.outputs[0].text,
+                raw={"model_output": outputs.outputs[0].token_ids},)]
+        return result
+
     def _getSingleParameterSizeInBytes(self):
         type_to_size = {
             "auto": 2,

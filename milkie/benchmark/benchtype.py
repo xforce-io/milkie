@@ -40,7 +40,7 @@ class KeywordFilter:
             if self.filters == None:
                 return any(keyword in text for keyword in ["不知道", "不确定", "未找到"])
             else:
-                return text in self.filters
+                return self.filters in text
         elif self.isOr:
             return any(subFilter.match(text) for subFilter in self.filters)
         else:
@@ -80,17 +80,18 @@ class BenchTypeKeyword(BenchType):
                     logger.error(f"Error[{e}] in parsing line[{line}]")
     
     def eval(self, agent: Callable[[str, dict], Response], prompt):
-        for testcase in self.testcases:
-            resp = agent(
-                prompt, 
-                query_str=testcase.input, 
-                context_str=testcase.context)
-            if testcase.eval(resp):
-                logger.info(f"Testcase[{testcase.input[:5]}] Ans[{resp}] succ")
-                self.succ += 1
-            else:
-                self.fail += 1
-                logger.info(f"Testcase[{testcase.input[:5]}] Ans[{resp}] fail")
+        batchSize = 10
+        for i in range(0, len(self.testcases), batchSize):
+            batch = self.testcases[i:i+batchSize]
+            argsList = [{"input": testcase.input, "context": testcase.context} for testcase in batch]
+            responses = agent(prompt=prompt, argsList=argsList)
+            for j, response in enumerate(responses):
+                if batch[j].eval(response):
+                    logger.info(f"Testcase[{batch[j].input[:5]}] Ans[{response}] succ")
+                    self.succ += 1
+                else:
+                    self.fail += 1
+                    logger.info(f"Testcase[{batch[j].input[:5]}] Ans[{response}] fail")
 
     def getAccuracy(self) -> float:
         return float(self.succ) / (self.succ + self.fail)

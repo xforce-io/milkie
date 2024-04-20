@@ -85,15 +85,15 @@ def experiment(
     totalTime = 0
     totalTokens = 0
 
-    def agentTask(content, **kwargs):
+    def agentTask(contentBatch, argsList):
         nonlocal agent, cnt, totalTime, totalTokens
         t0 = time.time()
-        resp = agent.task(content, **kwargs)
+        resps = agent.taskBatch(contentBatch, argsList)
         t1 = time.time()
-        totalTokens += resp.metadata["numTokens"]
+        totalTokens += sum(resp.metadata["numTokens"] for resp in resps)
         totalTime += t1-t0
-        cnt += 1
-        return resp  
+        cnt += len(resps)
+        return resps 
 
     benchmarks.evalAndReport(agent=agentTask, prompt=promptQA)
     tokensPerSec = float(totalTokens)/totalTime

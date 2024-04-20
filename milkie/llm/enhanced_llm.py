@@ -40,6 +40,21 @@ class EnhancedLLM(object):
             raise NotImplementedError("predict not implemented for non-chat models")
         return (self._llm._parse_output(output), len(response.raw["model_output"]))
 
+    @torch.inference_mode()
+    def predictBatch(
+            self, 
+            prompt: BasePromptTemplate, 
+            argsList: list[dict]):
+        result = []
+        if self._llm.metadata.is_chat_model:
+            responses = self._chatBatch([self._llm._get_messages(prompt, **args) for args in argsList])
+            for response in responses:
+                output = response.message.content or ""
+                result += [(self._llm._parse_output(output), len(response.raw["model_output"]))]
+        else:
+            raise NotImplementedError("predict not implemented for non-chat models")
+        return result
+
     @abstractmethod
     def _getModel(self):
         pass
@@ -49,8 +64,19 @@ class EnhancedLLM(object):
         completion_response = self._complete(prompt, formatted=True, **kwargs)
         return completion_response_to_chat_response(completion_response)
 
+    def _chatBatch(self, messagesBatch: list[Sequence[ChatMessage]], **kwargs: Any) -> list[ChatResponse]:
+        prompts = []
+        for messages in messagesBatch:
+            prompts += [self._llm.messages_to_prompt(messages)]
+        completionResponses = self._completeBatch(prompts, formatted=True, **kwargs)
+        return [completion_response_to_chat_response(completionResponse) for completionResponse in completionResponses]
+
     @abstractmethod
     def _complete(self, prompt: str, formatted: bool = False, **kwargs: Any) -> Any:
+        pass
+
+    @abstractmethod
+    def _completeBatch(self, prompts: list[str], formatted: bool = False, **kwargs: Any) -> Any:
         pass
 
     @abstractmethod

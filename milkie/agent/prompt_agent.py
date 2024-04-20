@@ -41,3 +41,28 @@ class PromptAgent(BaseAgent):
         response.metadata["numTokens"] = numTokens
         logger.debug(f"prompt_agent query[{query}] answer[{answer}] cost[{t1-t0}]")
         return response
+
+    def taskBatch(self, query, kwargs :list[dict]) -> list[Response]:
+        chatPromptTmpl = ChatPromptTemplate(
+            message_templates=[
+                ChatMessage(
+                    content=self.prompt if self.prompt else query,
+                    role=MessageRole.USER)
+            ]
+        )
+
+        import time
+        t0 = time.time()
+        resultBatch = self.context.globalContext.settings.llm.predictBatch(
+            prompt=chatPromptTmpl,
+            argsList=kwargs)
+        t1 = time.time()
+
+        responses = []
+        for result in resultBatch:
+            response = Response(response="", source_nodes=None, metadata={})
+            #answer = response[0].replace("\n", "//")
+            response.metadata["numTokens"] = response[1]
+            responses += [response]
+        logger.debug(f"prompt_agent query[{query}] batchSize[{len(resultBatch)}] cost[{t1-t0}]")
+        return responses
