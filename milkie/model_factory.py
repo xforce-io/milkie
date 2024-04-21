@@ -72,10 +72,11 @@ class ModelFactory:
 
         if config.framework == FRAMEWORK.VLLM:
             self.llm = EnhancedVLLM(
+                context_window=config.ctxLen,
+                tokenizer_name=config.model,
                 model_name=config.model,
                 device=config.device,
                 max_new_tokens=256,
-                message_to_prompt=messagesToPrompt,
                 tokenizer_kwargs=tokenizerArgs)
         else :
             self.llm = EnhancedHFLLM(
@@ -88,7 +89,6 @@ class ModelFactory:
                 query_wrapper_prompt=PromptTemplate("{query_str}\n<|ASSISTANT|>\n"),
                 tokenizer_name=config.model,
                 model_name=config.model,
-                messages_to_prompt=messagesToPrompt,
                 tokenizer_kwargs=tokenizerArgs,
                 is_chat_model=True,
             )

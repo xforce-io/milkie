@@ -1,7 +1,5 @@
 from typing import Any, Callable, Optional, Sequence
 
-from transformers import AutoTokenizer
-
 from llama_index.core.prompts.base import BasePromptTemplate
 from vllm import SamplingParams
 from llama_index.legacy.llms.vllm import Vllm
@@ -13,11 +11,14 @@ from milkie.llm.enhanced_llm import EnhancedLLM
 
 class EnhancedVLLM(EnhancedLLM):
     def __init__(self,
+            context_window: int,
+            tokenizer_name: str,
             model_name: str,
             device :str,
             max_new_tokens: int,
-            message_to_prompt: Optional[Callable[[Sequence[ChatMessage]], str]],
-            tokenizer_kwargs: dict,):
+            tokenizer_kwargs: dict):
+        super().__init__(context_window, tokenizer_name, tokenizer_kwargs)
+        
         if device is not None:
             torch.cuda.set_device(device)
 
@@ -26,10 +27,9 @@ class EnhancedVLLM(EnhancedLLM):
             tensor_parallel_size=1,
             max_new_tokens=max_new_tokens,
             vllm_kwargs={"gpu_memory_utilization":0.75},
-            messages_to_prompt=message_to_prompt,
+            messages_to_prompt=self._tokenizer_messages_to_prompt,
             dtype="auto",)
 
-        self._tokenizer = AutoTokenizer.from_pretrained(model_name, kwargs=tokenizer_kwargs)
         self._llm._client.set_tokenizer(self._tokenizer)
         
     @torch.inference_mode()

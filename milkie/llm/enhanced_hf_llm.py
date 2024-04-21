@@ -19,8 +19,9 @@ class EnhancedHFLLM(EnhancedLLM) :
             model_kwargs: dict, 
             generate_kwargs: dict, 
             is_chat_model: bool, 
-            system_prompt: str, 
-            messages_to_prompt: Optional[Callable[[Sequence[ChatMessage]], str]]) -> None:
+            system_prompt: str) -> None:
+        super().__init__(context_window, tokenizer_name, tokenizer_kwargs)
+
         compile = model_kwargs.pop("torch_compile", False)
 
         if device is not None:
@@ -30,14 +31,13 @@ class EnhancedHFLLM(EnhancedLLM) :
             context_window=context_window, 
             max_new_tokens=max_new_tokens, 
             query_wrapper_prompt=query_wrapper_prompt, 
-            tokenizer_name=tokenizer_name, 
+            tokenizer=self._tokenizer,
             model_name=model_name, 
-            tokenizer_kwargs=tokenizer_kwargs, 
             model_kwargs=model_kwargs, 
             generate_kwargs=generate_kwargs, 
             is_chat_model=is_chat_model, 
             system_prompt=system_prompt, 
-            messages_to_prompt=messages_to_prompt)
+            messages_to_prompt=self._tokenizer_messages_to_prompt)
 
         #refer suggestions from https://pytorch.org/blog/accelerating-generative-ai-2/
         if compile:

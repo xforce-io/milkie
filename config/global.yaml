@@ -10,6 +10,7 @@ llm:
   model_args:
     torch_compile: False
     quantization_type: NONE
+    attn_implementation: flash_attention_2
   generation_args:
     repetition_penalty: 1.0
     temperature: 0
