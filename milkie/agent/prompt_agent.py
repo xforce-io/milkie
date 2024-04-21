@@ -1,5 +1,4 @@
 import logging
-from abc import abstractmethod
 
 from llama_index.legacy.response.schema import Response
 from llama_index.legacy.prompts import ChatPromptTemplate
@@ -21,7 +20,7 @@ class PromptAgent(BaseAgent):
 
         self.prompt = Loader.load(config) if config else None
 
-    def task(self, query, **kwargs) -> Response:
+    def task(self, query :str, **kwargs) -> Response:
         response = Response(response="", source_nodes=None, metadata={})
         chatPromptTmpl = ChatPromptTemplate(
             message_templates=[
@@ -39,10 +38,10 @@ class PromptAgent(BaseAgent):
         t1 = time.time()
         answer = response.response.replace("\n", "//")
         response.metadata["numTokens"] = numTokens
-        logger.debug(f"prompt_agent query[{query}] answer[{answer}] cost[{t1-t0}]")
+        logger.debug(f"prompt_agent query[{query.replace("\n", "//")}] answer[{answer}] cost[{t1-t0}]")
         return response
 
-    def taskBatch(self, query, kwargs :list[dict]) -> list[Response]:
+    def taskBatch(self, query :str, kwargs :list[dict]) -> list[Response]:
         chatPromptTmpl = ChatPromptTemplate(
             message_templates=[
                 ChatMessage(
@@ -64,5 +63,5 @@ class PromptAgent(BaseAgent):
             #answer = response[0].replace("\n", "//")
             response.metadata["numTokens"] = result[1]
             responses += [response]
-        logger.debug(f"prompt_agent query[{query}] batchSize[{len(resultBatch)}] cost[{t1-t0}]")
+        logger.debug(f"prompt_agent query[{query.replace("\n", "//")}] batchSize[{len(resultBatch)}] cost[{t1-t0}]")
         return responses

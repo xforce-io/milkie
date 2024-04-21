@@ -3,6 +3,7 @@ import logging
 import json
 from typing import Callable
 from llama_index.legacy.response.schema import Response
+from llama_index.legacy.utils import truncate_text
 
 logger = logging.getLogger(__name__)
 
@@ -79,19 +80,20 @@ class BenchTypeKeyword(BenchType):
                 except Exception as e:
                     logger.error(f"Error[{e}] in parsing line[{line}]")
     
-    def eval(self, agent: Callable[[str, dict], Response], prompt):
-        batchSize = 10
+    def eval(self, agent: Callable[[str, dict], list[Response]], prompt):
+        batchSize = 8
         for i in range(0, len(self.testcases), batchSize):
             batch = self.testcases[i:i+batchSize]
             argsList = [{"query_str": testcase.input, "context_str": testcase.context} for testcase in batch]
             responses = agent(prompt=prompt, argsList=argsList)
             for j, response in enumerate(responses):
+                status = f"Testcase[{batch[j].input[:5]}] Ans[{truncate_text(response.response, 500).replace('\n', '//')}]"
                 if batch[j].eval(response):
-                    logger.info(f"Testcase[{batch[j].input[:5]}] Ans[{response}] succ")
                     self.succ += 1
+                    logger.info(f"{status} succ")
                 else:
                     self.fail += 1
-                    logger.info(f"Testcase[{batch[j].input[:5]}] Ans[{response}] fail")
+                    logger.info(f"{status} fail")
 
     def getAccuracy(self) -> float:
         return float(self.succ) / (self.succ + self.fail)
@@ -101,7 +103,7 @@ class Benchmarks(object):
     def __init__(self, benchmarks :list) -> None:
         self.benchmarks = benchmarks
 
-    def eval(self, agent: Callable[[str, dict], Response], prompt):
+    def eval(self, agent: Callable[[str, dict], list[Response]], prompt):
         for benchmark in self.benchmarks:
             benchmark.eval(agent, prompt)
 
@@ -109,6 +111,6 @@ class Benchmarks(object):
         for benchmark in self.benchmarks:
             logger.info(f"benchmark[{benchmark.filepathTest}] succ[{benchmark.succ}] fail[{benchmark.fail}] accuracy[{benchmark.getAccuracy()}]")
     
-    def evalAndReport(self, agent: Callable[[str, dict], Response], prompt):
+    def evalAndReport(self, agent: Callable[[str, dict], list[Response]], prompt):
         self.eval(agent=agent, prompt=prompt)
         self.report()

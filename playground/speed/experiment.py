@@ -1,5 +1,8 @@
 import time, logging
 from sacred import Experiment
+
+from llama_index.legacy.response.schema import Response
+
 from milkie.benchmark.benchtype import BenchTypeKeyword, Benchmarks
 from milkie.config.config import FRAMEWORK, GlobalConfig
 from milkie.context import Context
@@ -7,7 +10,6 @@ from milkie.global_context import GlobalContext
 from milkie.model_factory import ModelFactory
 from milkie.prompt.prompt import Loader
 from milkie.strategy import Strategy, StrategyRaw
-
 from milkie.utils.commons import getMemStat
 from milkie.utils.data_utils import loadFromYaml
 
@@ -77,7 +79,7 @@ def experiment(
     agent = strategy.createAgent(context)
 
     benchmarks = Benchmarks([
-        BenchTypeKeyword("benchmark/410_key.jsonl"),
+        #BenchTypeKeyword("benchmark/410_key.jsonl"),
         BenchTypeKeyword("benchmark/fd100_key.jsonl"),
     ])
 
@@ -85,7 +87,7 @@ def experiment(
     totalTime = 0
     totalTokens = 0
 
-    def agentTask(prompt, argsList):
+    def agentTask(prompt, argsList) -> list[Response]:
         nonlocal agent, cnt, totalTime, totalTokens
         t0 = time.time()
         resps = agent.taskBatch(prompt, argsList)
