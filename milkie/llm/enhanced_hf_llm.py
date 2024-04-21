@@ -97,7 +97,10 @@ class EnhancedHFLLM(EnhancedLLM) :
                 full_prompt = prompt
             return full_prompt
 
-        inputsList = self._llm._tokenizer([makeFullPrompt(prompt) for prompt in prompts], return_tensors="pt")
+        inputsList = self._llm._tokenizer(
+            [makeFullPrompt(prompt) for prompt in prompts], 
+            return_tensors="pt",
+            padding=True)
         inputsList = inputsList.to(self._getModel().device)
 
         tokensList = self._getModel().generate(
@@ -109,14 +112,15 @@ class EnhancedHFLLM(EnhancedLLM) :
 
         completion_tokens = []
         for i in range(len(tokensList)):
-            completion_tokens += [tokensList[i][len(inputsList[i]["input_ids"][0]):]]
-        completion = self._llm._tokenizer.decode(completion_tokens, skip_special_tokens=True)
+            completion_tokens += [tokensList[i][len(inputsList["input_ids"][i]):]]
+        completion = self._llm._tokenizer.batch_decode(completion_tokens, skip_special_tokens=True)
 
         completionResponses = []
         for i in range(len(tokensList)):
             completionResponses += [CompletionResponse(
                 text=completion[i], 
-                raw={"model_output": tokensList[i][len(inputsList[i]["input_ids"][0]):]})]
+                raw={"model_output": tokensList[i][len(inputsList["input_ids"][i]):]})]
+        return completionResponses
 
     def _getSingleParameterSizeInBytes(self):
         type_to_size = {

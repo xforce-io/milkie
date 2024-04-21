@@ -1,4 +1,8 @@
 from typing import Any, Callable, Optional, Sequence
+
+from transformers import AutoTokenizer
+
+from llama_index.core.prompts.base import BasePromptTemplate
 from vllm import SamplingParams
 from llama_index.legacy.llms.vllm import Vllm
 from llama_index_client import BasePromptTemplate, ChatMessage
@@ -12,7 +16,8 @@ class EnhancedVLLM(EnhancedLLM):
             model_name: str,
             device :str,
             max_new_tokens: int,
-            message_to_prompt: Optional[Callable[[Sequence[ChatMessage]], str]]):
+            message_to_prompt: Optional[Callable[[Sequence[ChatMessage]], str]],
+            tokenizer_kwargs: dict,):
         if device is not None:
             torch.cuda.set_device(device)
 
@@ -23,6 +28,9 @@ class EnhancedVLLM(EnhancedLLM):
             vllm_kwargs={"gpu_memory_utilization":0.75},
             messages_to_prompt=message_to_prompt,
             dtype="auto",)
+
+        self._tokenizer = AutoTokenizer.from_pretrained(model_name, kwargs=tokenizer_kwargs)
+        self._llm._client.set_tokenizer(self._tokenizer)
         
     @torch.inference_mode()
     def predict(
@@ -53,14 +61,14 @@ class EnhancedVLLM(EnhancedLLM):
     ) -> list[CompletionResponse]:
         kwargs = kwargs if kwargs else {}
         params = {**self._llm._model_kwargs, **kwargs}
-        sampling_params = SamplingParams(**params)
+        sampling_params = SamplingParams(repetition_penalty=1.2, **params)
         outputs = self._getModel().generate(prompts, sampling_params)
 
         result = []
         for output in outputs:
             result += [CompletionResponse(
-                text=outputs.outputs[0].text,
-                raw={"model_output": outputs.outputs[0].token_ids},)]
+                text=output.outputs[0].text,
+                raw={"model_output": output.outputs[0].token_ids},)]
         return result
 
     def _getSingleParameterSizeInBytes(self):

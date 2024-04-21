@@ -32,12 +32,9 @@ class EnhancedLLM(object):
             self, 
             prompt: BasePromptTemplate, 
             **prompt_args: Any):
-        if self._llm.metadata.is_chat_model:
-            messages = self._llm._get_messages(prompt, **prompt_args)
-            response = self._chat(messages)
-            output = response.message.content or ""
-        else:
-            raise NotImplementedError("predict not implemented for non-chat models")
+        messages = self._llm._get_messages(prompt, **prompt_args)
+        response = self._chat(messages)
+        output = response.message.content or ""
         return (self._llm._parse_output(output), len(response.raw["model_output"]))
 
     @torch.inference_mode()
@@ -46,13 +43,10 @@ class EnhancedLLM(object):
             prompt: BasePromptTemplate, 
             argsList: list[dict]):
         result = []
-        if self._llm.metadata.is_chat_model:
-            responses = self._chatBatch([self._llm._get_messages(prompt, **args) for args in argsList])
-            for response in responses:
-                output = response.message.content or ""
-                result += [(self._llm._parse_output(output), len(response.raw["model_output"]))]
-        else:
-            raise NotImplementedError("predict not implemented for non-chat models")
+        responses = self._chatBatch([self._llm._get_messages(prompt, **args) for args in argsList])
+        for response in responses:
+            output = response.message.content or ""
+            result += [(self._llm._parse_output(output), len(response.raw["model_output"]))]
         return result
 
     @abstractmethod

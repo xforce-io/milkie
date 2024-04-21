@@ -64,12 +64,19 @@ class ModelFactory:
             del self.llm
             self.llm = None
 
+        tokenizerArgs = {
+            "max_length": config.ctxLen, 
+            "use_fast": False, 
+            "trust_remote_code": True, 
+            "padding_side": "left",}
+
         if config.framework == FRAMEWORK.VLLM:
             self.llm = EnhancedVLLM(
                 model_name=config.model,
                 device=config.device,
                 max_new_tokens=256,
-                message_to_prompt=messagesToPrompt)
+                message_to_prompt=messagesToPrompt,
+                tokenizer_kwargs=tokenizerArgs)
         else :
             self.llm = EnhancedHFLLM(
                 context_window=config.ctxLen,
@@ -82,7 +89,7 @@ class ModelFactory:
                 tokenizer_name=config.model,
                 model_name=config.model,
                 messages_to_prompt=messagesToPrompt,
-                tokenizer_kwargs={"max_length": config.ctxLen, "use_fast": False, "trust_remote_code": True},
+                tokenizer_kwargs=tokenizerArgs,
                 is_chat_model=True,
             )
 

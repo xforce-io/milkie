@@ -83,7 +83,7 @@ class BenchTypeKeyword(BenchType):
         batchSize = 10
         for i in range(0, len(self.testcases), batchSize):
             batch = self.testcases[i:i+batchSize]
-            argsList = [{"input": testcase.input, "context": testcase.context} for testcase in batch]
+            argsList = [{"query_str": testcase.input, "context_str": testcase.context} for testcase in batch]
             responses = agent(prompt=prompt, argsList=argsList)
             for j, response in enumerate(responses):
                 if batch[j].eval(response):

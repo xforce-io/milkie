@@ -85,10 +85,10 @@ def experiment(
     totalTime = 0
     totalTokens = 0
 
-    def agentTask(contentBatch, argsList):
+    def agentTask(prompt, argsList):
         nonlocal agent, cnt, totalTime, totalTokens
         t0 = time.time()
-        resps = agent.taskBatch(contentBatch, argsList)
+        resps = agent.taskBatch(prompt, argsList)
         t1 = time.time()
         totalTokens += sum(resp.metadata["numTokens"] for resp in resps)
         totalTime += t1-t0
