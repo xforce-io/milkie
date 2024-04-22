@@ -48,7 +48,7 @@ def experiment(
             #BenchTypeKeyword("benchmark/410_key.jsonl"),
             BenchTypeKeyword("benchmark/fd100_key.jsonl"),
         ],
-        globalConfig.getLLMConfig().generationArgs.batchSize)
+        globalConfig.getLLMConfig().batchSize)
 
     cnt = 0
     totalTime = 0

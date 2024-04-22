@@ -178,7 +178,6 @@ class LLMGenerationArgs(BaseConfig):
 
     def toJson(self):
         result = {
-            "batch_size": self.batchSize,
             "repetition_penalty": self.repetitionPenalty,
             "temperature": self.temperature,
             "do_sample": self.doSample,

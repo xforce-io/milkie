@@ -1,3 +1,4 @@
+from typing import Any
 import torch
 from llama_index.legacy.core.llms.types import CompletionResponse
 from llama_index.legacy.llms.huggingface import HuggingFaceLLM
@@ -83,15 +84,15 @@ class EnhancedHFLLM(EnhancedLLM) :
 
     def _completeBatch(
             self, 
-            inputsList: list[list[int]], 
+            inputsList: torch.tensor, 
             **kwargs: Any
     ) -> CompletionResponse:
         """Completion endpoint."""
         inputsList = inputsList.to(self._getModel().device)
-
+        
         param = {**self._llm.generate_kwargs, **kwargs}
         tokensList = self._getModel().generate(
-            **inputsList,
+            inputs=inputsList,
             max_new_tokens=self._llm.max_new_tokens,
             stopping_criteria=self._llm._stopping_criteria,
             **param)

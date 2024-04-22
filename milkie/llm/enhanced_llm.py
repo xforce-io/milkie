@@ -19,10 +19,11 @@ class EnhancedLLM(object):
             context_window :int,
             tokenizer_name :str,
             tokenizer_kwargs :dict) -> None:
+        self.context_window = context_window
         self._llm :LLM = None
 
-        if "max_length" not in tokenizer_kwargs:
-            tokenizer_kwargs["max_length"] = context_window
+        if "model_max_length" not in tokenizer_kwargs:
+            tokenizer_kwargs["model_max_length"] = context_window
         self._tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, **tokenizer_kwargs)
 
     def getLLM(self) -> LLM:
@@ -78,6 +79,7 @@ class EnhancedLLM(object):
                 messages_dict,
                 add_generation_prompt=True,
                 padding=True,
+                max_length=self.context_window,
                 return_tensors="pt")
         return self._tokenizer(generic_messages_to_prompt(messages))
 
@@ -93,7 +95,8 @@ class EnhancedLLM(object):
         promptsTokens = []
         for messages in messagesBatch:
             promptsTokens += [self._tokenizer_messages_to_prompt(messages)]
-        completionResponses = self._completeBatch(promptsTokens, formatted=True, **kwargs)
+        promptsTokens = torch.stack(promptsTokens)
+        completionResponses = self._completeBatch(promptsTokens[0], **kwargs)
         return [completion_response_to_chat_response(completionResponse) for completionResponse in completionResponses]
 
     @abstractmethod

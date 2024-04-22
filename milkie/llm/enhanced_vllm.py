@@ -59,7 +59,7 @@ class EnhancedVLLM(EnhancedLLM):
 
     def _completeBatch(
             self, 
-            inputsList: list[list[int]], 
+            inputsList: torch.tensor, 
             **kwargs: Any
     ) -> list[CompletionResponse]:
         kwargs = kwargs if kwargs else {}
