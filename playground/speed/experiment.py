@@ -4,14 +4,14 @@ from sacred import Experiment
 from llama_index.legacy.response.schema import Response
 
 from milkie.benchmark.benchtype import BenchTypeKeyword, Benchmarks
-from milkie.config.config import FRAMEWORK, GlobalConfig
+from milkie.config.config import FRAMEWORK
 from milkie.context import Context
 from milkie.global_context import GlobalContext
 from milkie.model_factory import ModelFactory
 from milkie.prompt.prompt import Loader
 from milkie.strategy import Strategy, StrategyRaw
 from milkie.utils.commons import getMemStat
-from milkie.utils.data_utils import loadFromYaml
+from playground.global_config import makeGlobalConfig
 
 logger = logging.getLogger(__name__)
 
@@ -37,51 +37,18 @@ promptQA = Loader.load("qa_init")
 def experiment(
         strategy :Strategy,
         **kwargs):
-    configYaml = loadFromYaml("config/global.yaml")
-    if "llm_model" in kwargs:
-        configYaml["llm"]["model"] = kwargs["llm_model"]
-
-    if "framework" in kwargs:
-        configYaml["llm"]["framework"] = kwargs["framework"]
-
-    if "device" in kwargs:
-        configYaml["llm"]["device"] = kwargs["device"]
-
-    if "quantization_type" in kwargs:
-        configYaml["llm"]["model_args"]["quantization_type"] = kwargs["quantization_type"]
-
-    if "attn_implementation" in kwargs:
-        configYaml["llm"]["model_args"]["attn_implementation"] = kwargs["attn_implementation"]
-    
-    if "torch_compile" in kwargs:
-        configYaml["llm"]["model_args"]["torch_compile"] = kwargs["torch_compile"]
-
-    if "repetition_penalty" in kwargs:
-        configYaml["llm"]["generation_args"]["repetition_penalty"] = kwargs["repetition_penalty"]
-
-    if "temperature" in kwargs:
-        configYaml["llm"]["generation_args"]["temperature"] = kwargs["temperature"]
-
-    if "do_sample" in kwargs:
-        configYaml["llm"]["generation_args"]["do_sample"] = kwargs["do_sample"]
-    
-    if "use_cache" in kwargs:
-        configYaml["llm"]["generation_args"]["use_cache"] = kwargs["use_cache"]
-        
-    if "prompt_lookup_num_tokens" in kwargs:
-        configYaml["llm"]["generation_args"]["prompt_lookup_num_tokens"] = kwargs["prompt_lookup_num_tokens"]
-
-    globalConfig = GlobalConfig(configYaml)
-
+    globalConfig = makeGlobalConfig(**kwargs)
     globalConfig.memoryConfig = None
+
     globalContext = GlobalContext(globalConfig, modelFactory)
     context = Context(globalContext=globalContext)
     agent = strategy.createAgent(context)
 
     benchmarks = Benchmarks([
-        #BenchTypeKeyword("benchmark/410_key.jsonl"),
-        BenchTypeKeyword("benchmark/fd100_key.jsonl"),
-    ])
+            #BenchTypeKeyword("benchmark/410_key.jsonl"),
+            BenchTypeKeyword("benchmark/fd100_key.jsonl"),
+        ],
+        globalConfig.getLLMConfig().generationArgs.batchSize)
 
     cnt = 0
     totalTime = 0
@@ -123,20 +90,22 @@ def mainFunc():
                 device = 0
 
             for framework in [FRAMEWORK.VLLM.name, FRAMEWORK.HUGGINGFACE.name]:
-                for use_cache in [True]:
-                    for quantization_type in [None]:
-                        for prompt_lookup_num_tokens in [None, 20]:
-                            if prompt_lookup_num_tokens and not use_cache:
-                                continue
+                for batch_size in [1, 2, 4]:
+                    for use_cache in [True]:
+                        for quantization_type in [None]:
+                            for prompt_lookup_num_tokens in [None]:
+                                if prompt_lookup_num_tokens and not use_cache:
+                                    continue
 
-                            experiment(
-                                strategy=strategy,
-                                llm_model=llm_model,
-                                framework=framework,
-                                device=device,
-                                use_cache=use_cache,
-                                quantization_type=quantization_type,
-                                prompt_lookup_num_tokens=prompt_lookup_num_tokens)
+                                experiment(
+                                    strategy=strategy,
+                                    llm_model=llm_model,
+                                    framework=framework,
+                                    device=device,
+                                    batch_size=batch_size,
+                                    use_cache=use_cache,
+                                    quantization_type=quantization_type,
+                                    prompt_lookup_num_tokens=prompt_lookup_num_tokens)
 
 if __name__ == "__main__":
     pass

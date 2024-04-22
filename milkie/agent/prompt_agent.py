@@ -38,10 +38,10 @@ class PromptAgent(BaseAgent):
         t1 = time.time()
         answer = response.response.replace("\n", "//")
         response.metadata["numTokens"] = numTokens
-        logger.debug(f"prompt_agent query[{query.replace("\n", "//")}] answer[{answer}] cost[{t1-t0}]")
+        logger.debug(f"prompt_agent query[{query}] answer[{answer}] cost[{t1-t0}]").replace("\n", "//")
         return response
 
-    def taskBatch(self, query :str, kwargs :list[dict]) -> list[Response]:
+    def taskBatch(self, query :str, argsList :list[dict], **kwargs) -> list[Response]:
         chatPromptTmpl = ChatPromptTemplate(
             message_templates=[
                 ChatMessage(
@@ -54,7 +54,8 @@ class PromptAgent(BaseAgent):
         t0 = time.time()
         resultBatch = self.context.globalContext.settings.llm.predictBatch(
             prompt=chatPromptTmpl,
-            argsList=kwargs)
+            argsList=argsList,
+            **kwargs)
         t1 = time.time()
 
         responses = []
@@ -63,5 +64,5 @@ class PromptAgent(BaseAgent):
             #answer = response[0].replace("\n", "//")
             response.metadata["numTokens"] = result[1]
             responses += [response]
-        logger.debug(f"prompt_agent query[{query.replace("\n", "//")}] batchSize[{len(resultBatch)}] cost[{t1-t0}]")
+        logger.debug(f"prompt_agent query[{query}] batchSize[{len(resultBatch)}] cost[{t1-t0}]".replace("\n", "//"))
         return responses

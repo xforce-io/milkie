@@ -155,11 +155,13 @@ class LLMModelArgs(BaseConfig):
 class LLMGenerationArgs(BaseConfig):
     def __init__(
             self,
+            batchSize :int,
             repetitionPenalty: float,
             temperature :float,
             doSample :bool,
             useCache :bool,
             promptLookupNumTokens: int):
+        self.batchSize = batchSize
         self.repetitionPenalty = repetitionPenalty
         self.temperature = temperature
         self.doSample = doSample
@@ -168,6 +170,7 @@ class LLMGenerationArgs(BaseConfig):
 
     def fromArgs(config :dict):
         llmGenerationArgs = LLMGenerationArgs(
+            batchSize=config["batch_size"] if "batch_size" in config else 1,
             repetitionPenalty=config["repetition_penalty"] if "repetition_penalty" in config else 1.0,
             temperature=config["temperature"] if "temperature" in config else 0,
             doSample=config["do_sample"] if "do_sample" in config else False,
@@ -178,6 +181,7 @@ class LLMGenerationArgs(BaseConfig):
 
     def toJson(self):
         result = {
+            "batch_size": self.batchSize,
             "repetition_penalty": self.repetitionPenalty,
             "temperature": self.temperature,
             "do_sample": self.doSample,
@@ -403,7 +407,7 @@ class AgentsConfig(BaseConfig):
             configs.append(agentConfig)
         return AgentsConfig(configs)
 
-    def getConfig(self, config :str):
+    def getConfig(self, config :str) -> SingleAgentConfig:
         return self.agentMap.get(config)
 
 class GlobalConfig(BaseConfig):
@@ -418,17 +422,17 @@ class GlobalConfig(BaseConfig):
         self.memoryConfig = MemoryConfig.fromArgs(config["memory"])
         self.indexConfig = IndexConfig.fromArgs(config["index"])
 
-    def getLLMConfig(self):
+    def getLLMConfig(self) -> LLMConfig:
         return self.llmConfig
     
-    def getEmbeddingConfig(self):
+    def getEmbeddingConfig(self) -> EmbeddingConfig:
         return self.embeddingConfig
     
-    def getAgentConfig(self, config :str):
+    def getAgentConfig(self, config :str) -> SingleAgentConfig:
         return self.agentsConfig.getConfig(config)
 
-    def getMemoryConfig(self):
+    def getMemoryConfig(self) -> MemoryConfig:
         return self.memoryConfig
 
-    def getIndexConfig(self):
+    def getIndexConfig(self) -> IndexConfig:
         return self.indexConfig

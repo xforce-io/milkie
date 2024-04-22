@@ -84,7 +84,10 @@ class EnhancedHFLLM(EnhancedLLM) :
             raw={"model_output": tokens[0][len(inputs["input_ids"][0]):]})
 
     def _completeBatch(
-        self, prompts: list[str], formatted: bool = False, **kwargs: Any
+            self, 
+            prompts: list[str], 
+            formatted: bool = False, 
+            **kwargs: Any
     ) -> CompletionResponse:
         """Completion endpoint."""
         def makeFullPrompt(prompt):
@@ -108,7 +111,7 @@ class EnhancedHFLLM(EnhancedLLM) :
             max_new_tokens=self._llm.max_new_tokens,
             stopping_criteria=self._llm._stopping_criteria,
             **self._llm.generate_kwargs,
-        )
+            **kwargs)
 
         completion_tokens = []
         for i in range(len(tokensList)):

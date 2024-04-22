@@ -52,9 +52,12 @@ class EnhancedLLM(object):
     def predictBatch(
             self, 
             prompt: BasePromptTemplate, 
-            argsList: list[dict]):
+            argsList: list[dict],
+            **kwargs: Any):
         result = []
-        responses = self._chatBatch([self._llm._get_messages(prompt, **args) for args in argsList])
+        responses = self._chatBatch(
+            [self._llm._get_messages(prompt, **args) for args in argsList],
+            kwargs)
         for response in responses:
             output = response.message.content or ""
             result += [(self._llm._parse_output(output), len(response.raw["model_output"]))]

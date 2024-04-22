@@ -50,18 +50,25 @@ class EnhancedVLLM(EnhancedLLM):
     ) -> CompletionResponse:
         kwargs = kwargs if kwargs else {}
         params = {**self._llm._model_kwargs, **kwargs}
-        sampling_params = SamplingParams(**params)
+        sampling_params = SamplingParams(
+            repetition_penalty=kwargs.get("repetition_penalty", 1.0),
+            **params)
         outputs = self._getModel().generate([prompt], sampling_params)
         return CompletionResponse(
             text=outputs[0].outputs[0].text,
             raw={"model_output": outputs[0].outputs[0].token_ids},)
 
     def _completeBatch(
-        self, prompts: list[str], formatted: bool = False, **kwargs: Any
+            self, 
+            prompts: list[str], 
+            formatted: bool = False, 
+            **kwargs: Any
     ) -> list[CompletionResponse]:
         kwargs = kwargs if kwargs else {}
         params = {**self._llm._model_kwargs, **kwargs}
-        sampling_params = SamplingParams(repetition_penalty=1.2, **params)
+        sampling_params = SamplingParams(
+            repetition_penalty=kwargs.get("repetition_penalty", 1.0),
+            **params)
         outputs = self._getModel().generate(prompts, sampling_params)
 
         result = []

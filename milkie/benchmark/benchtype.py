@@ -80,14 +80,17 @@ class BenchTypeKeyword(BenchType):
                 except Exception as e:
                     logger.error(f"Error[{e}] in parsing line[{line}]")
     
-    def eval(self, agent: Callable[[str, dict], list[Response]], prompt):
-        batchSize = 8
+    def eval(
+            self, 
+            agent: Callable[[str, dict], list[Response]], 
+            prompt :str,
+            batchSize :int):
         for i in range(0, len(self.testcases), batchSize):
             batch = self.testcases[i:i+batchSize]
             argsList = [{"query_str": testcase.input, "context_str": testcase.context} for testcase in batch]
             responses = agent(prompt=prompt, argsList=argsList)
             for j, response in enumerate(responses):
-                status = f"Testcase[{batch[j].input[:5]}] Ans[{truncate_text(response.response, 500).replace('\n', '//')}]"
+                status = f'Testcase[{batch[j].input[:5]}] Ans[{truncate_text(response.response, 500)}]'.replace("\n", "//")
                 if batch[j].eval(response):
                     self.succ += 1
                     logger.info(f"{status} succ")
@@ -100,17 +103,24 @@ class BenchTypeKeyword(BenchType):
 
 class Benchmarks(object):
     
-    def __init__(self, benchmarks :list) -> None:
+    def __init__(self, benchmarks :list, batchSize :int) -> None:
         self.benchmarks = benchmarks
+        self.batchSize = batchSize
 
-    def eval(self, agent: Callable[[str, dict], list[Response]], prompt):
+    def eval(
+            self, 
+            agent: Callable[[str, dict], list[Response]], 
+            prompt :str):
         for benchmark in self.benchmarks:
-            benchmark.eval(agent, prompt)
+            benchmark.eval(agent, prompt, self.batchSize)
 
     def report(self):
         for benchmark in self.benchmarks:
             logger.info(f"benchmark[{benchmark.filepathTest}] succ[{benchmark.succ}] fail[{benchmark.fail}] accuracy[{benchmark.getAccuracy()}]")
     
-    def evalAndReport(self, agent: Callable[[str, dict], list[Response]], prompt):
+    def evalAndReport(
+            self, 
+            agent: Callable[[str, dict], list[Response]], 
+            prompt :str):
         self.eval(agent=agent, prompt=prompt)
         self.report()
