@@ -106,12 +106,12 @@ class EnhancedHFLLM(EnhancedLLM) :
             padding=True)
         inputsList = inputsList.to(self._getModel().device)
 
+        param = {**self._llm.generate_kwargs, **kwargs}
         tokensList = self._getModel().generate(
             **inputsList,
             max_new_tokens=self._llm.max_new_tokens,
             stopping_criteria=self._llm._stopping_criteria,
-            **self._llm.generate_kwargs,
-            **kwargs)
+            **param)
 
         completion_tokens = []
         for i in range(len(tokensList)):

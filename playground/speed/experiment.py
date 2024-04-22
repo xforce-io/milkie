@@ -57,7 +57,10 @@ def experiment(
     def agentTask(prompt, argsList) -> list[Response]:
         nonlocal agent, cnt, totalTime, totalTokens
         t0 = time.time()
-        resps = agent.taskBatch(prompt, argsList)
+        resps = agent.taskBatch(
+            prompt, 
+            argsList, 
+            **globalConfig.getLLMConfig().generationArgs.toJson())
         t1 = time.time()
         totalTokens += sum(resp.metadata["numTokens"] for resp in resps)
         totalTime += t1-t0

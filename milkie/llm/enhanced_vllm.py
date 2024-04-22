@@ -65,10 +65,8 @@ class EnhancedVLLM(EnhancedLLM):
             **kwargs: Any
     ) -> list[CompletionResponse]:
         kwargs = kwargs if kwargs else {}
-        params = {**self._llm._model_kwargs, **kwargs}
-        sampling_params = SamplingParams(
-            repetition_penalty=kwargs.get("repetition_penalty", 1.0),
-            **params)
+        params = {**self._llm._model_kwargs, **{k: kwargs[k] for k in ["repetition_penalty", "temperature"]}}
+        sampling_params = SamplingParams(**params)
         outputs = self._getModel().generate(prompts, sampling_params)
 
         result = []

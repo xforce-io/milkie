@@ -57,7 +57,7 @@ class EnhancedLLM(object):
         result = []
         responses = self._chatBatch(
             [self._llm._get_messages(prompt, **args) for args in argsList],
-            kwargs)
+            **kwargs)
         for response in responses:
             output = response.message.content or ""
             result += [(self._llm._parse_output(output), len(response.raw["model_output"]))]
@@ -85,7 +85,10 @@ class EnhancedLLM(object):
         completion_response = self._complete(prompt, formatted=True, **kwargs)
         return completion_response_to_chat_response(completion_response)
 
-    def _chatBatch(self, messagesBatch: list[Sequence[ChatMessage]], **kwargs: Any) -> list[ChatResponse]:
+    def _chatBatch(
+            self, 
+            messagesBatch: list[Sequence[ChatMessage]], 
+            **kwargs: Any) -> list[ChatResponse]:
         prompts = []
         for messages in messagesBatch:
             prompts += [self._llm.messages_to_prompt(messages)]
