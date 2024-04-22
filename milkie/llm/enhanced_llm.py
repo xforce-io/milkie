@@ -67,18 +67,19 @@ class EnhancedLLM(object):
     def _getModel(self):
         pass
 
-    def _tokenizer_messages_to_prompt(self, messages: Sequence[ChatMessage]) -> str:
+    def _tokenizer_messages_to_prompt(self, messages: Sequence[ChatMessage]) -> list[list[int]]:
         """Use the tokenizer to convert messages to prompt. Fallback to generic."""
         if hasattr(self._tokenizer, "apply_chat_template"):
             messages_dict = [
                 {"role": message.role.value, "content": message.content}
                 for message in messages
             ]
-            tokens = self._tokenizer.apply_chat_template(
+            return self._tokenizer.apply_chat_template(
                 messages_dict,
-                add_generation_prompt=True)
-            return self._tokenizer.decode(tokens)
-        return generic_messages_to_prompt(messages)
+                add_generation_prompt=True,
+                padding=True,
+                return_tensors="pt")
+        return self._tokenizer(generic_messages_to_prompt(messages))
 
     def _chat(self, messages: Sequence[ChatMessage], **kwargs: Any) -> ChatResponse:
         prompt = self._llm.messages_to_prompt(messages)
@@ -89,10 +90,10 @@ class EnhancedLLM(object):
             self, 
             messagesBatch: list[Sequence[ChatMessage]], 
             **kwargs: Any) -> list[ChatResponse]:
-        prompts = []
+        promptsTokens = []
         for messages in messagesBatch:
-            prompts += [self._llm.messages_to_prompt(messages)]
-        completionResponses = self._completeBatch(prompts, formatted=True, **kwargs)
+            promptsTokens += [self._tokenizer_messages_to_prompt(messages)]
+        completionResponses = self._completeBatch(promptsTokens, formatted=True, **kwargs)
         return [completion_response_to_chat_response(completionResponse) for completionResponse in completionResponses]
 
     @abstractmethod
@@ -100,7 +101,7 @@ class EnhancedLLM(object):
         pass
 
     @abstractmethod
-    def _completeBatch(self, prompts: list[str], formatted: bool = False, **kwargs: Any) -> Any:
+    def _completeBatch(self, prompts: list[list[int]], **kwargs: Any) -> Any:
         pass
 
     @abstractmethod

@@ -13,6 +13,9 @@ def makeGlobalConfig(
     if "device" in kwargs:
         configYaml["llm"]["device"] = kwargs["device"]
 
+    if "batch_size" in kwargs:
+        configYaml["llm"]["batch_size"] = kwargs["batch_size"]
+
     if "quantization_type" in kwargs:
         configYaml["llm"]["model_args"]["quantization_type"] = kwargs["quantization_type"]
 
@@ -21,9 +24,6 @@ def makeGlobalConfig(
     
     if "torch_compile" in kwargs:
         configYaml["llm"]["model_args"]["torch_compile"] = kwargs["torch_compile"]
-
-    if "batch_size" in kwargs:
-        configYaml["llm"]["generation_args"]["batch_size"] = kwargs["batch_size"]
 
     if "repetition_penalty" in kwargs:
         configYaml["llm"]["generation_args"]["repetition_penalty"] = kwargs["repetition_penalty"]

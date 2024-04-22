@@ -26,8 +26,7 @@ class EnhancedVLLM(EnhancedLLM):
             model=model_name,
             tensor_parallel_size=1,
             max_new_tokens=max_new_tokens,
-            vllm_kwargs={"gpu_memory_utilization":0.75},
-            messages_to_prompt=self._tokenizer_messages_to_prompt,
+            vllm_kwargs={"gpu_memory_utilization":0.9},
             dtype="auto",)
 
         self._llm._client.set_tokenizer(self._tokenizer)
@@ -60,14 +59,15 @@ class EnhancedVLLM(EnhancedLLM):
 
     def _completeBatch(
             self, 
-            prompts: list[str], 
-            formatted: bool = False, 
+            inputsList: list[list[int]], 
             **kwargs: Any
     ) -> list[CompletionResponse]:
         kwargs = kwargs if kwargs else {}
         params = {**self._llm._model_kwargs, **{k: kwargs[k] for k in ["repetition_penalty", "temperature"]}}
         sampling_params = SamplingParams(**params)
-        outputs = self._getModel().generate(prompts, sampling_params)
+        outputs = self._getModel().generate(
+            prompt_token_ids=inputsList, 
+            sampling_params=sampling_params)
 
         result = []
         for output in outputs:

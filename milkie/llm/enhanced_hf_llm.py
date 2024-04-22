@@ -1,6 +1,5 @@
 import torch
-from typing import Any, Callable, Optional, Sequence
-from llama_index.legacy.core.llms.types import ChatMessage, CompletionResponse
+from llama_index.legacy.core.llms.types import CompletionResponse
 from llama_index.legacy.llms.huggingface import HuggingFaceLLM
 
 from milkie.llm.enhanced_llm import EnhancedLLM
@@ -36,8 +35,7 @@ class EnhancedHFLLM(EnhancedLLM) :
             model_kwargs=model_kwargs, 
             generate_kwargs=generate_kwargs, 
             is_chat_model=is_chat_model, 
-            system_prompt=system_prompt, 
-            messages_to_prompt=self._tokenizer_messages_to_prompt)
+            system_prompt=system_prompt)
 
         #refer suggestions from https://pytorch.org/blog/accelerating-generative-ai-2/
         if compile:
@@ -85,25 +83,10 @@ class EnhancedHFLLM(EnhancedLLM) :
 
     def _completeBatch(
             self, 
-            prompts: list[str], 
-            formatted: bool = False, 
+            inputsList: list[list[int]], 
             **kwargs: Any
     ) -> CompletionResponse:
         """Completion endpoint."""
-        def makeFullPrompt(prompt):
-            if not formatted:
-                if self._llm.query_wrapper_prompt:
-                    full_prompt = self._llm.query_wrapper_prompt.format(query_str=prompt)
-                if self._llm.system_prompt:
-                    full_prompt = f"{self._llm.system_prompt} {full_prompt}"
-            else:
-                full_prompt = prompt
-            return full_prompt
-
-        inputsList = self._llm._tokenizer(
-            [makeFullPrompt(prompt) for prompt in prompts], 
-            return_tensors="pt",
-            padding=True)
         inputsList = inputsList.to(self._getModel().device)
 
         param = {**self._llm.generate_kwargs, **kwargs}

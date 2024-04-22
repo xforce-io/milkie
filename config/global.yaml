@@ -7,12 +7,12 @@ llm:
   azure_endpoint: "https://artificial-intelligence-01.openai.azure.com/"
   api_version: "2023-12-01-preview"
   ctx_len: 4096
+  batch_size: 4
   model_args:
     torch_compile: False
     quantization_type: NONE
     attn_implementation: flash_attention_2
   generation_args:
-    batch_size: 4
     repetition_penalty: 1.0
     temperature: 0
     do_sample: False

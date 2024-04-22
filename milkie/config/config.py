@@ -155,13 +155,11 @@ class LLMModelArgs(BaseConfig):
 class LLMGenerationArgs(BaseConfig):
     def __init__(
             self,
-            batchSize :int,
             repetitionPenalty: float,
             temperature :float,
             doSample :bool,
             useCache :bool,
             promptLookupNumTokens: int):
-        self.batchSize = batchSize
         self.repetitionPenalty = repetitionPenalty
         self.temperature = temperature
         self.doSample = doSample
@@ -170,7 +168,6 @@ class LLMGenerationArgs(BaseConfig):
 
     def fromArgs(config :dict):
         llmGenerationArgs = LLMGenerationArgs(
-            batchSize=config["batch_size"] if "batch_size" in config else 1,
             repetitionPenalty=config["repetition_penalty"] if "repetition_penalty" in config else 1.0,
             temperature=config["temperature"] if "temperature" in config else 0,
             doSample=config["do_sample"] if "do_sample" in config else False,
@@ -199,6 +196,7 @@ class LLMConfig(BaseConfig):
             type :LLMType, 
             model :str, 
             ctxLen :int = 0,
+            batchSize :int = 1,
             framework :FRAMEWORK = FRAMEWORK.HUGGINGFACE,
             device :int = None,
             deploymentName :str = None,
@@ -210,6 +208,7 @@ class LLMConfig(BaseConfig):
         self.type = type
         self.model = model
         self.ctxLen = ctxLen
+        self.batchSize = batchSize
         self.framework = framework
         self.device = device
         self.deploymentName = deploymentName
@@ -235,6 +234,7 @@ class LLMConfig(BaseConfig):
                 type=LLMType.HUGGINGFACE, 
                 model=config["model"],
                 ctxLen=config["ctx_len"],
+                batchSize=config["batch_size"],
                 framework=framework,
                 device=device,
                 modelArgs=modelArgs,
@@ -243,6 +243,7 @@ class LLMConfig(BaseConfig):
             return LLMConfig(
                 type=LLMType.AZURE_OPENAI,
                 model=config["model"],
+                batchSize=config["batch_size"],
                 deploymentName=config["deployment_name"],
                 apiKey=config["api_key"],
                 azureEndpoint=config["azure_endpoint"],
