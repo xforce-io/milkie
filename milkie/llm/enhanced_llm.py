@@ -68,20 +68,23 @@ class EnhancedLLM(object):
     def _getModel(self):
         pass
 
-    def _tokenizer_messages_to_prompt(self, messages: Sequence[ChatMessage]) -> list[list[int]]:
+    def _tokenizer_messages_to_prompt(self, messagesBatch: list[Sequence[ChatMessage]]) -> dict:
         """Use the tokenizer to convert messages to prompt. Fallback to generic."""
         if hasattr(self._tokenizer, "apply_chat_template"):
-            messages_dict = [
-                {"role": message.role.value, "content": message.content}
-                for message in messages
-            ]
+            messagesDict = []
+            for messages in messagesBatch:
+                messagesDict += [[
+                    {"role": message.role.value, "content": message.content}
+                    for message in messages
+                ]]
             return self._tokenizer.apply_chat_template(
-                messages_dict,
+                messagesDict,
                 add_generation_prompt=True,
                 padding=True,
                 max_length=self.context_window,
+                return_dict=True,
                 return_tensors="pt")
-        return self._tokenizer(generic_messages_to_prompt(messages))
+        return self._tokenizer(generic_messages_to_prompt(messagesBatch))
 
     def _chat(self, messages: Sequence[ChatMessage], **kwargs: Any) -> ChatResponse:
         prompt = self._llm.messages_to_prompt(messages)
@@ -92,11 +95,8 @@ class EnhancedLLM(object):
             self, 
             messagesBatch: list[Sequence[ChatMessage]], 
             **kwargs: Any) -> list[ChatResponse]:
-        promptsTokens = []
-        for messages in messagesBatch:
-            promptsTokens += [self._tokenizer_messages_to_prompt(messages)]
-        promptsTokens = torch.stack(promptsTokens)
-        completionResponses = self._completeBatch(promptsTokens[0], **kwargs)
+        promptsTokens = self._tokenizer_messages_to_prompt(messagesBatch)
+        completionResponses = self._completeBatch(promptsTokens, **kwargs)
         return [completion_response_to_chat_response(completionResponse) for completionResponse in completionResponses]
 
     @abstractmethod

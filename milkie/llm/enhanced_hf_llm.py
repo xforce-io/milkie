@@ -84,29 +84,29 @@ class EnhancedHFLLM(EnhancedLLM) :
 
     def _completeBatch(
             self, 
-            inputsList: torch.tensor, 
+            inputs: dict, 
             **kwargs: Any
     ) -> CompletionResponse:
         """Completion endpoint."""
-        inputsList = inputsList.to(self._getModel().device)
+        inputs = inputs.to(self._getModel().device)
         
         param = {**self._llm.generate_kwargs, **kwargs}
         tokensList = self._getModel().generate(
-            inputs=inputsList,
+            **inputs,
             max_new_tokens=self._llm.max_new_tokens,
             stopping_criteria=self._llm._stopping_criteria,
             **param)
 
         completion_tokens = []
         for i in range(len(tokensList)):
-            completion_tokens += [tokensList[i][len(inputsList["input_ids"][i]):]]
+            completion_tokens += [tokensList[i][len(inputs["input_ids"][i]):]]
         completion = self._llm._tokenizer.batch_decode(completion_tokens, skip_special_tokens=True)
 
         completionResponses = []
         for i in range(len(tokensList)):
             completionResponses += [CompletionResponse(
                 text=completion[i], 
-                raw={"model_output": tokensList[i][len(inputsList["input_ids"][i]):]})]
+                raw={"model_output": tokensList[i][len(inputs["input_ids"][i]):]})]
         return completionResponses
 
     def _getSingleParameterSizeInBytes(self):
