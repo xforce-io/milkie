@@ -54,7 +54,7 @@ def experiment(
     totalTime = 0
     totalTokens = 0
 
-    def agentTask(prompt, argsList) -> list[Response]:
+    def agentTaskBatch(prompt :str, argsList :list) -> list[Response]:
         nonlocal agent, cnt, totalTime, totalTokens
         t0 = time.time()
         resps = agent.taskBatch(
@@ -67,7 +67,20 @@ def experiment(
         cnt += len(resps)
         return resps 
 
-    benchmarks.evalAndReport(agent=agentTask, prompt=promptQA)
+    def agentTaskSingle(prompt :str, argsList :list) -> list[Response]:
+        nonlocal agent, cnt, totalTime, totalTokens
+        t0 = time.time()
+        resps = agent.task(
+            prompt, 
+            argsList, 
+            **globalConfig.getLLMConfig().generationArgs.toJson())
+        t1 = time.time()
+        totalTokens += sum(resp.metadata["numTokens"] for resp in resps)
+        totalTime += t1-t0
+        cnt += len(resps)
+        return resps 
+
+    benchmarks.evalAndReport(agent=agentTaskSingle, prompt=promptQA)
     tokensPerSec = float(totalTokens)/totalTime
 
     #TODO: 1.412 is observered from the A800 GPU, need to remove this hard code

@@ -20,7 +20,7 @@ class PromptAgent(BaseAgent):
 
         self.prompt = Loader.load(config) if config else None
 
-    def task(self, query :str, **kwargs) -> Response:
+    def task(self, query :str, argsList :list[dict], **kwargs) -> Response:
         response = Response(response="", source_nodes=None, metadata={})
         chatPromptTmpl = ChatPromptTemplate(
             message_templates=[
@@ -34,7 +34,7 @@ class PromptAgent(BaseAgent):
         t0 = time.time()
         response.response, numTokens = self.context.globalContext.settings.llm.predict(
             prompt=chatPromptTmpl,
-            **kwargs)
+            **argsList[0])
         t1 = time.time()
         answer = response.response.replace("\n", "//")
         response.metadata["numTokens"] = numTokens
