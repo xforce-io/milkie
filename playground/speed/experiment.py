@@ -56,7 +56,7 @@ def experiment(
     totalTokens = 0
 
     def agentTaskBatch(prompt :str, argsList :list) -> list[Response]:
-        nonlocal agent, numQueries, totalTime, totalTokens
+        nonlocal agent, numQueries, numBatches, totalTime, totalTokens
         t0 = time.time()
         resps = agent.taskBatch(
             prompt, 
@@ -70,7 +70,7 @@ def experiment(
         return resps 
 
     def agentTaskSingle(prompt :str, argsList :list) -> list[Response]:
-        nonlocal agent, numQueries, totalTime, totalTokens
+        nonlocal agent, numQueries, numBatches, totalTime, totalTokens
         t0 = time.time()
         resp = agent.task(
             prompt, 
@@ -83,7 +83,7 @@ def experiment(
         numBatches += 1
         return [resp]
 
-    benchmarks.evalAndReport(agent=agentTaskSingle, prompt=promptQA)
+    benchmarks.evalAndReport(agent=agentTaskBatch, prompt=promptQA)
     tokensPerSec = float(totalTokens)/totalTime
 
     #TODO: 1.412 is observered from the A800 GPU, need to remove this hard code

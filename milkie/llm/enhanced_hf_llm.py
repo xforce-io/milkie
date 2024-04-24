@@ -20,8 +20,8 @@ class EnhancedHFLLM(EnhancedLLM) :
             generate_kwargs: dict, 
             is_chat_model: bool, 
             system_prompt: str) -> None:
-
         tokenizer_kwargs["padding_side"] = "left"
+
         super().__init__(context_window, tokenizer_name, tokenizer_kwargs)
 
         compile = model_kwargs.pop("torch_compile", False)
@@ -65,7 +65,10 @@ class EnhancedHFLLM(EnhancedLLM) :
             if self._llm.system_prompt:
                 full_prompt = f"{self._llm.system_prompt} {full_prompt}"
 
-        inputs = self._llm._tokenizer(text=full_prompt, return_tensors="pt")
+        inputs = self._llm._tokenizer(
+            text=full_prompt, 
+            return_tensors="pt", 
+            padding=True)
         inputs = inputs.to(self._getModel().device)
 
         for key in self._llm.tokenizer_outputs_to_remove:
@@ -91,8 +94,6 @@ class EnhancedHFLLM(EnhancedLLM) :
     ) -> CompletionResponse:
         """Completion endpoint."""
         inputs = self._llm._tokenizer(text=prompts, return_tensors="pt")
-        inputs = inputs.to(self._getModel().device)
-
         for key in self._llm.tokenizer_outputs_to_remove:
             for input in inputs:
                 if key in input:
