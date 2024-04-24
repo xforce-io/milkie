@@ -50,12 +50,13 @@ def experiment(
         ],
         globalConfig.getLLMConfig().batchSize)
 
-    cnt = 0
+    numQueries = 0
+    numBatches = 0
     totalTime = 0
     totalTokens = 0
 
     def agentTaskBatch(prompt :str, argsList :list) -> list[Response]:
-        nonlocal agent, cnt, totalTime, totalTokens
+        nonlocal agent, numQueries, totalTime, totalTokens
         t0 = time.time()
         resps = agent.taskBatch(
             prompt, 
@@ -64,21 +65,23 @@ def experiment(
         t1 = time.time()
         totalTokens += sum(resp.metadata["numTokens"] for resp in resps)
         totalTime += t1-t0
-        cnt += len(resps)
+        numQueries += len(resps)
+        numBatches += 1
         return resps 
 
     def agentTaskSingle(prompt :str, argsList :list) -> list[Response]:
-        nonlocal agent, cnt, totalTime, totalTokens
+        nonlocal agent, numQueries, totalTime, totalTokens
         t0 = time.time()
-        resps = agent.task(
+        resp = agent.task(
             prompt, 
             argsList, 
             **globalConfig.getLLMConfig().generationArgs.toJson())
         t1 = time.time()
-        totalTokens += sum(resp.metadata["numTokens"] for resp in resps)
+        totalTokens += resp.metadata["numTokens"]
         totalTime += t1-t0
-        cnt += len(resps)
-        return resps 
+        numQueries += 1
+        numBatches += 1
+        return [resp]
 
     benchmarks.evalAndReport(agent=agentTaskSingle, prompt=promptQA)
     tokensPerSec = float(totalTokens)/totalTime
@@ -87,11 +90,14 @@ def experiment(
     logger.info(f"Running "
                 f"kwargs[{kwargs}] "
                 f"costSec[{totalTime}] "
-                f"avgLatSec[{totalTime/cnt}] "
+                f"avgQueryLatSec[{totalTime/numQueries}] "
+                f"avgBatchLatSec[{totalTime/numBatches}] "
                 f"tokensPerSec[{tokensPerSec}] "
                 f"memory[{globalContext.settings.llm.getMem()}] "
                 f"mbu[{globalContext.settings.llm.getMBU(tokensPerSec, 1.412 * 1024**4)}] ")
-    ex.log_scalar("total", cnt)
+    ex.log_scalar("total", numQueries)
+    ex.log_scalar("avgQueryLatSec", totalTime/numQueries)
+    ex.log_scalar("avgBatchLatSec", totalTime/numBatches)
     ex.log_scalar("costMs", totalTime)
 
     getMemStat()
