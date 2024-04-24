@@ -59,14 +59,14 @@ class EnhancedVLLM(EnhancedLLM):
 
     def _completeBatch(
             self, 
-            inputsList: torch.tensor, 
+            prompts: list[str], 
             **kwargs: Any
     ) -> list[CompletionResponse]:
         kwargs = kwargs if kwargs else {}
         params = {**self._llm._model_kwargs, **{k: kwargs[k] for k in ["repetition_penalty", "temperature"]}}
         sampling_params = SamplingParams(**params)
         outputs = self._getModel().generate(
-            prompt_token_ids=inputsList, 
+            prompts=prompts, 
             sampling_params=sampling_params)
 
         result = []

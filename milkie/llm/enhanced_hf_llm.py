@@ -20,6 +20,8 @@ class EnhancedHFLLM(EnhancedLLM) :
             generate_kwargs: dict, 
             is_chat_model: bool, 
             system_prompt: str) -> None:
+
+        tokenizer_kwargs["padding_side"] = "left"
         super().__init__(context_window, tokenizer_name, tokenizer_kwargs)
 
         compile = model_kwargs.pop("torch_compile", False)
@@ -84,10 +86,18 @@ class EnhancedHFLLM(EnhancedLLM) :
 
     def _completeBatch(
             self, 
-            inputs: dict, 
+            prompts: list[str], 
             **kwargs: Any
     ) -> CompletionResponse:
         """Completion endpoint."""
+        inputs = self._llm._tokenizer(text=prompts, return_tensors="pt")
+        inputs = inputs.to(self._getModel().device)
+
+        for key in self._llm.tokenizer_outputs_to_remove:
+            for input in inputs:
+                if key in input:
+                    inputs.pop(key, None)
+
         inputs = inputs.to(self._getModel().device)
         
         param = {**self._llm.generate_kwargs, **kwargs}

@@ -14,27 +14,6 @@ logger = logging.getLogger(__name__)
 
 SystemPromptCn = Loader.load("system_prompt")
 
-def messagesToPrompt(messages: Sequence[ChatMessage]) -> str:
-    """Convert messages to a prompt string."""
-    string_messages = []
-    for message in messages:
-        role = message.role
-        content = message.content
-        string_message = f"{role.value}: {content}"
-
-        addtional_kwargs = message.additional_kwargs
-        if addtional_kwargs:
-            string_message += f"\n{addtional_kwargs}"
-        string_messages.append(string_message)
-
-    string_messages.append(f"{MessageRole.ASSISTANT.value}: ")
-    result = "\n".join(string_messages)
-
-    fmt_text_chunk = truncate_text(result, 5000).replace("\n", "//")
-    logger.debug(f"> prompt: [{len(fmt_text_chunk)}|{fmt_text_chunk}]")
-
-    return result
-
 class ModelFactory:
     
     def __init__(self) -> None:
@@ -67,8 +46,7 @@ class ModelFactory:
         tokenizerArgs = {
             "max_length": config.ctxLen, 
             "use_fast": False, 
-            "trust_remote_code": True, 
-            "padding_side": "left",}
+            "trust_remote_code": True,}
 
         if config.framework == FRAMEWORK.VLLM:
             self.llm = EnhancedVLLM(

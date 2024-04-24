@@ -21,9 +21,6 @@ class EnhancedLLM(object):
             tokenizer_kwargs :dict) -> None:
         self.context_window = context_window
         self._llm :LLM = None
-
-        if "model_max_length" not in tokenizer_kwargs:
-            tokenizer_kwargs["model_max_length"] = context_window
         self._tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, **tokenizer_kwargs)
 
     def getLLM(self) -> LLM:
@@ -68,7 +65,7 @@ class EnhancedLLM(object):
     def _getModel(self):
         pass
 
-    def _tokenizer_messages_to_prompt(self, messagesBatch: list[Sequence[ChatMessage]]) -> dict:
+    def _tokenizer_messages_to_prompt(self, messagesBatch: list[Sequence[ChatMessage]]) -> list[str]:
         """Use the tokenizer to convert messages to prompt. Fallback to generic."""
         if hasattr(self._tokenizer, "apply_chat_template"):
             messagesDict = []
@@ -80,11 +77,8 @@ class EnhancedLLM(object):
             return self._tokenizer.apply_chat_template(
                 messagesDict,
                 add_generation_prompt=True,
-                padding=True,
-                max_length=self.context_window,
-                return_dict=True,
-                return_tensors="pt")
-        return self._tokenizer(generic_messages_to_prompt(messagesBatch))
+                tokenize=False)
+        return [generic_messages_to_prompt(messagesBatch)]
 
     def _chat(self, messages: Sequence[ChatMessage], **kwargs: Any) -> ChatResponse:
         prompt = self._llm.messages_to_prompt(messages)
@@ -95,8 +89,8 @@ class EnhancedLLM(object):
             self, 
             messagesBatch: list[Sequence[ChatMessage]], 
             **kwargs: Any) -> list[ChatResponse]:
-        promptsTokens = self._tokenizer_messages_to_prompt(messagesBatch)
-        completionResponses = self._completeBatch(promptsTokens, **kwargs)
+        prompts = self._tokenizer_messages_to_prompt(messagesBatch)
+        completionResponses = self._completeBatch(prompts, **kwargs)
         return [completion_response_to_chat_response(completionResponse) for completionResponse in completionResponses]
 
     @abstractmethod
