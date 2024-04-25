@@ -55,9 +55,6 @@ class TestcaseKeyword:
         self.filter = KeywordFilter(json.loads(config["keypoints"]))
         self.keypoints = config["keypoints"]
 
-    def keypoints(self):
-        return self.keypoints
-
     def eval(self, resp) -> bool:
         return self.filter.match(resp.response)
 

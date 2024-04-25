@@ -1,6 +1,7 @@
 from typing import Any, Callable, Optional, Sequence
 
 from llama_index.core.prompts.base import BasePromptTemplate
+from milkie.config.config import QuantMethod
 from vllm import SamplingParams
 from llama_index.legacy.llms.vllm import Vllm
 from llama_index_client import BasePromptTemplate, ChatMessage
@@ -26,7 +27,7 @@ class EnhancedVLLM(EnhancedLLM):
             model=model_name,
             tensor_parallel_size=1,
             max_new_tokens=max_new_tokens,
-            vllm_kwargs={"gpu_memory_utilization":0.9, "quantization" : None if model_name.find("GPTQ") < 0 else "gptq"},
+            vllm_kwargs={"gpu_memory_utilization":0.9, "quantization" : None if EnhancedLLM.getQuantMethod(model_name) == QuantMethod.NONE else "gptq"},
             dtype="auto",)
 
         self._llm._client.set_tokenizer(self._tokenizer)

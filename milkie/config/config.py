@@ -50,10 +50,15 @@ class RewriteStrategy(Enum):
     QUERY_REWRITE = 1
     HYDE = 2
 
-class QuantizationType(Enum):
+class QuantType(Enum):
     NONE = 0
     INT8 = 1
     INT4 = 2
+
+class QuantMethod(Enum):
+    NONE = 0
+    GPTQ = 1
+    AWQ = 2
 
 class MemoryTermConfig(BaseConfig):
     def __init__(
@@ -95,7 +100,7 @@ class LLMModelArgs(BaseConfig):
     def __init__(
             self,
             attnImplementation :str, 
-            quantizationType :QuantizationType,
+            quantizationType :QuantType,
             torchCompile :bool):
         self.attnImplementation = attnImplementation
         self.quantizationType = quantizationType
@@ -104,11 +109,11 @@ class LLMModelArgs(BaseConfig):
         self.trustRemoteCode = True
 
     def fromArgs(config :dict):
-        quantizationType = QuantizationType.NONE
-        if config["quantization_type"] == QuantizationType.INT8.name:
-            quantizationType = QuantizationType.INT8
-        elif config["quantization_type"] == QuantizationType.INT4.name:
-            quantizationType = QuantizationType.INT4
+        quantizationType = QuantType.NONE
+        if config["quantization_type"] == QuantType.INT8.name:
+            quantizationType = QuantType.INT8
+        elif config["quantization_type"] == QuantType.INT4.name:
+            quantizationType = QuantType.INT4
         
         llmModelArgs = LLMModelArgs(
             attnImplementation=config["attn_implementation"] if "attn_implementation" in config else None,
@@ -126,9 +131,9 @@ class LLMModelArgs(BaseConfig):
             result["attn_implementation"] = self.attnImplementation
 
         quantizationConfig = None
-        if self.quantizationType == QuantizationType.INT8:
+        if self.quantizationType == QuantType.INT8:
             quantizationConfig = BitsAndBytesConfig(load_in_8bit=True)
-        elif self.quantizationType == QuantizationType.INT4:
+        elif self.quantizationType == QuantType.INT4:
             quantizationConfig = BitsAndBytesConfig(load_in_4bit=True)
         
         if quantizationConfig:

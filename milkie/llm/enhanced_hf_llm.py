@@ -3,6 +3,7 @@ import torch
 from llama_index.legacy.core.llms.types import CompletionResponse
 from llama_index.legacy.llms.huggingface import HuggingFaceLLM
 
+from milkie.config.config import QuantMethod
 from milkie.llm.enhanced_llm import EnhancedLLM
 
 class EnhancedHFLLM(EnhancedLLM) :
@@ -29,6 +30,17 @@ class EnhancedHFLLM(EnhancedLLM) :
         if device is not None:
             torch.cuda.set_device(device)
 
+        from transformers import AutoModelForCausalLM
+        from auto_gptq import AutoGPTQForCausalLM
+        if EnhancedLLM.getQuantMethod(model_name) == QuantMethod.GPTQ:
+            model = AutoGPTQForCausalLM.from_pretrained(
+                model_name, **model_kwargs
+            )
+        else:
+            model = AutoModelForCausalLM.from_pretrained(
+                model_name, **model_kwargs
+            )
+
         self._llm = HuggingFaceLLM(
             context_window=context_window, 
             max_new_tokens=max_new_tokens, 
@@ -36,6 +48,7 @@ class EnhancedHFLLM(EnhancedLLM) :
             tokenizer=self._tokenizer,
             tokenizer_name=model_name,
             model_name=model_name, 
+            model=model,
             model_kwargs=model_kwargs, 
             generate_kwargs=generate_kwargs, 
             is_chat_model=is_chat_model, 

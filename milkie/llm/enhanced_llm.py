@@ -13,6 +13,8 @@ from llama_index.legacy.llms.generic_utils import (
     messages_to_prompt as generic_messages_to_prompt,
 )
 
+from milkie.config.config import QuantMethod
+
 class EnhancedLLM(object):
 
     def __init__(self,
@@ -31,6 +33,14 @@ class EnhancedLLM(object):
 
     def getNumParams(self) -> int:
         return 0
+
+    def getQuantMethod(modelName :str) -> QuantMethod:
+        if modelName.lower().find("gptq") >= 0:
+            return QuantMethod.GPTQ
+        elif modelName.lower().find("awq") >= 0:
+            return QuantMethod.AWQ
+        else:
+            return QuantMethod.NONE
 
     #get memory bandwidth utilization
     def getMBU(self, tokensPerSec :float, memBandwidth :float) -> float:
