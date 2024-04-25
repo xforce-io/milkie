@@ -53,6 +53,10 @@ class TestcaseKeyword:
         self.input = config["input"]
         self.context = config["context"]
         self.filter = KeywordFilter(json.loads(config["keypoints"]))
+        self.keypoints = config["keypoints"]
+
+    def keypoints(self):
+        return self.keypoints
 
     def eval(self, resp) -> bool:
         return self.filter.match(resp.response)
@@ -90,7 +94,7 @@ class BenchTypeKeyword(BenchType):
             argsList = [{"query_str": testcase.input, "context_str": testcase.context} for testcase in batch]
             responses = agent(prompt=prompt, argsList=argsList)
             for j, response in enumerate(responses):
-                status = f'Testcase[{batch[j].input[:5]}] Ans[{truncate_text(response.response, 500)}]'.replace("\n", "//")
+                status = f'Testcase[{batch[j].input[:30]}] Ans[{truncate_text(response.response, 500)}] Keypoints[{batch[j].keypoints()}]'.replace("\n", "//")
                 if batch[j].eval(response):
                     self.succ += 1
                     logger.info(f"{status} succ")

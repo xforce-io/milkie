@@ -34,6 +34,7 @@ class EnhancedHFLLM(EnhancedLLM) :
             max_new_tokens=max_new_tokens, 
             query_wrapper_prompt=query_wrapper_prompt, 
             tokenizer=self._tokenizer,
+            tokenizer_name=model_name,
             model_name=model_name, 
             model_kwargs=model_kwargs, 
             generate_kwargs=generate_kwargs, 

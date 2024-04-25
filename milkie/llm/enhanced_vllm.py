@@ -26,8 +26,7 @@ class EnhancedVLLM(EnhancedLLM):
             model=model_name,
             tensor_parallel_size=1,
             max_new_tokens=max_new_tokens,
-            vllm_kwargs={"gpu_memory_utilization":0.9},
-            quantization=None if model_name.find("GPTQ") < 0 else "gptq",
+            vllm_kwargs={"gpu_memory_utilization":0.9, "quantization" : None if model_name.find("GPTQ") < 0 else "gptq"},
             dtype="auto",)
 
         self._llm._client.set_tokenizer(self._tokenizer)

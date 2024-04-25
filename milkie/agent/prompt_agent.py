@@ -61,7 +61,6 @@ class PromptAgent(BaseAgent):
         responses = []
         for result in resultBatch:
             response = Response(response=result[0], source_nodes=None, metadata={})
-            #answer = response[0].replace("\n", "//")
             response.metadata["numTokens"] = result[1]
             responses += [response]
         logger.debug(f"prompt_agent query[{query}] batchSize[{len(resultBatch)}] cost[{t1-t0}]".replace("\n", "//"))
