@@ -20,9 +20,12 @@ class EnhancedLLM(object):
     def __init__(self,
             context_window :int,
             tokenizer_name :str,
+            device :str,
             tokenizer_kwargs :dict) -> None:
         self.context_window = context_window
         self._llm :LLM = None
+        if device is not None:
+            torch.cuda.set_device(device)
         self._tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, **tokenizer_kwargs)
 
     def getLLM(self) -> LLM:
@@ -108,7 +111,7 @@ class EnhancedLLM(object):
         pass
 
     @abstractmethod
-    def _completeBatch(self, prompts: list[list[int]], **kwargs: Any) -> Any:
+    def _completeBatch(self, prompts: list[str], **kwargs: Any) -> Any:
         pass
 
     @abstractmethod

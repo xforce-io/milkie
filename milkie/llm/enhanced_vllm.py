@@ -18,11 +18,8 @@ class EnhancedVLLM(EnhancedLLM):
             device :str,
             max_new_tokens: int,
             tokenizer_kwargs: dict):
-        super().__init__(context_window, tokenizer_name, tokenizer_kwargs)
+        super().__init__(context_window, tokenizer_name, device, tokenizer_kwargs)
         
-        if device is not None:
-            torch.cuda.set_device(device)
-
         self._llm = Vllm(
             model=model_name,
             tensor_parallel_size=1,

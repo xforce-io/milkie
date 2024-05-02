@@ -6,6 +6,7 @@ from llama_index.legacy.core.llms.types import MessageRole, ChatMessage
 from llama_index.legacy.utils import truncate_text
 
 from milkie.llm.enhanced_hf_llm import EnhancedHFLLM
+from milkie.llm.enhanced_lmdeploy import EnhancedLmDeploy
 from milkie.llm.enhanced_vllm import EnhancedVLLM
 from milkie.prompt.prompt import Loader
 from milkie.config.config import FRAMEWORK, EmbeddingConfig, LLMConfig
@@ -50,6 +51,14 @@ class ModelFactory:
 
         if config.framework == FRAMEWORK.VLLM:
             self.llm = EnhancedVLLM(
+                context_window=config.ctxLen,
+                tokenizer_name=config.model,
+                model_name=config.model,
+                device=config.device,
+                max_new_tokens=256,
+                tokenizer_kwargs=tokenizerArgs)
+        elif config.framework == FRAMEWORK.LMDEPLOY:
+            self.llm = EnhancedLmDeploy(
                 context_window=config.ctxLen,
                 tokenizer_name=config.model,
                 model_name=config.model,

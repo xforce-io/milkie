@@ -23,19 +23,17 @@ class EnhancedHFLLM(EnhancedLLM) :
             system_prompt: str) -> None:
         tokenizer_kwargs["padding_side"] = "left"
 
-        super().__init__(context_window, tokenizer_name, tokenizer_kwargs)
+        super().__init__(context_window, tokenizer_name, device, tokenizer_kwargs)
 
         compile = model_kwargs.pop("torch_compile", False)
-
-        if device is not None:
-            torch.cuda.set_device(device)
 
         from transformers import AutoModelForCausalLM
         from auto_gptq import AutoGPTQForCausalLM
         if EnhancedLLM.getQuantMethod(model_name) == QuantMethod.GPTQ:
-            model = AutoGPTQForCausalLM.from_pretrained(
+            model = AutoGPTQForCausalLM.from_quantized(
                 model_name, **model_kwargs
             )
+            model.config.attn_implementation = model_kwargs["attn_implementation"]
         else:
             model = AutoModelForCausalLM.from_pretrained(
                 model_name, **model_kwargs
@@ -79,7 +77,7 @@ class EnhancedHFLLM(EnhancedLLM) :
             if self._llm.system_prompt:
                 full_prompt = f"{self._llm.system_prompt} {full_prompt}"
 
-        inputs = self._llm._tokenizer(
+        inputs = self._tokenizer(
             text=full_prompt, 
             return_tensors="pt", 
             padding=True)
@@ -96,7 +94,7 @@ class EnhancedHFLLM(EnhancedLLM) :
             **self._llm.generate_kwargs,
         )
         completion_tokens = tokens[0][inputs["input_ids"].size(1) :]
-        completion = self._llm._tokenizer.decode(completion_tokens, skip_special_tokens=True)
+        completion = self._tokenizer.decode(completion_tokens, skip_special_tokens=True)
         return CompletionResponse(
             text=completion, 
             raw={"model_output": tokens[0][len(inputs["input_ids"][0]):]})
@@ -107,7 +105,7 @@ class EnhancedHFLLM(EnhancedLLM) :
             **kwargs: Any
     ) -> CompletionResponse:
         """Completion endpoint."""
-        inputs = self._llm._tokenizer(text=prompts, return_tensors="pt")
+        inputs = self._tokenizer(text=prompts, return_tensors="pt")
         for key in self._llm.tokenizer_outputs_to_remove:
             for input in inputs:
                 if key in input:
@@ -125,7 +123,7 @@ class EnhancedHFLLM(EnhancedLLM) :
         completion_tokens = []
         for i in range(len(tokensList)):
             completion_tokens += [tokensList[i][len(inputs["input_ids"][i]):]]
-        completion = self._llm._tokenizer.batch_decode(completion_tokens, skip_special_tokens=True)
+        completion = self._tokenizer.batch_decode(completion_tokens, skip_special_tokens=True)
 
         completionResponses = []
         for i in range(len(tokensList)):

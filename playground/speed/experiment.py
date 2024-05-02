@@ -111,8 +111,8 @@ def mainFunc():
             if llm_model == ModelQwenV15S14bChat:
                 device = 0
 
-            for framework in [FRAMEWORK.VLLM.name, FRAMEWORK.HUGGINGFACE.name]:
-                for batch_size in [1, 2, 4]:
+            for framework in [FRAMEWORK.LMDEPLOY.name]:
+                for batch_size in [10]:
                     for use_cache in [True]:
                         for quantization_type in [None]:
                             for prompt_lookup_num_tokens in [None]:

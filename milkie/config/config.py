@@ -28,6 +28,7 @@ class LLMType(Enum):
 class FRAMEWORK(Enum):
     HUGGINGFACE = 0
     VLLM = 1
+    LMDEPLOY = 2
 
 class EmbeddingType(Enum):
     HUGGINGFACE = 0
@@ -226,6 +227,8 @@ class LLMConfig(BaseConfig):
         framework = FRAMEWORK.HUGGINGFACE
         if config["framework"] == FRAMEWORK.VLLM.name:
             framework = FRAMEWORK.VLLM
+        elif config["framework"] == FRAMEWORK.LMDEPLOY.name:
+            framework = FRAMEWORK.LMDEPLOY
 
         device = None
         if "device" in config.keys():
