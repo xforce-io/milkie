@@ -7,7 +7,7 @@ from lmdeploy.messages import TurbomindEngineConfig
 from llama_index.legacy.llms.generic_utils import (
     completion_response_to_chat_response,
 )
-from llama_index.legacy.llms.llm import CustomLLM
+from llama_index.legacy.llms.custom import CustomLLM
 from llama_index.legacy.core.llms.types import (
     ChatMessage,
     ChatResponse,
@@ -36,7 +36,7 @@ class LMDeploy(CustomLLM):
             model_format="hf",
             session_len=context_window,
             tp=1)
-        self.model = model_name
+        super().__init__(model=model_name)
         turboMind = TurboMind.from_pretrained(model_name, engineConfig)
         self._client = turboMind.create_instance()
 
@@ -109,11 +109,14 @@ class EnhancedLmDeploy(EnhancedLLM):
             device: str,
             max_new_tokens: int,
             tokenizer_kwargs: dict) -> None:
+        tokenizer_kwargs["padding_side"] = "left"
+
         super().__init__(context_window, tokenizer_name, device, tokenizer_kwargs)
 
         self._llm = LMDeploy(
                 model_name, 
                 context_window)
+        self.device = device
 
     def _completeBatch(
             self, 
@@ -121,8 +124,8 @@ class EnhancedLmDeploy(EnhancedLLM):
             **kwargs: Any
     ) -> CompletionResponse:
         """Completion endpoint."""
-        inputs = self._tokenizer(text=prompts, return_tensors="pt")
-        inputs = inputs.to(self._getModel().device)
+        inputs = self._tokenizer(text=prompts, return_tensors="pt", padding=True)
+        inputs = inputs.to(self.device)
         
         engineOutputs = self.modelInst().batched_infer(
             session_ids=[random.randint(0, 1000000) for _ in range(len(prompts))],
