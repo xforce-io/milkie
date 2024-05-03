@@ -19,29 +19,35 @@ from llama_index.legacy.core.llms.types import (
     LLMMetadata,
 )
 from llama_index.legacy.llms.base import llm_chat_callback, llm_completion_callback
+from llama_index.legacy.bridge.pydantic import Field, PrivateAttr
 
 class LMDeploy(LLM):
+
+    _client: Any = PrivateAttr()
     
-    def __init__(self, model_name: str) -> None:
+    def __init__(
+            self, 
+            model_name: str,
+            context_window :int) -> None:
         engineConfig = TurbomindEngineConfig(
             cache_max_entry_count=0.8,
             cache_block_seq_len=64,
             model_format="hf",
-            session_len=self.context_window,
+            session_len=context_window,
             tp=1)
-        self.model_name = model_name
-        self._model = TurboMind.from_pretrained(model_name, engineConfig)
-        self._modelInst = self._model.create_instance()
+        self.model = model_name
+        turboMind = TurboMind.from_pretrained(model_name, engineConfig)
+        _client = turboMind.create_instance()
 
     def modelInst(self):
-        return self._modelInst
+        return self._client
 
     def class_name(cls) -> str:
         return "LMDeploy"
 
     @property
     def metadata(self) -> LLMMetadata:
-        return LLMMetadata(model_name=self.model_name)
+        return LLMMetadata(model_name=self.model)
 
     @llm_chat_callback()
     def chat(self, messages: Sequence[ChatMessage], **kwargs: Any) -> ChatResponse:
@@ -104,8 +110,9 @@ class EnhancedLmDeploy(EnhancedLLM):
             tokenizer_kwargs: dict) -> None:
         super().__init__(context_window, tokenizer_name, device, tokenizer_kwargs)
 
-        self._llm = LMDeploy(model_name)
-        self._modelInst = self._llm.modelInst()
+        self._llm = LMDeploy(
+                model_name, 
+                context_window)
 
     def _completeBatch(
             self, 
@@ -116,7 +123,7 @@ class EnhancedLmDeploy(EnhancedLLM):
         inputs = self._tokenizer(text=prompts, return_tensors="pt")
         inputs = inputs.to(self._getModel().device)
         
-        engineOutputs = self._modelInst.batched_infer(
+        engineOutputs = self.modelInst().batched_infer(
             session_ids=[random.randint(0, 1000000) for _ in range(len(prompts))],
             token_ids=inputs,
         )
