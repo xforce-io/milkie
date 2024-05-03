@@ -1,5 +1,5 @@
 import random
-from typing import Any, Sequence
+from typing import Any, Optional, Sequence
 from milkie.llm.enhanced_llm import EnhancedLLM
 from lmdeploy.turbomind import TurboMind
 from lmdeploy.messages import TurbomindEngineConfig
@@ -7,7 +7,7 @@ from lmdeploy.messages import TurbomindEngineConfig
 from llama_index.legacy.llms.generic_utils import (
     completion_response_to_chat_response,
 )
-from llama_index.legacy.llms.llm import LLM
+from llama_index.legacy.llms.llm import CustomLLM
 from llama_index.legacy.core.llms.types import (
     ChatMessage,
     ChatResponse,
@@ -21,8 +21,9 @@ from llama_index.legacy.core.llms.types import (
 from llama_index.legacy.llms.base import llm_chat_callback, llm_completion_callback
 from llama_index.legacy.bridge.pydantic import Field, PrivateAttr
 
-class LMDeploy(LLM):
+class LMDeploy(CustomLLM):
 
+    model: Optional[str] = Field(description="The HuggingFace Model to use.")
     _client: Any = PrivateAttr()
     
     def __init__(
@@ -37,7 +38,7 @@ class LMDeploy(LLM):
             tp=1)
         self.model = model_name
         turboMind = TurboMind.from_pretrained(model_name, engineConfig)
-        _client = turboMind.create_instance()
+        self._client = turboMind.create_instance()
 
     def modelInst(self):
         return self._client
