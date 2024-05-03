@@ -1,10 +1,24 @@
 import random
-from typing import Any
+from typing import Any, Sequence
 from milkie.llm.enhanced_llm import EnhancedLLM
 from lmdeploy.turbomind import TurboMind
 from lmdeploy.messages import TurbomindEngineConfig
+
+from llama_index.legacy.llms.generic_utils import (
+    completion_response_to_chat_response,
+)
 from llama_index.legacy.llms.llm import LLM
-from llama_index.legacy.core.llms.types import CompletionResponse
+from llama_index.legacy.core.llms.types import (
+    ChatMessage,
+    ChatResponse,
+    ChatResponseAsyncGen,
+    ChatResponseGen,
+    CompletionResponse,
+    CompletionResponseAsyncGen,
+    CompletionResponseGen,
+    LLMMetadata,
+)
+from llama_index.legacy.llms.base import llm_chat_callback, llm_completion_callback
 
 class LMDeploy(LLM):
     
@@ -15,11 +29,69 @@ class LMDeploy(LLM):
             model_format="hf",
             session_len=self.context_window,
             tp=1)
+        self.model_name = model_name
         self._model = TurboMind.from_pretrained(model_name, engineConfig)
         self._modelInst = self._model.create_instance()
 
     def modelInst(self):
         return self._modelInst
+
+    def class_name(cls) -> str:
+        return "LMDeploy"
+
+    @property
+    def metadata(self) -> LLMMetadata:
+        return LLMMetadata(model_name=self.model_name)
+
+    @llm_chat_callback()
+    def chat(self, messages: Sequence[ChatMessage], **kwargs: Any) -> ChatResponse:
+        kwargs = kwargs if kwargs else {}
+        prompt = self.messages_to_prompt(messages)
+        completion_response = self.complete(prompt, **kwargs)
+        return completion_response_to_chat_response(completion_response)
+
+    @llm_completion_callback()
+    def complete(
+        self, prompt: str, formatted: bool = False, **kwargs: Any
+    ) -> CompletionResponse:
+        raise (ValueError("Not Implemented"))
+
+    @llm_chat_callback()
+    def stream_chat(
+        self, messages: Sequence[ChatMessage], **kwargs: Any
+    ) -> ChatResponseGen:
+        raise (ValueError("Not Implemented"))
+
+    @llm_completion_callback()
+    def stream_complete(
+        self, prompt: str, formatted: bool = False, **kwargs: Any
+    ) -> CompletionResponseGen:
+        raise (ValueError("Not Implemented"))
+
+    @llm_chat_callback()
+    async def achat(
+        self, messages: Sequence[ChatMessage], **kwargs: Any
+    ) -> ChatResponse:
+        kwargs = kwargs if kwargs else {}
+        return self.chat(messages, **kwargs)
+
+    @llm_completion_callback()
+    async def acomplete(
+        self, prompt: str, formatted: bool = False, **kwargs: Any
+    ) -> CompletionResponse:
+        raise (ValueError("Not Implemented"))
+
+    @llm_chat_callback()
+    async def astream_chat(
+        self, messages: Sequence[ChatMessage], **kwargs: Any
+    ) -> ChatResponseAsyncGen:
+        raise (ValueError("Not Implemented"))
+
+    @llm_completion_callback()
+    async def astream_complete(
+        self, prompt: str, formatted: bool = False, **kwargs: Any
+    ) -> CompletionResponseAsyncGen:
+        raise (ValueError("Not Implemented"))
 
 class EnhancedLmDeploy(EnhancedLLM):
     def __init__(
