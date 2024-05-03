@@ -3,7 +3,23 @@ from typing import Any
 from milkie.llm.enhanced_llm import EnhancedLLM
 from lmdeploy.turbomind import TurboMind
 from lmdeploy.messages import TurbomindEngineConfig
+from llama_index.legacy.llms.llm import LLM
 from llama_index.legacy.core.llms.types import CompletionResponse
+
+class LMDeploy(LLM):
+    
+    def __init__(self, model_name: str) -> None:
+        engineConfig = TurbomindEngineConfig(
+            cache_max_entry_count=0.8,
+            cache_block_seq_len=64,
+            model_format="hf",
+            session_len=self.context_window,
+            tp=1)
+        self._model = TurboMind.from_pretrained(model_name, engineConfig)
+        self._modelInst = self._model.create_instance()
+
+    def modelInst(self):
+        return self._modelInst
 
 class EnhancedLmDeploy(EnhancedLLM):
     def __init__(
@@ -16,14 +32,8 @@ class EnhancedLmDeploy(EnhancedLLM):
             tokenizer_kwargs: dict) -> None:
         super().__init__(context_window, tokenizer_name, device, tokenizer_kwargs)
 
-        engineConfig = TurbomindEngineConfig(
-            cache_max_entry_count=0.8,
-            cache_block_seq_len=64,
-            model_format="hf",
-            session_len=self.context_window,
-            tp=1)
-        self._llm = TurboMind.from_pretrained(model_name, engineConfig)
-        self._modelInst = self._llm.create_instance()
+        self._llm = LMDeploy(model_name)
+        self._modelInst = self._llm.modelInst()
 
     def _completeBatch(
             self, 
