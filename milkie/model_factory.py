@@ -52,6 +52,7 @@ class ModelFactory:
         if config.framework == FRAMEWORK.VLLM:
             self.llm = EnhancedVLLM(
                 context_window=config.ctxLen,
+                concurrency=config.batchSize,
                 tokenizer_name=config.model,
                 model_name=config.model,
                 device=config.device,
@@ -60,6 +61,7 @@ class ModelFactory:
         elif config.framework == FRAMEWORK.LMDEPLOY:
             self.llm = EnhancedLmDeploy(
                 context_window=config.ctxLen,
+                concurrency=config.batchSize,
                 tokenizer_name=config.model,
                 model_name=config.model,
                 device=config.device,
@@ -68,6 +70,7 @@ class ModelFactory:
         else :
             self.llm = EnhancedHFLLM(
                 context_window=config.ctxLen,
+                concurrency=config.batchSize,
                 device=config.device,
                 max_new_tokens=256,
                 model_kwargs=config.modelArgs.toJson(),

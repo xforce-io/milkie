@@ -106,7 +106,7 @@ class Request:
     def __init__(
             self, 
             prompt: str, 
-            tokenized: list[dict],
+            tokenized: dict,
             **kwargs: Any) -> None:
         self.prompt = prompt
         self.tokenized = tokenized
@@ -148,7 +148,10 @@ class EnhancedLmDeploy(EnhancedLLM):
         inputs = inputs.to(self.device)
         
         for i, prompt in enumerate(prompts):
-            self.resQueue.put(Request(prompt, inputs[i], **kwargs))
+            self.resQueue.put(Request(
+                    prompt, 
+                    {"input_ids": inputs["input_ids"][i], "attention_mask": inputs["attention_mask"][i]},
+                    **kwargs))
         for i in range(self.concurrency):
             self.resQueue.put(None)
         
