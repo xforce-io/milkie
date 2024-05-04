@@ -11,6 +11,7 @@ class EnhancedHFLLM(EnhancedLLM) :
     def __init__(
             self, 
             context_window: int, 
+            concurrency: int,
             max_new_tokens: int, 
             query_wrapper_prompt: str, 
             tokenizer_name: str, 
@@ -23,7 +24,7 @@ class EnhancedHFLLM(EnhancedLLM) :
             system_prompt: str) -> None:
         tokenizer_kwargs["padding_side"] = "left"
 
-        super().__init__(context_window, tokenizer_name, device, tokenizer_kwargs)
+        super().__init__(context_window, concurrency, tokenizer_name, device, tokenizer_kwargs)
 
         compile = model_kwargs.pop("torch_compile", False)
 

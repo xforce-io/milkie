@@ -19,10 +19,12 @@ class EnhancedLLM(object):
 
     def __init__(self,
             context_window :int,
+            concurrency :int,
             tokenizer_name :str,
             device :str,
             tokenizer_kwargs :dict) -> None:
         self.context_window = context_window
+        self.concurrency = concurrency
         self._llm :LLM = None
         if device is not None:
             torch.cuda.set_device(device)

@@ -1,8 +1,10 @@
 import random
+from queue import Queue
+from threading import Thread
 from typing import Any, Optional, Sequence
 from milkie.llm.enhanced_llm import EnhancedLLM
 from lmdeploy.turbomind import TurboMind
-from lmdeploy.messages import TurbomindEngineConfig
+from lmdeploy.messages import (TurbomindEngineConfig, EngineGenerationConfig, EngineOutput)
 
 from llama_index.legacy.llms.generic_utils import (
     completion_response_to_chat_response,
@@ -100,10 +102,21 @@ class LMDeploy(CustomLLM):
     ) -> CompletionResponseAsyncGen:
         raise (ValueError("Not Implemented"))
 
+class Request:
+    def __init__(
+            self, 
+            prompt: str, 
+            tokenized: list[dict],
+            **kwargs: Any) -> None:
+        self.prompt = prompt
+        self.tokenized = tokenized
+        self.kwargs = kwargs
+
 class EnhancedLmDeploy(EnhancedLLM):
     def __init__(
             self, 
             context_window: int, 
+            concurrency: int,
             tokenizer_name: str, 
             model_name: str,
             device: str,
@@ -111,35 +124,67 @@ class EnhancedLmDeploy(EnhancedLLM):
             tokenizer_kwargs: dict) -> None:
         tokenizer_kwargs["padding_side"] = "left"
 
-        super().__init__(context_window, tokenizer_name, device, tokenizer_kwargs)
+        super().__init__(context_window, concurrency, tokenizer_name, device, tokenizer_kwargs)
 
         self._llm = LMDeploy(
                 model_name, 
                 context_window)
         self.device = device
+        self.maxNewTokens = max_new_tokens
+        self.reqQueue = Queue()
+        self.resQueue = Queue()
+        self.threads = []
 
     def _completeBatch(
             self, 
             prompts: list[str], 
             **kwargs: Any
     ) -> CompletionResponse:
-        """Completion endpoint."""
+        self.reqQueue.queue.clear()
+        self.resQueue.queue.clear()
+        self.threads.clear()
+        
         inputs = self._tokenizer(text=prompts, return_tensors="pt", padding=True)
         inputs = inputs.to(self.device)
         
-        engineOutputs = self.modelInst().batched_infer(
-            session_ids=[random.randint(0, 1000000) for _ in range(len(prompts))],
-            token_ids=inputs,
-        )
+        for i, prompt in enumerate(prompts):
+            self.resQueue.put(Request(prompt, inputs[i], **kwargs))
+        for i in range(self.concurrency):
+            self.resQueue.put(None)
+        
+        for i in range(self.concurrency):
+            t = Thread(target=EnhancedLmDeploy._inferenceThread, args=(self, self.reqQueue, self.resQueue), daemon=True)
+            t.start()
+            self.threads.append(t)
+        
+        for t in self.threads:
+            t.join()
 
         completionTokens = []
-        for i in range(len(engineOutputs)):
-            completionTokens += [engineOutputs[i][len(inputs["input_ids"][i]):]]
+        for engineOutput in iter(self.resQueue.get):
+            completionTokens += [engineOutput.token_ids]
         completion = self._tokenizer.batch_decode(completionTokens, skip_special_tokens=True)
 
         completionResponses = []
-        for i in range(len(engineOutputs)):
+        for engineOutput in iter(self.resQueue.get):
             completionResponses += [CompletionResponse(
                 text=completion[i], 
-                raw={"model_output": engineOutputs[i][len(inputs["input_ids"][i]):]})]
+                raw={"model_output": engineOutput.token_ids})]
         return completionResponses
+
+    def _inferenceThread(
+            self, 
+            reqQueue :Queue, 
+            resQueue :Queue, 
+            **kwargs :Any) -> EngineOutput:
+        for request in iter(reqQueue.get, None):
+            for outputs in self._llm.modelInst().stream_infer(
+                    random.randint(0, 1000),
+                    intput_ids=request.tokenized["input_ids"],
+                    gen_config=EngineGenerationConfig(
+                        max_new_tokens=self.maxNewTokens,
+                    ),
+                    sequence_start=True,
+                    sequence_end=True,
+                    stream_output=True):
+                resQueue.put(outputs)

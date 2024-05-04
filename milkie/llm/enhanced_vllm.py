@@ -13,12 +13,13 @@ from milkie.llm.enhanced_llm import EnhancedLLM
 class EnhancedVLLM(EnhancedLLM):
     def __init__(self,
             context_window: int,
+            concurrency: int,
             tokenizer_name: str,
             model_name: str,
             device :str,
             max_new_tokens: int,
             tokenizer_kwargs: dict):
-        super().__init__(context_window, tokenizer_name, device, tokenizer_kwargs)
+        super().__init__(context_window, concurrency, tokenizer_name, device, tokenizer_kwargs)
         
         self._llm = Vllm(
             model=model_name,
