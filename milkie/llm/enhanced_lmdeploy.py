@@ -1,4 +1,5 @@
 import random
+import uuid
 from queue import Queue
 from threading import Thread
 from typing import Any, Optional, Sequence
@@ -26,7 +27,6 @@ from llama_index.legacy.bridge.pydantic import Field, PrivateAttr
 class LMDeploy(CustomLLM):
 
     model: Optional[str] = Field(description="The HuggingFace Model to use.")
-    _client: Any = PrivateAttr()
     
     def __init__(
             self, 
@@ -39,11 +39,10 @@ class LMDeploy(CustomLLM):
             session_len=context_window,
             tp=1)
         super().__init__(model=model_name)
-        turboMind = TurboMind.from_pretrained(model_name, engineConfig)
-        self._client = turboMind.create_instance()
-
+        self.turboMind = TurboMind.from_pretrained(model_name, engineConfig)
+        
     def modelInst(self):
-        return self._client
+        return self.turboMind.create_instance()
 
     def class_name(cls) -> str:
         return "LMDeploy"
@@ -108,6 +107,7 @@ class Request:
             prompt: str, 
             tokenized: list[int],
             **kwargs: Any) -> None:
+        self.sessionid = int(uuid.uuid4().hex, 16)
         self.prompt = prompt
         self.tokenized = tokenized
         self.kwargs = kwargs
@@ -183,18 +183,20 @@ class EnhancedLmDeploy(EnhancedLLM):
 
     def _inferenceThread(
             self, 
-            reqQueue :Queue, 
-            resQueue :Queue, 
+            reqQueue :Queue[Request], 
+            resQueue :Queue[EngineOutput], 
             **kwargs :Any) -> EngineOutput:
         genConfig = EngineGenerationConfig.From(
             GenerationConfig(
                 n=1,
-                max_new_tokens=self.maxNewTokens,),
+                max_new_tokens=self.maxNewTokens),
             self._tokenizer
         )
+
+        modelInst = self._llm.modelInst()
         for request in iter(reqQueue.get, None):
-            for outputs in self._llm.modelInst().stream_infer(
-                    random.randint(0, 1000),
+            for outputs in modelInst.stream_infer(
+                    request.sessionid,
                     input_ids=request.tokenized,
                     gen_config=genConfig,
                     sequence_start=True,
@@ -202,3 +204,6 @@ class EnhancedLmDeploy(EnhancedLLM):
                     stream_output=True):
                 pass
             resQueue.put(outputs)
+
+    def _getSingleParameterSizeInBytes(self):
+        return 2 
