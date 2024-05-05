@@ -106,7 +106,7 @@ class Request:
     def __init__(
             self, 
             prompt: str, 
-            tokenized: dict,
+            tokenized: list[int],
             **kwargs: Any) -> None:
         self.prompt = prompt
         self.tokenized = tokenized
@@ -122,8 +122,6 @@ class EnhancedLmDeploy(EnhancedLLM):
             device: str,
             max_new_tokens: int,
             tokenizer_kwargs: dict) -> None:
-        tokenizer_kwargs["padding_side"] = "left"
-
         super().__init__(context_window, concurrency, tokenizer_name, device, tokenizer_kwargs)
 
         self._llm = LMDeploy(
@@ -144,19 +142,22 @@ class EnhancedLmDeploy(EnhancedLLM):
         self.resQueue.queue.clear()
         self.threads.clear()
         
-        inputs = self._tokenizer(text=prompts, return_tensors="pt", padding=True)
+        inputs = self._tokenizer(text=prompts, return_tensors="pt")
         inputs = inputs.to(self.device)
         
         for i, prompt in enumerate(prompts):
-            self.resQueue.put(Request(
+            self.reqQueue.put(Request(
                     prompt, 
-                    {"input_ids": inputs["input_ids"][i], "attention_mask": inputs["attention_mask"][i]},
+                    inputs["input_ids"][i],
                     **kwargs))
         for i in range(self.concurrency):
-            self.resQueue.put(None)
+            self.reqQueue.put(None)
         
         for i in range(self.concurrency):
-            t = Thread(target=EnhancedLmDeploy._inferenceThread, args=(self, self.reqQueue, self.resQueue), daemon=True)
+            t = Thread(
+                    target=EnhancedLmDeploy._inferenceThread, 
+                    args=(self, self.reqQueue, self.resQueue), 
+                    daemon=True)
             t.start()
             self.threads.append(t)
         
@@ -183,7 +184,7 @@ class EnhancedLmDeploy(EnhancedLLM):
         for request in iter(reqQueue.get, None):
             for outputs in self._llm.modelInst().stream_infer(
                     random.randint(0, 1000),
-                    intput_ids=request.tokenized["input_ids"],
+                    input_ids=request.tokenized["input_ids"].tolist(),
                     gen_config=EngineGenerationConfig(
                         max_new_tokens=self.maxNewTokens,
                     ),
