@@ -4,7 +4,7 @@ from threading import Thread
 from typing import Any, Optional, Sequence
 from milkie.llm.enhanced_llm import EnhancedLLM
 from lmdeploy.turbomind import TurboMind
-from lmdeploy.messages import (TurbomindEngineConfig, EngineGenerationConfig, EngineOutput)
+from lmdeploy.messages import (TurbomindEngineConfig, GenerationConfig, EngineGenerationConfig, EngineOutput)
 
 from llama_index.legacy.llms.generic_utils import (
     completion_response_to_chat_response,
@@ -146,10 +146,10 @@ class EnhancedLmDeploy(EnhancedLLM):
         inputs = inputs.to(self.device)
         
         for i, prompt in enumerate(prompts):
-            unpaddedInputIds = inputs["input_ids"][i][:inputs["attention_mask"][i].sum(dim=1)]
+            unpaddedInputIds = inputs["input_ids"][i][:inputs["attention_mask"][i].sum(dim=0)]
             self.reqQueue.put(Request(
                     prompt, 
-                    unpaddedInputIds,
+                    unpaddedInputIds.tolist(),
                     **kwargs))
         for i in range(self.concurrency):
             self.reqQueue.put(None)
@@ -165,13 +165,17 @@ class EnhancedLmDeploy(EnhancedLLM):
         for t in self.threads:
             t.join()
 
+        outputs = []
+        while not self.resQueue.empty():
+            outputs.append(self.resQueue.get())
+
         completionTokens = []
-        for engineOutput in iter(self.resQueue.get):
+        for engineOutput in outputs:
             completionTokens += [engineOutput.token_ids]
         completion = self._tokenizer.batch_decode(completionTokens, skip_special_tokens=True)
 
         completionResponses = []
-        for engineOutput in iter(self.resQueue.get):
+        for engineOutput in outputs:
             completionResponses += [CompletionResponse(
                 text=completion[i], 
                 raw={"model_output": engineOutput.token_ids})]
@@ -182,14 +186,19 @@ class EnhancedLmDeploy(EnhancedLLM):
             reqQueue :Queue, 
             resQueue :Queue, 
             **kwargs :Any) -> EngineOutput:
+        genConfig = EngineGenerationConfig.From(
+            GenerationConfig(
+                n=1,
+                max_new_tokens=self.maxNewTokens,),
+            self._tokenizer
+        )
         for request in iter(reqQueue.get, None):
             for outputs in self._llm.modelInst().stream_infer(
                     random.randint(0, 1000),
-                    input_ids=request.tokenized["input_ids"],
-                    gen_config=EngineGenerationConfig(
-                        max_new_tokens=self.maxNewTokens,
-                    ),
+                    input_ids=request.tokenized,
+                    gen_config=genConfig,
                     sequence_start=True,
                     sequence_end=True,
                     stream_output=True):
-                resQueue.put(outputs)
+                pass
+            resQueue.put(outputs)
