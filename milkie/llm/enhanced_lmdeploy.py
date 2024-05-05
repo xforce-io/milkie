@@ -142,13 +142,14 @@ class EnhancedLmDeploy(EnhancedLLM):
         self.resQueue.queue.clear()
         self.threads.clear()
         
-        inputs = self._tokenizer(text=prompts, return_tensors="pt")
+        inputs = self._tokenizer(text=prompts, return_tensors="pt", padding=True)
         inputs = inputs.to(self.device)
         
         for i, prompt in enumerate(prompts):
+            unpaddedInputIds = inputs["input_ids"][i][:inputs["attention_mask"][i].sum(dim=1)]
             self.reqQueue.put(Request(
                     prompt, 
-                    inputs["input_ids"][i],
+                    unpaddedInputIds,
                     **kwargs))
         for i in range(self.concurrency):
             self.reqQueue.put(None)
@@ -184,7 +185,7 @@ class EnhancedLmDeploy(EnhancedLLM):
         for request in iter(reqQueue.get, None):
             for outputs in self._llm.modelInst().stream_infer(
                     random.randint(0, 1000),
-                    input_ids=request.tokenized["input_ids"].tolist(),
+                    input_ids=request.tokenized["input_ids"],
                     gen_config=EngineGenerationConfig(
                         max_new_tokens=self.maxNewTokens,
                     ),
