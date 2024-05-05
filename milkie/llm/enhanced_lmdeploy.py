@@ -27,6 +27,7 @@ from llama_index.legacy.bridge.pydantic import Field, PrivateAttr
 class LMDeploy(CustomLLM):
 
     model: Optional[str] = Field(description="The HuggingFace Model to use.")
+    _turboMind: Any = PrivateAttr()
     
     def __init__(
             self, 
@@ -39,10 +40,10 @@ class LMDeploy(CustomLLM):
             session_len=context_window,
             tp=1)
         super().__init__(model=model_name)
-        self.turboMind = TurboMind.from_pretrained(model_name, engineConfig)
+        self._turboMind = TurboMind.from_pretrained(model_name, engineConfig)
         
     def modelInst(self):
-        return self.turboMind.create_instance()
+        return self._turboMind.create_instance()
 
     def class_name(cls) -> str:
         return "LMDeploy"
