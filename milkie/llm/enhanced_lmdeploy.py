@@ -1,5 +1,5 @@
-import random
 import uuid
+import random
 from queue import Queue
 from threading import Thread
 from typing import Any, Optional, Sequence
@@ -102,16 +102,30 @@ class LMDeploy(CustomLLM):
     ) -> CompletionResponseAsyncGen:
         raise (ValueError("Not Implemented"))
 
-class Request:
+class QueueRequest:
     def __init__(
             self, 
             prompt: str, 
             tokenized: list[int],
             **kwargs: Any) -> None:
-        self.sessionid = int(uuid.uuid4().hex, 16)
+        self._uuid = str(uuid.uuid4())
+        self.sessionid = random.randint(0, 2**16)
         self.prompt = prompt
         self.tokenized = tokenized
         self.kwargs = kwargs
+    
+    def uuid(self):
+        return self._uuid
+
+class QueueResponse:
+    def __init__(self,
+            request :QueueRequest,
+            output :EngineOutput) -> None:
+        self.request = request
+        self.output = output
+        
+    def uuid(self):
+        return self.request.uuid()
 
 class EnhancedLmDeploy(EnhancedLLM):
     def __init__(
@@ -130,8 +144,8 @@ class EnhancedLmDeploy(EnhancedLLM):
                 context_window)
         self.device = device
         self.maxNewTokens = max_new_tokens
-        self.reqQueue = Queue()
-        self.resQueue = Queue()
+        self.reqQueue = Queue[QueueRequest]()
+        self.resQueue = Queue[QueueResponse]()
         self.threads = []
 
     def _completeBatch(
@@ -146,12 +160,16 @@ class EnhancedLmDeploy(EnhancedLLM):
         inputs = self._tokenizer(text=prompts, return_tensors="pt", padding=True)
         inputs = inputs.to(self.device)
         
+        order = dict()
         for i, prompt in enumerate(prompts):
             unpaddedInputIds = inputs["input_ids"][i][:inputs["attention_mask"][i].sum(dim=0)]
-            self.reqQueue.put(Request(
+            request = QueueRequest(
                     prompt, 
                     unpaddedInputIds.tolist(),
-                    **kwargs))
+                    **kwargs)
+            order[request.uuid()] = i
+            self.reqQueue.put(request)
+
         for i in range(self.concurrency):
             self.reqQueue.put(None)
         
@@ -169,6 +187,7 @@ class EnhancedLmDeploy(EnhancedLLM):
         outputs = []
         while not self.resQueue.empty():
             outputs.append(self.resQueue.get())
+        outputs.sort(key=lambda x: order[x.uuid()])
 
         completionTokens = []
         for engineOutput in outputs:
@@ -184,8 +203,8 @@ class EnhancedLmDeploy(EnhancedLLM):
 
     def _inferenceThread(
             self, 
-            reqQueue :Queue[Request], 
-            resQueue :Queue[EngineOutput], 
+            reqQueue :Queue[QueueRequest], 
+            resQueue :Queue[QueueResponse], 
             **kwargs :Any) -> EngineOutput:
         genConfig = EngineGenerationConfig.From(
             GenerationConfig(
@@ -204,7 +223,7 @@ class EnhancedLmDeploy(EnhancedLLM):
                     sequence_end=True,
                     stream_output=True):
                 pass
-            resQueue.put(outputs)
+            resQueue.put(QueueResponse(request, outputs))
 
     def _getSingleParameterSizeInBytes(self):
         return 2 
