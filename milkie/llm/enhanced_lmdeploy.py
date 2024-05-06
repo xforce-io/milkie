@@ -189,16 +189,18 @@ class EnhancedLmDeploy(EnhancedLLM):
             resps.append(self.resQueue.get())
         resps.sort(key=lambda x: order[x.uuid()])
 
+        assert len(resps) == len(prompts)
+
         completionTokens = []
         for resp in resps:
             completionTokens += [resp.output.token_ids]
         completion = self._tokenizer.batch_decode(completionTokens, skip_special_tokens=True)
 
         completionResponses = []
-        for resp in resps:
+        for i, resp in enumerate(resps):
             completionResponses += [CompletionResponse(
                 text=completion[i], 
-                raw={"model_output": resp.token_ids})]
+                raw={"model_output": resp.output.token_ids})]
         return completionResponses
 
     def _inferenceThread(
