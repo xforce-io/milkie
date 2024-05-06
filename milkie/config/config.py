@@ -163,11 +163,15 @@ class LLMGenerationArgs(BaseConfig):
             self,
             repetitionPenalty: float,
             temperature :float,
+            topK :int,
+            topP :float,
             doSample :bool,
             useCache :bool,
             promptLookupNumTokens: int):
         self.repetitionPenalty = repetitionPenalty
         self.temperature = temperature
+        self.topK = topK
+        self.topP = topP
         self.doSample = doSample
         self.useCache = useCache
         self.promptLookupNumTokens = promptLookupNumTokens
@@ -176,6 +180,8 @@ class LLMGenerationArgs(BaseConfig):
         llmGenerationArgs = LLMGenerationArgs(
             repetitionPenalty=config["repetition_penalty"] if "repetition_penalty" in config else 1.0,
             temperature=config["temperature"] if "temperature" in config else 0,
+            topK=config["top_k"] if "top_k" in config else -1,
+            topP=config["top_p"] if "top_p" in config else 1.0,
             doSample=config["do_sample"] if "do_sample" in config else False,
             useCache=config["use_cache"] if "use_cache" in config else True,
             promptLookupNumTokens=config["prompt_lookup_num_tokens"] if "prompt_lookup_num_tokens" in config else None,
@@ -186,6 +192,8 @@ class LLMGenerationArgs(BaseConfig):
         result = {
             "repetition_penalty": self.repetitionPenalty,
             "temperature": self.temperature,
+            "top_k" : self.topK,
+            "top_p": self.topP,
             "do_sample": self.doSample,
             "use_cache": self.useCache,
         }

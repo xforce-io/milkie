@@ -15,6 +15,8 @@ llm:
   generation_args:
     repetition_penalty: 1.0
     temperature: 0
+    top_k: 1
+    top_p: 0.9
     do_sample: False
     use_cache: True
     prompt_lookup_num_tokens: 20
