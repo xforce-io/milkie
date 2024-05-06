@@ -184,21 +184,21 @@ class EnhancedLmDeploy(EnhancedLLM):
         for t in self.threads:
             t.join()
 
-        outputs = []
+        resps :list[QueueResponse] = []
         while not self.resQueue.empty():
-            outputs.append(self.resQueue.get())
-        outputs.sort(key=lambda x: order[x.uuid()])
+            resps.append(self.resQueue.get())
+        resps.sort(key=lambda x: order[x.uuid()])
 
         completionTokens = []
-        for engineOutput in outputs:
-            completionTokens += [engineOutput.token_ids]
+        for resp in resps:
+            completionTokens += [resp.output.token_ids]
         completion = self._tokenizer.batch_decode(completionTokens, skip_special_tokens=True)
 
         completionResponses = []
-        for engineOutput in outputs:
+        for resp in resps:
             completionResponses += [CompletionResponse(
                 text=completion[i], 
-                raw={"model_output": engineOutput.token_ids})]
+                raw={"model_output": resp.token_ids})]
         return completionResponses
 
     def _inferenceThread(
