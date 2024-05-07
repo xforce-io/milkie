@@ -212,7 +212,7 @@ class EnhancedLmDeploy(EnhancedLLM):
             GenerationConfig(
                 n=1,
                 max_new_tokens=self.maxNewTokens,
-                **{k: kwargs[k] for k in ["repetition_penalty", "temperature", "top_k", "top_p"]}),
+                **EnhancedLLM.filterGenArgs(kwargs)),
             self._tokenizer
         )
 

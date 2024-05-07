@@ -76,6 +76,12 @@ class EnhancedLLM(object):
             result += [(self._llm._parse_output(output), len(response.raw["model_output"]))]
         return result
 
+    def filterGenArgs(kwargs :dict):
+        return EnhancedLLM.filterArgs(kwargs, ["repetition_penalty", "temperature", "top_k", "top_p"])
+
+    def filterArgs(kwargs :dict, keysLeft :list[str]):
+        return {k: v for k, v in kwargs.items() if k in keysLeft} 
+
     @abstractmethod
     def _getModel(self):
         pass

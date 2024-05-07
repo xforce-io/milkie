@@ -64,7 +64,7 @@ class EnhancedVLLM(EnhancedLLM):
         kwargs = kwargs if kwargs else {}
         params = {
             **self._llm._model_kwargs, 
-            **{k: kwargs[k] for k in ["repetition_penalty", "temperature", "top_k", "top_p"]}}
+            **EnhancedLLM.filterGenArgs(kwargs)}
         sampling_params = SamplingParams(**params)
         outputs = self._getModel().generate(
             prompts=prompts, 
