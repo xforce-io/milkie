@@ -176,7 +176,7 @@ class EnhancedLmDeploy(EnhancedLLM):
         for i in range(self.concurrency):
             t = Thread(
                     target=EnhancedLmDeploy._inferenceThread, 
-                    args=(self, self.reqQueue, self.resQueue), 
+                    args=(self, self.reqQueue, self.resQueue, kwargs), 
                     daemon=True)
             t.start()
             self.threads.append(t)
@@ -207,7 +207,7 @@ class EnhancedLmDeploy(EnhancedLLM):
             self, 
             reqQueue :Queue[QueueRequest], 
             resQueue :Queue[QueueResponse], 
-            **kwargs :Any) -> EngineOutput:
+            kwargs :dict) -> EngineOutput:
         genConfig = EngineGenerationConfig.From(
             GenerationConfig(
                 n=1,

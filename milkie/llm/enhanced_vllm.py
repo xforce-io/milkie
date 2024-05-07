@@ -61,13 +61,19 @@ class EnhancedVLLM(EnhancedLLM):
             prompts: list[str], 
             **kwargs: Any
     ) -> list[CompletionResponse]:
+        inputs = self._tokenizer(text=prompts, return_tensors="pt", padding=True)
+
+        promptTokenIds = []
+        for i in range(inputs["input_ids"].size(0)):
+            promptTokenIds.append(inputs["input_ids"][i][:inputs["attention_mask"][i].sum(dim=0)])
+
         kwargs = kwargs if kwargs else {}
         params = {
             **self._llm._model_kwargs, 
             **EnhancedLLM.filterGenArgs(kwargs)}
         sampling_params = SamplingParams(**params)
         outputs = self._getModel().generate(
-            prompts=prompts, 
+            prompt_token_ids=promptTokenIds, 
             sampling_params=sampling_params)
 
         result = []
