@@ -47,13 +47,12 @@ class VLLM(CustomLLM):
             vllm_kwargs :Dict[str, Any]) -> None:
         super().__init__(model=model_name, max_new_tokens=max_new_tokens)
 
-        self._asyncEngineArgs = AsyncEngineArgs(
+        asyncEngineArgs = AsyncEngineArgs(
             model=model_name,
             max_model_len=context_window,
-            max_new_tokens=max_new_tokens,
             **vllm_kwargs)
         self._engine = AsyncLLMEngine.from_engine_args(
-            self._asyncEngineArgs, 
+            asyncEngineArgs, 
             usage_context=UsageContext.LLM_CLASS)
         
     def class_name(cls) -> str:
@@ -143,11 +142,8 @@ class EnhancedVLLM(EnhancedLLM):
             vllm_kwargs={
                 "gpu_memory_utilization":0.9, 
                 "quantization" : None if EnhancedLLM.getQuantMethod(model_name) == QuantMethod.NONE else "gptq",
-                "enable_prefix_caching" :True},
-            dtype="auto",)
+                "enable_prefix_caching" :True})
 
-        self._getModel().set_tokenizer(self._tokenizer)
-        
     @torch.inference_mode()
     def predict(
             self, 
@@ -159,7 +155,7 @@ class EnhancedVLLM(EnhancedLLM):
         return (self._llm._parse_output(output), len(response.raw["model_output"]))
 
     def _getModel(self):
-        return self._llm._client
+        return self._llm.engine
 
     def _complete(
         self, prompt: str, formatted: bool = False, **kwargs: Any

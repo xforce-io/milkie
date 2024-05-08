@@ -40,6 +40,7 @@ class QueueResponse:
         self.request = request
         self.output = output
         
+    @property
     def requestId(self):
         return self.request.requestId()
 
@@ -53,6 +54,7 @@ class EnhancedLLM(object):
             tokenizer_kwargs :dict) -> None:
         self.context_window = context_window
         self.concurrency = concurrency
+        self.device = device
         self._llm :LLM = None
         if device is not None:
             torch.cuda.set_device(device)
@@ -176,10 +178,10 @@ class EnhancedLLM(object):
         for i, prompt in enumerate(prompts):
             unpaddedInputIds = inputs["input_ids"][i][:inputs["attention_mask"][i].sum(dim=0)]
             request = QueueRequest(
-                    prompt, 
-                    unpaddedInputIds.tolist(),
+                    prompt=prompt, 
+                    tokenized=unpaddedInputIds.tolist(),
                     **kwargs)
-            order[request.uuid()] = i
+            order[request.requestId] = i
             self._reqQueue.put(request)
 
         for i in range(self.concurrency):
