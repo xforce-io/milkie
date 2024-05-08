@@ -11,7 +11,6 @@ from llama_index.legacy.llms.generic_utils import (
 )
 from llama_index.core.prompts.base import BasePromptTemplate
 from llama_index.legacy.llms.custom import CustomLLM
-from llama_index.legacy.llms.vllm import Vllm
 from llama_index_client import BasePromptTemplate
 from llama_index.legacy.core.llms.types import (
     ChatMessage,
@@ -43,12 +42,14 @@ class VLLM(CustomLLM):
     def __init__(
             self, 
             model_name: str,
+            context_window: int,
             max_new_tokens :int,
             vllm_kwargs :Dict[str, Any]) -> None:
         super().__init__(model=model_name, max_new_tokens=max_new_tokens)
 
         self._asyncEngineArgs = AsyncEngineArgs(
             model=model_name,
+            max_model_len=context_window,
             max_new_tokens=max_new_tokens,
             **vllm_kwargs)
         self._engine = AsyncLLMEngine.from_engine_args(
@@ -69,7 +70,7 @@ class VLLM(CustomLLM):
     @property
     def _model_kwargs(self) -> Dict[str, Any]:
         base_kwargs = {
-            "max_tokens": self._asyncEngineArgs.max_new_tokens,
+            "max_tokens": self.max_new_tokens,
         }
         return {**base_kwargs}
 
@@ -136,7 +137,8 @@ class EnhancedVLLM(EnhancedLLM):
         super().__init__(context_window, concurrency, tokenizer_name, device, tokenizer_kwargs)
         
         self._llm = VLLM(
-            model=model_name,
+            context_window=context_window,
+            model_name=model_name,
             max_new_tokens=max_new_tokens,
             vllm_kwargs={
                 "gpu_memory_utilization":0.9, 
