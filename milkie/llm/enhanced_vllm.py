@@ -179,7 +179,7 @@ class EnhancedVLLM(EnhancedLLM):
             prompts=prompts, 
             inference=self._inference,
             tokenIdExtractor=lambda output : output.outputs[0].token_ids,
-            kwargs=kwargs)
+            **kwargs)
 
     def _completeBatchSync(
             self, 
@@ -212,12 +212,13 @@ class EnhancedVLLM(EnhancedLLM):
             self, 
             reqQueue :Queue[QueueRequest], 
             resQueue :Queue[QueueResponse], 
-            kwargs :dict) -> Any:
+            genArgs :dict,
+            **kwargs :Any) -> Any:
         for request in iter(reqQueue.get, None):
-            kwargs = kwargs if kwargs else {}
+            genArgs = genArgs if genArgs else {}
             params = {
                 **self._llm._model_kwargs, 
-                **EnhancedLLM.filterGenArgs(kwargs)}
+                **EnhancedLLM.filterGenArgs(genArgs)}
             samplingParams = SamplingParams(**params)
             resultsGenerator = self._llm.engine.generate(
                     prompt_token_ids=request.tokenized, 

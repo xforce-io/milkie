@@ -132,12 +132,13 @@ class EnhancedLmDeploy(EnhancedLLM):
             self, 
             reqQueue :Queue[QueueRequest], 
             resQueue :Queue[QueueResponse], 
-            kwargs :dict) -> EngineOutput:
+            genArgs :dict,
+            **kwargs :Any) -> EngineOutput:
         genConfig = EngineGenerationConfig.From(
             GenerationConfig(
                 n=1,
                 max_new_tokens=self.maxNewTokens,
-                **EnhancedLLM.filterGenArgs(kwargs)),
+                **EnhancedLLM.filterGenArgs(genArgs)),
             self._tokenizer
         )
 
