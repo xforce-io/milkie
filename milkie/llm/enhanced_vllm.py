@@ -1,14 +1,128 @@
-from typing import Any, Callable, Optional, Sequence
-
-from llama_index.core.prompts.base import BasePromptTemplate
-from milkie.config.config import QuantMethod
-from vllm import SamplingParams
-from llama_index.legacy.llms.vllm import Vllm
-from llama_index_client import BasePromptTemplate, ChatMessage
-from llama_index.legacy.core.llms.types import ChatMessage, CompletionResponse
+from typing import Any, Dict, Optional, Sequence
+from queue import Queue
 import torch
+from vllm import SamplingParams
+from vllm.engine.arg_utils import AsyncEngineArgs
+from vllm.engine.async_llm_engine import AsyncLLMEngine
+from vllm.usage.usage_lib import UsageContext
 
-from milkie.llm.enhanced_llm import EnhancedLLM
+from llama_index.legacy.llms.generic_utils import (
+    completion_response_to_chat_response,
+)
+from llama_index.core.prompts.base import BasePromptTemplate
+from llama_index.legacy.llms.custom import CustomLLM
+from llama_index.legacy.llms.vllm import Vllm
+from llama_index_client import BasePromptTemplate
+from llama_index.legacy.core.llms.types import (
+    ChatMessage,
+    ChatResponse,
+    ChatResponseGen,
+    ChatResponseAsyncGen,
+    CompletionResponse, 
+    CompletionResponseGen,
+    CompletionResponseAsyncGen,
+    LLMMetadata,
+)
+from llama_index.legacy.llms.base import llm_chat_callback, llm_completion_callback
+from llama_index.legacy.bridge.pydantic import Field, PrivateAttr
+
+from milkie.config.config import QuantMethod
+from milkie.llm.enhanced_llm import EnhancedLLM, QueueRequest, QueueResponse
+
+class VLLM(CustomLLM):
+
+    model: Optional[str] = Field(description="The Vllm Model to use.")
+
+    max_new_tokens: int = Field(
+        default=512,
+        description="Maximum number of tokens to generate per output sequence.",
+    )
+    
+    _engine: Any = PrivateAttr()
+    
+    def __init__(
+            self, 
+            model_name: str,
+            max_new_tokens :int,
+            vllm_kwargs :Dict[str, Any]) -> None:
+        super().__init__(model=model_name, max_new_tokens=max_new_tokens)
+
+        self._asyncEngineArgs = AsyncEngineArgs(
+            model=model_name,
+            max_new_tokens=max_new_tokens,
+            **vllm_kwargs)
+        self._engine = AsyncLLMEngine.from_engine_args(
+            self._asyncEngineArgs, 
+            usage_context=UsageContext.LLM_CLASS)
+        
+    def class_name(cls) -> str:
+        return "VLLM"
+
+    @property
+    def engine(self) -> Any:
+        return self._engine
+
+    @property
+    def metadata(self) -> LLMMetadata:
+        return LLMMetadata(model_name=self.model)
+
+    @property
+    def _model_kwargs(self) -> Dict[str, Any]:
+        base_kwargs = {
+            "max_tokens": self._asyncEngineArgs.max_new_tokens,
+        }
+        return {**base_kwargs}
+
+    @llm_chat_callback()
+    def chat(self, messages: Sequence[ChatMessage], **kwargs: Any) -> ChatResponse:
+        kwargs = kwargs if kwargs else {}
+        prompt = self.messages_to_prompt(messages)
+        completion_response = self.complete(prompt, **kwargs)
+        return completion_response_to_chat_response(completion_response)
+
+    @llm_completion_callback()
+    def complete(
+        self, prompt: str, formatted: bool = False, **kwargs: Any
+    ) -> CompletionResponse:
+        raise (ValueError("Not Implemented"))
+
+    @llm_chat_callback()
+    def stream_chat(
+        self, messages: Sequence[ChatMessage], **kwargs: Any
+    ) -> ChatResponseGen:
+        raise (ValueError("Not Implemented"))
+
+    @llm_completion_callback()
+    def stream_complete(
+        self, prompt: str, formatted: bool = False, **kwargs: Any
+    ) -> CompletionResponseGen:
+        raise (ValueError("Not Implemented"))
+
+    @llm_chat_callback()
+    async def achat(
+        self, messages: Sequence[ChatMessage], **kwargs: Any
+    ) -> ChatResponse:
+        kwargs = kwargs if kwargs else {}
+        return self.chat(messages, **kwargs)
+
+    @llm_completion_callback()
+    async def acomplete(
+        self, prompt: str, formatted: bool = False, **kwargs: Any
+    ) -> CompletionResponse:
+        raise (ValueError("Not Implemented"))
+
+    @llm_chat_callback()
+    async def astream_chat(
+        self, messages: Sequence[ChatMessage], **kwargs: Any
+    ) -> ChatResponseAsyncGen:
+        raise (ValueError("Not Implemented"))
+
+    @llm_completion_callback()
+    async def astream_complete(
+        self, prompt: str, formatted: bool = False, **kwargs: Any
+    ) -> CompletionResponseAsyncGen:
+        raise (ValueError("Not Implemented"))
+
 
 class EnhancedVLLM(EnhancedLLM):
     def __init__(self,
@@ -21,14 +135,16 @@ class EnhancedVLLM(EnhancedLLM):
             tokenizer_kwargs: dict):
         super().__init__(context_window, concurrency, tokenizer_name, device, tokenizer_kwargs)
         
-        self._llm = Vllm(
+        self._llm = VLLM(
             model=model_name,
-            tensor_parallel_size=1,
             max_new_tokens=max_new_tokens,
-            vllm_kwargs={"gpu_memory_utilization":0.9, "quantization" : None if EnhancedLLM.getQuantMethod(model_name) == QuantMethod.NONE else "gptq"},
+            vllm_kwargs={
+                "gpu_memory_utilization":0.9, 
+                "quantization" : None if EnhancedLLM.getQuantMethod(model_name) == QuantMethod.NONE else "gptq",
+                "enable_prefix_caching" :True},
             dtype="auto",)
 
-        self._llm._client.set_tokenizer(self._tokenizer)
+        self._getModel().set_tokenizer(self._tokenizer)
         
     @torch.inference_mode()
     def predict(
@@ -61,6 +177,17 @@ class EnhancedVLLM(EnhancedLLM):
             prompts: list[str], 
             **kwargs: Any
     ) -> list[CompletionResponse]:
+        return self._completeBatchAsync(
+            prompts=prompts, 
+            inference=self._inference,
+            tokenIdExtractor=lambda output : output.outputs[0].token_ids,
+            kwargs=kwargs)
+
+    def _completeBatchSync(
+            self, 
+            prompts: list[str], 
+            **kwargs: Any
+    ) -> list[CompletionResponse]:
         inputs = self._tokenizer(text=prompts, return_tensors="pt", padding=True)
 
         promptTokenIds = []
@@ -82,6 +209,34 @@ class EnhancedVLLM(EnhancedLLM):
                 text=output.outputs[0].text,
                 raw={"model_output": output.outputs[0].token_ids},)]
         return result
+
+    async def _inference(
+            self, 
+            reqQueue :Queue[QueueRequest], 
+            resQueue :Queue[QueueResponse], 
+            kwargs :dict) -> Any:
+        for request in iter(reqQueue.get, None):
+            kwargs = kwargs if kwargs else {}
+            params = {
+                **self._llm._model_kwargs, 
+                **EnhancedLLM.filterGenArgs(kwargs)}
+            samplingParams = SamplingParams(**params)
+            resultsGenerator = self._llm.engine.generate(
+                    prompt_token_ids=request.tokenized, 
+                    sampling_params=samplingParams, 
+                    request_id=request.requestId)
+            finalOutput = None
+            async for requestOutput in resultsGenerator:
+                if await request.is_disconnected():
+                    # Abort the request if the client disconnects.
+                    await self._llm.engine.abort(request.requestId)
+                    return
+                finalOutput = requestOutput
+
+            assert finalOutput is not None
+            resQueue.put(QueueResponse(
+                requestId=request.requestId, 
+                output=finalOutput))
 
     def _getSingleParameterSizeInBytes(self):
         type_to_size = {

@@ -1,19 +1,47 @@
 from abc import abstractmethod
 from typing import Any, Sequence
+from threading import Thread
+import random, uuid
+from queue import Queue
+from typing import Callable
+
+import torch
 
 from transformers import AutoTokenizer
 
 from llama_index_client import ChatMessage
-from llama_index.legacy.core.llms.types import ChatResponse
+from llama_index.legacy.core.llms.types import ChatResponse, CompletionResponse
 from llama_index.core.prompts.base import BasePromptTemplate
 from llama_index.legacy.llms.llm import LLM
-import torch
 from llama_index.legacy.llms.generic_utils import (
     completion_response_to_chat_response,
     messages_to_prompt as generic_messages_to_prompt,
 )
 
 from milkie.config.config import QuantMethod
+
+class QueueRequest:
+    def __init__(
+            self, 
+            requestId :str,
+            prompt: str, 
+            tokenized: list[int],
+            **kwargs: Any) -> None:
+        self.requestId = str(uuid.uuid4()) if requestId is None else requestId
+        self.sessionid = random.randint(0, 2**16)
+        self.prompt = prompt
+        self.tokenized = tokenized
+        self.kwargs = kwargs
+    
+class QueueResponse:
+    def __init__(self,
+            request :QueueRequest,
+            output :Any) -> None:
+        self.request = request
+        self.output = output
+        
+    def requestId(self):
+        return self.request.requestId()
 
 class EnhancedLLM(object):
 
@@ -29,6 +57,10 @@ class EnhancedLLM(object):
         if device is not None:
             torch.cuda.set_device(device)
         self._tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, **tokenizer_kwargs)
+
+        self._reqQueue = Queue[QueueRequest]()
+        self._resQueue = Queue[QueueResponse]()
+        self._threads = []
 
     def getLLM(self) -> LLM:
         return self._llm
@@ -125,3 +157,60 @@ class EnhancedLLM(object):
     @abstractmethod
     def _getSingleParameterSizeInBytes(self):
         pass
+
+    def _completeBatchAsync(
+            self, 
+            prompts: list[str], 
+            inference: Callable[[object, Queue[QueueRequest], Queue[QueueResponse], dict], Any],
+            tokenIdExtractor: Callable[[QueueResponse], list[int]],
+            **kwargs: Any
+    ) -> CompletionResponse:
+        self._reqQueue.queue.clear()
+        self._resQueue.queue.clear()
+        self._threads.clear()
+        
+        inputs = self._tokenizer(text=prompts, return_tensors="pt", padding=True)
+        inputs = inputs.to(self.device)
+        
+        order = dict()
+        for i, prompt in enumerate(prompts):
+            unpaddedInputIds = inputs["input_ids"][i][:inputs["attention_mask"][i].sum(dim=0)]
+            request = QueueRequest(
+                    prompt, 
+                    unpaddedInputIds.tolist(),
+                    **kwargs)
+            order[request.uuid()] = i
+            self._reqQueue.put(request)
+
+        for i in range(self.concurrency):
+            self._reqQueue.put(None)
+        
+        for i in range(self.concurrency):
+            t = Thread(
+                    target=inference, 
+                    args=(self, self._reqQueue, self._resQueue, kwargs), 
+                    daemon=True)
+            t.start()
+            self._threads.append(t)
+        
+        for t in self._threads:
+            t.join()
+
+        resps :list[QueueResponse] = []
+        while not self._resQueue.empty():
+            resps.append(self._resQueue.get())
+        resps.sort(key=lambda x: order[x.requestId()])
+
+        assert len(resps) == len(prompts)
+
+        completionTokens = []
+        for resp in resps:
+            completionTokens += [tokenIdExtractor(resp)]
+        completion = self._tokenizer.batch_decode(completionTokens, skip_special_tokens=True)
+
+        completionResponses = []
+        for i, resp in enumerate(resps):
+            completionResponses += [CompletionResponse(
+                text=completion[i], 
+                raw={"model_output": tokenIdExtractor(resp)})]
+        return completionResponses

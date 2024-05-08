@@ -1,9 +1,6 @@
-import uuid
-import random
 from queue import Queue
-from threading import Thread
 from typing import Any, Optional, Sequence
-from milkie.llm.enhanced_llm import EnhancedLLM
+from milkie.llm.enhanced_llm import EnhancedLLM, QueueRequest, QueueResponse
 from lmdeploy.turbomind import TurboMind
 from lmdeploy.messages import (TurbomindEngineConfig, GenerationConfig, EngineGenerationConfig, EngineOutput)
 
@@ -102,31 +99,6 @@ class LMDeploy(CustomLLM):
     ) -> CompletionResponseAsyncGen:
         raise (ValueError("Not Implemented"))
 
-class QueueRequest:
-    def __init__(
-            self, 
-            prompt: str, 
-            tokenized: list[int],
-            **kwargs: Any) -> None:
-        self._uuid = str(uuid.uuid4())
-        self.sessionid = random.randint(0, 2**16)
-        self.prompt = prompt
-        self.tokenized = tokenized
-        self.kwargs = kwargs
-    
-    def uuid(self):
-        return self._uuid
-
-class QueueResponse:
-    def __init__(self,
-            request :QueueRequest,
-            output :EngineOutput) -> None:
-        self.request = request
-        self.output = output
-        
-    def uuid(self):
-        return self.request.uuid()
-
 class EnhancedLmDeploy(EnhancedLLM):
     def __init__(
             self, 
@@ -144,66 +116,19 @@ class EnhancedLmDeploy(EnhancedLLM):
                 context_window)
         self.device = device
         self.maxNewTokens = max_new_tokens
-        self.reqQueue = Queue[QueueRequest]()
-        self.resQueue = Queue[QueueResponse]()
-        self.threads = []
 
     def _completeBatch(
             self, 
             prompts: list[str], 
             **kwargs: Any
     ) -> CompletionResponse:
-        self.reqQueue.queue.clear()
-        self.resQueue.queue.clear()
-        self.threads.clear()
-        
-        inputs = self._tokenizer(text=prompts, return_tensors="pt", padding=True)
-        inputs = inputs.to(self.device)
-        
-        order = dict()
-        for i, prompt in enumerate(prompts):
-            unpaddedInputIds = inputs["input_ids"][i][:inputs["attention_mask"][i].sum(dim=0)]
-            request = QueueRequest(
-                    prompt, 
-                    unpaddedInputIds.tolist(),
-                    **kwargs)
-            order[request.uuid()] = i
-            self.reqQueue.put(request)
+        return super()._completeBatchAsync(
+            prompts, 
+            EnhancedLmDeploy._inference,
+            lambda output : output.token_ids,
+            **kwargs)
 
-        for i in range(self.concurrency):
-            self.reqQueue.put(None)
-        
-        for i in range(self.concurrency):
-            t = Thread(
-                    target=EnhancedLmDeploy._inferenceThread, 
-                    args=(self, self.reqQueue, self.resQueue, kwargs), 
-                    daemon=True)
-            t.start()
-            self.threads.append(t)
-        
-        for t in self.threads:
-            t.join()
-
-        resps :list[QueueResponse] = []
-        while not self.resQueue.empty():
-            resps.append(self.resQueue.get())
-        resps.sort(key=lambda x: order[x.uuid()])
-
-        assert len(resps) == len(prompts)
-
-        completionTokens = []
-        for resp in resps:
-            completionTokens += [resp.output.token_ids]
-        completion = self._tokenizer.batch_decode(completionTokens, skip_special_tokens=True)
-
-        completionResponses = []
-        for i, resp in enumerate(resps):
-            completionResponses += [CompletionResponse(
-                text=completion[i], 
-                raw={"model_output": resp.output.token_ids})]
-        return completionResponses
-
-    def _inferenceThread(
+    def _inference(
             self, 
             reqQueue :Queue[QueueRequest], 
             resQueue :Queue[QueueResponse], 
