@@ -21,6 +21,7 @@ from llama_index.legacy.core.llms.types import (
     CompletionResponseAsyncGen,
     LLMMetadata,
 )
+from llama_index.legacy.llms.vllm import Vllm
 from llama_index.legacy.llms.base import llm_chat_callback, llm_completion_callback
 from llama_index.legacy.bridge.pydantic import Field, PrivateAttr
 
@@ -139,7 +140,7 @@ class EnhancedVLLM(EnhancedLLM):
             tokenizer_kwargs: dict):
         super().__init__(context_window, concurrency, tokenizer_name, device, tokenizer_kwargs)
         
-        self._llm = VLLM(
+        self._llm = Vllm(
             context_window=context_window,
             model_name=model_name,
             max_new_tokens=max_new_tokens,
@@ -160,7 +161,7 @@ class EnhancedVLLM(EnhancedLLM):
         return (self._llm._parse_output(output), len(response.raw["model_output"]))
 
     def _getModel(self):
-        return self._llm.engine
+        return self._llm._client
 
     def _complete(
         self, prompt: str, formatted: bool = False, **kwargs: Any
