@@ -143,6 +143,7 @@ class EnhancedVLLM(EnhancedLLM):
             context_window=context_window,
             model_name=model_name,
             max_new_tokens=max_new_tokens,
+            dtype="auto",
             vllm_kwargs={
                 "gpu_memory_utilization":0.9, 
                 "quantization" : None if EnhancedLLM.getQuantMethod(model_name) == QuantMethod.NONE else "gptq",
@@ -179,8 +180,10 @@ class EnhancedVLLM(EnhancedLLM):
             prompts: list[str], 
             **kwargs: Any
     ) -> list[CompletionResponse]:
+        self.concurrency
         return self._completeBatchAsync(
             prompts=prompts, 
+            numThreads=1,
             inference=EnhancedVLLM._inference,
             tokenIdExtractor=lambda output : output.outputs[0].token_ids,
             **kwargs)
@@ -218,13 +221,18 @@ class EnhancedVLLM(EnhancedLLM):
             resQueue :Queue[QueueResponse], 
             genArgs :dict,
             **kwargs :Any) -> Any:
-        for request in iter(reqQueue.get, None):
-            genArgs = genArgs if genArgs else {}
-            params = {
-                **self._llm._model_kwargs, 
-                **EnhancedLLM.filterGenArgs(genArgs)}
-            samplingParams = SamplingParams(**params)
-            self._llm.engine.add_request(
+        genArgs = genArgs if genArgs else {}
+        params = {
+            **self._llm._model_kwargs, 
+            **EnhancedLLM.filterGenArgs(genArgs)}
+        samplingParams = SamplingParams(**params)
+        while not reqQueue.empty():
+            for i in range(self.concurrency):
+                if reqQueue.empty():
+                    break
+
+                request = reqQueue.get()
+                self._llm.engine.add_request(
                     prompt=request.prompt,
                     prompt_token_ids=request.tokenized, 
                     sampling_params=samplingParams, 

@@ -159,6 +159,7 @@ class EnhancedLLM(object):
     def _completeBatchAsync(
             self, 
             prompts: list[str], 
+            numThreads: int,
             inference: Callable[[object, Queue[QueueRequest], Queue[QueueResponse], dict, dict], Any],
             tokenIdExtractor: Callable[[QueueResponse], list[int]],
             **genArgs: Any
@@ -181,10 +182,10 @@ class EnhancedLLM(object):
             order[request.requestId] = i
             self._reqQueue.put(request)
 
-        for i in range(self.concurrency):
+        for i in range(numThreads):
             self._reqQueue.put(None)
         
-        for i in range(self.concurrency):
+        for i in range(numThreads):
             t = Thread(
                     target=inference, 
                     args=(self, self._reqQueue, self._resQueue, genArgs), 

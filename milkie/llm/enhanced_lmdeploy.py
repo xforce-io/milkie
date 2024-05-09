@@ -123,9 +123,10 @@ class EnhancedLmDeploy(EnhancedLLM):
             **kwargs: Any
     ) -> CompletionResponse:
         return super()._completeBatchAsync(
-            prompts, 
-            EnhancedLmDeploy._inference,
-            lambda output : output.token_ids,
+            prompts=prompts, 
+            numThreads=self.concurrency,
+            inference=EnhancedLmDeploy._inference,
+            tokenIdExtractor=lambda output : output.token_ids,
             **kwargs)
 
     def _inference(
