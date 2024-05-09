@@ -35,15 +35,11 @@ class QueueRequest:
     
 class QueueResponse:
     def __init__(self,
-            request :QueueRequest,
+            requestId :int,
             output :Any) -> None:
-        self.request = request
+        self.requestId = requestId
         self.output = output
         
-    @property
-    def requestId(self):
-        return self.request.requestId()
-
 class EnhancedLLM(object):
 
     def __init__(self,

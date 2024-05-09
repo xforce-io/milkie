@@ -152,7 +152,7 @@ class EnhancedLmDeploy(EnhancedLLM):
                     sequence_end=True,
                     stream_output=True):
                 pass
-            resQueue.put(QueueResponse(request, outputs))
+            resQueue.put(QueueResponse(request.requestId, outputs))
 
     def _getSingleParameterSizeInBytes(self):
         return 2 

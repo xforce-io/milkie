@@ -232,7 +232,7 @@ class EnhancedVLLM(EnhancedLLM):
 
             for output in outputs:
                 resQueue.put(QueueResponse(
-                    requestId=request.requestId, 
+                    requestId=output.request_id, 
                     output=output))
 
     def _getSingleParameterSizeInBytes(self):
