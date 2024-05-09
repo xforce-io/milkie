@@ -2,9 +2,8 @@ from typing import Any, Dict, Optional, Sequence
 from queue import Queue
 import torch
 from vllm import SamplingParams
-from vllm.engine.arg_utils import AsyncEngineArgs
+from vllm.engine.arg_utils import EngineArgs
 from vllm.engine.llm_engine import LLMEngine
-from vllm.usage.usage_lib import UsageContext
 
 from llama_index.legacy.llms.generic_utils import (
     completion_response_to_chat_response,
@@ -224,16 +223,17 @@ class EnhancedVLLM(EnhancedLLM):
                     sampling_params=samplingParams, 
                     request_id=request.requestId)
 
-            requestOutputs = self._llm.engine.step()
-            for requestOutput in requestOutputs:
-                if requestOutput.finished:
-                    finalOutput = requestOutput
-                    break
+            outputs = []
+            while self._llm.engine.has_unfinished_requests():
+                stepOutputs = self._llm.engine.step()
+                for requestOutput in stepOutputs:
+                    if requestOutput.finished:
+                        outputs.append(requestOutput)
 
-            assert finalOutput is not None
-            resQueue.put(QueueResponse(
-                requestId=request.requestId, 
-                output=finalOutput))
+            for output in outputs:
+                resQueue.put(QueueResponse(
+                    requestId=request.requestId, 
+                    output=output))
 
     def _getSingleParameterSizeInBytes(self):
         type_to_size = {
