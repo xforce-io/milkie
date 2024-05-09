@@ -180,13 +180,13 @@ class EnhancedVLLM(EnhancedLLM):
             prompts: list[str], 
             **kwargs: Any
     ) -> list[CompletionResponse]:
-        self.concurrency
-        return self._completeBatchAsync(
-            prompts=prompts, 
-            numThreads=1,
-            inference=EnhancedVLLM._inference,
-            tokenIdExtractor=lambda output : output.outputs[0].token_ids,
-            **kwargs)
+        #return self._completeBatchAsync(
+        #    prompts=prompts, 
+        #    numThreads=1,
+        #    inference=EnhancedVLLM._inference,
+        #    tokenIdExtractor=lambda output : output.outputs[0].token_ids,
+        #    **kwargs)
+        return self._completeBatchSync(prompts, **kwargs)
 
     def _completeBatchSync(
             self, 
@@ -206,7 +206,8 @@ class EnhancedVLLM(EnhancedLLM):
         sampling_params = SamplingParams(**params)
         outputs = self._getModel().generate(
             prompt_token_ids=promptTokenIds, 
-            sampling_params=sampling_params)
+            sampling_params=sampling_params,
+            use_tqdm=False)
 
         result = []
         for output in outputs:
@@ -232,6 +233,9 @@ class EnhancedVLLM(EnhancedLLM):
                     break
 
                 request = reqQueue.get()
+                if not request:
+                    break
+                
                 self._llm.engine.add_request(
                     prompt=request.prompt,
                     prompt_token_ids=request.tokenized, 
