@@ -35,6 +35,11 @@ class VLLM(CustomLLM):
         default=512,
         description="Maximum number of tokens to generate per output sequence.",
     )
+
+    dtype: str = Field(
+        default="auto",
+        description="The data type for the model weights and activations.",
+    )
     
     _engine: Any = PrivateAttr()
     
@@ -43,12 +48,14 @@ class VLLM(CustomLLM):
             model_name: str,
             context_window: int,
             max_new_tokens :int,
+            dtype :str,
             vllm_kwargs :Dict[str, Any]) -> None:
         super().__init__(model=model_name, max_new_tokens=max_new_tokens)
 
         engineArgs = EngineArgs(
             model=model_name,
             max_model_len=context_window,
+            dtype=dtype,
             **vllm_kwargs)
         self._engine = LLMEngine.from_engine_args(engineArgs)
         

@@ -198,18 +198,18 @@ class EnhancedLLM(object):
         resps :list[QueueResponse] = []
         while not self._resQueue.empty():
             resps.append(self._resQueue.get())
-        resps.sort(key=lambda x: order[x.requestId()])
+        resps.sort(key=lambda x: order[x.requestId])
 
         assert len(resps) == len(prompts)
 
         completionTokens = []
         for resp in resps:
-            completionTokens += [tokenIdExtractor(resp)]
+            completionTokens += [tokenIdExtractor(resp.output)]
         completion = self._tokenizer.batch_decode(completionTokens, skip_special_tokens=True)
 
         completionResponses = []
         for i, resp in enumerate(resps):
             completionResponses += [CompletionResponse(
                 text=completion[i], 
-                raw={"model_output": tokenIdExtractor(resp)})]
+                raw={"model_output": tokenIdExtractor(resp.output)})]
         return completionResponses
