@@ -3,7 +3,7 @@ from queue import Queue
 import torch
 from vllm import SamplingParams
 from vllm.engine.arg_utils import AsyncEngineArgs
-from vllm.engine.async_llm_engine import AsyncLLMEngine
+from vllm.engine.llm_engine import LLMEngine
 from vllm.usage.usage_lib import UsageContext
 
 from llama_index.legacy.llms.generic_utils import (
@@ -47,13 +47,11 @@ class VLLM(CustomLLM):
             vllm_kwargs :Dict[str, Any]) -> None:
         super().__init__(model=model_name, max_new_tokens=max_new_tokens)
 
-        asyncEngineArgs = AsyncEngineArgs(
+        engineArgs = EngineArgs(
             model=model_name,
             max_model_len=context_window,
             **vllm_kwargs)
-        self._engine = AsyncLLMEngine.from_engine_args(
-            asyncEngineArgs, 
-            usage_context=UsageContext.LLM_CLASS)
+        self._engine = LLMEngine.from_engine_args(engineArgs)
         
     def class_name(cls) -> str:
         return "VLLM"
@@ -177,7 +175,7 @@ class EnhancedVLLM(EnhancedLLM):
     ) -> list[CompletionResponse]:
         return self._completeBatchAsync(
             prompts=prompts, 
-            inference=self._inference,
+            inference=EnhancedVLLM._inference,
             tokenIdExtractor=lambda output : output.outputs[0].token_ids,
             **kwargs)
 
@@ -208,7 +206,7 @@ class EnhancedVLLM(EnhancedLLM):
                 raw={"model_output": output.outputs[0].token_ids},)]
         return result
 
-    async def _inference(
+    def _inference(
             self, 
             reqQueue :Queue[QueueRequest], 
             resQueue :Queue[QueueResponse], 
@@ -220,17 +218,17 @@ class EnhancedVLLM(EnhancedLLM):
                 **self._llm._model_kwargs, 
                 **EnhancedLLM.filterGenArgs(genArgs)}
             samplingParams = SamplingParams(**params)
-            resultsGenerator = self._llm.engine.generate(
+            self._llm.engine.add_request(
+                    prompt=request.prompt,
                     prompt_token_ids=request.tokenized, 
                     sampling_params=samplingParams, 
                     request_id=request.requestId)
-            finalOutput = None
-            async for requestOutput in resultsGenerator:
-                if await request.is_disconnected():
-                    # Abort the request if the client disconnects.
-                    await self._llm.engine.abort(request.requestId)
-                    return
-                finalOutput = requestOutput
+
+            requestOutputs = self._llm.engine.step()
+            for requestOutput in requestOutputs:
+                if requestOutput.finished:
+                    finalOutput = requestOutput
+                    break
 
             assert finalOutput is not None
             resQueue.put(QueueResponse(
