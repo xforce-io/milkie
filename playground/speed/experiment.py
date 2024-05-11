@@ -59,7 +59,6 @@ def theConfig():
     quantization_type = None
     prompt_lookup_num_tokens = None
 
-
 @ex.capture()
 def experiment(
         strategy :Strategy,
@@ -141,7 +140,7 @@ def mainFunc(
         "prompt_lookup_num_tokens":prompt_lookup_num_tokens,
     }
 
-    experiment(kwargs)
+    experiment(**kwargs)
 
 if __name__ == "__main__":
     pass
