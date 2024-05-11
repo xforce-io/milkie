@@ -1,4 +1,5 @@
 from abc import abstractmethod
+from typing import Any
 
 from milkie.agent.base_agent import BaseAgent
 from milkie.agent.prompt_agent import PromptAgent
@@ -19,6 +20,16 @@ class Strategy(object):
 
     def __str__(self) -> str:
         pass
+
+    def getStrategy(name :str) -> Any:
+        if name == "raw":
+            return StrategyRaw()
+        elif name == "mrqa":
+            return StrategyMRQA()
+        elif name == "deepqa":
+            return StrategyDeepQA()
+        else:
+            raise ValueError(f"Unknown strategy name: {name}")
 
 class StrategyMRQA(Strategy):
 

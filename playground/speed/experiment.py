@@ -1,12 +1,9 @@
-from multiprocessing import Process
 import time, logging
-from threading import Thread
 from sacred import Experiment
 
 from llama_index.legacy.response.schema import Response
 
 from milkie.benchmark.benchtype import BenchTypeKeyword, Benchmarks
-from milkie.config.config import FRAMEWORK
 from milkie.context import Context
 from milkie.global_context import GlobalContext
 from milkie.model_factory import ModelFactory
@@ -31,9 +28,37 @@ from sacred.observers import FileStorageObserver
 
 ex = Experiment()
 ex.observers.append(FileStorageObserver("my_runs"))
-modelFactory = ModelFactory()
 
 promptQA = Loader.load("qa_init")
+
+def getModel(name :str) -> str:
+    if name == "Yi34":
+        return ModelYi34
+    elif name == "Baichuan13bChat":
+        return ModelBaichuan13bChat
+    elif name == "Qwen14bChat":
+        return ModelQwen14bChat
+    elif name == "QwenV15S14bChat":
+        return ModelQwenV15S14bChat
+    elif name == "QwenV15S14bGPTQINT4Chat":
+        return ModelQwenV15S14bGPTQINT4Chat
+    elif name == "QwenV15S14bGPTQINT8Chat":
+        return ModelQwenV15S14bGPTQINT8Chat
+    elif name == "QwenV15S14bAWQChat":
+        return ModelQwenV15S14bAWQChat
+    else:
+        raise ValueError(f"Unknown model name: {name}")
+
+@ex.config
+def theConfig():
+    strategy = "raw"
+    llm_model = "QwenV15S14bChat"
+    framework = "LMDEPLOY"
+    batch_size = 10
+    use_cache = True
+    quantization_type = None
+    prompt_lookup_num_tokens = None
+
 
 @ex.capture()
 def experiment(
@@ -42,6 +67,7 @@ def experiment(
     globalConfig = makeGlobalConfig(**kwargs)
     globalConfig.memoryConfig = None
 
+    modelFactory = ModelFactory()
     globalContext = GlobalContext(globalConfig, modelFactory)
     context = Context(globalContext=globalContext)
     agent = strategy.createAgent(context)
@@ -71,20 +97,6 @@ def experiment(
         numBatches += 1
         return resps 
 
-    def agentTaskSingle(prompt :str, argsList :list) -> list[Response]:
-        nonlocal agent, numQueries, numBatches, totalTime, totalTokens
-        t0 = time.time()
-        resp = agent.task(
-            prompt, 
-            argsList, 
-            **globalConfig.getLLMConfig().generationArgs.toJson())
-        t1 = time.time()
-        totalTokens += resp.metadata["numTokens"]
-        totalTime += t1-t0
-        numQueries += 1
-        numBatches += 1
-        return [resp]
-
     benchmarks.evalAndReport(agent=agentTaskBatch, prompt=promptQA)
     tokensPerSec = float(totalTokens)/totalTime
 
@@ -105,31 +117,31 @@ def experiment(
     getMemStat()
 
 @ex.automain
-def mainFunc():
+def mainFunc(
+        strategy, 
+        llm_model, 
+        framework, 
+        batch_size, 
+        use_cache, 
+        quantization_type, 
+        prompt_lookup_num_tokens):
     logger.info("starting speed test")
-    for strategy in [StrategyRaw()]:
-        for llm_model in [ModelQwenV15S14bChat, ModelQwenV15S14bGPTQINT8Chat]:
-            for framework in [FRAMEWORK.LMDEPLOY.name, FRAMEWORK.VLLM.name]:
-                for batch_size in [10]:
-                    for use_cache in [True]:
-                        for quantization_type in [None]:
-                            for prompt_lookup_num_tokens in [None]:
-                                if prompt_lookup_num_tokens and not use_cache:
-                                    continue
 
-                                kwargs = {
-                                    "strategy":strategy,
-                                    "llm_model":llm_model,
-                                    "framework":framework,
-                                    "batch_size":batch_size,
-                                    "use_cache":use_cache,
-                                    "quantization_type":quantization_type,
-                                    "prompt_lookup_num_tokens":prompt_lookup_num_tokens,
-                                }
+    assert type(batch_size) == int
+    assert type(use_cache) == bool
+    assert not (prompt_lookup_num_tokens and not use_cache)
 
-                                p = Process(target=experiment, kwargs=kwargs)
-                                p.start()
-                                p.join()
+    kwargs = {
+        "strategy":Strategy.getStrategy(strategy),
+        "llm_model":getModel(llm_model),
+        "framework":framework,
+        "batch_size":batch_size,
+        "use_cache":use_cache,
+        "quantization_type":quantization_type,
+        "prompt_lookup_num_tokens":prompt_lookup_num_tokens,
+    }
+
+    experiment(kwargs)
 
 if __name__ == "__main__":
     pass
