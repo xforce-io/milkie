@@ -1,4 +1,4 @@
-import multiprocessing
+from multiprocessing import Process
 import time, logging
 from threading import Thread
 from sacred import Experiment
@@ -127,10 +127,9 @@ def mainFunc():
                                     "prompt_lookup_num_tokens":prompt_lookup_num_tokens,
                                 }
 
-                                with multiprocessing.Pool(1) as p:
-                                    p.apply_async(experiment, kwds=kwargs)
-                                    p.close()
-                                    p.join()
+                                p = Process(target=experiment, kwargs=kwargs)
+                                p.start()
+                                p.join()
 
 if __name__ == "__main__":
     pass
