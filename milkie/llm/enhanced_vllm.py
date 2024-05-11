@@ -26,13 +26,12 @@ class EnhancedVLLM(EnhancedLLM):
         super().__init__(context_window, concurrency, tokenizer_name, device, tokenizer_kwargs)
         
         self._llm = Vllm(
-            model_name=model_name,
+            model=model_name,
             max_new_tokens=max_new_tokens,
             dtype="auto",
             vllm_kwargs={
                 "gpu_memory_utilization":0.9, 
-                "quantization" : None if EnhancedLLM.getQuantMethod(model_name) == QuantMethod.NONE else "gptq",
-                "enable_prefix_caching" :True})
+                "quantization" : None if EnhancedLLM.getQuantMethod(model_name) == QuantMethod.NONE else "gptq"})
 
     @torch.inference_mode()
     def predict(

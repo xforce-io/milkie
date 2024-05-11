@@ -1,4 +1,6 @@
+import multiprocessing
 import time, logging
+from threading import Thread
 from sacred import Experiment
 
 from llama_index.legacy.response.schema import Response
@@ -106,12 +108,8 @@ def experiment(
 def mainFunc():
     logger.info("starting speed test")
     for strategy in [StrategyRaw()]:
-        for llm_model in [ModelQwenV15S14bChat]:
-            device = None
-            if llm_model == ModelQwenV15S14bChat:
-                device = 0
-
-            for framework in [FRAMEWORK.LMDEPLOY.name]:
+        for llm_model in [ModelQwenV15S14bChat, ModelQwenV15S14bGPTQINT8Chat]:
+            for framework in [FRAMEWORK.LMDEPLOY.name, FRAMEWORK.VLLM.name]:
                 for batch_size in [10]:
                     for use_cache in [True]:
                         for quantization_type in [None]:
@@ -119,15 +117,20 @@ def mainFunc():
                                 if prompt_lookup_num_tokens and not use_cache:
                                     continue
 
-                                experiment(
-                                    strategy=strategy,
-                                    llm_model=llm_model,
-                                    framework=framework,
-                                    device=device,
-                                    batch_size=batch_size,
-                                    use_cache=use_cache,
-                                    quantization_type=quantization_type,
-                                    prompt_lookup_num_tokens=prompt_lookup_num_tokens)
+                                kwargs = {
+                                    "strategy":strategy,
+                                    "llm_model":llm_model,
+                                    "framework":framework,
+                                    "batch_size":batch_size,
+                                    "use_cache":use_cache,
+                                    "quantization_type":quantization_type,
+                                    "prompt_lookup_num_tokens":prompt_lookup_num_tokens,
+                                }
+
+                                with multiprocessing.Pool(1) as p:
+                                    p.apply_async(experiment, kwds=kwargs)
+                                    p.close()
+                                    p.join()
 
 if __name__ == "__main__":
     pass
