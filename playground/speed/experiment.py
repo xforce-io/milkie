@@ -8,7 +8,7 @@ from milkie.context import Context
 from milkie.global_context import GlobalContext
 from milkie.model_factory import ModelFactory
 from milkie.prompt.prompt import Loader
-from milkie.strategy import Strategy, StrategyRaw
+from milkie.strategy import Strategy
 from milkie.utils.commons import getMemStat
 from playground.global_config import makeGlobalConfig
 
@@ -23,6 +23,9 @@ ModelQwenV15S14bChat = Prefix+"qwen/Qwen1.5-14B-Chat/"
 ModelQwenV15S14bGPTQINT4Chat = Prefix+"qwen/Qwen1___5-14B-Chat-GPTQ-Int4/"
 ModelQwenV15S14bGPTQINT8Chat = Prefix+"qwen/Qwen1___5-14B-Chat-GPTQ-Int8/"
 ModelQwenV15S14bAWQChat = Prefix+"qwen/Qwen1___5-14B-Chat-AWQ/"
+
+PrefixAishuReader = "/mnt/data2/.cache/huggingface/hub/"
+ModelAishuReader2Chat = PrefixAishuReader + "Qwen-14B-Chat-1.5-aishuV2"
 
 from sacred.observers import FileStorageObserver
 
@@ -46,6 +49,8 @@ def getModel(name :str) -> str:
         return ModelQwenV15S14bGPTQINT8Chat
     elif name == "QwenV15S14bAWQChat":
         return ModelQwenV15S14bAWQChat
+    elif name == "AishuReader2Chat":
+        return ModelAishuReader2Chat
     else:
         raise ValueError(f"Unknown model name: {name}")
 
@@ -58,6 +63,7 @@ def theConfig():
     use_cache = True
     quantization_type = None
     prompt_lookup_num_tokens = None
+    benchmarks = ""
 
 @ex.capture()
 def experiment(
@@ -71,10 +77,8 @@ def experiment(
     context = Context(globalContext=globalContext)
     agent = strategy.createAgent(context)
 
-    benchmarks = Benchmarks([
-            #BenchTypeKeyword("benchmark/410_key.jsonl"),
-            BenchTypeKeyword("benchmark/fd100_key.jsonl"),
-        ],
+    benchmarks = Benchmarks(
+        [BenchTypeKeyword(benchmark.strip()) for benchmark in kwargs["benchmarks"].split(";")],
         globalConfig.getLLMConfig().batchSize)
 
     numQueries = 0
@@ -123,7 +127,8 @@ def mainFunc(
         batch_size, 
         use_cache, 
         quantization_type, 
-        prompt_lookup_num_tokens):
+        prompt_lookup_num_tokens,
+        benchmarks):
     logger.info("starting speed test")
 
     assert type(batch_size) == int
@@ -138,6 +143,7 @@ def mainFunc(
         "use_cache":use_cache,
         "quantization_type":quantization_type,
         "prompt_lookup_num_tokens":prompt_lookup_num_tokens,
+        "benchmarks":benchmarks,
     }
 
     experiment(**kwargs)

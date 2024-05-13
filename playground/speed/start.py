@@ -1,5 +1,7 @@
 import subprocess
 
+benchmarks = "benchmark/fd100_key.jsonl;benchmark/410_key.jsonl"
+
 for llm_model in [
         "QwenV15S14bChat",
         "QwenV15S14bGPTQINT4Chat",
