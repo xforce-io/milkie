@@ -57,7 +57,7 @@ class EnhancedHFLLM(EnhancedLLM) :
             model_kwargs=model_kwargs, 
             generate_kwargs=generate_kwargs, 
             is_chat_model=is_chat_model, 
-            system_prompt=super()._systemPrompt)
+            system_prompt=self._systemPrompt if self._systemPrompt is not None else "-")
 
         #refer suggestions from https://pytorch.org/blog/accelerating-generative-ai-2/
         if compile:
@@ -106,7 +106,7 @@ class EnhancedHFLLM(EnhancedLLM) :
             **kwargs: Any
     ) -> CompletionResponse:
         """Completion endpoint."""
-        inputs = self._tokenizer(text=prompts, return_tensors="pt")
+        inputs = self._tokenizer(text=prompts, return_tensors="pt", padding=True)
         for key in self._llm.tokenizer_outputs_to_remove:
             for input in inputs:
                 if key in input:
