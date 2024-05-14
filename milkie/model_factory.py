@@ -55,6 +55,7 @@ class ModelFactory:
                 concurrency=config.batchSize,
                 tokenizer_name=config.model,
                 model_name=config.model,
+                system_prompt=config.systemPrompt,
                 device=config.device,
                 max_new_tokens=256,
                 tokenizer_kwargs=tokenizerArgs)
@@ -64,6 +65,7 @@ class ModelFactory:
                 concurrency=config.batchSize,
                 tokenizer_name=config.model,
                 model_name=config.model,
+                system_prompt=config.systemPrompt,
                 device=config.device,
                 max_new_tokens=256,
                 tokenizer_kwargs=tokenizerArgs)
@@ -75,10 +77,10 @@ class ModelFactory:
                 max_new_tokens=256,
                 model_kwargs=config.modelArgs.toJson(),
                 generate_kwargs=config.generationArgs.toJson(),
-                system_prompt=SystemPromptCn,
                 query_wrapper_prompt=PromptTemplate("{query_str}\n<|ASSISTANT|>\n"),
                 tokenizer_name=config.model,
                 model_name=config.model,
+                system_prompt=config.systemPrompt,
                 tokenizer_kwargs=tokenizerArgs,
                 is_chat_model=True,
             )

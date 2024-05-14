@@ -47,11 +47,13 @@ class EnhancedLLM(object):
             context_window :int,
             concurrency :int,
             tokenizer_name :str,
+            system_prompt :str,
             device :str,
             tokenizer_kwargs :dict) -> None:
         self.context_window = context_window
         self.concurrency = concurrency
         self.device = device
+
         self._llm :LLM = None
         if device is not None:
             torch.cuda.set_device(device)
@@ -60,7 +62,7 @@ class EnhancedLLM(object):
         self._reqQueue = Queue[QueueRequest]()
         self._resQueue = Queue[QueueResponse]()
         self._threads = []
-        self._systemPrompt = Loader.load("system_qwen")
+        self._systemPrompt = Loader.load(system_prompt) if system_prompt is not None else None
 
     def getLLM(self) -> LLM:
         return self._llm
@@ -101,8 +103,9 @@ class EnhancedLLM(object):
             **kwargs: Any):
         result = []
         messages = [self._llm._get_messages(prompt, **args) for args in argsList]
-        for msgs in messages:
-            msgs.insert(0, ChatMessage(role="system", content=self._systemPrompt))
+        if self._systemPrompt is not None:
+            for msgs in messages:
+                msgs.insert(0, ChatMessage(role="system", content=self._systemPrompt))
         responses = self._chatBatch(messages, **kwargs)
         for response in responses:
             output = response.message.content or ""

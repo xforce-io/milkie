@@ -24,7 +24,13 @@ class EnhancedHFLLM(EnhancedLLM) :
             system_prompt: str) -> None:
         tokenizer_kwargs["padding_side"] = "left"
 
-        super().__init__(context_window, concurrency, tokenizer_name, device, tokenizer_kwargs)
+        super().__init__(
+            context_window=context_window, 
+            concurrency=concurrency, 
+            tokenizer_name=tokenizer_name, 
+            system_prompt=system_prompt,
+            device=device, 
+            tokenizer_kwargs=tokenizer_kwargs)
 
         compile = model_kwargs.pop("torch_compile", False)
 
@@ -51,7 +57,7 @@ class EnhancedHFLLM(EnhancedLLM) :
             model_kwargs=model_kwargs, 
             generate_kwargs=generate_kwargs, 
             is_chat_model=is_chat_model, 
-            system_prompt=system_prompt)
+            system_prompt=super()._systemPrompt)
 
         #refer suggestions from https://pytorch.org/blog/accelerating-generative-ai-2/
         if compile:

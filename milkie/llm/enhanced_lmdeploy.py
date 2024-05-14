@@ -106,10 +106,17 @@ class EnhancedLmDeploy(EnhancedLLM):
             concurrency: int,
             tokenizer_name: str, 
             model_name: str,
+            system_prompt: str,
             device: str,
             max_new_tokens: int,
             tokenizer_kwargs: dict) -> None:
-        super().__init__(context_window, concurrency, tokenizer_name, device, tokenizer_kwargs)
+        super().__init__(
+            context_window=context_window, 
+            concurrency=concurrency, 
+            tokenizer_name=tokenizer_name, 
+            system_prompt=system_prompt, 
+            device=device, 
+            tokenizer_kwargs=tokenizer_kwargs)
 
         self._llm = LMDeploy(
                 model_name, 
