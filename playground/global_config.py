@@ -7,6 +7,9 @@ def makeGlobalConfig(
     if "llm_model" in kwargs:
         configYaml["llm"]["model"] = kwargs["llm_model"]
 
+    if "system_prompt" in kwargs:
+        configYaml["llm"]["system_prompt"] = kwargs["system_prompt"]
+
     if "framework" in kwargs:
         configYaml["llm"]["framework"] = kwargs["framework"]
 

@@ -61,6 +61,7 @@ def theConfig():
     use_cache = True
     quantization_type = None
     prompt_lookup_num_tokens = None
+    system_prompt = None
     prompt = "qa_strict"
     benchmarks = ""
 
