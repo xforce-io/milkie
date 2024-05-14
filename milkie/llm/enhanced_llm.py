@@ -55,8 +55,6 @@ class EnhancedLLM(object):
         self.device = device
 
         self._llm :LLM = None
-        if device is not None:
-            torch.cuda.set_device(device)
         self._tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, **tokenizer_kwargs)
 
         self._reqQueue = Queue[QueueRequest]()

@@ -35,8 +35,8 @@ class EnhancedHFLLM(EnhancedLLM) :
         compile = model_kwargs.pop("torch_compile", False)
 
         from transformers import AutoModelForCausalLM
-        from auto_gptq import AutoGPTQForCausalLM
         if EnhancedLLM.getQuantMethod(model_name) == QuantMethod.GPTQ:
+            from auto_gptq import AutoGPTQForCausalLM
             model = AutoGPTQForCausalLM.from_quantized(
                 model_name, **model_kwargs
             )
@@ -45,6 +45,7 @@ class EnhancedHFLLM(EnhancedLLM) :
             model = AutoModelForCausalLM.from_pretrained(
                 model_name, **model_kwargs
             )
+        model = model.to(self.device)
 
         self._llm = HuggingFaceLLM(
             context_window=context_window, 
@@ -112,12 +113,13 @@ class EnhancedHFLLM(EnhancedLLM) :
                 if key in input:
                     inputs.pop(key, None)
 
-        inputs = inputs.to(self._getModel().device)
+
+        inputs = inputs.to(self.device)
         
         param = {**self._llm.generate_kwargs, **kwargs}
         tokensList = self._getModel().generate(
             **inputs,
-            max_new_tokens=self._llm.max_new_tokens,
+            max_length=self._llm.max_new_tokens,
             stopping_criteria=self._llm._stopping_criteria,
             **param)
 

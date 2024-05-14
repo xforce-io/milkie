@@ -47,11 +47,11 @@ class Device(Enum):
     MPS = 2
 
     def getDevice(device):
-        if device == Device.CPU:
+        if device == Device.CPU.name:
             return "cpu"
-        elif device == Device.CUDA:
+        elif device == Device.CUDA.name:
             return "cuda"
-        elif device == Device.MPS:
+        elif device == Device.MPS.name:
             return "mps"
         else:
             raise Exception("Device not supported")
