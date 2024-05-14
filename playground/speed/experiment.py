@@ -32,8 +32,6 @@ from sacred.observers import FileStorageObserver
 ex = Experiment()
 ex.observers.append(FileStorageObserver("my_runs"))
 
-promptQA = Loader.load("qa_init")
-
 def getModel(name :str) -> str:
     if name == "Yi34":
         return ModelYi34
@@ -63,12 +61,15 @@ def theConfig():
     use_cache = True
     quantization_type = None
     prompt_lookup_num_tokens = None
+    prompt = "qa_strict"
     benchmarks = ""
 
 @ex.capture()
 def experiment(
         strategy :Strategy,
         **kwargs):
+    promptQA = Loader.load(kwargs["prompt"])
+
     globalConfig = makeGlobalConfig(**kwargs)
     globalConfig.memoryConfig = None
 
