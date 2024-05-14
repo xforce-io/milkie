@@ -24,6 +24,8 @@ class EnhancedVLLM(EnhancedLLM):
             device :str,
             max_new_tokens: int,
             tokenizer_kwargs: dict):
+        tokenizer_kwargs["padding_side"] = "right"
+        
         super().__init__(
             context_window=context_window, 
             concurrency=concurrency, 
