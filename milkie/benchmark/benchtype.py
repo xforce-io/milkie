@@ -21,7 +21,7 @@ def jsonToFilter(config, text):
 
 class KeywordFilter:
 
-    RefuseKeywords = ["不知道", "不确定", "未找到", "抱歉","无法确定","没有提到","无法回答","没有明确回答","没有找到","无法找到","未找到","未提及","unknown","无法判断","无关","无法直接回答","没有明确"]
+    RefuseKeywords = ["无法得出", "无法知道", "不知道", "不确定", "未找到", "抱歉","无法确定","没有提到","无法回答","没有明确回答","没有找到","无法找到","未找到","未提及","unknown","无法判断","无关","无法直接回答","没有明确"]
     
     def __init__(self, config) -> None:
         self.isOr = None
