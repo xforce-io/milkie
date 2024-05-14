@@ -3,6 +3,7 @@ llm:
   model: /mnt/data1/.cache/huggingface/hub/01ai/Yi-34B-Chat/
   system_prompt: system_prompt
   framework : VLLM
+  device: CUDA
   deployment_name: "gpt-35-turbo-16k"
   api_key: "41157f060dc04dea8dd063b8716ec721"
   azure_endpoint: "https://artificial-intelligence-01.openai.azure.com/"

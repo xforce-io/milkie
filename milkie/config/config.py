@@ -46,6 +46,16 @@ class Device(Enum):
     CUDA = 1
     MPS = 2
 
+    def getDevice(device):
+        if device == Device.CPU:
+            return "cpu"
+        elif device == Device.CUDA:
+            return "cuda"
+        elif device == Device.MPS:
+            return "mps"
+        else:
+            raise Exception("Device not supported")
+
 class RewriteStrategy(Enum):
     NONE = 0
     QUERY_REWRITE = 1
@@ -243,6 +253,7 @@ class LLMConfig(BaseConfig):
         device = None
         if "device" in config.keys():
             device = config["device"]
+            device = Device.getDevice(device)
         
         modelArgs = LLMModelArgs.fromArgs(config["model_args"])
         generationArgs = LLMGenerationArgs.fromArgs(config["generation_args"])
@@ -279,12 +290,7 @@ class EmbeddingConfig(BaseConfig):
             device :Device):
         self.type = type
         self.model = model 
-        if device == Device.CPU.name:
-            self.device = "cpu"
-        elif device == Device.MPS.name:
-            self.device = "mps"
-        else:
-            self.device = "cuda"
+        self.device = Device.getDevice(device)
 
     def fromArgs(config :dict):
         if config["type"] == EmbeddingType.HUGGINGFACE.name:

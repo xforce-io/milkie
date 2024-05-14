@@ -16,7 +16,7 @@ class EnhancedHFLLM(EnhancedLLM) :
             query_wrapper_prompt: str, 
             tokenizer_name: str, 
             model_name: str, 
-            device: int,
+            device: str,
             tokenizer_kwargs: dict, 
             model_kwargs: dict, 
             generate_kwargs: dict, 
