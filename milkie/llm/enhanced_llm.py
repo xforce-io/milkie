@@ -19,6 +19,7 @@ from llama_index.legacy.llms.generic_utils import (
 )
 
 from milkie.config.config import QuantMethod
+from milkie.prompt.prompt import Loader
 
 class QueueRequest:
     def __init__(
@@ -59,6 +60,7 @@ class EnhancedLLM(object):
         self._reqQueue = Queue[QueueRequest]()
         self._resQueue = Queue[QueueResponse]()
         self._threads = []
+        self._systemPrompt = Loader.load("system_qwen")
 
     def getLLM(self) -> LLM:
         return self._llm
@@ -98,9 +100,10 @@ class EnhancedLLM(object):
             argsList: list[dict],
             **kwargs: Any):
         result = []
-        responses = self._chatBatch(
-            [self._llm._get_messages(prompt, **args) for args in argsList],
-            **kwargs)
+        messages = [self._llm._get_messages(prompt, **args) for args in argsList]
+        for msgs in messages:
+            msgs.insert(0, ChatMessage(role="system", content=self._systemPrompt))
+        responses = self._chatBatch(messages, **kwargs)
         for response in responses:
             output = response.message.content or ""
             result += [(self._llm._parse_output(output), len(response.raw["model_output"]))]

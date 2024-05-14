@@ -129,6 +129,7 @@ def mainFunc(
         use_cache, 
         quantization_type, 
         prompt_lookup_num_tokens,
+        prompt,
         benchmarks):
     logger.info("starting speed test")
 
@@ -144,6 +145,7 @@ def mainFunc(
         "use_cache":use_cache,
         "quantization_type":quantization_type,
         "prompt_lookup_num_tokens":prompt_lookup_num_tokens,
+        "prompt":prompt,
         "benchmarks":benchmarks,
     }
 

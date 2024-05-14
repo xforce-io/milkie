@@ -20,6 +20,8 @@ def jsonToFilter(config, text):
     raise ValueError("Unknown filter format")
 
 class KeywordFilter:
+
+    RefuseKeywords = ["不知道", "不确定", "未找到", "抱歉","无法确定","没有提到","无法回答","没有明确回答","没有找到","无法找到","未找到","未提及","unknown","无法判断","无关","无法直接回答","没有明确"]
     
     def __init__(self, config) -> None:
         self.isOr = None
@@ -39,7 +41,7 @@ class KeywordFilter:
     def match(self, text) -> bool:
         if self.isOr == None:
             if self.filters == None:
-                return any(keyword in text for keyword in ["不知道", "不确定", "未找到"])
+                return any(keyword in text for keyword in KeywordFilter.RefuseKeywords)
             else:
                 return self.filters in text
         elif self.isOr:

@@ -72,12 +72,6 @@ class EnhancedHFLLM(EnhancedLLM) :
     ) -> CompletionResponse:
         """Completion endpoint."""
         full_prompt = prompt
-        if not formatted:
-            if self._llm.query_wrapper_prompt:
-                full_prompt = self._llm.query_wrapper_prompt.format(query_str=prompt)
-            if self._llm.system_prompt:
-                full_prompt = f"{self._llm.system_prompt} {full_prompt}"
-
         inputs = self._tokenizer(
             text=full_prompt, 
             return_tensors="pt", 
