@@ -64,21 +64,25 @@ def getModel(name :str) -> str:
 ###############################MODEL REPOS########################################
 ###############################MODEL REPOS########################################
 
+from sacred.observers.base import RunObserver
+class MemObserver(RunObserver):
+    def started_event(
+        self, ex_info, command, host_info, start_time, config, meta_info, _id
+    ):
+        self.config = config
+
+    def log_metrics(self, metrics_by_name, info):
+        report = {
+            "config" : self.config,
+            "metrics" : metrics_by_name
+        }
+        import pdb; pdb.set_trace()
+
 from sacred.observers import FileStorageObserver
 
 ex = Experiment()
 ex.observers.append(FileStorageObserver("my_runs"))
-
-@ex.config
-def theConfig():
-    strategy = "raw"
-    llm_model = "QwenV15S14bChat"
-    framework = "LMDEPLOY"
-    batch_size = 50
-    prompt_lookup_num_tokens = None
-    system_prompt = None
-    prompt = "qa_strict"
-    benchmarks = ""
+ex.observers.append(MemObserver())
 
 @ex.capture()
 def experiment(
@@ -96,7 +100,7 @@ def experiment(
 
     benchmarks = []
     for benchmark in kwargs["benchmarks"].split(";"):
-        if benchmark.strip().empty():
+        if len(benchmark.strip()) == 0:
             continue
         benchmarks.append(BenchTypeKeyword(benchmark.strip()))
 
@@ -159,14 +163,4 @@ def mainFunc(
         "prompt":prompt,
         "benchmarks":benchmarks,
     }
-
     experiment(**kwargs)
-
-if __name__ == "__main__":
-    result = ex.run()
-
-    outputData = {
-        "config" : result.config,
-        "metrics" : result.to_json()
-    }
-    logger.info(f"exp result: {outputData}")
