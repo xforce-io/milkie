@@ -82,7 +82,7 @@ class EnhancedVLLM(EnhancedLLM):
 
         promptTokenIds = []
         for i in range(inputs["input_ids"].size(0)):
-            promptTokenIds.append(EnhancedLLM._unpadTokenized(inputs, i))
+            promptTokenIds.append(EnhancedLLM._unpadTokenized(inputs, i).tolist())
 
         kwargs = kwargs if kwargs else {}
         params = {
