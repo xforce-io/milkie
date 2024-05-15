@@ -74,9 +74,7 @@ def theConfig():
     strategy = "raw"
     llm_model = "QwenV15S14bChat"
     framework = "LMDEPLOY"
-    batch_size = 10
-    use_cache = True
-    quantization_type = None
+    batch_size = 50
     prompt_lookup_num_tokens = None
     system_prompt = None
     prompt = "qa_strict"
@@ -97,6 +95,7 @@ def experiment(
     agent = strategy.createAgent(context)
 
     benchmarks = Benchmarks(
+        ex,
         [BenchTypeKeyword(benchmark.strip()) for benchmark in kwargs["benchmarks"].split(";")],
         globalConfig.getLLMConfig().batchSize)
 
@@ -123,46 +122,32 @@ def experiment(
     tokensPerSec = float(totalTokens)/totalTime
 
     #TODO: 1.412 is observered from the A800 GPU, need to remove this hard code
-    logger.info(f"Running "
-                f"kwargs[{kwargs}] "
-                f"costSec[{totalTime}] "
-                f"avgQueryLatSec[{totalTime/numQueries}] "
-                f"avgBatchLatSec[{totalTime/numBatches}] "
-                f"tokensPerSec[{tokensPerSec}] "
-                f"memory[{globalContext.settings.llm.getMem()}] "
-                f"mbu[{globalContext.settings.llm.getMBU(tokensPerSec, 1.412 * 1024**4)}] ")
     ex.log_scalar("total", numQueries)
+    ex.log_scalar("costSec", totalTime)
     ex.log_scalar("avgQueryLatSec", totalTime/numQueries)
     ex.log_scalar("avgBatchLatSec", totalTime/numBatches)
-    ex.log_scalar("costMs", totalTime)
+    ex.log_scalar("tokensPerSec", tokensPerSec)
+    ex.log_scalar("memory", globalContext.settings.llm.getMem())
+    ex.log_scalar("mbu", globalContext.settings.llm.getMBU(tokensPerSec, 1.412 * 1024**4))
 
     getMemStat()
 
-@ex.automain
+@ex.main
 def mainFunc(
         strategy, 
         llm_model, 
         framework, 
         batch_size, 
-        use_cache, 
-        quantization_type, 
         prompt_lookup_num_tokens,
         system_prompt,
         prompt,
         benchmarks):
-    logger.info("starting speed test")
-
     assert type(batch_size) == int
-    assert type(use_cache) == bool
-    assert not (prompt_lookup_num_tokens and not use_cache)
-
     kwargs = {
         "strategy":Strategy.getStrategy(strategy),
         "llm_model":getModel(llm_model),
         "framework":framework,
         "batch_size":batch_size,
-        "use_cache":use_cache,
-        "quantization_type":quantization_type,
         "prompt_lookup_num_tokens":prompt_lookup_num_tokens,
         "system_prompt":system_prompt,
         "prompt":prompt,
@@ -172,4 +157,10 @@ def mainFunc(
     experiment(**kwargs)
 
 if __name__ == "__main__":
-    pass
+    result = ex.run()
+
+    outputData = {
+        "config" : result.config,
+        "metrics" : result.to_json()
+    }
+    logger.info(f"exp result: {outputData}")

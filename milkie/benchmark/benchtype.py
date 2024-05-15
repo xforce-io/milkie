@@ -2,6 +2,7 @@ from abc import abstractmethod
 import logging
 import json
 from typing import Callable
+from sacred import Experiment
 from llama_index.legacy.response.schema import Response
 from llama_index.legacy.utils import truncate_text
 
@@ -62,6 +63,12 @@ class TestcaseKeyword:
 
 class BenchType(object):
 
+    def __init__(self, filepathTest :str) -> None:
+        self.filepathTest = filepathTest
+        self.name = filepathTest.split("/")[-1].split(".")[0]
+        self.succ = 0
+        self.fail = 0
+
     @abstractmethod
     def eval(self, text) -> float:
         pass
@@ -69,9 +76,7 @@ class BenchType(object):
 class BenchTypeKeyword(BenchType):
 
     def __init__(self, filepathTest :str) -> None:
-        self.filepathTest = filepathTest
-        self.succ = 0
-        self.fail = 0
+        super().__init__(filepathTest)
         
         self.testcases = []
         with open(filepathTest, 'r') as file:
@@ -106,7 +111,8 @@ class BenchTypeKeyword(BenchType):
 
 class Benchmarks(object):
     
-    def __init__(self, benchmarks :list, batchSize :int) -> None:
+    def __init__(self, ex :Experiment, benchmarks :list, batchSize :int) -> None:
+        self.ex = ex
         self.benchmarks = benchmarks
         self.batchSize = batchSize
 
@@ -119,7 +125,9 @@ class Benchmarks(object):
 
     def report(self):
         for benchmark in self.benchmarks:
-            logger.info(f"benchmark[{benchmark.filepathTest}] succ[{benchmark.succ}] fail[{benchmark.fail}] accuracy[{benchmark.getAccuracy()}]")
+            self.ex.log_scalar(f"benchmark.{benchmark.name}.succ", benchmark.succ)
+            self.ex.log_scalar(f"benchmark.{benchmark.name}.fail", benchmark.fail)
+            self.ex.log_scalar(f"benchmark.{benchmark.name}.accu", benchmark.getAccuracy())
     
     def evalAndReport(
             self, 
