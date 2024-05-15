@@ -79,7 +79,7 @@ class MemObserver(RunObserver):
             "config" : self.config,
             "metrics" : metrics_by_name
         }
-        logger.info(f"exp result {json.dumps(report)}")
+        logger.info(f"exp result {json.dumps(report, default=str)}")
 
 from sacred.observers import FileStorageObserver
 
