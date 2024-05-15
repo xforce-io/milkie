@@ -94,9 +94,15 @@ def experiment(
     context = Context(globalContext=globalContext)
     agent = strategy.createAgent(context)
 
+    benchmarks = []
+    for benchmark in kwargs["benchmarks"].split(";"):
+        if benchmark.strip().empty():
+            continue
+        benchmarks.append(BenchTypeKeyword(benchmark.strip()))
+
     benchmarks = Benchmarks(
         ex,
-        [BenchTypeKeyword(benchmark.strip()) for benchmark in kwargs["benchmarks"].split(";")],
+        benchmarks,
         globalConfig.getLLMConfig().batchSize)
 
     numQueries = 0
