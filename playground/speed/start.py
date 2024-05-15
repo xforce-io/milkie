@@ -23,7 +23,7 @@ for llm_model in [
                     "-m",
                     "playground.speed.experiment",
                     "with",
-                    f"strategy={strategy}"
+                    f"strategy={strategy}",
                     f"llm_model={llm_model}",
                     f"framework={framework}",
                     f"batch_size={batch_size}",

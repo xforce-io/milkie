@@ -1,4 +1,4 @@
-import time, logging
+import time, logging, json
 from sacred import Experiment
 
 from llama_index.legacy.response.schema import Response
@@ -72,11 +72,14 @@ class MemObserver(RunObserver):
         self.config = config
 
     def log_metrics(self, metrics_by_name, info):
+        if len(metrics_by_name) == 0:
+            return
+
         report = {
             "config" : self.config,
             "metrics" : metrics_by_name
         }
-        import pdb; pdb.set_trace()
+        logger.info(f"exp result {json.dumps(report)}")
 
 from sacred.observers import FileStorageObserver
 
@@ -142,7 +145,7 @@ def experiment(
 
     getMemStat()
 
-@ex.main
+@ex.automain
 def mainFunc(
         strategy, 
         llm_model, 
