@@ -24,8 +24,6 @@ class EnhancedVLLM(EnhancedLLM):
             device :str,
             max_new_tokens: int,
             tokenizer_kwargs: dict):
-        tokenizer_kwargs["padding_side"] = "right"
-        
         super().__init__(
             context_window=context_window, 
             concurrency=concurrency, 
@@ -84,7 +82,7 @@ class EnhancedVLLM(EnhancedLLM):
 
         promptTokenIds = []
         for i in range(inputs["input_ids"].size(0)):
-            promptTokenIds.append(inputs["input_ids"][i][:inputs["attention_mask"][i].sum(dim=0)])
+            promptTokenIds.append(EnhancedLLM._unpadTokenized(inputs, i))
 
         kwargs = kwargs if kwargs else {}
         params = {

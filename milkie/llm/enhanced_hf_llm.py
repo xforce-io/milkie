@@ -22,8 +22,6 @@ class EnhancedHFLLM(EnhancedLLM) :
             generate_kwargs: dict, 
             is_chat_model: bool, 
             system_prompt: str) -> None:
-        tokenizer_kwargs["padding_side"] = "left"
-
         super().__init__(
             context_window=context_window, 
             concurrency=concurrency, 

@@ -55,7 +55,7 @@ class EnhancedLLM(object):
         self.device = device
 
         self._llm :LLM = None
-        self._tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, **tokenizer_kwargs)
+        self._initTokenizer(tokenizer_name, tokenizer_kwargs)
 
         self._reqQueue = Queue[QueueRequest]()
         self._resQueue = Queue[QueueResponse]()
@@ -120,6 +120,14 @@ class EnhancedLLM(object):
     def _getModel(self):
         pass
 
+    def _initTokenizer(self, tokenizer_name :str, tokenizer_kwargs :dict):
+        tokenizer_kwargs["padding_side"] = "left"
+        self._tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, **tokenizer_kwargs)
+    
+    def _unpadTokenized(tokenized :dict, idx :int) -> list[int]:
+        lenMasked = tokenized["attention_mask"][idx].sum(dim=0)
+        return tokenized["input_ids"][idx][-lenMasked:]
+
     def _tokenizer_messages_to_prompt(self, messagesBatch: list[Sequence[ChatMessage]]) -> list[str]:
         """Use the tokenizer to convert messages to prompt. Fallback to generic."""
         if hasattr(self._tokenizer, "apply_chat_template"):
@@ -177,7 +185,7 @@ class EnhancedLLM(object):
         
         order = dict()
         for i, prompt in enumerate(prompts):
-            unpaddedInputIds = inputs["input_ids"][i][:inputs["attention_mask"][i].sum(dim=0)]
+            unpaddedInputIds = EnhancedLLM._unpadTokenized(inputs, i)
             request = QueueRequest(
                     requestId=None,
                     prompt=prompt, 
