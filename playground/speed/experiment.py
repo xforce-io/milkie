@@ -126,7 +126,7 @@ def experiment(
             argsList, 
             **globalConfig.getLLMConfig().generationArgs.toJson())
         t1 = time.time()
-        lenOutputs += sum(len(resp.text) for resp in resps)
+        lenOutputs += sum(len(resp.response) for resp in resps)
         totalTokens += sum(resp.metadata["numTokens"] for resp in resps)
         totalTime += t1-t0
         numQueries += len(resps)
