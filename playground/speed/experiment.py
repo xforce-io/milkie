@@ -113,18 +113,20 @@ def experiment(
         globalConfig.getLLMConfig().batchSize)
 
     numQueries = 0
+    lenOutputs = 0
     numBatches = 0
     totalTime = 0
     totalTokens = 0
 
     def agentTaskBatch(prompt :str, argsList :list) -> list[Response]:
-        nonlocal agent, numQueries, numBatches, totalTime, totalTokens
+        nonlocal agent, numQueries, lenOutputs, numBatches, totalTime, totalTokens
         t0 = time.time()
         resps = agent.taskBatch(
             prompt, 
             argsList, 
             **globalConfig.getLLMConfig().generationArgs.toJson())
         t1 = time.time()
+        lenOutputs += sum(len(resp.text) for resp in resps)
         totalTokens += sum(resp.metadata["numTokens"] for resp in resps)
         totalTime += t1-t0
         numQueries += len(resps)
@@ -137,6 +139,7 @@ def experiment(
     #TODO: 1.412 is observered from the A800 GPU, need to remove this hard code
     ex.log_scalar("total", numQueries)
     ex.log_scalar("costSec", totalTime)
+    ex.log_scalar("avgOutputLen", lenOutputs/numQueries)
     ex.log_scalar("avgQueryLatSec", totalTime/numQueries)
     ex.log_scalar("avgBatchLatSec", totalTime/numBatches)
     ex.log_scalar("tokensPerSec", tokensPerSec)
