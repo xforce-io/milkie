@@ -6,6 +6,7 @@ from milkie.strategy import Strategy, StrategyDeepQA
 
 from milkie.benchmark.testsuite import TestCase, TestSuite
 from milkie.utils.data_utils import loadFromYaml
+from playground.model_repos import ModelAishuReader2_Chat_AWQ
 
 logger = logging.getLogger(__name__)
 
@@ -32,13 +33,6 @@ TestCases = [
     TestCase("第二红岸基地的建造经费主要来自于谁", ["伊文斯"]),
     TestCase("杀死申玉菲的凶手希望地球叛军统帅属于哪个派别", ["降临派"]),
 ]
-
-ModelYi34 = "/mnt/data1/.cache/huggingface/hub/01ai/Yi-34B-Chat/"
-
-Prefix = "/mnt/data1/.cache/modelscope/hub/"
-ModelBaichuan13bChat = Prefix+"baichuan-inc/Baichuan2-13B-Chat"
-ModelQwen14bChat = Prefix+"qwen/Qwen-14B-Chat"
-ModelQwenV15S14bChat = Prefix+"qwen/Qwen1.5-14B-Chat/"
 
 from sacred.observers import FileStorageObserver
 
@@ -116,7 +110,7 @@ def experiment(
 @ex.automain
 def mainFunc():
     for strategy in [StrategyDeepQA()]:
-        for llm_model in [ModelQwenV15S14bChat]:
+        for llm_model in [ModelAishuReader2_Chat_AWQ]:
             for framework in [FRAMEWORK.HUGGINGFACE, FRAMEWORK.VLLM]:
                 for rewrite_strategy in ["QUERY_REWRITE", "NONE"]:
                     experiment(

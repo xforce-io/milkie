@@ -1,6 +1,5 @@
 #coding=utf-8
 
-import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import json
@@ -126,7 +125,7 @@ def drawFigureForSingleAnylysisObj(ax, analysisObj):
     x = np.arange(len(labels)) * 0.1  # the label locations
     width = 0.05  # the width of the bars
 
-    rects = ax.bar(x, vals, width, label="metric")
+    rects = ax.bar(x, vals, width)
 
     ax.set_ylim(0, max(vals) * 1.5)
     ax.set_ylabel(analysisObj["name"])
@@ -143,18 +142,19 @@ def drawFigureForSingleAnylysisObj(ax, analysisObj):
                         xy=(rect.get_x() + rect.get_width() / 2, height),
                         xytext=(0, 1),
                         textcoords="offset points",
+                        fontsize=6,
                         ha='center', 
                         va='bottom')
     autolabel(rects)
 
 def plotAnalysisObjs(analysisObjs :list[dict]):
-    fig, axs = plt.subplots(len(analysisObjs), 1, figsize=(5, 5), label="abv")  # 创建子图布局，并设置图形尺寸
+    fig, axs = plt.subplots(len(analysisObjs), 1, figsize=(5, len(analysisObjs)*2), label="abv")  # 创建子图布局，并设置图形尺寸
     for i, analysisObj in enumerate(analysisObjs):
         drawFigureForSingleAnylysisObj(axs[i], analysisObj)
 
     plt.text(
         0.5, 
-        0.05, 
+        0.01, 
         json.dumps(analysisObjs[0]["commonConfig"]), 
         ha='center', 
         fontsize=8, 
@@ -168,7 +168,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description='Anylysis milkie log')
     parser.add_argument('--logfilepath', type=str, help='filepath of log')
-    parser.add_argument('--keymetrics', type=str, default="tokensPerSec,costSec", help='key metrics to analysis, split by comma')
+    parser.add_argument('--keymetrics', type=str, default="tokensPerSec,costSec,avgOutputLen", help='key metrics to analysis, split by comma')
     args = parser.parse_args()
 
     if os.path.exists(args.logfilepath):
