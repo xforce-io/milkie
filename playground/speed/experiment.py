@@ -11,7 +11,7 @@ from milkie.prompt.prompt import Loader
 from milkie.strategy import Strategy
 from milkie.utils.commons import getMemStat
 from playground.global_config import makeGlobalConfig
-from playground.model_repos import getModel
+from playground.model_repos import GModelRepo
 
 logger = logging.getLogger(__name__)
 
@@ -112,7 +112,7 @@ def mainFunc(
     assert type(batch_size) == int
     kwargs = {
         "strategy":Strategy.getStrategy(strategy),
-        "llm_model":getModel(llm_model),
+        "llm_model":GModelRepo.getModel(llm_model).getModelPath(),
         "framework":framework,
         "batch_size":batch_size,
         "prompt_lookup_num_tokens":prompt_lookup_num_tokens,
