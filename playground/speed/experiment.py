@@ -44,7 +44,7 @@ def experiment(
         **kwargs):
     promptQA = Loader.load(kwargs["prompt"])
 
-    globalConfig = makeGlobalConfig(**kwargs)
+    globalConfig = makeGlobalConfig(strategy, **kwargs)
     globalConfig.memoryConfig = None
 
     modelFactory = ModelFactory()

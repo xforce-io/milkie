@@ -1,7 +1,9 @@
+from milkie.strategy import Strategy
 from milkie.utils.data_utils import loadFromYaml
 from milkie.config.config import GlobalConfig
 
 def makeGlobalConfig(
+        strategy :Strategy,
         **kwargs) -> GlobalConfig:
     configYaml = loadFromYaml("config/global.yaml")
     if "llm_model" in kwargs:
@@ -42,5 +44,29 @@ def makeGlobalConfig(
         
     if "prompt_lookup_num_tokens" in kwargs:
         configYaml["llm"]["generation_args"]["prompt_lookup_num_tokens"] = kwargs["prompt_lookup_num_tokens"]
+
+    def getAgentConfig(name :str):
+        for agentConfig in configYaml["agents"]:
+            if agentConfig["config"] == name:
+                return agentConfig
+
+    agentConfig = getAgentConfig(strategy.getAgentName())
+    if "reranker" in kwargs:
+        agentConfig["retrieval"]["reranker"]["name"] = kwargs["reranker"]
+
+    if "rerank_position" in kwargs:
+        agentConfig["retrieval"]["reranker"]["position"] = kwargs["rerank_position"]
+
+    if "rewrite_strategy" in kwargs:
+        agentConfig["retrieval"]["rewrite_strategy"] = kwargs["rewrite_strategy"]
+
+    if "chunk_size" in kwargs:
+        agentConfig["index"]["chunk_size"] = kwargs["chunk_size"]
+
+    if "channel_recall" in kwargs:
+        agentConfig["retrieval"]["channel_recall"] = kwargs["channel_recall"]
+    
+    if "similarity_top_k" in kwargs:
+        agentConfig["retrieval"]["similarity_top_k"] = kwargs["similarity_top_k"]
 
     return GlobalConfig(configYaml)

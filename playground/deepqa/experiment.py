@@ -6,6 +6,7 @@ from milkie.strategy import Strategy, StrategyDeepQA
 
 from milkie.benchmark.testsuite import TestCase, TestSuite
 from milkie.utils.data_utils import loadFromYaml
+from playground.global_config import makeGlobalConfig
 from playground.model_repos import GModelRepo
 
 logger = logging.getLogger(__name__)
@@ -38,68 +39,16 @@ from sacred.observers import FileStorageObserver
 
 ex = Experiment()
 ex.observers.append(FileStorageObserver("my_runs"))
-modelFactory = ModelFactory()
-
-
-@ex.config
-def theConfig():
-    reranker = "FLAGEMBED"
-    chunkSize = 256
 
 @ex.capture()
 def experiment(
         strategy :Strategy,
         **kwargs):
-    configYaml = loadFromYaml("config/global.yaml")
-    if "llm_model" in kwargs:
-        configYaml["llm"]["model"] = kwargs["llm_model"]
+    globalConfig = makeGlobalConfig(strategy, **kwargs)
+    globalConfig.memoryConfig = None
 
-    if "load_in_8bit" in kwargs:
-        configYaml["llm"]["model_args"]["load_in_8bit"] = kwargs["load_in_8bit"]
-
-    if "attn_implementation" in kwargs:
-        configYaml["llm"]["model_args"]["attn_implementation"] = kwargs["attn_implementation"]
-
-    if "repetition_penalty" in kwargs:
-        configYaml["llm"]["generation_args"]["repetition_penalty"] = kwargs["repetition_penalty"]
-
-    if "temperature" in kwargs:
-        configYaml["llm"]["generation_args"]["temperature"] = kwargs["temperature"]
-
-    if "do_sample" in kwargs:
-        configYaml["llm"]["generation_args"]["do_sample"] = kwargs["do_sample"]
-    
-    if "use_cache" in kwargs:
-        configYaml["llm"]["generation_args"]["use_cache"] = kwargs["use_cache"]
-        
-    if "prompt_lookup_num_tokens" in kwargs:
-        configYaml["llm"]["generation_args"]["prompt_lookup_num_tokens"] = kwargs["prompt_lookup_num_tokens"]
-
-    def getAgentConfig(name :str):
-        for agentConfig in configYaml["agents"]:
-            if agentConfig["config"] == name:
-                return agentConfig
-
-    agentConfig = getAgentConfig(strategy.getAgentName())
-    if "reranker" in kwargs:
-        agentConfig["retrieval"]["reranker"]["name"] = kwargs["reranker"]
-
-    if "rerank_position" in kwargs:
-        agentConfig["retrieval"]["reranker"]["position"] = kwargs["rerank_position"]
-
-    if "rewrite_strategy" in kwargs:
-        agentConfig["retrieval"]["rewrite_strategy"] = kwargs["rewrite_strategy"]
-
-    if "chunk_size" in kwargs:
-        agentConfig["index"]["chunk_size"] = kwargs["chunk_size"]
-
-    if "channel_recall" in kwargs:
-        agentConfig["retrieval"]["channel_recall"] = kwargs["channel_recall"]
-    
-    if "similarity_top_k" in kwargs:
-        agentConfig["retrieval"]["similarity_top_k"] = kwargs["similarity_top_k"]
-
-    globalConfig = GlobalConfig(configYaml)
+    modelFactory = ModelFactory()
+    globalConfig = GlobalConfig(globalConfig, modelFactory)
     TestSuite("三体", TestCases).run(
         strategy, 
         ex, 
