@@ -108,20 +108,19 @@ def experiment(
         **kwargs)
 
 @ex.automain
-def mainFunc():
-    for strategy in [StrategyDeepQA()]:
-        for llm_model in ["yi-chat-34b"]:
-            for framework in [FRAMEWORK.VLLM]:
-                for rewrite_strategy in ["QUERY_REWRITE", "NONE"]:
-                    experiment(
-                        strategy=strategy,
-                        llm_model=GModelRepo.getModel(llm_model).getModelPath(),
-                        framework=framework,
-                        reranker="FLAGEMBED",
-                        rerank_position="NONE",
-                        rewrite_strategy=rewrite_strategy,
-                        channel_recall=30,
-                        similarity_top_k=20)
-
-if __name__ == "__main__":
-    pass
+def mainFunc(
+        strategy,
+        llm_model,
+        framework,
+        rewrite_strategy):
+    kwargs = {
+        "strategy":Strategy.getStrategy(strategy),
+        "llm_model":GModelRepo.getModel(llm_model).getModelPath(),
+        "framework":framework,
+        "rewrite_strategy":rewrite_strategy,
+        "reranker":"FLAGEMBED",
+        "rerank_position":"NONE",
+        "channel_recall":30,
+        "similarity_top_k":20
+    }
+    experiment(**kwargs)
