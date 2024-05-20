@@ -6,6 +6,7 @@ from milkie.strategy import Strategy, StrategyDeepQA
 
 from milkie.benchmark.testsuite import TestCase, TestSuite
 from milkie.utils.data_utils import loadFromYaml
+from playground.model_repos import GModelRepo
 
 logger = logging.getLogger(__name__)
 
@@ -109,12 +110,12 @@ def experiment(
 @ex.automain
 def mainFunc():
     for strategy in [StrategyDeepQA()]:
-        for llm_model in [ModelAishuReader2_Chat_AWQ]:
-            for framework in [FRAMEWORK.HUGGINGFACE, FRAMEWORK.VLLM]:
+        for llm_model in ["yi-chat-34b"]:
+            for framework in [FRAMEWORK.VLLM]:
                 for rewrite_strategy in ["QUERY_REWRITE", "NONE"]:
                     experiment(
                         strategy=strategy,
-                        llm_model=llm_model,
+                        llm_model=GModelRepo.getModel(llm_model).getModelPath(),
                         framework=framework,
                         reranker="FLAGEMBED",
                         rerank_position="NONE",
