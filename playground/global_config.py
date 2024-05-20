@@ -49,8 +49,12 @@ def makeGlobalConfig(
         for agentConfig in configYaml["agents"]:
             if agentConfig["config"] == name:
                 return agentConfig
+        return None
 
     agentConfig = getAgentConfig(strategy.getAgentName())
+    if agentConfig is None:
+        return GlobalConfig(configYaml)
+    
     if "reranker" in kwargs:
         agentConfig["retrieval"]["reranker"]["name"] = kwargs["reranker"]
 

@@ -1,6 +1,6 @@
 import subprocess
 
-strategy = "raw"
+strategy = "deepqa"
 llm_model = "qwenv1.5-chat-14b"
 framework = "VLLM"
 
