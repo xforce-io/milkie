@@ -7,15 +7,15 @@ from milkie.context import Context
 
 class DeepQA(Team):
    
-   def __init__(
+    def __init__(
             self,
             context :Context,
             config :str) -> None:
          super().__init__(context, config)
          self.qaAgent = QAAgent(context, config)
       
-   def task(self, query) -> Response:
-      return self.qaAgent.task(query)
+    def task(self, query) -> Response:
+        return self.qaAgent.task(query)
 
-   def taskBatch(self, queries: list[str]) -> list[Response]:
-      raise NotImplementedError("DeepQA does not support taskBatch")
+    def taskBatch(self, queries: list[str]) -> list[Response]:
+        raise NotImplementedError("DeepQA does not support taskBatch")

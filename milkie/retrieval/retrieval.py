@@ -81,8 +81,8 @@ class RetrievalModule:
         if self.rewriteAgent:
             self.rewriteAgent.setContext(context)
             rewriteResp = self.rewriteAgent.taskBatch(
-                query=curQuery,
-                argsList=None)
+                query=None,
+                argsList=[{"query_str":curQuery}])
             curQuery = rewriteResp.response
 
         result = self.engine.retrieve(QueryBundle(curQuery))
