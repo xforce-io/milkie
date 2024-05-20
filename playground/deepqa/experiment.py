@@ -6,7 +6,6 @@ from milkie.strategy import Strategy, StrategyDeepQA
 
 from milkie.benchmark.testsuite import TestCase, TestSuite
 from milkie.utils.data_utils import loadFromYaml
-from playground.model_repos import ModelAishuReader2_Chat_AWQ
 
 logger = logging.getLogger(__name__)
 
