@@ -41,8 +41,10 @@ class Memory(object):
         return self.getNodeFromId(node.prev_node.node_id) if node.prev_node else None
     
     def __buildDocsFromLongTermLocal(self, memoryTermConfig :MemoryTermConfig):
-        from llama_index.readers.file.unstructured.base import UnstructuredReader
-        return UnstructuredReader(memoryTermConfig.path).load_data()
+        loader = SimpleDirectoryReader(memoryTermConfig.path, file_extractor={
+            ".txt" : "UnstructuredReader"
+        })
+        return loader.load_data()
 
 if __name__ == "__main__":
     memoryTermConfig = MemoryTermConfig(

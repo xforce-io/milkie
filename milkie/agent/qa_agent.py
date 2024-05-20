@@ -43,6 +43,9 @@ class QAAgent(BaseAgent):
             self.processRound(self.context)
         return self.context.decisionResult
 
+    def taskBatch(self, query: str, kwargs: list[dict]) -> list[Response]:
+        raise NotImplementedError("QAAgent does not support taskBatch")
+
     def processRound(self, context):
         self.__retrieval(context)
         self.__reasoning(context)

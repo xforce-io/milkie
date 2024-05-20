@@ -16,3 +16,6 @@ class DeepQA(Team):
       
    def task(self, query) -> Response:
       return self.qaAgent.task(query)
+
+   def taskBatch(self, queries: list[str]) -> list[Response]:
+      raise NotImplementedError("DeepQA does not support taskBatch")

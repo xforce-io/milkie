@@ -99,16 +99,11 @@ class EnhancedLLM(object):
             prompt: BasePromptTemplate, 
             argsList: list[dict],
             **kwargs: Any):
-        result = []
-        messages = [self._llm._get_messages(prompt, **args) for args in argsList]
-        if self._systemPrompt is not None:
-            for msgs in messages:
-                msgs.insert(0, ChatMessage(role="system", content=self._systemPrompt))
-        responses = self._chatBatch(messages, **kwargs)
-        for response in responses:
-            output = response.message.content or ""
-            result += [(self._llm._parse_output(output), len(response.raw["model_output"]))]
-        return result
+        if argsList is not None and len(argsList) > 0:
+            messages = [self._llm._get_messages(prompt, **args) for args in argsList]
+        else:
+            messages = [self._llm._get_messages(prompt, **{})]
+        return self._predictBatch(messages, **kwargs)
 
     def filterGenArgs(kwargs :dict):
         return EnhancedLLM.filterArgs(kwargs, ["repetition_penalty", "temperature", "top_k", "top_p"])
@@ -142,6 +137,21 @@ class EnhancedLLM(object):
                 add_generation_prompt=True,
                 tokenize=False)
         return [generic_messages_to_prompt(messagesBatch)]
+
+    @torch.inference_mode()
+    def _predictBatch(
+            self, 
+            messages,
+            **kwargs: Any):
+        result = []
+        if self._systemPrompt is not None:
+            for msgs in messages:
+                msgs.insert(0, ChatMessage(role="system", content=self._systemPrompt))
+        responses = self._chatBatch(messages, **kwargs)
+        for response in responses:
+            output = response.message.content or ""
+            result += [(self._llm._parse_output(output), len(response.raw["model_output"]))]
+        return result
 
     def _chat(self, messages: Sequence[ChatMessage], **kwargs: Any) -> ChatResponse:
         prompt = self._llm.messages_to_prompt(messages)
