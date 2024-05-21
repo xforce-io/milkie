@@ -24,7 +24,7 @@ optimum = "*"
 auto-gptq = "*"
 autoawq = "*"
 jieba = "*"
-unstructured = "*"
+llama-index-readers-file = "*"
 
 [build-system]
 requires = ["poetry-core"]

@@ -1,6 +1,7 @@
 from typing import List
 from llama_index.legacy.service_context import ServiceContext
-from llama_index.legacy.readers.file.base import SimpleDirectoryReader 
+from llama_index.core import SimpleDirectoryReader 
+from llama_index.readers.file.unstructured.base import UnstructuredReader
 from llama_index.legacy.storage.storage_context import StorageContext
 from llama_index.legacy.schema import BaseNode
 
@@ -42,7 +43,7 @@ class Memory(object):
     
     def __buildDocsFromLongTermLocal(self, memoryTermConfig :MemoryTermConfig):
         loader = SimpleDirectoryReader(memoryTermConfig.path, file_extractor={
-            ".txt" : "UnstructuredReader"
+            ".txt" : UnstructuredReader()
         })
         return loader.load_data()
 

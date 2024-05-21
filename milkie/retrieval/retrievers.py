@@ -76,4 +76,4 @@ class HybridRetriever(BaseRetriever):
         return nodes
 
     def __calcRRF(rank0, rank1):
-        return 1.0/(60 + rank0) + 1.0/(60 + rank1)
+        return 1.0/(20 + rank0) + 1.0/(20 + rank1)
