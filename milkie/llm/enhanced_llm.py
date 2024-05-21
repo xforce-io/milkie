@@ -6,13 +6,14 @@ from queue import Queue
 from typing import Callable
 
 import torch
+import logging
 
 from transformers import AutoTokenizer
 
 from llama_index_client import ChatMessage
 from llama_index.core.base.llms.types import ChatResponse, CompletionResponse
 from llama_index.core import BasePromptTemplate
-from llama_index.llms import LLM
+from llama_index.core.llms.llm import LLM
 from llama_index.core.base.llms.generic_utils import (
     completion_response_to_chat_response,
     messages_to_prompt as generic_messages_to_prompt,
@@ -20,6 +21,8 @@ from llama_index.core.base.llms.generic_utils import (
 
 from milkie.config.config import QuantMethod
 from milkie.prompt.prompt import Loader
+
+logger = logging.getLogger(__name__)
 
 class QueueRequest:
     def __init__(
@@ -155,6 +158,7 @@ class EnhancedLLM(object):
 
     def _chat(self, messages: Sequence[ChatMessage], **kwargs: Any) -> ChatResponse:
         prompt = self._llm.messages_to_prompt(messages)
+        logger.debug(f"Prompt: {prompt}")
         completion_response = self._complete(prompt, formatted=True, **kwargs)
         return completion_response_to_chat_response(completion_response)
 
@@ -163,6 +167,7 @@ class EnhancedLLM(object):
             messagesBatch: list[Sequence[ChatMessage]], 
             **kwargs: Any) -> list[ChatResponse]:
         prompts = self._tokenizer_messages_to_prompt(messagesBatch)
+        logger.debug(f"Prompts: {prompts}")
         completionResponses = self._completeBatch(prompts, **kwargs)
         return [completion_response_to_chat_response(completionResponse) for completionResponse in completionResponses]
 
