@@ -66,7 +66,7 @@ class HybridRetriever(BaseRetriever):
         
         for node in nodes:
             if not node.metadata["rrf"]:
-                node.score = HybridRetriever.__calcRRF(node.score, 100)
+                node.score = HybridRetriever.__calcRRF(node.score, 50)
 
         nodes.sort(key=lambda x: x.score, reverse=True)
         logger.debug(f"final_recall[{len(nodes)}]")

@@ -1,11 +1,9 @@
 import logging
 from sacred import Experiment
-from milkie.config.config import FRAMEWORK, GlobalConfig
 from milkie.model_factory import ModelFactory
-from milkie.strategy import Strategy, StrategyDeepQA
+from milkie.strategy import Strategy
 
 from milkie.benchmark.testsuite import TestCase, TestSuite
-from milkie.utils.data_utils import loadFromYaml
 from playground.global_config import makeGlobalConfig
 from playground.model_repos import GModelRepo
 
@@ -45,10 +43,8 @@ def experiment(
         strategy :Strategy,
         **kwargs):
     globalConfig = makeGlobalConfig(strategy, **kwargs)
-    globalConfig.memoryConfig = None
 
     modelFactory = ModelFactory()
-    globalConfig = GlobalConfig(globalConfig, modelFactory)
     TestSuite("三体", TestCases).run(
         strategy, 
         ex, 

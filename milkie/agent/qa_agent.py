@@ -29,6 +29,7 @@ class QAAgent(BaseAgent):
 
         self.groundingModule = GroundingModule()
         self.retrievalModule = RetrievalModule(
+            globalConfig=context.globalContext.globalConfig,
             retrievalConfig=self.config.retrievalConfig,
             memoryWithIndex=self.memoryWithIndex)
         self.reasoningModule = ReasoningModule()

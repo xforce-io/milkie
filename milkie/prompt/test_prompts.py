@@ -6,50 +6,48 @@ from llama_index.legacy.llms.types import ChatMessage, MessageRole
 
 from milkie.prompt.prompt import Loader
 
-EMPH_QUERY_INIT_PROMPT_TMPL = Loader.load("qa_init")
-EMPH_QUERY_REFINE_PROMPT_TMPL = Loader.load("qa_refine")
+def candidateTextQAPromptImpl(promptQa:str):
+    return PromptTemplate(
+        Loader.load(promptQa), prompt_type=PromptType.QUERY_KEYWORD_EXTRACT
+    )
 
-EMPH_QUERY_INIT_PROMPT = PromptTemplate(
-    EMPH_QUERY_INIT_PROMPT_TMPL, prompt_type=PromptType.QUERY_KEYWORD_EXTRACT
-)
+def candidateRefinePromptImpl(promptRefine:str):
+    return PromptTemplate(
+        Loader.load(promptRefine), prompt_type=PromptType.REFINE
+    )
 
-EMPH_QUERY_REFINE_PROMPT = PromptTemplate(
-    EMPH_QUERY_REFINE_PROMPT_TMPL, prompt_type=PromptType.REFINE
-)
+def candidateTextQAPromptSel(
+        promptSystem:str,
+        promptQa:str) :
+    return SelectorPromptTemplate(
+        default_template=candidateTextQAPromptImpl(promptQa),
+        conditionals=[(
+            is_chat_model, 
+            ChatPromptTemplate(
+                message_templates=[
+                    ChatMessage(
+                        content=(Loader.load(promptSystem)),
+                        role=MessageRole.SYSTEM,
+                    ),
+                    ChatMessage(
+                        content=(Loader.load(promptQa)),
+                        role=MessageRole.USER,
+                    ),
+            ])
+        )]
+    )
 
-EMPH_TEXT_QA_PROMPT_SEL = SelectorPromptTemplate(
-    default_template=EMPH_QUERY_INIT_PROMPT,
-    conditionals=[(
-        is_chat_model, 
-        ChatPromptTemplate(
-            message_templates=[
-                ChatMessage(
-                    content=(Loader.load("system_prompt")),
-                    role=MessageRole.SYSTEM,
-                ),
-                ChatMessage(
-                    content=(Loader.load("qa_init")),
-                    role=MessageRole.USER,
-                ),
-        ])
-    )]
-)
-
-EMPH_REFINE_PROMPT_SEL = SelectorPromptTemplate(
-    default_template=EMPH_QUERY_REFINE_PROMPT,
-    conditionals=[(
-        is_chat_model, 
-        ChatPromptTemplate(
-            message_templates=[
-                ChatMessage(
-                    content=(Loader.load("qa_refine")),
-                    role=MessageRole.USER,
-                ),
-        ])
-    )]
-)
-
-CANDIDATE_TEXT_QA_PROMPT_IMPL = EMPH_QUERY_INIT_PROMPT
-CANDIDATE_REFINE_PROMPT_IMPL = EMPH_QUERY_REFINE_PROMPT
-CANDIDATE_TEXT_QA_PROMPT_SEL = EMPH_TEXT_QA_PROMPT_SEL
-CANDIDATE_REFINE_PROMPT_SEL = EMPH_REFINE_PROMPT_SEL
+def candidateRefinePromptSel(promptRefine :str) :
+    return SelectorPromptTemplate(
+        default_template=candidateRefinePromptImpl(promptRefine),
+        conditionals=[(
+            is_chat_model, 
+            ChatPromptTemplate(
+                message_templates=[
+                    ChatMessage(
+                        content=(Loader.load(promptRefine)),
+                        role=MessageRole.USER,
+                    ),
+            ])
+        )]
+    ) 

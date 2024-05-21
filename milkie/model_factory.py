@@ -13,8 +13,6 @@ from milkie.config.config import FRAMEWORK, EmbeddingConfig, LLMConfig
 
 logger = logging.getLogger(__name__)
 
-SystemPromptCn = Loader.load("system_prompt")
-
 class ModelFactory:
     
     def __init__(self) -> None:

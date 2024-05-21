@@ -24,6 +24,7 @@ class RetrievalAgent(BaseAgent):
             self.memoryWithIndex = context.getGlobalContext().memoryWithIndex
 
         self.retrievalModule = RetrievalModule(
+            globalConfig=context.globalContext.globalConfig,
             retrievalConfig=self.config.retrievalConfig,
             memoryWithIndex=self.memoryWithIndex,
         )

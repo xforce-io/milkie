@@ -6,8 +6,6 @@ from llama_index.legacy.llms import AzureOpenAI
 from milkie.model_factory import ModelFactory
 from milkie.prompt.prompt import Loader
 
-SystemPromptCn = Loader.load("system_prompt")
-
 class Settings(object):
     def __init__(
             self, 
@@ -27,7 +25,7 @@ class Settings(object):
                 azure_deployment=config.deploymentName,
                 api_version=config.apiVersion,
                 api_key=config.apiKey,
-                system_prompt=SystemPromptCn,
+                system_prompt=Loader.load("system_prompt"),
                 temperature=config.temperature)
 
     def __buildEmbedding(self, config :EmbeddingConfig):

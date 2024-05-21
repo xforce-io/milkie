@@ -9,11 +9,11 @@ from llama_index.legacy.response_synthesizers.type import ResponseMode
 from llama_index.legacy.schema import NodeWithScore
 
 from milkie.agent.prompt_agent import PromptAgent
-from milkie.config.config import RerankPosition, RetrievalConfig, RewriteStrategy
+from milkie.config.config import GlobalConfig, RerankPosition, RetrievalConfig, RewriteStrategy
 from milkie.context import Context
 from milkie.custom_refine_program import CustomProgramFactory
 from milkie.memory.memory_with_index import MemoryWithIndex
-from milkie.prompt.test_prompts import CANDIDATE_REFINE_PROMPT_SEL, CANDIDATE_TEXT_QA_PROMPT_IMPL, CANDIDATE_REFINE_PROMPT_IMPL, CANDIDATE_TEXT_QA_PROMPT_SEL
+from milkie.prompt.test_prompts import candidateTextQAPromptSel, candidateRefinePromptSel, candidateTextQAPromptImpl, candidateRefinePromptImpl
 from milkie.retrieval.position_reranker import PositionReranker
 from milkie.retrieval.reranker import Reranker
 from milkie.retrieval.retrievers import HybridRetriever
@@ -24,6 +24,7 @@ def chineseTokenizer(text) :
 class RetrievalModule:
     def __init__(
             self, 
+            globalConfig :GlobalConfig,
             retrievalConfig :RetrievalConfig,
             memoryWithIndex :MemoryWithIndex):
         self.rewriteAgent = None
@@ -63,8 +64,10 @@ class RetrievalModule:
             service_context=memoryWithIndex.serviceContext,
             program_factory=CustomProgramFactory(memoryWithIndex.settings.llm),
             structured_answer_filtering=True,
-            text_qa_template=CANDIDATE_TEXT_QA_PROMPT_SEL,
-            refine_template=CANDIDATE_REFINE_PROMPT_SEL,
+            text_qa_template=candidateTextQAPromptSel(
+                globalConfig.getLLMConfig().systemPrompt,
+                "qa_init"),
+            refine_template=candidateRefinePromptSel("qa_refine"),
         )
 
         self.engine = RetrieverQueryEngine.from_args(
@@ -72,8 +75,8 @@ class RetrievalModule:
             node_postprocessors=nodePostProcessors,
             service_context=memoryWithIndex.serviceContext,
             response_mode=ResponseMode.COMPACT,
-            text_qa_template=CANDIDATE_TEXT_QA_PROMPT_IMPL,
-            refine_template=CANDIDATE_REFINE_PROMPT_IMPL,
+            text_qa_template=candidateTextQAPromptImpl("qa_init"),
+            refine_template=candidateRefinePromptImpl("qa_refine"),
             response_synthesizer=responseSynthesizer)
 
     def retrieve(self, context :Context) -> List[NodeWithScore]:
