@@ -17,14 +17,20 @@ paddleocr = "^2.7"
 common = "^0.1"
 paddle = "^1"
 paddlepaddle = "^2.6"
+
 llama_index = "^0.10"
 llama-index-llms-vllm = "*"
+llama-index-readers-file = "*"
+llama-index-llms-huggingface = "*"
+llama-index-postprocessor-flag-embedding-reranker = "*"
+llama-index-retrievers-bm25 = "*"
+llama-index-embeddings-huggingface = "*"
+
 flash-attn = "^2.5.7"
 optimum = "*"
 auto-gptq = "*"
 autoawq = "*"
 jieba = "*"
-llama-index-readers-file = "*"
 
 [build-system]
 requires = ["poetry-core"]

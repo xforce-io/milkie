@@ -3,8 +3,8 @@ import logging
 import json
 from typing import Callable
 from sacred import Experiment
-from llama_index.legacy.response.schema import Response
-from llama_index.legacy.utils import truncate_text
+from llama_index.core import Response
+from llama_index.core.utils import truncate_text
 
 logger = logging.getLogger(__name__)
 

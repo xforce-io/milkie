@@ -1,12 +1,12 @@
 from typing import List
 import jieba
 
-from llama_index.legacy.schema import QueryBundle
-from llama_index.legacy.response_synthesizers.factory import get_response_synthesizer
-from llama_index.legacy.retrievers import BM25Retriever
-from llama_index.legacy.query_engine import RetrieverQueryEngine
-from llama_index.legacy.response_synthesizers.type import ResponseMode
-from llama_index.legacy.schema import NodeWithScore
+from llama_index.core.schema import QueryBundle
+from llama_index.core.response_synthesizers.factory import get_response_synthesizer
+from llama_index.core.query_engine import RetrieverQueryEngine
+from llama_index.core.response_synthesizers.type import ResponseMode
+from llama_index.core.schema import NodeWithScore
+from llama_index.retrievers.bm25.base import BM25Retriever
 
 from milkie.agent.prompt_agent import PromptAgent
 from milkie.config.config import GlobalConfig, RerankPosition, RetrievalConfig, RewriteStrategy

@@ -1,6 +1,6 @@
 from milkie.config.config import RerankConfig, RerankerType
 
-from llama_index.legacy.postprocessor.flag_embedding_reranker import FlagEmbeddingReranker
+from llama_index.postprocessor.flag_embedding_reranker import FlagEmbeddingReranker
 
 
 class Reranker:

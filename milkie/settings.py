@@ -1,8 +1,8 @@
 import logging
-from milkie.config.config import EmbeddingConfig, GlobalConfig, LLMConfig, LLMType
 
 from llama_index.legacy.llms import AzureOpenAI
 
+from milkie.config.config import EmbeddingConfig, GlobalConfig, LLMConfig, LLMType
 from milkie.model_factory import ModelFactory
 from milkie.prompt.prompt import Loader
 

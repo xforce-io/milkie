@@ -1,7 +1,7 @@
 from typing import Any
 import torch
-from llama_index.legacy.core.llms.types import CompletionResponse
-from llama_index.legacy.llms.huggingface import HuggingFaceLLM
+from llama_index.core.base.llms.types import CompletionResponse
+from llama_index.llms.huggingface import HuggingFaceLLM
 
 from milkie.config.config import QuantMethod
 from milkie.llm.enhanced_llm import EnhancedLLM

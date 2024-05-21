@@ -1,6 +1,6 @@
 from typing import List
-from llama_index.legacy.postprocessor.types import BaseNodePostprocessor
-from llama_index.legacy.schema import NodeWithScore, QueryBundle
+from llama_index.core.postprocessor.types import BaseNodePostprocessor
+from llama_index.core.schema import NodeWithScore, QueryBundle
 
 class PositionReranker(BaseNodePostprocessor):
 

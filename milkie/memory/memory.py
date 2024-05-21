@@ -1,9 +1,9 @@
 from typing import List
-from llama_index.legacy.service_context import ServiceContext
-from llama_index.core import SimpleDirectoryReader 
+from llama_index.core.service_context import ServiceContext
+from llama_index.core.readers.file.base import SimpleDirectoryReader 
 from llama_index.readers.file.unstructured.base import UnstructuredReader
-from llama_index.legacy.storage.storage_context import StorageContext
-from llama_index.legacy.schema import BaseNode
+from llama_index.core.storage.storage_context import StorageContext
+from llama_index.core.schema import BaseNode
 
 from milkie.config.config import LongTermMemorySource, MemoryTermConfig, MemoryType
 

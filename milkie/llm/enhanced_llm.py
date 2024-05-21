@@ -10,10 +10,10 @@ import torch
 from transformers import AutoTokenizer
 
 from llama_index_client import ChatMessage
-from llama_index.legacy.core.llms.types import ChatResponse, CompletionResponse
-from llama_index.core.prompts.base import BasePromptTemplate
-from llama_index.legacy.llms.llm import LLM
-from llama_index.legacy.llms.generic_utils import (
+from llama_index.core.base.llms.types import ChatResponse, CompletionResponse
+from llama_index.core import BasePromptTemplate
+from llama_index.llms import LLM
+from llama_index.core.base.llms.generic_utils import (
     completion_response_to_chat_response,
     messages_to_prompt as generic_messages_to_prompt,
 )

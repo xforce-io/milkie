@@ -1,11 +1,11 @@
 import logging
 from typing import Any, Type
 
-from llama_index.legacy.prompts.base import BasePromptTemplate, PromptTemplate
-from llama_index.legacy.types import BasePydanticProgram
+from llama_index.core.prompts.base import BasePromptTemplate, PromptTemplate
+from llama_index.core.types import BasePydanticProgram
+from llama_index.core.service_context_elements.llm_predictor import LLMPredictorType
+from llama_index.core.response_synthesizers.refine import StructuredRefineResponse
 from pydantic import BaseModel
-from llama_index.legacy.llm_predictor.base import LLMPredictorType
-from llama_index.legacy.response_synthesizers.refine import StructuredRefineResponse
 
 logger = logging.getLogger(__name__)
 

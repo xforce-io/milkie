@@ -1,4 +1,4 @@
-from llama_index.legacy.core.response.schema import Response
+from llama_index.core import Response
 
 from milkie.action import ActionModule
 from milkie.agent.base_agent import BaseAgent

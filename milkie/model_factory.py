@@ -1,14 +1,10 @@
-from typing import Sequence
 import logging
-from llama_index.legacy.prompts.base import PromptTemplate
-from llama_index.legacy.embeddings.huggingface import HuggingFaceEmbedding
-from llama_index.legacy.core.llms.types import MessageRole, ChatMessage
-from llama_index.legacy.utils import truncate_text
+from llama_index.core.prompts.base import PromptTemplate
+from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 
 from milkie.llm.enhanced_hf_llm import EnhancedHFLLM
 from milkie.llm.enhanced_lmdeploy import EnhancedLmDeploy
 from milkie.llm.enhanced_vllm import EnhancedVLLM
-from milkie.prompt.prompt import Loader
 from milkie.config.config import FRAMEWORK, EmbeddingConfig, LLMConfig
 
 logger = logging.getLogger(__name__)

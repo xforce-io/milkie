@@ -1,4 +1,4 @@
-from llama_index.legacy.core.response.schema import Response
+from llama_index.core import Response
 from milkie.agent.prompt_agent import PromptAgent
 from milkie.agent.retrieval_agent import RetrievalAgent
 from milkie.agent.team.team import Team

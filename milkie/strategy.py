@@ -7,7 +7,6 @@ from milkie.agent.team.deepqa import DeepQA
 from milkie.agent.team.mrqa import MapReduceQA
 from milkie.context import Context
 
-
 class Strategy(object):
     
     @abstractmethod

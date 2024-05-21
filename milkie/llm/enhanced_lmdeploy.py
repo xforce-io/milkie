@@ -4,11 +4,11 @@ from milkie.llm.enhanced_llm import EnhancedLLM, QueueRequest, QueueResponse
 from lmdeploy.turbomind import TurboMind
 from lmdeploy.messages import (TurbomindEngineConfig, GenerationConfig, EngineGenerationConfig, EngineOutput)
 
-from llama_index.legacy.llms.generic_utils import (
+from llama_index.core.base.llms.generic_utils import (
     completion_response_to_chat_response,
 )
-from llama_index.legacy.llms.custom import CustomLLM
-from llama_index.legacy.core.llms.types import (
+from llama_index.core.llms.custom import CustomLLM
+from llama_index.core.base.llms.types import (
     ChatMessage,
     ChatResponse,
     ChatResponseAsyncGen,
@@ -18,8 +18,8 @@ from llama_index.legacy.core.llms.types import (
     CompletionResponseGen,
     LLMMetadata,
 )
-from llama_index.legacy.llms.base import llm_chat_callback, llm_completion_callback
-from llama_index.legacy.bridge.pydantic import Field, PrivateAttr
+from llama_index.core.llms.callbacks import llm_chat_callback, llm_completion_callback
+from llama_index.core.bridge.pydantic import Field, PrivateAttr
 
 class LMDeploy(CustomLLM):
 

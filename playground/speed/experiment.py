@@ -1,7 +1,7 @@
 import time, logging, json
 from sacred import Experiment
 
-from llama_index.legacy.response.schema import Response
+from llama_index.core import Response
 
 from milkie.benchmark.benchtype import BenchTypeKeyword, Benchmarks
 from milkie.context import Context
