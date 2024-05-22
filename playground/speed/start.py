@@ -1,5 +1,7 @@
 import subprocess
 
+from playground.set_env import EnvSettings
+
 strategy = "raw"
 llm_model = "qwenv1.5-chat-14b"
 framework = "VLLM"
@@ -19,7 +21,7 @@ for llm_model in [
     for framework in ["VLLM"]:
         for system_prompt in ["system_prompt", "system_qwen"]:
             for prompt in ["qa_init", "qa_strict"]:
-                subprocess.run([
+                subprocess.run(EnvSettings + [
                     "python", 
                     "-m",
                     "playground.speed.experiment",
