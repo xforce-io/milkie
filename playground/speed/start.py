@@ -1,6 +1,6 @@
 import subprocess
 
-from playground.set_env import EnvSettings
+from playground.set_env import EnvSettings, NewEnv
 
 strategy = "raw"
 llm_model = "qwenv1.5-chat-14b"
@@ -19,21 +19,26 @@ for llm_model in [
         "aishuv2-chat-14b-gptq-int8",
         "internlmv2-chat-20b"]:
     for framework in ["VLLM"]:
-        for system_prompt in ["system_prompt", "system_qwen"]:
-            for prompt in ["qa_init", "qa_strict"]:
-                subprocess.run(EnvSettings + [
-                    "python", 
-                    "-m",
-                    "playground.speed.experiment",
-                    "with",
-                    f"strategy={strategy}",
-                    f"llm_model={llm_model}",
-                    f"framework={framework}",
-                    f"batch_size={batch_size}",
-                    f"prompt_lookup_num_tokens={prompt_lookup_num_tokens}",
-                    f"system_prompt={system_prompt}",
-                    f"prompt={prompt}",
-                    f"benchmarks={benchmarks}",
-                    "-l",
-                    "DEBUG"
-                ])
+        for system_prompt in [
+                "system_prompt", 
+                "system_qwen"]:
+            for prompt in [
+                    "qa_init", 
+                    "qa_strict"]:
+                subprocess.run([
+                        "python", 
+                        "-m",
+                        "playground.speed.experiment",
+                        "with",
+                        f"strategy={strategy}",
+                        f"llm_model={llm_model}",
+                        f"framework={framework}",
+                        f"batch_size={batch_size}",
+                        f"prompt_lookup_num_tokens={prompt_lookup_num_tokens}",
+                        f"system_prompt={system_prompt}",
+                        f"prompt={prompt}",
+                        f"benchmarks={benchmarks}",
+                        "-l",
+                        "DEBUG"
+                    ],
+                    env=NewEnv)

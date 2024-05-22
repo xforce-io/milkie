@@ -1,7 +1,7 @@
 import subprocess
 
 from milkie.config.config import RewriteStrategy
-from playground.set_env import EnvSettings
+from playground.set_env import EnvSettings, NewEnv
 
 strategy = "deepqa"
 llm_model = "qwenv1.5-chat-14b"
@@ -17,15 +17,16 @@ for llm_model in [
         RewriteStrategy.NONE.name,
         RewriteStrategy.QUERY_REWRITE.name,
     ]:
-        subprocess.run(EnvSettings + [
-            "python", 
-            "-m",
-            "playground.deepqa.experiment",
-            "with",
-            f"strategy={strategy}",
-            f"llm_model={llm_model}",
-            f"framework={framework}",
-            f"rewrite_strategy={rewrite_strategy}",
-            "-l",
-            "DEBUG"
-        ])
+        subprocess.run([
+                "python", 
+                "-m",
+                "playground.deepqa.experiment",
+                "with",
+                f"strategy={strategy}",
+                f"llm_model={llm_model}",
+                f"framework={framework}",
+                f"rewrite_strategy={rewrite_strategy}",
+                "-l",
+                "DEBUG"
+            ],
+            env=NewEnv)
