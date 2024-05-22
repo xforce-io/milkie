@@ -1,10 +1,31 @@
+from typing import Optional
+
 from llama_index.core.service_context import ServiceContext
+from llama_index.core.node_parser.interface import NodeParser
+from llama_index.core.node_parser.text.sentence import (
+    DEFAULT_CHUNK_SIZE,
+    SENTENCE_CHUNK_OVERLAP,
+    SentenceSplitter,
+)
+from llama_index.core.callbacks.base import CallbackManager
 
 from milkie.config.config import GlobalConfig
 from milkie.memory.memory_with_index import MemoryWithIndex
 from milkie.settings import Settings
 from milkie.model_factory import ModelFactory
 
+def getNodeParser(
+    chunk_size: int = DEFAULT_CHUNK_SIZE,
+    chunk_overlap: int = SENTENCE_CHUNK_OVERLAP,
+    callback_manager: Optional[CallbackManager] = None,
+) -> NodeParser:
+    """Get default node parser."""
+    return SentenceSplitter(
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+        callback_manager=callback_manager or CallbackManager(),
+        separator="\n\n",
+    )
 
 class GlobalContext():
     
@@ -19,7 +40,8 @@ class GlobalContext():
             embed_model=self.settings.embedding,
             chunk_size=globalConfig.indexConfig.chunkSize if globalConfig.indexConfig else None,
             chunk_overlap=globalConfig.indexConfig.chunkOverlap if globalConfig.indexConfig else None,
-            llm=self.settings.llm.getLLM())
+            llm=self.settings.llm.getLLM(),
+            node_parser=getNodeParser)
 
         if globalConfig.memoryConfig and globalConfig.indexConfig:
             self.memoryWithIndex = MemoryWithIndex(
