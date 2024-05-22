@@ -1,7 +1,7 @@
 import subprocess
 
 from milkie.config.config import RewriteStrategy
-from playground.set_env import EnvSettings, NewEnv
+from playground.set_env import NewEnv
 
 strategy = "deepqa"
 llm_model = "qwenv1.5-chat-14b"
