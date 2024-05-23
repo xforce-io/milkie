@@ -2,8 +2,8 @@ from typing import Any, Dict, Optional, Sequence
 from queue import Queue
 import torch
 from vllm import SamplingParams
-from vllm.engine.arg_utils import EngineArgs
-from vllm.engine.llm_engine import LLMEngine
+from vllm.engine.arg_utils import AsyncEngineArgs
+from vllm.engine.llm_engine import AsyncLLMEngine
 
 from llama_index.core.base.llms.generic_utils import (
     completion_response_to_chat_response,
@@ -52,12 +52,12 @@ class VLLM(CustomLLM):
             vllm_kwargs :Dict[str, Any]) -> None:
         super().__init__(model=model_name, max_new_tokens=max_new_tokens)
 
-        engineArgs = EngineArgs(
+        engineArgs = AsyncEngineArgs(
             model=model_name,
             max_model_len=context_window,
             dtype=dtype,
             **vllm_kwargs)
-        self._engine = LLMEngine.from_engine_args(engineArgs)
+        self._engine = AsyncLLMEngine.from_engine_args(engineArgs)
         
     def class_name(cls) -> str:
         return "VLLM"
@@ -148,7 +148,8 @@ class EnhancedVLLM(EnhancedLLM):
         
         quantMethod = EnhancedLLM.getQuantMethod(model_name)
         self._llm = VLLM(
-            model=model_name,
+            model_name=model_name,
+            context_window=context_window,
             max_new_tokens=max_new_tokens,
             dtype="auto",
             vllm_kwargs={
@@ -166,7 +167,7 @@ class EnhancedVLLM(EnhancedLLM):
         return (self._llm._parse_output(output), len(response.raw["model_output"]))
 
     def _getModel(self):
-        return self._llm._client
+        return self._llm._engine
 
     def _complete(
         self, prompt: str, formatted: bool = False, **kwargs: Any

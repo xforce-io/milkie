@@ -26,10 +26,11 @@ class CustomRefineProgram(BasePydanticProgram):
     def __call__(self, *args: Any, **kwds: Any) -> StructuredRefineResponse:
         import time
         t0 = time.time()
-        answer, _ = self._llm.predict(
-            self._prompt, 
+        answer, _ = self._llm.predictBatch(
+            prompt=self._prompt, 
+            argsList=None,
             **kwds,
-        )
+        )[0]
         t1 = time.time()
 
         answer = answer.strip()
