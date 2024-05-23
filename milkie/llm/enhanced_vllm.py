@@ -3,7 +3,7 @@ from queue import Queue
 import torch
 from vllm import SamplingParams
 from vllm.engine.arg_utils import AsyncEngineArgs
-from vllm.engine.llm_engine import AsyncLLMEngine
+from vllm.engine.async_llm_engine import AsyncLLMEngine
 
 from llama_index.core.base.llms.generic_utils import (
     completion_response_to_chat_response,
@@ -222,7 +222,7 @@ class EnhancedVLLM(EnhancedLLM):
                 raw={"model_output": output.outputs[0].token_ids},)]
         return result
 
-    def _inference(
+    async def _inference(
             self, 
             reqQueue :Queue[QueueRequest], 
             resQueue :Queue[QueueResponse], 
@@ -234,31 +234,27 @@ class EnhancedVLLM(EnhancedLLM):
             **EnhancedLLM.filterGenArgs(genArgs)}
         samplingParams = SamplingParams(**params)
         while not reqQueue.empty():
-            for i in range(self.concurrency):
-                if reqQueue.empty():
-                    break
+            request = reqQueue.get()
+            if not request:
+                break
+            
+            resultsGenerator = self._llm.engine.generate(
+                request.prompt, 
+                samplingParams, 
+                request.requestId)
+           
+            finalOutput = None
+            async for request_output in resultsGenerator:
+                if await request.is_disconnected():
+                    await self._llm.engine.abort(request.requestId)
+                    assert False
+                finalOutput = request_output
 
-                request = reqQueue.get()
-                if not request:
-                    break
-                
-                self._llm.engine.add_request(
-                    prompt=request.prompt,
-                    prompt_token_ids=request.tokenized, 
-                    sampling_params=samplingParams, 
-                    request_id=request.requestId)
-
-            outputs = []
-            while self._llm.engine.has_unfinished_requests():
-                stepOutputs = self._llm.engine.step()
-                for requestOutput in stepOutputs:
-                    if requestOutput.finished:
-                        outputs.append(requestOutput)
-
-            for output in outputs:
-                resQueue.put(QueueResponse(
-                    requestId=output.request_id, 
-                    output=output))
+            assert finalOutput is not None
+           
+            resQueue.put(QueueResponse(
+                requestId=finalOutput.request_id, 
+                output=finalOutput))
 
     def _getSingleParameterSizeInBytes(self):
         type_to_size = {
