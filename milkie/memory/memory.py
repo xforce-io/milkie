@@ -26,7 +26,7 @@ class Memory(object):
 
         self.idToNodes = {}
         for node in self.nodes:
-            node.text = node.text.strip().replace("\u3000", "")
+            node.text = node.text.strip().replace("\u3000", "").replace("\n\n", " ")
             self.idToNodes[node.node_id] = node
         
         self.storageContext = StorageContext.from_defaults()

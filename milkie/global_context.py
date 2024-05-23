@@ -41,7 +41,7 @@ class GlobalContext():
             chunk_size=globalConfig.indexConfig.chunkSize if globalConfig.indexConfig else None,
             chunk_overlap=globalConfig.indexConfig.chunkOverlap if globalConfig.indexConfig else None,
             llm=self.settings.llm.getLLM(),
-            node_parser=getNodeParser)
+            node_parser=getNodeParser())
 
         if globalConfig.memoryConfig and globalConfig.indexConfig:
             self.memoryWithIndex = MemoryWithIndex(

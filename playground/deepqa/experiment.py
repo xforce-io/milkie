@@ -5,7 +5,6 @@ from milkie.strategy import Strategy
 
 from milkie.benchmark.testsuite import TestCase, TestSuite
 from playground.global_config import makeGlobalConfig
-from playground.model_repos import GModelRepo
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +59,7 @@ def mainFunc(
         rewrite_strategy):
     kwargs = {
         "strategy":Strategy.getStrategy(strategy),
-        "llm_model":GModelRepo.getModel(llm_model).getModelPath(),
+        "llm_model":llm_model,
         "framework":framework,
         "rewrite_strategy":rewrite_strategy,
         "reranker":"FLAGEMBED",

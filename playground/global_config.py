@@ -1,13 +1,14 @@
 from milkie.strategy import Strategy
 from milkie.utils.data_utils import loadFromYaml
 from milkie.config.config import GlobalConfig
+from playground.model_repos import GModelRepo
 
 def makeGlobalConfig(
         strategy :Strategy,
         **kwargs) -> GlobalConfig:
     configYaml = loadFromYaml("config/global.yaml")
     if "llm_model" in kwargs:
-        configYaml["llm"]["model"] = kwargs["llm_model"]
+        configYaml["llm"]["model"] = GModelRepo.getModel(kwargs["llm_model"]).getModelPath()
 
     if "system_prompt" in kwargs:
         configYaml["llm"]["system_prompt"] = kwargs["system_prompt"]
