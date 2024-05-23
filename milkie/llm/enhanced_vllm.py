@@ -7,7 +7,7 @@ from vllm.engine.llm_engine import LLMEngine
 from llama_index.core.prompts.base import BasePromptTemplate
 from llama_index_client import BasePromptTemplate
 from llama_index.core.base.llms.types import CompletionResponse
-from llama_index.legacy.llms.vllm import Vllm
+from llama_index.llms.vllm import Vllm
 
 from milkie.config.config import QuantMethod
 from milkie.llm.enhanced_llm import EnhancedLLM
