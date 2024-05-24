@@ -45,6 +45,7 @@ class VLLM(CustomLLM):
     )
     
     _process: Any = None
+    _engineArgs: AsyncEngineArgs = None
     
     def __init__(
             self, 
@@ -56,13 +57,13 @@ class VLLM(CustomLLM):
             vllm_kwargs :Dict[str, Any]) -> None:
         super().__init__(model=model_name, max_new_tokens=max_new_tokens)
 
-        self.engineArgs = AsyncEngineArgs(
+        self._engineArgs = AsyncEngineArgs(
             model=model_name,
             max_model_len=context_window,
             dtype=dtype,
             **vllm_kwargs)
 
-        self._port = port
+        self.port = port
 
         self._startProcess()
         
@@ -84,7 +85,7 @@ class VLLM(CustomLLM):
             '-m', 
             'vllm.entrypoints.api_server']
         cmds += ["--port", str(self.port)]
-        for key, value in self.engineArgs.items():
+        for key, value in self._engineArgs.items():
             cmds += [f"--{key}", str(value)]
 
         self._process = subprocess.Popen(cmds)
