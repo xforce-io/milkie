@@ -85,10 +85,14 @@ class VLLM(CustomLLM):
             'python', 
             '-m', 
             'vllm.entrypoints.api_server']
-        cmds += [f"--port {str(self.port)}"]
+        cmds += [f"--port", f"{str(self.port)}"]
         for key, value in vars(self.engineArgs).items():
+            key = key.replace("_", "-")
             if value is not None:
-                cmds += [f"--{key} {str(value)}"]
+                if str(value) == "True":
+                    cmds += [f"--{key}"]
+                elif str(value) != "False":
+                    cmds += [f"--{key}", f"{str(value)}"]
 
         self.process = subprocess.Popen(cmds)
         print(f"Started process with PID: [{self.process.pid}] command: [{cmds}]")
