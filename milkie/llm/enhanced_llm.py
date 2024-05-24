@@ -52,10 +52,12 @@ class EnhancedLLM(object):
             tokenizer_name :str,
             system_prompt :str,
             device :str,
+            port :int,
             tokenizer_kwargs :dict) -> None:
         self.context_window = context_window
         self.concurrency = concurrency
         self.device = device
+        self.port = port
 
         self._llm :LLM = None
         self._initTokenizer(tokenizer_name, tokenizer_kwargs)

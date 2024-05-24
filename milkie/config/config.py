@@ -223,6 +223,7 @@ class LLMConfig(BaseConfig):
             batchSize :int = 1,
             framework :FRAMEWORK = FRAMEWORK.HUGGINGFACE,
             device :int = None,
+            port :int = None,
             deploymentName :str = None,
             apiKey :str = None,
             azureEndpoint :str = None,
@@ -236,6 +237,7 @@ class LLMConfig(BaseConfig):
         self.batchSize = batchSize
         self.framework = framework
         self.device = device
+        self.port = port
         self.deploymentName = deploymentName
         self.apiKey = apiKey
         self.azureEndpoint = azureEndpoint
@@ -254,6 +256,10 @@ class LLMConfig(BaseConfig):
         if "device" in config.keys():
             device = config["device"]
             device = Device.getDevice(device)
+
+        port = None
+        if "port" in config.keys():
+            port = config["port"]
         
         modelArgs = LLMModelArgs.fromArgs(config["model_args"])
         generationArgs = LLMGenerationArgs.fromArgs(config["generation_args"])
@@ -266,6 +272,7 @@ class LLMConfig(BaseConfig):
                 batchSize=config["batch_size"],
                 framework=framework,
                 device=device,
+                port=port,
                 modelArgs=modelArgs,
                 generationArgs=generationArgs)
         elif config["type"] == LLMType.AZURE_OPENAI.name:

@@ -51,6 +51,7 @@ class ModelFactory:
                 model_name=config.model,
                 system_prompt=config.systemPrompt,
                 device=config.device,
+                port=config.port,
                 max_new_tokens=256,
                 tokenizer_kwargs=tokenizerArgs)
         elif config.framework == FRAMEWORK.LMDEPLOY:
@@ -61,6 +62,7 @@ class ModelFactory:
                 model_name=config.model,
                 system_prompt=config.systemPrompt,
                 device=config.device,
+                port=config.port,
                 max_new_tokens=256,
                 tokenizer_kwargs=tokenizerArgs)
         else :
@@ -68,6 +70,7 @@ class ModelFactory:
                 context_window=config.ctxLen,
                 concurrency=config.batchSize,
                 device=config.device,
+                port=config.port,
                 max_new_tokens=256,
                 model_kwargs=config.modelArgs.toJson(),
                 generate_kwargs=config.generationArgs.toJson(),

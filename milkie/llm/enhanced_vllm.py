@@ -1,5 +1,6 @@
 from typing import Any, Dict, Optional, Sequence
 from queue import Queue
+import requests
 import torch
 from vllm import SamplingParams
 from vllm.engine.arg_utils import AsyncEngineArgs
@@ -41,7 +42,7 @@ class VLLM(CustomLLM):
         description="The data type for the model weights and activations.",
     )
     
-    _engine: Any = PrivateAttr()
+    _process: Any = None
     
     def __init__(
             self, 
@@ -52,23 +53,43 @@ class VLLM(CustomLLM):
             vllm_kwargs :Dict[str, Any]) -> None:
         super().__init__(model=model_name, max_new_tokens=max_new_tokens)
 
-        engineArgs = AsyncEngineArgs(
+        self.engineArgs = AsyncEngineArgs(
             model=model_name,
             max_model_len=context_window,
             dtype=dtype,
             **vllm_kwargs)
-        self._engine = AsyncLLMEngine.from_engine_args(engineArgs)
+
+        self._startProcess()
+        
+    def __del__(self):
+        if self._process is not None:
+            self._endProcess()
         
     def class_name(cls) -> str:
         return "VLLM"
 
     @property
-    def engine(self) -> Any:
-        return self._engine
-
-    @property
     def metadata(self) -> LLMMetadata:
         return LLMMetadata(model_name=self.model)
+
+    def _startProcess(self):
+        import subprocess
+        cmds = [
+            'python', 
+            '-m', 
+            'vllm.entrypoints.api_server']
+        for key, value in self.engineArgs.items():
+            cmds += [f"--{key}", str(value)]
+
+        self._process = subprocess.Popen(cmds)
+        self._pid = self.process.pid
+        print(f"Started process with PID: [{self.pid}] command: [{cmds}]")
+        
+    def _endProcess(self):
+        if self._process:
+            self._process.terminate()
+            print(f"Terminated process with PID: {self._pid}")
+            self._process.wait()
 
     @property
     def _model_kwargs(self) -> Dict[str, Any]:
@@ -77,18 +98,11 @@ class VLLM(CustomLLM):
         }
         return {**base_kwargs}
 
-    @llm_chat_callback()
-    def chat(self, messages: Sequence[ChatMessage], **kwargs: Any) -> ChatResponse:
-        kwargs = kwargs if kwargs else {}
-        prompt = self.messages_to_prompt(messages)
-        completion_response = self.complete(prompt, **kwargs)
-        return completion_response_to_chat_response(completion_response)
-
     @llm_completion_callback()
     def complete(
         self, prompt: str, formatted: bool = False, **kwargs: Any
     ) -> CompletionResponse:
-        raise (ValueError("Not Implemented"))
+        raise (ValueError("Not Implemented")) 
 
     @llm_chat_callback()
     def stream_chat(
@@ -127,7 +141,6 @@ class VLLM(CustomLLM):
     ) -> CompletionResponseAsyncGen:
         raise (ValueError("Not Implemented"))
 
-
 class EnhancedVLLM(EnhancedLLM):
     def __init__(self,
             context_window: int,
@@ -136,6 +149,7 @@ class EnhancedVLLM(EnhancedLLM):
             model_name: str,
             system_prompt: str,
             device :str,
+            port :int,
             max_new_tokens: int,
             tokenizer_kwargs: dict):
         super().__init__(
@@ -144,6 +158,7 @@ class EnhancedVLLM(EnhancedLLM):
             tokenizer_name=tokenizer_name, 
             system_prompt=system_prompt, 
             device=device, 
+            port=port,
             tokenizer_kwargs=tokenizer_kwargs)
         
         quantMethod = EnhancedLLM.getQuantMethod(model_name)
@@ -151,6 +166,7 @@ class EnhancedVLLM(EnhancedLLM):
             model_name=model_name,
             context_window=context_window,
             max_new_tokens=max_new_tokens,
+            port=port,
             dtype="auto",
             vllm_kwargs={
                 "gpu_memory_utilization":0.9, 
@@ -169,18 +185,8 @@ class EnhancedVLLM(EnhancedLLM):
     def _getModel(self):
         return self._llm._engine
 
-    def _complete(
-        self, prompt: str, formatted: bool = False, **kwargs: Any
-    ) -> CompletionResponse:
-        kwargs = kwargs if kwargs else {}
-        params = {**self._llm._model_kwargs, **kwargs}
-        sampling_params = SamplingParams(
-            repetition_penalty=kwargs.get("repetition_penalty", 1.0),
-            **params)
-        outputs = self._getModel().generate([prompt], sampling_params)
-        return CompletionResponse(
-            text=outputs[0].outputs[0].text,
-            raw={"model_output": outputs[0].outputs[0].token_ids},)
+    def _complete(self, prompt: str, formatted: bool = False, **kwargs: Any) -> Any:
+        return self._completeBatch([prompt], **kwargs)[0]
 
     def _completeBatch(
             self, 
@@ -194,35 +200,7 @@ class EnhancedVLLM(EnhancedLLM):
             tokenIdExtractor=lambda output : output.outputs[0].token_ids,
             **kwargs)
 
-    def _completeBatchSync(
-            self, 
-            prompts: list[str], 
-            **kwargs: Any
-    ) -> list[CompletionResponse]:
-        inputs = self._tokenizer(text=prompts, return_tensors="pt", padding=True)
-
-        promptTokenIds = []
-        for i in range(inputs["input_ids"].size(0)):
-            promptTokenIds.append(EnhancedLLM._unpadTokenized(inputs, i).tolist())
-
-        kwargs = kwargs if kwargs else {}
-        params = {
-            **self._llm._model_kwargs, 
-            **EnhancedLLM.filterGenArgs(kwargs)}
-        sampling_params = SamplingParams(**params)
-        outputs = self._getModel().generate(
-            prompt_token_ids=promptTokenIds, 
-            sampling_params=sampling_params,
-            use_tqdm=False)
-
-        result = []
-        for output in outputs:
-            result += [CompletionResponse(
-                text=output.outputs[0].text,
-                raw={"model_output": output.outputs[0].token_ids},)]
-        return result
-
-    async def _inference(
+    def _inference(
             self, 
             reqQueue :Queue[QueueRequest], 
             resQueue :Queue[QueueResponse], 
@@ -232,29 +210,25 @@ class EnhancedVLLM(EnhancedLLM):
         params = {
             **self._llm._model_kwargs, 
             **EnhancedLLM.filterGenArgs(genArgs)}
-        samplingParams = SamplingParams(**params)
         while not reqQueue.empty():
             request = reqQueue.get()
             if not request:
                 break
             
-            resultsGenerator = self._llm.engine.generate(
-                request.prompt, 
-                samplingParams, 
-                request.requestId)
-           
-            finalOutput = None
-            async for request_output in resultsGenerator:
-                if await request.is_disconnected():
-                    await self._llm.engine.abort(request.requestId)
-                    assert False
-                finalOutput = request_output
+            kwargs = kwargs if kwargs else {}
+            data = {
+                "prompt": request.prompt,
+                **params
+            }
 
-            assert finalOutput is not None
-           
-            resQueue.put(QueueResponse(
-                requestId=finalOutput.request_id, 
-                output=finalOutput))
+            response = requests.post("http://0.0.0.0:%d" % self.port, json=data)
+            if response.status_code == 200:
+                result = response.json()
+                resQueue.put(QueueResponse(
+                    requestId=request.request_id, 
+                    output=result["raw"]["model_output"]))
+            else:
+                raise ValueError("Failed to complete request")
 
     def _getSingleParameterSizeInBytes(self):
         type_to_size = {
