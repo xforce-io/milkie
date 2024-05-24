@@ -6,9 +6,6 @@ from vllm import SamplingParams
 from vllm.engine.arg_utils import AsyncEngineArgs
 from vllm.engine.async_llm_engine import AsyncLLMEngine
 
-from llama_index.core.base.llms.generic_utils import (
-    completion_response_to_chat_response,
-)
 from llama_index.core.prompts.base import BasePromptTemplate
 from llama_index.core.llms.custom import CustomLLM
 from llama_index.core.base.llms.types import (
@@ -22,7 +19,7 @@ from llama_index.core.base.llms.types import (
     LLMMetadata,
 )
 from llama_index.core.llms.callbacks import llm_chat_callback, llm_completion_callback
-from llama_index.core.bridge.pydantic import Field, PrivateAttr
+from llama_index.core.bridge.pydantic import Field
 from llama_index_client import BasePromptTemplate
 
 from milkie.config.config import QuantMethod
@@ -41,6 +38,11 @@ class VLLM(CustomLLM):
         default="auto",
         description="The data type for the model weights and activations.",
     )
+
+    port : int = Field(
+        default=8083,
+        description="The port"
+    )
     
     _process: Any = None
     
@@ -49,6 +51,7 @@ class VLLM(CustomLLM):
             model_name: str,
             context_window: int,
             max_new_tokens :int,
+            port :int,
             dtype :str,
             vllm_kwargs :Dict[str, Any]) -> None:
         super().__init__(model=model_name, max_new_tokens=max_new_tokens)
@@ -58,6 +61,8 @@ class VLLM(CustomLLM):
             max_model_len=context_window,
             dtype=dtype,
             **vllm_kwargs)
+
+        self._port = port
 
         self._startProcess()
         
@@ -78,6 +83,7 @@ class VLLM(CustomLLM):
             'python', 
             '-m', 
             'vllm.entrypoints.api_server']
+        cmds += ["--port", str(self.port)]
         for key, value in self.engineArgs.items():
             cmds += [f"--{key}", str(value)]
 
