@@ -1,5 +1,6 @@
 from typing import Any, Dict, Optional, Sequence
 from queue import Queue
+from pydantic import PrivateAttr
 import requests
 import torch
 from vllm import SamplingParams
@@ -44,8 +45,8 @@ class VLLM(CustomLLM):
         description="The port"
     )
     
-    _process: Any = None
-    _engineArgs: AsyncEngineArgs = None
+    _process: Any = PrivateAttr()
+    _engineArgs: Any = PrivateAttr()
     
     def __init__(
             self, 
@@ -89,7 +90,7 @@ class VLLM(CustomLLM):
             cmds += [f"--{key}", str(value)]
 
         self._process = subprocess.Popen(cmds)
-        self._pid = self.process.pid
+        self._pid = self._process.pid
         print(f"Started process with PID: [{self.pid}] command: [{cmds}]")
         
     def _endProcess(self):
