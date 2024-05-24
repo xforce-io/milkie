@@ -45,8 +45,8 @@ class VLLM(CustomLLM):
         description="The port"
     )
     
-    _process: Any = PrivateAttr()
-    _engineArgs: Any = PrivateAttr()
+    process: Any = PrivateAttr()
+    engineArgs: Any = PrivateAttr()
     
     def __init__(
             self, 
@@ -58,7 +58,7 @@ class VLLM(CustomLLM):
             vllm_kwargs :Dict[str, Any]) -> None:
         super().__init__(model=model_name, max_new_tokens=max_new_tokens)
 
-        self._engineArgs = AsyncEngineArgs(
+        self.engineArgs = AsyncEngineArgs(
             model=model_name,
             max_model_len=context_window,
             dtype=dtype,
@@ -69,7 +69,7 @@ class VLLM(CustomLLM):
         self._startProcess()
         
     def __del__(self):
-        if self._process is not None:
+        if self.process is not None:
             self._endProcess()
         
     def class_name(cls) -> str:
@@ -86,18 +86,17 @@ class VLLM(CustomLLM):
             '-m', 
             'vllm.entrypoints.api_server']
         cmds += ["--port", str(self.port)]
-        for key, value in self._engineArgs.items():
-            cmds += [f"--{key}", str(value)]
+        for key, value in vars(self.engineArgs).items():
+            cmds += [f"--{key}={str(value)}"]
 
-        self._process = subprocess.Popen(cmds)
-        self._pid = self._process.pid
-        print(f"Started process with PID: [{self.pid}] command: [{cmds}]")
+        self.process = subprocess.Popen(cmds)
+        print(f"Started process with PID: [{self.process.pid}] command: [{cmds}]")
         
     def _endProcess(self):
-        if self._process:
-            self._process.terminate()
-            print(f"Terminated process with PID: {self._pid}")
-            self._process.wait()
+        if self.process:
+            self.process.terminate()
+            print(f"Terminated process with PID: {self.process.pid}")
+            self.process.wait()
 
     @property
     def _model_kwargs(self) -> Dict[str, Any]:
@@ -223,7 +222,6 @@ class EnhancedVLLM(EnhancedLLM):
             if not request:
                 break
             
-            kwargs = kwargs if kwargs else {}
             data = {
                 "prompt": request.prompt,
                 **params
