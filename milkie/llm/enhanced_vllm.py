@@ -96,7 +96,7 @@ class VLLM(CustomLLM):
                     cmds += [f"--{key}"]
                 elif str(value) != "False":
                     cmds += [f"--{key}", f"{str(value)}"]
-                    
+
 
         self.process = subprocess.Popen(cmds)
         print(f"Started process with PID: [{self.process.pid}] command: [{cmds}]")
@@ -236,14 +236,14 @@ class EnhancedVLLM(EnhancedLLM):
                 **params
             }
 
-            response = requests.post("http://0.0.0.0:%d" % self.port, json=data)
+            response = requests.post("http://0.0.0.0:%d/generate" % self.port, json=data)
             if response.status_code == 200:
                 result = response.json()
                 resQueue.put(QueueResponse(
-                    requestId=request.request_id, 
+                    requestId=request.requestId, 
                     output=result["raw"]["model_output"]))
             else:
-                raise ValueError("Failed to complete request")
+                raise ValueError("Failed to complete request, status code: %d" % response.status_code)
 
     def _getSingleParameterSizeInBytes(self):
         type_to_size = {
