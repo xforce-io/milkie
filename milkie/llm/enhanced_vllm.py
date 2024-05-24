@@ -88,11 +88,15 @@ class VLLM(CustomLLM):
         cmds += [f"--port", f"{str(self.port)}"]
         for key, value in vars(self.engineArgs).items():
             key = key.replace("_", "-")
+            if key == "max-seq-len-to-capture":
+                key = "max-seq_len-to-capture"
+                
             if value is not None:
                 if str(value) == "True":
                     cmds += [f"--{key}"]
                 elif str(value) != "False":
                     cmds += [f"--{key}", f"{str(value)}"]
+                    
 
         self.process = subprocess.Popen(cmds)
         print(f"Started process with PID: [{self.process.pid}] command: [{cmds}]")
