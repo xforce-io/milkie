@@ -37,7 +37,7 @@ class QAAgent(BaseAgent):
             engine=self.retrievalModule.engine)
         self.actionModule = ActionModule()
 
-    def task(self, query) -> Response:
+    def task(self, query, **kwargs) -> Response:
         self.context.setCurQuery(query)
         self.processRound(self.context)
         while not self._end():
@@ -47,22 +47,22 @@ class QAAgent(BaseAgent):
     def taskBatch(self, query: str, kwargs: list[dict]) -> list[Response]:
         raise NotImplementedError("QAAgent does not support taskBatch")
 
-    def processRound(self, context):
-        self.__retrieval(context)
-        self.__reasoning(context)
-        self.__decision(context)
+    def processRound(self, context, **kwargs):
+        self.__retrieval(context, **kwargs)
+        self.__reasoning(context, **kwargs)
+        self.__decision(context, **kwargs)
     
     def _end(self) -> bool:
         return True
 
-    def __retrieval(self, context):
-        return self.retrievalModule.retrieve(context)
+    def __retrieval(self, context, **kwargs):
+        return self.retrievalModule.retrieve(context, **kwargs)
 
-    def __reasoning(self, context):
-        return self.reasoningModule.reason(context)
+    def __reasoning(self, context, **kwargs):
+        return self.reasoningModule.reason(context, **kwargs)
 
-    def __decision(self, context):
-        return self.decisionModule.decide(context)
+    def __decision(self, context, **kwargs):
+        return self.decisionModule.decide(context, **kwargs)
 
 if __name__ == "__main__":
     globalConfig = GlobalConfig("config/global.yaml")

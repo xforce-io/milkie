@@ -5,7 +5,7 @@ class DecisionModule():
     def __init__(self, engine):
         self.engine = engine
 
-    def decide(self, context :Context):
+    def decide(self, context :Context, **kwargs):
         decisionResult = self.engine.synthesize(
             context.getCurQuery(),
             context.retrievalResult)

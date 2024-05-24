@@ -27,6 +27,10 @@ class RetrievalModule:
             globalConfig :GlobalConfig,
             retrievalConfig :RetrievalConfig,
             memoryWithIndex :MemoryWithIndex):
+        self.globalConfig = globalConfig
+        self.retrievalConfig = retrievalConfig
+        self.memoryWithIndex = memoryWithIndex
+            
         self.rewriteAgent = None
         if retrievalConfig.rewriteStrategy == RewriteStrategy.HYDE:
             self.rewriteAgent = PromptAgent(
@@ -36,8 +40,6 @@ class RetrievalModule:
             self.rewriteAgent = PromptAgent(
                 context=None, 
                 config="query_rewrite")
-        
-        self.retrievalConfig = retrievalConfig
 
         self.denseRetriever = memoryWithIndex.index.denseIndex.as_retriever(
             similarity_top_k=self.retrievalConfig.channelRecall)
@@ -51,41 +53,44 @@ class RetrievalModule:
             self.denseRetriever, 
             self.sparseRetriever)
 
-        nodePostProcessors = []
+        self.nodePostProcessors = []
         reranker = Reranker(self.retrievalConfig.rerankerConfig) 
         if reranker.reranker:
-            nodePostProcessors.append(reranker.reranker)
+            self.nodePostProcessors.append(reranker.reranker)
 
         if self.retrievalConfig.rerankerConfig.rerankPosition == RerankPosition.SIMPLE:
             positionReranker = PositionReranker()
-            nodePostProcessors.append(positionReranker)
+            self.nodePostProcessors.append(positionReranker)
 
+    def retrieve(self, context :Context, **kwargs) -> List[NodeWithScore]:
         responseSynthesizer = get_response_synthesizer(
-            service_context=memoryWithIndex.serviceContext,
-            program_factory=CustomProgramFactory(memoryWithIndex.settings.llm),
+            service_context=self.memoryWithIndex.serviceContext,
+            program_factory=CustomProgramFactory(
+                self.memoryWithIndex.settings.llm, 
+                **kwargs),
             structured_answer_filtering=True,
             text_qa_template=candidateTextQAPromptSel(
-                globalConfig.getLLMConfig().systemPrompt,
+                self.globalConfig.getLLMConfig().systemPrompt,
                 "qa_init"),
             refine_template=candidateRefinePromptSel("qa_refine"),
         )
 
         self.engine = RetrieverQueryEngine.from_args(
             retriever=self.hybridRetriever,
-            node_postprocessors=nodePostProcessors,
-            service_context=memoryWithIndex.serviceContext,
+            node_postprocessors=self.nodePostProcessors,
+            service_context=self.memoryWithIndex.serviceContext,
             response_mode=ResponseMode.COMPACT,
             text_qa_template=candidateTextQAPromptImpl("qa_init"),
             refine_template=candidateRefinePromptImpl("qa_refine"),
             response_synthesizer=responseSynthesizer)
-
-    def retrieve(self, context :Context) -> List[NodeWithScore]:
+        
         curQuery = context.getCurQuery()
         if self.rewriteAgent:
             self.rewriteAgent.setContext(context)
             rewriteResp = self.rewriteAgent.taskBatch(
                 query=None,
-                argsList=[{"query_str":curQuery}])
+                argsList=[{"query_str":curQuery}],
+                **kwargs)
             curQuery = rewriteResp[0].response
 
         result = self.engine.retrieve(QueryBundle(curQuery))
