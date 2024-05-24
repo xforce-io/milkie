@@ -85,9 +85,10 @@ class VLLM(CustomLLM):
             'python', 
             '-m', 
             'vllm.entrypoints.api_server']
-        cmds += ["--port", str(self.port)]
+        cmds += [f"--port {str(self.port)}"]
         for key, value in vars(self.engineArgs).items():
-            cmds += [f"--{key}={str(value)}"]
+            if value is not None:
+                cmds += [f"--{key} {str(value)}"]
 
         self.process = subprocess.Popen(cmds)
         print(f"Started process with PID: [{self.process.pid}] command: [{cmds}]")
