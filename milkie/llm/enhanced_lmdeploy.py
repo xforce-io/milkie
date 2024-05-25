@@ -24,6 +24,11 @@ from llama_index.core.bridge.pydantic import Field, PrivateAttr
 class LMDeploy(CustomLLM):
 
     model: Optional[str] = Field(description="The HuggingFace Model to use.")
+
+    context_window: Optional[int] = Field(
+        default=8192,
+    )
+
     _turboMind: Any = PrivateAttr()
     
     def __init__(
@@ -37,6 +42,8 @@ class LMDeploy(CustomLLM):
             session_len=context_window,
             tp=1)
         super().__init__(model=model_name)
+
+        self.context_window = context_window
         self._turboMind = TurboMind.from_pretrained(model_name, engineConfig)
         
     def modelInst(self):
@@ -47,7 +54,9 @@ class LMDeploy(CustomLLM):
 
     @property
     def metadata(self) -> LLMMetadata:
-        return LLMMetadata(model_name=self.model)
+        return LLMMetadata(
+            model_name=self.model,
+            context_window=self.context_window,)
 
     @llm_chat_callback()
     def chat(self, messages: Sequence[ChatMessage], **kwargs: Any) -> ChatResponse:

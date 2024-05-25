@@ -30,6 +30,10 @@ class VLLM(CustomLLM):
 
     model: Optional[str] = Field(description="The Vllm Model to use.")
 
+    context_window: Optional[int] = Field(
+        default=8192,
+    )
+
     max_new_tokens: int = Field(
         default=512,
         description="Maximum number of tokens to generate per output sequence.",
@@ -58,13 +62,15 @@ class VLLM(CustomLLM):
             vllm_kwargs :Dict[str, Any]) -> None:
         super().__init__(model=model_name, max_new_tokens=max_new_tokens)
 
+        self.model = model_name
+        self.context_window = context_window
+        self.port = port
+
         self.engineArgs = AsyncEngineArgs(
             model=model_name,
             max_model_len=context_window,
             dtype=dtype,
             **vllm_kwargs)
-
-        self.port = port
 
         self._startProcess()
         
@@ -77,7 +83,9 @@ class VLLM(CustomLLM):
 
     @property
     def metadata(self) -> LLMMetadata:
-        return LLMMetadata(model_name=self.model)
+        return LLMMetadata(
+            model_name=self.model,
+            context_window=self.context_window,)
 
     def _startProcess(self):
         import subprocess
@@ -213,7 +221,7 @@ class EnhancedVLLM(EnhancedLLM):
             prompts=prompts, 
             numThreads=1,
             inference=EnhancedVLLM._inference,
-            tokenIdExtractor=lambda output : output.outputs[0].token_ids,
+            tokenIdExtractor=lambda output : output,
             **kwargs)
 
     def _inference(
