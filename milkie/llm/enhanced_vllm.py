@@ -84,7 +84,7 @@ class VLLM(CustomLLM):
         cmds = [
             'python', 
             '-m', 
-            'vllm.entrypoints.api_server']
+            'milkie.llm.vllm_server']
         cmds += [f"--port", f"{str(self.port)}"]
         for key, value in vars(self.engineArgs).items():
             key = key.replace("_", "-")
