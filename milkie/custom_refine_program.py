@@ -29,7 +29,7 @@ class CustomRefineProgram(BasePydanticProgram):
         t0 = time.time()
         answer, _ = self._llm.predictBatch(
             prompt=self._prompt, 
-            argsList=[*kwds],
+            argsList=[kwds],
             **self._kwargs
         )[0]
         t1 = time.time()

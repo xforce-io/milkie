@@ -33,8 +33,7 @@ class QAAgent(BaseAgent):
             retrievalConfig=self.config.retrievalConfig,
             memoryWithIndex=self.memoryWithIndex)
         self.reasoningModule = ReasoningModule()
-        self.decisionModule = DecisionModule(
-            engine=self.retrievalModule.engine)
+        self.decisionModule = DecisionModule()
         self.actionModule = ActionModule()
 
     def task(self, query, **kwargs) -> Response:
@@ -62,6 +61,7 @@ class QAAgent(BaseAgent):
         return self.reasoningModule.reason(context, **kwargs)
 
     def __decision(self, context, **kwargs):
+        self.decisionModule.setEngine(self.retrievalModule.engine)
         return self.decisionModule.decide(context, **kwargs)
 
 if __name__ == "__main__":
