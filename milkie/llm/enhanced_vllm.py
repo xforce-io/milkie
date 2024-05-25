@@ -232,7 +232,8 @@ class EnhancedVLLM(EnhancedLLM):
                 break
             
             data = {
-                "prompt": request.prompt,
+                "prompt" : request.prompt,
+                "prompt_token_ids": request.tokenized,
                 **params
             }
 

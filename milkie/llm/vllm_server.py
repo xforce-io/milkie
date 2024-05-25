@@ -42,6 +42,7 @@ async def generate(request: Request) -> Response:
     - other fields: the sampling parameters (See `SamplingParams` for details).
     """
     request_dict = await request.json()
+    prompt = request_dict.pop("prompt")
     prompt_token_ids = request_dict.pop("prompt_token_ids")
     stream = request_dict.pop("stream", False)
     sampling_params = SamplingParams(**request_dict)
@@ -49,6 +50,7 @@ async def generate(request: Request) -> Response:
 
     assert engine is not None
     results_generator = engine.generate(
+        prompt=prompt,
         prompt_token_ids=prompt_token_ids, 
         sampling_params=sampling_params, 
         request_id=request_id)
