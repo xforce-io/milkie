@@ -8,6 +8,7 @@ from llama_index.core.node_parser.text.sentence import (
     SentenceSplitter,
 )
 from llama_index.core.callbacks.base import CallbackManager
+from llama_index.core.indices.prompt_helper import PromptHelper
 
 from milkie.config.config import GlobalConfig
 from milkie.memory.memory_with_index import MemoryWithIndex
@@ -36,10 +37,16 @@ class GlobalContext():
         self.globalConfig = globalConfig
         self.modelFactory = modelFactory
         self.settings = Settings(globalConfig, modelFactory)
+        promptHelper = PromptHelper(
+            context_window=globalConfig.getLLMConfig().ctxLen,
+            chunk_size_limit=globalConfig.getLLMConfig().ctxLen*3/4,
+        )
+
         self.serviceContext = ServiceContext.from_defaults(
             embed_model=self.settings.embedding,
             chunk_size=globalConfig.indexConfig.chunkSize if globalConfig.indexConfig else None,
             chunk_overlap=globalConfig.indexConfig.chunkOverlap if globalConfig.indexConfig else None,
+            prompt_helper=promptHelper,
             llm=self.settings.llm.getLLM(),
             node_parser=getNodeParser())
 
