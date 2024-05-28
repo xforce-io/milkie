@@ -1,6 +1,7 @@
 from abc import abstractmethod
 import logging
 import json
+import threading
 from typing import Callable
 from sacred import Experiment
 from llama_index.core import Response
@@ -70,10 +71,38 @@ class BenchType(object):
         self.fail = 0
 
     @abstractmethod
-    def eval(self, text) -> float:
+    def eval(
+            self, 
+            agent: Callable[[str, dict], list[Response]],
+            prompt :str,
+            batchSize :int) -> float:
+        pass
+
+    @abstractmethod
+    def evalParrel(self,
+            agent: Callable[[str, dict], list[Response]],
+            prompt :str,
+            batchSize :int) -> float:
         pass
 
 class BenchTypeKeyword(BenchType):
+
+    class Statistics :
+
+        def __init__(self) -> None:
+            self.succ = 0
+            self.fail = 0
+            self.lockStatics = threading.Lock()
+
+        def addSucc(self):
+            with self.lockStatics:
+                self.succ += 1
+                
+        def addFail(self):
+            with self.lockStatics:
+                self.fail += 1
+
+    statistics = Statistics()
 
     def __init__(self, filepathTest :str) -> None:
         super().__init__(filepathTest)
@@ -106,12 +135,46 @@ class BenchTypeKeyword(BenchType):
                     self.fail += 1
                     logger.info(f"{status} fail")
 
+    def evalParrel(
+            self,
+            agent: Callable[[str, dict], list[Response]],
+            prompt :str,
+            batchSize :int):
+        threads = []
+        for i in range(0, len(self.testcases), batchSize):
+            batch = self.testcases[i:i+batchSize]
+            t = threading.Thread(
+                target=BenchTypeKeyword._callAgent,
+                args=(agent, prompt, batch, self.statistics),
+                daemon=True)
+            t.start()
+            threads.append(t)
+
+        for t in threads:
+            t.join()
+
     def getAccuracy(self) -> float:
         return float(self.succ) / (self.succ + self.fail)
 
+    def _callAgent(
+            agent: Callable[[str, dict], list[Response]],
+            prompt :str,
+            batch: list[TestcaseKeyword],
+            statistics: Statistics):
+        argsList = [{"query_str": testcase.input, "context_str": testcase.context} for testcase in batch]
+        responses = agent(prompt=prompt, argsList=argsList)
+        for j, response in enumerate(responses):
+            status = f'Testcase[{batch[j].input[:30]}] Ans[{truncate_text(response.response, 500)}] Keypoints[{batch[j].keypoints()}]'.replace("\n", "//")
+            if batch[j].eval(response):
+                statistics.addSucc()
+                logger.info(f"{status} succ")
+            else:
+                statistics.addFail()
+                logger.info(f"{status} fail")
+
 class Benchmarks(object):
     
-    def __init__(self, ex :Experiment, benchmarks :list, batchSize :int) -> None:
+    def __init__(self, ex :Experiment, benchmarks :list[BenchType], batchSize :int) -> None:
         self.ex = ex
         self.benchmarks = benchmarks
         self.batchSize = batchSize
@@ -121,7 +184,7 @@ class Benchmarks(object):
             agent: Callable[[str, dict], list[Response]], 
             prompt :str):
         for benchmark in self.benchmarks:
-            benchmark.eval(agent, prompt, self.batchSize)
+            benchmark.evalParrel(agent, prompt, self.batchSize)
 
     def report(self):
         for benchmark in self.benchmarks:

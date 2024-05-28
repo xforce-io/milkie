@@ -46,7 +46,6 @@ class GlobalContext():
             embed_model=self.settings.embedding,
             chunk_size=globalConfig.indexConfig.chunkSize if globalConfig.indexConfig else None,
             chunk_overlap=globalConfig.indexConfig.chunkOverlap if globalConfig.indexConfig else None,
-            prompt_helper=promptHelper,
             llm=self.settings.llm.getLLM(),
             node_parser=getNodeParser())
 

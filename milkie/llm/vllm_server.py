@@ -66,7 +66,8 @@ async def generate(request: Request) -> Response:
     assert final_output is not None
     ret = {
         "raw" : {
-            "model_output" : final_output.prompt_token_ids
+            "text" : final_output.outputs[0].text,
+            "model_output" : final_output.outputs[0].token_ids,
         }
     }
     return JSONResponse(ret)

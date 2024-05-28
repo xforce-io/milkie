@@ -17,5 +17,15 @@ class DeepQA(Team):
     def task(self, query, **kwargs) -> Response:
         return self.qaAgent.task(query, **kwargs)
 
+    def taskBatch(
+            self, 
+            prompt, 
+            argsList :list, 
+            **kwargs) -> Response:
+        resps = []
+        for args in argsList:
+            resps.append(
+                self.qaAgent.task(prompt.format(**args), **kwargs))
+
     def taskBatch(self, queries: list[str]) -> list[Response]:
         raise NotImplementedError("DeepQA does not support taskBatch")
