@@ -49,10 +49,15 @@ def experiment(
     def agentTaskBatch(prompt :str, argsList :list) -> list[Response]:
         nonlocal agent, numQueries, lenOutputs, numBatches, totalTime, totalTokens
         t0 = time.time()
-        resps = agent.taskBatch(
-            prompt, 
-            argsList, 
-            **globalConfig.getLLMConfig().generationArgs.toJson())
+        resps = []
+        try:
+            resps = agent.taskBatch(
+                prompt, 
+                argsList, 
+                **globalConfig.getLLMConfig().generationArgs.toJson())
+        except Exception as e:
+            logger.error(f"Error[{e}] in agentTaskBatch")
+
         t1 = time.time()
         lenOutputs += sum(len(resp.response) for resp in resps)
         if len(resps) >= 0 and "numTokens" in resps[0].metadata:
