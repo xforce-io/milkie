@@ -27,7 +27,7 @@ for llm_model in [
                 f"llm_model={llm_model}",
                 f"framework={framework}",
                 f"rewrite_strategy={rewrite_strategy}",
-                f"benchmarks={benchmarks}"
+                f"benchmarks={benchmarks}",
                 "-l",
                 "DEBUG"
             ],

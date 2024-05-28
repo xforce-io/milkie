@@ -16,4 +16,3 @@ class DecisionModule():
             context.getCurQuery(),
             context.retrievalResult)
         context.setDecisionResult(decisionResult)
-        print(decisionResult)

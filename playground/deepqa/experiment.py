@@ -55,7 +55,8 @@ def experiment(
             **globalConfig.getLLMConfig().generationArgs.toJson())
         t1 = time.time()
         lenOutputs += sum(len(resp.response) for resp in resps)
-        totalTokens += sum(resp.metadata["numTokens"] for resp in resps)
+        if len(resps) >= 0 and "numTokens" in resps.metadata:
+            totalTokens += sum(resp.metadata["numTokens"] for resp in resps)
         totalTime += t1-t0
         numQueries += len(resps)
         numBatches += 1
@@ -68,7 +69,8 @@ def mainFunc(
         strategy,
         llm_model,
         framework,
-        rewrite_strategy):
+        rewrite_strategy,
+        benchmarks):
     kwargs = {
         "strategy":Strategy.getStrategy(strategy),
         "llm_model":llm_model,
@@ -78,6 +80,6 @@ def mainFunc(
         "rerank_position":"NONE",
         "channel_recall":30,
         "similarity_top_k":20,
-        "benchmarks":"benchmark/santi.jsonl"
+        "benchmarks":benchmarks
     }
     experiment(**kwargs)

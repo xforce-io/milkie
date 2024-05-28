@@ -55,7 +55,7 @@ class TestcaseKeyword:
     
     def __init__(self, config) -> None:
         self.input = config["input"]
-        self.context = config["context"]
+        self.context = config["context"] if "context" in config else None
         self.filter = KeywordFilter(json.loads(config["keypoints"]))
         self.keypoints = config["keypoints"]
 
