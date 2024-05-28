@@ -62,9 +62,6 @@ class EnhancedLLM(object):
         self._llm :LLM = None
         self._initTokenizer(tokenizer_name, tokenizer_kwargs)
 
-        self._reqQueue = Queue[QueueRequest]()
-        self._resQueue = Queue[QueueResponse]()
-        self._threads = []
         self._systemPrompt = Loader.load(system_prompt) if system_prompt is not None else None
 
     def getLLM(self) -> LLM:
@@ -193,9 +190,10 @@ class EnhancedLLM(object):
             tokenIdExtractor: Callable[[QueueResponse], list[int]],
             **genArgs: Any
     ) -> CompletionResponse:
-        self._reqQueue.queue.clear()
-        self._resQueue.queue.clear()
-        self._threads.clear()
+
+        reqQueue = Queue[QueueRequest]()
+        resQueue = Queue[QueueResponse]()
+        threads = []
         
         inputs = self._tokenizer(text=prompts, return_tensors="pt", padding=True)
         inputs = inputs.to(self.device)
@@ -209,25 +207,25 @@ class EnhancedLLM(object):
                     tokenized=unpaddedInputIds.tolist(),
                     **genArgs)
             order[request.requestId] = i
-            self._reqQueue.put(request)
+            reqQueue.put(request)
 
         for i in range(numThreads):
-            self._reqQueue.put(None)
+            reqQueue.put(None)
         
         for i in range(numThreads):
             t = Thread(
                     target=inference, 
-                    args=(self, self._reqQueue, self._resQueue, genArgs), 
+                    args=(self, reqQueue, resQueue, genArgs), 
                     daemon=True)
             t.start()
-            self._threads.append(t)
+            threads.append(t)
         
-        for t in self._threads:
+        for t in threads:
             t.join()
 
         resps :list[QueueResponse] = []
-        while not self._resQueue.empty():
-            resps.append(self._resQueue.get())
+        while not resQueue.empty():
+            resps.append(resQueue.get())
         resps.sort(key=lambda x: order[x.requestId])
 
         assert len(resps) == len(prompts)
