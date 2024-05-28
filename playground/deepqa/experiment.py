@@ -55,7 +55,7 @@ def experiment(
             **globalConfig.getLLMConfig().generationArgs.toJson())
         t1 = time.time()
         lenOutputs += sum(len(resp.response) for resp in resps)
-        if len(resps) >= 0 and "numTokens" in resps.metadata:
+        if len(resps) >= 0 and "numTokens" in resps[0].metadata:
             totalTokens += sum(resp.metadata["numTokens"] for resp in resps)
         totalTime += t1-t0
         numQueries += len(resps)

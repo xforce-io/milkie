@@ -1,9 +1,10 @@
+import logging
 from llama_index.core import Response
 from milkie.agent.qa_agent import QAAgent
 from milkie.agent.team.team import Team
-from milkie.config.config import GlobalConfig
 from milkie.context import Context
 
+logger = logging.getLogger(__name__)
 
 class DeepQA(Team):
    
@@ -22,8 +23,12 @@ class DeepQA(Team):
             prompt, 
             argsList :list, 
             **kwargs) -> Response:
-        resps = []
-        for args in argsList:
-            resps.append(
-                self.qaAgent.task(prompt.format(**args), **kwargs))
-        return resps
+        try:
+            resps = []
+            for args in argsList:
+                resps.append(
+                    self.qaAgent.task(prompt.format(**args), **kwargs))
+            return resps
+        except Exception as e:
+            logger.error(f"Error[{e}] in taskBatch")
+            return None
