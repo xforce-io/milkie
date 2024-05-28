@@ -6,6 +6,7 @@ from playground.set_env import NewEnv
 strategy = "deepqa"
 llm_model = "qwenv1.5-chat-14b"
 framework = "VLLM"
+benchmarks = "benchmark/santi.jsonl"
 
 for llm_model in [
         "qwenv1.5-chat-14b",
@@ -26,6 +27,7 @@ for llm_model in [
                 f"llm_model={llm_model}",
                 f"framework={framework}",
                 f"rewrite_strategy={rewrite_strategy}",
+                f"benchmarks={benchmarks}"
                 "-l",
                 "DEBUG"
             ],
