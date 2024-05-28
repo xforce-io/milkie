@@ -56,6 +56,8 @@ def experiment(
                 argsList, 
                 **globalConfig.getLLMConfig().generationArgs.toJson())
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             logger.error(f"Error[{e}] in agentTaskBatch")
 
         t1 = time.time()

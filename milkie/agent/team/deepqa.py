@@ -30,5 +30,7 @@ class DeepQA(Team):
                     self.qaAgent.task(prompt.format(**args), **kwargs))
             return resps
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             logger.error(f"Error[{e}] in taskBatch")
             return None
