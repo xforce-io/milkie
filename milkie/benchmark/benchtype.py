@@ -2,6 +2,7 @@ from abc import abstractmethod
 import logging
 import json
 import threading
+import time
 from typing import Callable
 from sacred import Experiment
 from llama_index.core import Response
@@ -67,8 +68,6 @@ class BenchType(object):
     def __init__(self, filepathTest :str) -> None:
         self.filepathTest = filepathTest
         self.name = filepathTest.split("/")[-1].split(".")[0]
-        self.succ = 0
-        self.fail = 0
 
     @abstractmethod
     def eval(
@@ -93,6 +92,14 @@ class BenchTypeKeyword(BenchType):
             self.succ = 0
             self.fail = 0
             self.lockStatics = threading.Lock()
+            self.startMs = 0
+            self.stopMs = 0
+
+        def tick(self):
+            self.startMs = time.time()
+        
+        def tock(self):
+            self.stopMs = time.time()
 
         def addSucc(self):
             with self.lockStatics:
@@ -101,6 +108,9 @@ class BenchTypeKeyword(BenchType):
         def addFail(self):
             with self.lockStatics:
                 self.fail += 1
+
+        def costMs(self) -> float:
+            return self.stopMs - self.startMs
 
     statistics = Statistics()
 
@@ -140,6 +150,8 @@ class BenchTypeKeyword(BenchType):
             agent: Callable[[str, dict], list[Response]],
             prompt :str,
             batchSize :int):
+        self.statistics.tick()
+        
         threads = []
         for i in range(0, len(self.testcases), batchSize):
             batch = self.testcases[i:i+batchSize]
@@ -152,6 +164,20 @@ class BenchTypeKeyword(BenchType):
 
         for t in threads:
             t.join()
+
+        self.statistics.tock()
+
+    @property
+    def succ(self) -> int: 
+        return self.statistics.succ
+
+    @property
+    def fail(self) -> int:
+        return self.statistics.fail
+
+    @property
+    def costMs(self) -> float:
+        return self.statistics.costMs()
 
     def getAccuracy(self) -> float:
         return float(self.succ) / (self.succ + self.fail)
@@ -191,6 +217,14 @@ class Benchmarks(object):
             self.ex.log_scalar(f"benchmark.{benchmark.name}.succ", benchmark.succ)
             self.ex.log_scalar(f"benchmark.{benchmark.name}.fail", benchmark.fail)
             self.ex.log_scalar(f"benchmark.{benchmark.name}.accu", benchmark.getAccuracy())
+
+            logger.info(
+                f"Benchmark[{benchmark.name}] "
+                f"succ[{benchmark.succ}] "
+                f"fail[{benchmark.fail}] "
+                f"accu[{benchmark.getAccuracy()}] "
+                f"cost[{benchmark.costMs}] "
+                f"avg[{benchmark.costMs / (benchmark.succ + benchmark.fail)}] ")
     
     def evalAndReport(
             self, 

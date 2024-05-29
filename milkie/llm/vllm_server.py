@@ -7,13 +7,12 @@ change `vllm/entrypoints/openai/api_server.py` instead.
 """
 
 import argparse
-import json
 import ssl
-from typing import AsyncGenerator
 
+import signal
 import uvicorn
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, Response, StreamingResponse
+from fastapi.responses import JSONResponse, Response
 
 from vllm.engine.arg_utils import AsyncEngineArgs
 from vllm.engine.async_llm_engine import AsyncLLMEngine
@@ -72,6 +71,10 @@ async def generate(request: Request) -> Response:
     }
     return JSONResponse(ret)
 
+def signalHandler(sig, frame):
+    print("Received signal, exiting..", sig)
+    uvicorn.shutdown()
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", type=str, default=None)
@@ -101,6 +104,10 @@ if __name__ == "__main__":
         engine_args, usage_context=UsageContext.API_SERVER)
 
     app.root_path = args.root_path
+
+    signal.signal(signal.SIGINT, signalHandler)    
+    signal.signal(signal.SIGTERM, signalHandler)    
+    
     uvicorn.run(app,
                 host=args.host,
                 port=args.port,
