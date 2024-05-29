@@ -1,7 +1,7 @@
 llm:
   type: HUGGINGFACE
   model: /mnt/data1/.cache/huggingface/hub/01ai/Yi-34B-Chat/
-  system_prompt: system_prompt
+  system_prompt: system_qwen
   framework : VLLM
   device: CUDA
   port: 10230

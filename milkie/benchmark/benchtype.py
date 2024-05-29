@@ -139,10 +139,10 @@ class BenchTypeKeyword(BenchType):
             for j, response in enumerate(responses):
                 status = f'Testcase[{batch[j].input[:30]}] Ans[{truncate_text(response.response, 500)}] Keypoints[{batch[j].keypoints}]'.replace("\n", "//")
                 if batch[j].eval(response):
-                    self.succ += 1
+                    self.statistics.succ += 1
                     logger.info(f"{status} succ")
                 else:
-                    self.fail += 1
+                    self.statistics.fail += 1
                     logger.info(f"{status} fail")
 
     def evalParrel(

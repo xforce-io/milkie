@@ -1,5 +1,7 @@
-from typing import Optional
+from typing import List, Optional, Sequence
 
+from llama_index.core.llms.llm import LLM
+from llama_index.core.prompts import BasePromptTemplate
 from llama_index.core.service_context import ServiceContext
 from llama_index.core.node_parser.interface import NodeParser
 from llama_index.core.node_parser.text.sentence import (
@@ -8,9 +10,9 @@ from llama_index.core.node_parser.text.sentence import (
     SentenceSplitter,
 )
 from llama_index.core.callbacks.base import CallbackManager
-from llama_index.core.indices.prompt_helper import PromptHelper
+from llama_index.core.indices.prompt_helper import DEFAULT_PADDING, PromptHelper
 
-from milkie.config.config import GlobalConfig
+from milkie.config.config import GlobalConfig, LLMConfig
 from milkie.memory.memory_with_index import MemoryWithIndex
 from milkie.settings import Settings
 from milkie.model_factory import ModelFactory
@@ -28,6 +30,22 @@ def getNodeParser(
         separator="\n\n",
     )
 
+class CustomizedPromptHelper(PromptHelper):
+
+    def __init__(self, llmConfig :LLMConfig):
+        super().__init__(
+            context_window=llmConfig.ctxLen,
+            chunk_size_limit=llmConfig.ctxLen*3/4)
+    
+    def repack(
+            self, 
+            prompt: BasePromptTemplate, 
+            text_chunks: Sequence[str], 
+            padding: int = ..., 
+            llm: LLM | None = None) -> List[str]:
+        chunks = super().repack(prompt, text_chunks, padding, llm)
+        return chunks[:2]
+
 class GlobalContext():
     
     def __init__(
@@ -37,15 +55,15 @@ class GlobalContext():
         self.globalConfig = globalConfig
         self.modelFactory = modelFactory
         self.settings = Settings(globalConfig, modelFactory)
-        promptHelper = PromptHelper(
-            context_window=globalConfig.getLLMConfig().ctxLen,
-            chunk_size_limit=globalConfig.getLLMConfig().ctxLen*3/4,
+        promptHelper = CustomizedPromptHelper(
+            llmConfig=globalConfig.getLLMConfig()
         )
 
         self.serviceContext = ServiceContext.from_defaults(
             embed_model=self.settings.embedding,
             chunk_size=globalConfig.indexConfig.chunkSize if globalConfig.indexConfig else None,
             chunk_overlap=globalConfig.indexConfig.chunkOverlap if globalConfig.indexConfig else None,
+            prompt_helper=promptHelper,
             llm=self.settings.llm.getLLM(),
             node_parser=getNodeParser())
 
