@@ -41,8 +41,8 @@ class CustomizedPromptHelper(PromptHelper):
             self, 
             prompt: BasePromptTemplate, 
             text_chunks: Sequence[str], 
-            padding: int = ..., 
-            llm: LLM | None = None) -> List[str]:
+            padding: int = DEFAULT_PADDING,
+            llm: Optional[LLM] = None) -> List[str]:
         chunks = super().repack(prompt, text_chunks, padding, llm)
         return chunks[:2]
 

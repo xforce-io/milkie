@@ -1,5 +1,5 @@
-{"input": "三体人用了什么方式来警告汪淼停止纳米材料研究", "keypoints": "{\"$and\": [\"倒计时\"]}", "level": "easy", "is_table": 0}
-{"input": "三体世界的纪元主要分哪几种", "keypoints": "{\"$and\": [\"恒纪元\", \"乱纪元\"]}", "level": "easy", "is_table": 0}
+{"input": "三体人用了什么方式来警告汪淼停止纳米材料研究", "keypoints": "{\"$and\": [\"倒计时\", \"宇宙背景辐射\"]}", "level": "easy", "is_table": 0}
+{"input": "三体世界与乱纪元对应的是", "keypoints": "{\"$and\": [\"恒纪元\"]}", "level": "easy", "is_table": 0}
 {"input": "三体人有哪种独特的生存形态", "keypoints": "{\"$and\": [\"脱水\"]}", "level": "easy", "is_table": 0}
 {"input": "三体人如何繁殖后代", "keypoints": "{\"$and\": [\"分裂\"]}", "level": "easy", "is_table": 0}
 {"input": "三体世界最恐怖的灾难是什么", "keypoints": "{\"$or\": [\"三日凌空\", \"三颗太阳\"]}", "level": "easy", "is_table": 0}
