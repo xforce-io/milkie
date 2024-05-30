@@ -171,9 +171,9 @@ class EnhancedLLM(object):
         completionResponses = self._completeBatch(prompts, **kwargs)
         t1 = time.time()
 
-        logger.debug(
-            f"size[{len(prompts)}] " 
-            f"prompt[{prompts[0].replace("\n", "//")}] "
+        firstPrompt = prompts[0].replace("\n", "//")
+        logger.debug(f"size[{len(prompts)}] " 
+            f"prompt[{firstPrompt}] "
             f"answer[{completionResponses[0].text}]"
             f"costMs[{t1-t0}]")
 

@@ -91,7 +91,7 @@ class RetrievalModule:
                 query=None,
                 argsList=[{"query_str":curQuery}],
                 **kwargs)
-            curQuery = rewriteResp[0].response
+            curQuery = curQuery + "|" + rewriteResp[0].response
 
         result = self.engine.retrieve(QueryBundle(curQuery))
         context.setRetrievalResult(result)
