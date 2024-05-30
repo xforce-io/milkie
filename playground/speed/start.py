@@ -1,6 +1,6 @@
 import subprocess
 
-from playground.set_env import NewEnv
+from playground.init import NewEnv
 
 strategy = "raw"
 llm_model = "qwenv1.5-chat-14b"

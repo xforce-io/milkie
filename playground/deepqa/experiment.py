@@ -1,5 +1,4 @@
 import time, logging
-from sacred import Experiment
 
 from llama_index.core import Response
 
@@ -9,14 +8,13 @@ from milkie.global_context import GlobalContext
 from milkie.model_factory import ModelFactory
 from milkie.strategy import Strategy
 
+from milkie.utils.commons import getMemStat
 from playground.global_config import makeGlobalConfig
+from playground.init import createExperiment
 
 logger = logging.getLogger(__name__)
 
-from sacred.observers import FileStorageObserver
-
-ex = Experiment()
-ex.observers.append(FileStorageObserver("my_runs"))
+ex = createExperiment()
 
 @ex.capture()
 def experiment(
@@ -70,6 +68,20 @@ def experiment(
         return resps 
 
     benchmarks.evalAndReport(agent=agentTaskBatch, prompt="{query_str}")
+    tokensPerSec = float(totalTokens)/totalTime
+
+
+    #TODO: 1.412 is observered from the A800 GPU, need to remove this hard code
+    ex.log_scalar("total", numQueries)
+    ex.log_scalar("costSec", totalTime)
+    ex.log_scalar("avgOutputLen", lenOutputs/numQueries)
+    ex.log_scalar("avgQueryLatSec", totalTime/numQueries)
+    ex.log_scalar("avgBatchLatSec", totalTime/numBatches)
+    ex.log_scalar("tokensPerSec", tokensPerSec)
+    ex.log_scalar("memory", globalContext.settings.llm.getMem())
+    ex.log_scalar("mbu", globalContext.settings.llm.getMBU(tokensPerSec, 1.412 * 1024**4))
+
+    getMemStat()
 
 @ex.automain
 def mainFunc(

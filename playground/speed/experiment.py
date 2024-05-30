@@ -1,5 +1,4 @@
-import time, logging, json
-from sacred import Experiment
+import time
 
 from llama_index.core import Response
 
@@ -11,31 +10,9 @@ from milkie.prompt.prompt import Loader
 from milkie.strategy import Strategy
 from milkie.utils.commons import getMemStat
 from playground.global_config import makeGlobalConfig
+from playground.init import createExperiment
 
-logger = logging.getLogger(__name__)
-
-from sacred.observers.base import RunObserver
-class MemObserver(RunObserver):
-    def started_event(
-        self, ex_info, command, host_info, start_time, config, meta_info, _id
-    ):
-        self.config = config
-
-    def log_metrics(self, metrics_by_name, info):
-        if len(metrics_by_name) == 0:
-            return
-
-        report = {
-            "config" : self.config,
-            "metrics" : metrics_by_name
-        }
-        logger.info(f"exp result {json.dumps(report, default=str)}")
-
-from sacred.observers import FileStorageObserver
-
-ex = Experiment()
-ex.observers.append(FileStorageObserver("my_runs"))
-ex.observers.append(MemObserver())
+ex = createExperiment()
 
 @ex.capture()
 def experiment(

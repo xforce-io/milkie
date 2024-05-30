@@ -217,14 +217,11 @@ class Benchmarks(object):
             self.ex.log_scalar(f"benchmark.{benchmark.name}.succ", benchmark.succ)
             self.ex.log_scalar(f"benchmark.{benchmark.name}.fail", benchmark.fail)
             self.ex.log_scalar(f"benchmark.{benchmark.name}.accu", benchmark.getAccuracy())
-
-            logger.info(
-                f"Benchmark[{benchmark.name}] "
-                f"succ[{benchmark.succ}] "
-                f"fail[{benchmark.fail}] "
-                f"accu[{benchmark.getAccuracy()}] "
-                f"cost[{benchmark.costMs}] "
-                f"avg[{benchmark.costMs / (benchmark.succ + benchmark.fail)}] ")
+            self.ex.log_scalar(f"benchmark.{benchmark.name}.costMs", benchmark.costMs)
+            if benchmark.succ + benchmark.fail != 0:
+                self.ex.log_scalar(
+                    f"benchmark.{benchmark.name}.avgMs", 
+                    benchmark.costMs / (benchmark.succ + benchmark.fail))
     
     def evalAndReport(
             self, 
