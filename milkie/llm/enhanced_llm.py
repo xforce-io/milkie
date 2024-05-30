@@ -173,7 +173,7 @@ class EnhancedLLM(object):
 
         logger.debug(
             f"size[{len(prompts)}] " 
-            f"prompt[{prompts[0]}] "
+            f"prompt[{prompts[0].replace("\n", "//")}] "
             f"answer[{completionResponses[0].text}]"
             f"costMs[{t1-t0}]")
 
