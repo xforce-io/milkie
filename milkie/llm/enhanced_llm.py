@@ -5,6 +5,7 @@ import random, uuid
 from queue import Queue
 from typing import Callable
 
+import time
 import torch
 import logging
 
@@ -157,7 +158,6 @@ class EnhancedLLM(object):
 
     def _chat(self, messages: Sequence[ChatMessage], **kwargs: Any) -> ChatResponse:
         prompt = self._llm.messages_to_prompt(messages)
-        logger.debug(f"Prompt: {prompt}")
         completion_response = self._complete(prompt, formatted=True, **kwargs)
         return completion_response_to_chat_response(completion_response)
 
@@ -166,8 +166,17 @@ class EnhancedLLM(object):
             messagesBatch: list[Sequence[ChatMessage]], 
             **kwargs: Any) -> list[ChatResponse]:
         prompts = self._tokenizer_messages_to_prompt(messagesBatch)
-        logger.debug(f"Prompts: {prompts}")
+
+        t0 = time.time()
         completionResponses = self._completeBatch(prompts, **kwargs)
+        t1 = time.time()
+
+        logger.debug(
+            f"size[{len(prompts)}] " 
+            f"prompt[{prompts[0]}] "
+            f"answer[{completionResponses[0].text}]"
+            f"costMs[{t1-t0}]")
+
         return [completion_response_to_chat_response(completionResponse) for completionResponse in completionResponses]
 
     @abstractmethod

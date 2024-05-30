@@ -38,7 +38,6 @@ class PromptAgent(BaseAgent):
         t1 = time.time()
         answer = response.response.replace("\n", "//")
         response.metadata["numTokens"] = numTokens
-        logger.debug(f"prompt_agent query[{query}] answer[{answer}] cost[{t1-t0}]").replace("\n", "//")
         return response
 
     def taskBatch(self, query :str, argsList :list[dict], **kwargs) -> list[Response]:
@@ -63,5 +62,4 @@ class PromptAgent(BaseAgent):
             response = Response(response=result[0], source_nodes=None, metadata={})
             response.metadata["numTokens"] = result[1]
             responses += [response]
-        logger.debug(f"prompt_agent query[{query}] batchSize[{len(resultBatch)}] cost[{t1-t0}]".replace("\n", "//"))
         return responses

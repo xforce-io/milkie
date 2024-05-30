@@ -69,7 +69,6 @@ class DefaultRefineProgram(BasePydanticProgram):
             ).strip()
         t1 = time.time()
         qanswer = answer.replace("\n", "//")
-        logger.debug(f"llm_call answer[{qanswer}] cost[{t1-t0}]")	
         return StructuredRefineResponse(answer=answer, query_satisfied=True)
 
     async def acall(self, *args: Any, **kwds: Any) -> StructuredRefineResponse:
