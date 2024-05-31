@@ -89,12 +89,14 @@ def mainFunc(
         llm_model,
         framework,
         rewrite_strategy,
+        chunk_augment,
         benchmarks):
     kwargs = {
         "strategy":Strategy.getStrategy(strategy),
         "llm_model":llm_model,
         "framework":framework,
         "rewrite_strategy":rewrite_strategy,
+        "chunk_augment":chunk_augment,
         "reranker":"FLAGEMBED",
         "rerank_position":"NONE",
         "channel_recall":30,

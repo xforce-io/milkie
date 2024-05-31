@@ -33,6 +33,10 @@ class FRAMEWORK(Enum):
 class EmbeddingType(Enum):
     HUGGINGFACE = 0
 
+class ChunkAugmentType(Enum):
+    NONE = 0
+    SIMPLE = 1
+
 class RerankerType(Enum):
     NONE = 0
     FLAGEMBED = 1
@@ -339,13 +343,19 @@ class RetrievalConfig(BaseConfig):
             rewriteStrategy :RewriteStrategy,
             channelRecall :int,
             similarityTopK :int,
+            chunkAugmentType :ChunkAugmentType,
             rerankerConfig :RerankConfig):
         self.rewriteStrategy = rewriteStrategy
         self.channelRecall = channelRecall
         self.similarityTopK = similarityTopK 
+        self.chunkAugmentType = chunkAugmentType
         self.rerankerConfig = rerankerConfig
 
     def fromArgs(config :dict):
+        chunkAugmentType = ChunkAugmentType.NONE
+        if config["chunk_augment"] == ChunkAugmentType.SIMPLE.name:
+            chunkAugmentType = ChunkAugmentType.SIMPLE
+        
         rerankerType = RerankerType.NONE
         if config["reranker"]["name"] == RerankerType.FLAGEMBED.name:
             rerankerType = RerankerType.FLAGEMBED
@@ -370,6 +380,7 @@ class RetrievalConfig(BaseConfig):
             rewriteStrategy=rewriteStrategy,
             channelRecall=config["channel_recall"],
             similarityTopK=config["similarity_top_k"],
+            chunkAugmentType=chunkAugmentType,
             rerankerConfig=reranker)
 
 class AgentType(Enum):

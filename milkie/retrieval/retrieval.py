@@ -9,11 +9,12 @@ from llama_index.core.schema import NodeWithScore
 from llama_index.retrievers.bm25.base import BM25Retriever
 
 from milkie.agent.prompt_agent import PromptAgent
-from milkie.config.config import GlobalConfig, RerankPosition, RetrievalConfig, RewriteStrategy
+from milkie.config.config import ChunkAugmentType, GlobalConfig, RerankPosition, RetrievalConfig, RewriteStrategy
 from milkie.context import Context
 from milkie.custom_refine_program import CustomProgramFactory
 from milkie.memory.memory_with_index import MemoryWithIndex
 from milkie.prompt.test_prompts import candidateTextQAPromptSel, candidateRefinePromptSel, candidateTextQAPromptImpl, candidateRefinePromptImpl
+from milkie.retrieval.chunk_augment import ChunkAugment
 from milkie.retrieval.position_reranker import PositionReranker
 from milkie.retrieval.reranker import Reranker
 from milkie.retrieval.retrievers import HybridRetriever
@@ -54,6 +55,10 @@ class RetrievalModule:
             self.sparseRetriever)
 
         self.nodePostProcessors = []
+        if self.retrievalConfig.chunkAugmentType == ChunkAugmentType.SIMPLE:
+            chunkAugment = ChunkAugment()
+            self.nodePostProcessors.append(chunkAugment)
+        
         reranker = Reranker(self.retrievalConfig.rerankerConfig) 
         if reranker.reranker:
             self.nodePostProcessors.append(reranker.reranker)

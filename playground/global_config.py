@@ -56,6 +56,9 @@ def makeGlobalConfig(
     if agentConfig is None:
         return GlobalConfig(configYaml)
     
+    if "chunk_augment" in kwargs:
+        agentConfig["retrieval"]["chunk_augment"] = kwargs["chunk_augment"]
+    
     if "reranker" in kwargs:
         agentConfig["retrieval"]["reranker"]["name"] = kwargs["reranker"]
 

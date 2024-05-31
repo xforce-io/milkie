@@ -18,17 +18,22 @@ for llm_model in [
         RewriteStrategy.NONE.name,
         RewriteStrategy.QUERY_REWRITE.name,
     ]:
-        subprocess.run([
-                "python", 
-                "-m",
-                "playground.deepqa.experiment",
-                "with",
-                f"strategy={strategy}",
-                f"llm_model={llm_model}",
-                f"framework={framework}",
-                f"rewrite_strategy={rewrite_strategy}",
-                f"benchmarks={benchmarks}",
-                "-l",
-                "DEBUG"
-            ],
-            env=NewEnv)
+        for chunk_augment in [
+            "NONE",
+            "SIMPLE",
+        ]:
+            subprocess.run([
+                    "python", 
+                    "-m",
+                    "playground.deepqa.experiment",
+                    "with",
+                    f"strategy={strategy}",
+                    f"llm_model={llm_model}",
+                    f"framework={framework}",
+                    f"rewrite_strategy={rewrite_strategy}",
+                    f"chunk_augment={chunk_augment}",
+                    f"benchmarks={benchmarks}",
+                    "-l",
+                    "DEBUG"
+                ],
+                env=NewEnv)
