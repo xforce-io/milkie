@@ -37,7 +37,6 @@ class CustomRefineProgram(BasePydanticProgram):
         answer = answer.strip()
         qanswer = answer.replace("\n", "//")
         
-        logger.debug(f"llm_call prompt[{self._prompt}] answer[{qanswer}] cost[{t1-t0}]")	
         return StructuredRefineResponse(answer=answer, query_satisfied=True)
 
 class CustomProgramFactory:
