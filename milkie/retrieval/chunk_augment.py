@@ -6,6 +6,9 @@ class ChunkAugment(BaseNodePostprocessor):
     def class_name(cls) -> str:
         return "ChunkAugment"
 
+    def set_context(self, context):
+        self.context = context
+
     def _postprocess_nodes(
             self, 
             nodes: List[NodeWithScore], 

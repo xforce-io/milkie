@@ -55,9 +55,11 @@ class RetrievalModule:
             self.sparseRetriever)
 
         self.nodePostProcessors = []
+
+        self.chunkAugment = None
         if self.retrievalConfig.chunkAugmentType == ChunkAugmentType.SIMPLE:
-            chunkAugment = ChunkAugment()
-            self.nodePostProcessors.append(chunkAugment)
+            self.chunkAugment = ChunkAugment()
+            self.nodePostProcessors.append(self.chunkAugment)
         
         reranker = Reranker(self.retrievalConfig.rerankerConfig) 
         if reranker.reranker:
@@ -68,6 +70,7 @@ class RetrievalModule:
             self.nodePostProcessors.append(positionReranker)
 
     def retrieve(self, context :Context, **kwargs) -> List[NodeWithScore]:
+        self.chunkAugment.set_context(context)
         responseSynthesizer = get_response_synthesizer(
             service_context=self.memoryWithIndex.serviceContext,
             program_factory=CustomProgramFactory(
