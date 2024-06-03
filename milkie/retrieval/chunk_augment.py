@@ -1,8 +1,12 @@
-from typing import List
+from typing import Any, List
 from llama_index.core.postprocessor.types import BaseNodePostprocessor
 from llama_index.core.schema import NodeWithScore, QueryBundle
+from pydantic import PrivateAttr
 
 class ChunkAugment(BaseNodePostprocessor):
+
+    context: Any = PrivateAttr()
+
     def class_name(cls) -> str:
         return "ChunkAugment"
 

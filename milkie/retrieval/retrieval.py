@@ -70,7 +70,9 @@ class RetrievalModule:
             self.nodePostProcessors.append(positionReranker)
 
     def retrieve(self, context :Context, **kwargs) -> List[NodeWithScore]:
-        self.chunkAugment.set_context(context)
+        if self.chunkAugment:
+            self.chunkAugment.set_context(context)
+
         responseSynthesizer = get_response_synthesizer(
             service_context=self.memoryWithIndex.serviceContext,
             program_factory=CustomProgramFactory(
