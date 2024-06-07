@@ -56,11 +56,6 @@ class RetrievalModule:
 
         self.nodePostProcessors = []
 
-        self.chunkAugment = None
-        if self.retrievalConfig.chunkAugmentType == ChunkAugmentType.SIMPLE:
-            self.chunkAugment = ChunkAugment()
-            self.nodePostProcessors.append(self.chunkAugment)
-        
         reranker = Reranker(self.retrievalConfig.rerankerConfig) 
         if reranker.reranker:
             self.nodePostProcessors.append(reranker.reranker)
@@ -69,6 +64,11 @@ class RetrievalModule:
             positionReranker = PositionReranker()
             self.nodePostProcessors.append(positionReranker)
 
+        self.chunkAugment = None
+        if self.retrievalConfig.chunkAugmentType == ChunkAugmentType.SIMPLE:
+            self.chunkAugment = ChunkAugment()
+            self.nodePostProcessors.append(self.chunkAugment)
+        
     def retrieve(self, context :Context, **kwargs) -> List[NodeWithScore]:
         if self.chunkAugment:
             self.chunkAugment.set_context(context)
