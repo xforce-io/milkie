@@ -19,6 +19,9 @@ def makeGlobalConfig(
     if "device" in kwargs:
         configYaml["llm"]["device"] = kwargs["device"]
 
+    if "ctx_len" in kwargs:
+        configYaml["llm"]["ctx_len"] = kwargs["ctx_len"]
+
     if "batch_size" in kwargs:
         configYaml["llm"]["batch_size"] = kwargs["batch_size"]
 

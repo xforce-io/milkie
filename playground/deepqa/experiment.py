@@ -88,6 +88,7 @@ def mainFunc(
         strategy,
         llm_model,
         framework,
+        ctx_len,
         rewrite_strategy,
         chunk_augment,
         benchmarks):
@@ -95,6 +96,7 @@ def mainFunc(
         "strategy":Strategy.getStrategy(strategy),
         "llm_model":llm_model,
         "framework":framework,
+        "ctx_len":ctx_len,
         "rewrite_strategy":rewrite_strategy,
         "chunk_augment":chunk_augment,
         "reranker":"FLAGEMBED",

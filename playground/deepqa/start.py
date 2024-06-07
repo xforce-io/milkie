@@ -14,26 +14,31 @@ for llm_model in [
         "aishuv2-chat-14b-awq",
         "aishuv2-chat-14b-gptq-int8",
         "internlmv2-chat-20b"]:
-    for rewrite_strategy in [
-        RewriteStrategy.NONE.name,
-        RewriteStrategy.QUERY_REWRITE.name,
+    for ctx_len in [
+        4096,
+        8192,
     ]:
-        for chunk_augment in [
-            "NONE",
-            "SIMPLE",
+        for rewrite_strategy in [
+            RewriteStrategy.NONE.name,
+            RewriteStrategy.QUERY_REWRITE.name,
         ]:
-            subprocess.run([
-                    "python", 
-                    "-m",
-                    "playground.deepqa.experiment",
-                    "with",
-                    f"strategy={strategy}",
-                    f"llm_model={llm_model}",
-                    f"framework={framework}",
-                    f"rewrite_strategy={rewrite_strategy}",
-                    f"chunk_augment={chunk_augment}",
-                    f"benchmarks={benchmarks}",
-                    "-l",
-                    "DEBUG"
-                ],
-                env=NewEnv)
+            for chunk_augment in [
+                "NONE",
+                "SIMPLE",
+            ]:
+                subprocess.run([
+                        "python", 
+                        "-m",
+                        "playground.deepqa.experiment",
+                        "with",
+                        f"strategy={strategy}",
+                        f"llm_model={llm_model}",
+                        f"framework={framework}",
+                        f"ctx_len={ctx_len}",
+                        f"rewrite_strategy={rewrite_strategy}",
+                        f"chunk_augment={chunk_augment}",
+                        f"benchmarks={benchmarks}",
+                        "-l",
+                        "DEBUG"
+                    ],
+                    env=NewEnv)
