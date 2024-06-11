@@ -8,7 +8,9 @@ def makeGlobalConfig(
         **kwargs) -> GlobalConfig:
     configYaml = loadFromYaml("config/global.yaml")
     if "llm_model" in kwargs:
-        configYaml["llm"]["model"] = GModelRepo.getModel(kwargs["llm_model"]).getModelPath()
+        model = GModelRepo.getModel(kwargs["llm_model"])
+        configYaml["llm"]["model"] = model.getModelPath()
+        configYaml["llm"]["tensor_parallel_size"] = model.getTensorParrallelSize()
 
     if "system_prompt" in kwargs:
         configYaml["llm"]["system_prompt"] = kwargs["system_prompt"]

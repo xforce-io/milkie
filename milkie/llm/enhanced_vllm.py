@@ -169,6 +169,7 @@ class EnhancedVLLM(EnhancedLLM):
     def __init__(self,
             context_window: int,
             concurrency: int,
+            tensor_parallel_size: int,
             tokenizer_name: str,
             model_name: str,
             system_prompt: str,
@@ -179,6 +180,7 @@ class EnhancedVLLM(EnhancedLLM):
         super().__init__(
             context_window=context_window, 
             concurrency=concurrency, 
+            tensor_parallel_size=tensor_parallel_size,
             tokenizer_name=tokenizer_name, 
             system_prompt=system_prompt, 
             device=device, 
@@ -194,7 +196,8 @@ class EnhancedVLLM(EnhancedLLM):
             dtype="auto",
             vllm_kwargs={
                 "gpu_memory_utilization":0.9, 
-                "quantization" : None if quantMethod == QuantMethod.NONE else quantMethod.name})
+                "quantization" : None if quantMethod == QuantMethod.NONE else quantMethod.name,
+                "tensor_parallel_size": self.tensor_parallel_size,})
 
     @torch.inference_mode()
     def predict(

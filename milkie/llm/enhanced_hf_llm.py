@@ -12,6 +12,7 @@ class EnhancedHFLLM(EnhancedLLM) :
             self, 
             context_window: int, 
             concurrency: int,
+            tensor_parallel_size: int,
             max_new_tokens: int, 
             query_wrapper_prompt: str, 
             tokenizer_name: str, 
@@ -25,6 +26,7 @@ class EnhancedHFLLM(EnhancedLLM) :
         super().__init__(
             context_window=context_window, 
             concurrency=concurrency, 
+            tensor_parallel_size=tensor_parallel_size,
             tokenizer_name=tokenizer_name, 
             system_prompt=system_prompt,
             device=device, 

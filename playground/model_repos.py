@@ -6,11 +6,14 @@ class Model:
             modelSeries, 
             rootpath, 
             modelpath,
-            ftFlag=None) -> None:
+            ftFlag=None,
+            tensorParrallelSize=1,
+            ) -> None:
         self.modelSeries = modelSeries
         self.rootpath = rootpath
         self.modelpath = modelpath
         self.ftFlag = ftFlag
+        self.tensorParrallelSize = tensorParrallelSize
 
         self.isChat = None
         self.size = None
@@ -40,6 +43,9 @@ class Model:
 
     def getModelPath(self) -> str:
         return f"{self.rootpath}{self.modelpath}"
+
+    def getTensorParrallelSize(self) -> int:
+        return self.tensorParrallelSize
 
     def _parseAttributesFromModepath(self) -> None:
         self.isChat = "chat" in self.modelpath.lower()
@@ -89,6 +95,7 @@ GModelRepo.addModel(Model("qwenv1.5", Rootpath, "qwen/Qwen1.5-14B-Chat/"))
 GModelRepo.addModel(Model("qwenv1.5", Rootpath, "qwen/Qwen1___5-14B-Chat-GPTQ-Int4/"))
 GModelRepo.addModel(Model("qwenv1.5", Rootpath, "qwen/Qwen1___5-14B-Chat-GPTQ-Int8/"))
 GModelRepo.addModel(Model("qwenv1.5", Rootpath, "qwen/Qwen1___5-14B-Chat-AWQ/"))
+GModelRepo.addModel(Model("qwenv2", Rootpath, "qwen/Qwen2-57B-A14B/"))
 
 RootpathAishuReader = "/mnt/data2/.cache/huggingface/hub/"
 GModelRepo.addModel(Model("aishuv2", RootpathAishuReader, "Qwen-14B-Chat-1.5-aishuV2"))

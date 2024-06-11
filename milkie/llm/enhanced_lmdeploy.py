@@ -113,6 +113,7 @@ class EnhancedLmDeploy(EnhancedLLM):
             self, 
             context_window: int, 
             concurrency: int,
+            tensor_parallel_size: int,
             tokenizer_name: str, 
             model_name: str,
             system_prompt: str,
@@ -122,6 +123,7 @@ class EnhancedLmDeploy(EnhancedLLM):
         super().__init__(
             context_window=context_window, 
             concurrency=concurrency, 
+            tensor_parallel_size=tensor_parallel_size,
             tokenizer_name=tokenizer_name, 
             system_prompt=system_prompt, 
             device=device, 

@@ -50,6 +50,7 @@ class EnhancedLLM(object):
     def __init__(self,
             context_window :int,
             concurrency :int,
+            tensor_parallel_size :int,
             tokenizer_name :str,
             system_prompt :str,
             device :str,
@@ -57,6 +58,7 @@ class EnhancedLLM(object):
             tokenizer_kwargs :dict) -> None:
         self.context_window = context_window
         self.concurrency = concurrency
+        self.tensor_parallel_size = tensor_parallel_size
         self.device = device
         self.port = port
 

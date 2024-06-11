@@ -225,6 +225,7 @@ class LLMConfig(BaseConfig):
             systemPrompt :str,
             ctxLen :int = 0,
             batchSize :int = 1,
+            tensorParallelSize :int = 1,
             framework :FRAMEWORK = FRAMEWORK.HUGGINGFACE,
             device :int = None,
             port :int = None,
@@ -239,6 +240,7 @@ class LLMConfig(BaseConfig):
         self.systemPrompt = systemPrompt
         self.ctxLen = ctxLen
         self.batchSize = batchSize
+        self.tensorParallelSize = tensorParallelSize
         self.framework = framework
         self.device = device
         self.port = port
@@ -274,6 +276,7 @@ class LLMConfig(BaseConfig):
                 systemPrompt=config["system_prompt"] if "system_prompt" in config else None,
                 ctxLen=config["ctx_len"],
                 batchSize=config["batch_size"],
+                tensorParallelSize=config["tensor_parallel_size"],
                 framework=framework,
                 device=device,
                 port=port,

@@ -47,6 +47,7 @@ class ModelFactory:
             self.llm = EnhancedVLLM(
                 context_window=config.ctxLen,
                 concurrency=config.batchSize,
+                tensor_parallel_size=config.tensorParallelSize,
                 tokenizer_name=config.model,
                 model_name=config.model,
                 system_prompt=config.systemPrompt,
@@ -58,6 +59,7 @@ class ModelFactory:
             self.llm = EnhancedLmDeploy(
                 context_window=config.ctxLen,
                 concurrency=config.batchSize,
+                tensor_parallel_size=config.tensorParallelSize,
                 tokenizer_name=config.model,
                 model_name=config.model,
                 system_prompt=config.systemPrompt,
@@ -69,6 +71,7 @@ class ModelFactory:
             self.llm = EnhancedHFLLM(
                 context_window=config.ctxLen,
                 concurrency=config.batchSize,
+                tensor_parallel_size=config.tensorParallelSize,
                 device=config.device,
                 port=config.port,
                 max_new_tokens=256,
