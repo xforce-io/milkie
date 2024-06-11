@@ -1,4 +1,4 @@
-{"input": "三体人用了什么方式来警告汪淼停止纳米材料研究", "keypoints": "{\"$and\": [\"倒计时\", \"宇宙背景辐射\"]}", "level": "easy", "is_table": 0}
+{"input": "三体人用了什么方式来警告汪淼停止纳米材料研究", "keypoints": "{\"$or\": [\"倒计时\", \"宇宙背景辐射\"]}", "level": "easy", "is_table": 0}
 {"input": "三体世界与乱纪元对应的是", "keypoints": "{\"$and\": [\"恒纪元\"]}", "level": "easy", "is_table": 0}
 {"input": "三体人有哪种独特的生存形态", "keypoints": "{\"$and\": [\"脱水\"]}", "level": "easy", "is_table": 0}
 {"input": "三体人如何繁殖后代", "keypoints": "{\"$and\": [\"分裂\"]}", "level": "easy", "is_table": 0}
@@ -9,10 +9,10 @@
 {"input": "叶文洁的爷爷的儿子叫什么名字", "keypoints": "{\"$and\": [\"叶哲泰\"]}", "level": "easy", "is_table": 0}
 {"input": "切割“审判日号”的行动代号是什么", "keypoints": "{\"$and\": [\"古筝\"]}", "level": "easy", "is_table": 0}
 {"input": "叶文雪的爸爸是谁", "keypoints": "{\"$and\": [\"叶哲泰\"]}", "level": "easy", "is_table": 0}
-{"input": "汪淼第一次玩三体游戏时，那个世界演化到了哪个阶段，毁于寒冷还是炙热", "keypoints": "{\"$and\": [\"战国\", {\"$or\": [\"寒冷\", \"严寒\"]}]}", "level": "easy", "is_table": 0}
+{"input": "汪淼第一次玩三体游戏时，那个世界演化到了中世纪阶段还是战国，毁于寒冷还是炙热", "keypoints": "{\"$and\": [\"战国\", {\"$or\": [\"寒冷\", \"严寒\"]}]}", "level": "easy", "is_table": 0}
 {"input": "红岸系统的目标是摧毁敌人的卫星吗", "keypoints": "{\"$and\": [\"不是\"]}", "level": "easy", "is_table": 0}
 {"input": "申玉菲和他丈夫初次见面是在哪里", "keypoints": "{\"$and\": [\"寺庙\"]}", "level": "easy", "is_table": 0}
-{"input": "在三体游戏中，是冯诺依曼和爱因斯坦共同为秦始皇设计了人列计算机，对不对", "keypoints": "{\"$or\": [\"不对\", \"不是\"]}", "level": "easy", "is_table": 0}
+{"input": "在三体游戏中，冯诺依曼和爱因斯坦共同为秦始皇设计了人列计算机，对还是不对", "keypoints": "{\"$or\": [\"不对\", \"不是\"]}", "level": "easy", "is_table": 0}
 {"input": "云河咖啡馆聚会中，主持人是谁", "keypoints": "{\"$and\": [\"潘寒\"]}", "level": "easy", "is_table": 0}
 {"input": "谁认为欧洲人入侵南美洲是强盗，哲学家、软件公司副总、女作家、电网领导还是博士生", "keypoints": "{\"$and\": [\"软件公司副总\", \"电网领导\"]}", "level": "easy", "is_table": 0}
 {"input": "杨冬的外婆叫什么名字", "keypoints": "{\"$and\": [\"绍琳\"]}", "level": "easy", "is_table": 0}
