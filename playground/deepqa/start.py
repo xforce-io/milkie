@@ -14,6 +14,7 @@ for llm_model in [
         "aishuv2-chat-14b-awq",
         "aishuv2-chat-14b-gptq-int8",
         "internlmv2-chat-20b"]:
+    type = "HUGGINGFACE"
     for ctx_len in [
         4096,
         8192,
@@ -31,6 +32,7 @@ for llm_model in [
                         "-m",
                         "playground.deepqa.experiment",
                         "with",
+                        f"type={type}"
                         f"strategy={strategy}",
                         f"llm_model={llm_model}",
                         f"framework={framework}",

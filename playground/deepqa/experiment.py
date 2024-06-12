@@ -85,6 +85,7 @@ def experiment(
 
 @ex.automain
 def mainFunc(
+        type,
         strategy,
         llm_model,
         framework,
@@ -93,6 +94,7 @@ def mainFunc(
         chunk_augment,
         benchmarks):
     kwargs = {
+        "type":type,
         "strategy":Strategy.getStrategy(strategy),
         "llm_model":llm_model,
         "framework":framework,

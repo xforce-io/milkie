@@ -7,6 +7,9 @@ def makeGlobalConfig(
         strategy :Strategy,
         **kwargs) -> GlobalConfig:
     configYaml = loadFromYaml("config/global.yaml")
+    if "type" in kwargs:
+        configYaml["llm"]["type"] = kwargs["type"]
+        
     if "llm_model" in kwargs:
         model = GModelRepo.getModel(kwargs["llm_model"])
         configYaml["llm"]["model"] = model.getModelPath()
