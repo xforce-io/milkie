@@ -28,6 +28,8 @@ class EnhancedOpenAI(EnhancedLLM):
             tokenizer_kwargs=tokenizer_kwargs)
 
         self.model_name = model_name
+        if model_name.startswith("deepseek"):
+            self.model_name = "deepseek-chat"
         self.endpoint = endpoint
         self.api_key = api_key
         self._client = OpenAI(api_key=api_key, base_url=endpoint)

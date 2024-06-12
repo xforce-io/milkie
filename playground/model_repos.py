@@ -109,6 +109,8 @@ GModelRepo.addModel(Model("internlmv2", RootpathInternlm2, "../trained_models/in
 RootpathYi = "/mnt/data3/models/01ai/"
 GModelRepo.addModel(Model("Yi", RootpathYi, "Yi-1___5-34B-Chat/"))
 
+GModelRepo.addModel(Model("deepseekv2", None, "deepseek-236B-chat"))
+
 if __name__ == "__main__" :
     for name, model in GModelRepo.models.items():
         print(f"ModelName: {name}")
