@@ -137,7 +137,7 @@ class BenchTypeKeyword(BenchType):
             argsList = [{"query_str": testcase.input, "context_str": testcase.context} for testcase in batch]
             responses = agent(prompt=prompt, argsList=argsList)
             for j, response in enumerate(responses):
-                status = f'Testcase[{batch[j].input[:30]}] Ans[{truncate_text(response.response, 500)}] Keypoints[{batch[j].keypoints}]'.replace("\n", "//")
+                status = f'Testcase[{batch[j].input[:35]}] Ans[{truncate_text(response.response, 500)}] Keypoints[{batch[j].keypoints}]'.replace("\n", "//")
                 if batch[j].eval(response):
                     self.statistics.succ += 1
                     logger.info(f"{status} succ")

@@ -23,12 +23,14 @@ class LongTermMemorySource(Enum):
 
 class LLMType(Enum):
     HUGGINGFACE = 0
-    AZURE_OPENAI = 1
+    GEN_OPENAI = 1
+    AZURE_OPENAI = 2
 
 class FRAMEWORK(Enum):
-    HUGGINGFACE = 0
-    VLLM = 1
-    LMDEPLOY = 2
+    NONE = 0
+    HUGGINGFACE = 1
+    VLLM = 2
+    LMDEPLOY = 3
 
 class EmbeddingType(Enum):
     HUGGINGFACE = 0
@@ -226,12 +228,12 @@ class LLMConfig(BaseConfig):
             ctxLen :int = 0,
             batchSize :int = 1,
             tensorParallelSize :int = 1,
-            framework :FRAMEWORK = FRAMEWORK.HUGGINGFACE,
+            framework :FRAMEWORK = FRAMEWORK.NONE,
             device :int = None,
             port :int = None,
             deploymentName :str = None,
             apiKey :str = None,
-            azureEndpoint :str = None,
+            endpoint :str = None,
             apiVersion :str = None,
             modelArgs :LLMModelArgs = None,
             generationArgs :LLMGenerationArgs = None):
@@ -246,7 +248,7 @@ class LLMConfig(BaseConfig):
         self.port = port
         self.deploymentName = deploymentName
         self.apiKey = apiKey
-        self.azureEndpoint = azureEndpoint
+        self.endpoint = endpoint
         self.apiVersion = apiVersion
         self.modelArgs = modelArgs
         self.generationArgs = generationArgs
@@ -282,6 +284,12 @@ class LLMConfig(BaseConfig):
                 port=port,
                 modelArgs=modelArgs,
                 generationArgs=generationArgs)
+        elif config["type"] == LLMType.GEN_OPENAI.name:
+            return LLMConfig(
+                type=LLMType.GEN_OPENAI,
+                model=config["model"],
+                apiKey=config["api_key"],
+                endpoint=config["endpoint"])
         elif config["type"] == LLMType.AZURE_OPENAI.name:
             return LLMConfig(
                 type=LLMType.AZURE_OPENAI,
@@ -289,7 +297,7 @@ class LLMConfig(BaseConfig):
                 batchSize=config["batch_size"],
                 deploymentName=config["deployment_name"],
                 apiKey=config["api_key"],
-                azureEndpoint=config["azure_endpoint"],
+                endpoint=config["endpoint"],
                 apiVersion=config["api_version"],
                 modelArgs=modelArgs,
                 generationArgs=generationArgs)

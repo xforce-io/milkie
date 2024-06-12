@@ -4,8 +4,9 @@ from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 
 from milkie.llm.enhanced_hf_llm import EnhancedHFLLM
 from milkie.llm.enhanced_lmdeploy import EnhancedLmDeploy
+from milkie.llm.enhanced_openai import EnhancedOpenAI
 from milkie.llm.enhanced_vllm import EnhancedVLLM
-from milkie.config.config import FRAMEWORK, EmbeddingConfig, LLMConfig
+from milkie.config.config import FRAMEWORK, EmbeddingConfig, LLMConfig, LLMType
 
 logger = logging.getLogger(__name__)
 
@@ -43,50 +44,67 @@ class ModelFactory:
             "use_fast": False, 
             "trust_remote_code": True,}
 
-        if config.framework == FRAMEWORK.VLLM:
-            self.llm = EnhancedVLLM(
+        if config.type == LLMType.GEN_OPENAI:
+            self.llm = EnhancedOpenAI(
+                model_name=config.model,
+                system_prompt=config.systemPrompt,
+                endpoint=config.endpoint,
+                api_key=config.apiKey,
                 context_window=config.ctxLen,
                 concurrency=config.batchSize,
                 tensor_parallel_size=config.tensorParallelSize,
                 tokenizer_name=config.model,
-                model_name=config.model,
-                system_prompt=config.systemPrompt,
                 device=config.device,
                 port=config.port,
-                max_new_tokens=256,
                 tokenizer_kwargs=tokenizerArgs)
-        elif config.framework == FRAMEWORK.LMDEPLOY:
-            self.llm = EnhancedLmDeploy(
-                context_window=config.ctxLen,
-                concurrency=config.batchSize,
-                tensor_parallel_size=config.tensorParallelSize,
-                tokenizer_name=config.model,
-                model_name=config.model,
-                system_prompt=config.systemPrompt,
-                device=config.device,
-                port=config.port,
-                max_new_tokens=256,
-                tokenizer_kwargs=tokenizerArgs)
-        else :
-            self.llm = EnhancedHFLLM(
-                context_window=config.ctxLen,
-                concurrency=config.batchSize,
-                tensor_parallel_size=config.tensorParallelSize,
-                device=config.device,
-                port=config.port,
-                max_new_tokens=256,
-                model_kwargs=config.modelArgs.toJson(),
-                generate_kwargs=config.generationArgs.toJson(),
-                query_wrapper_prompt=PromptTemplate("{query_str}\n<|ASSISTANT|>\n"),
-                tokenizer_name=config.model,
-                model_name=config.model,
-                system_prompt=config.systemPrompt,
-                tokenizer_kwargs=tokenizerArgs,
-                is_chat_model=True,
-            )
+        else:
+            if config.framework == FRAMEWORK.VLLM:
+                self.llm = EnhancedVLLM(
+                    context_window=config.ctxLen,
+                    concurrency=config.batchSize,
+                    tensor_parallel_size=config.tensorParallelSize,
+                    tokenizer_name=config.model,
+                    model_name=config.model,
+                    system_prompt=config.systemPrompt,
+                    device=config.device,
+                    port=config.port,
+                    max_new_tokens=256,
+                    tokenizer_kwargs=tokenizerArgs)
+            elif config.framework == FRAMEWORK.LMDEPLOY:
+                self.llm = EnhancedLmDeploy(
+                    context_window=config.ctxLen,
+                    concurrency=config.batchSize,
+                    tensor_parallel_size=config.tensorParallelSize,
+                    tokenizer_name=config.model,
+                    model_name=config.model,
+                    system_prompt=config.systemPrompt,
+                    device=config.device,
+                    port=config.port,
+                    max_new_tokens=256,
+                    tokenizer_kwargs=tokenizerArgs)
+            else :
+                self.llm = EnhancedHFLLM(
+                    context_window=config.ctxLen,
+                    concurrency=config.batchSize,
+                    tensor_parallel_size=config.tensorParallelSize,
+                    device=config.device,
+                    port=config.port,
+                    max_new_tokens=256,
+                    model_kwargs=config.modelArgs.toJson(),
+                    generate_kwargs=config.generationArgs.toJson(),
+                    query_wrapper_prompt=PromptTemplate("{query_str}\n<|ASSISTANT|>\n"),
+                    tokenizer_name=config.model,
+                    model_name=config.model,
+                    system_prompt=config.systemPrompt,
+                    tokenizer_kwargs=tokenizerArgs,
+                    is_chat_model=True,
+                )
 
         logging.info(f"Building HuggingFaceLLM with model[{config.model}] framework[{config.framework}] model_args[{repr(config.modelArgs)}] memory[{self.llm.getMem()}GB]")
         return self.llm
     
     def __getSignatureModel(self, config :LLMConfig):
-        return "%s-%s-%s" % (config.model, config.framework, config.modelArgs.toJson())
+        if config.modelArgs is None:
+            return "%s-%s" % (config.model, config.framework)
+        else:
+            return "%s-%s-%s" % (config.model, config.framework, config.modelArgs.toJson())

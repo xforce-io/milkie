@@ -21,7 +21,7 @@ class Settings(object):
         elif config.type == LLMType.AZURE_OPENAI:
             logging.info(f"Building AzureOpenAI with model {config.model}")
             self.llm = AzureOpenAI(
-                azure_endpoint=config.azureEndpoint,
+                azure_endpoint=config.endpoint,
                 azure_deployment=config.deploymentName,
                 api_version=config.apiVersion,
                 api_key=config.apiKey,
