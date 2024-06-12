@@ -56,13 +56,14 @@ class EnhancedOpenAI(EnhancedLLM):
             if not request:
                 break
             
+            messages = []
+            if self._systemPrompt:
+                messages.append({"role": "system", "content": self._systemPrompt})
+            messages.append({"role": "user", "content": request.prompt})
             try:
                 response = self._client.chat.completions.create(
                     model=self.model_name,
-                    messages=[
-                        {"role": "system", "content": self._systemPrompt},
-                        {"role": "user", "content": request.prompt},
-                    ],
+                    messages=messages,
                     stream=False
                 )
             except Exception as e:
