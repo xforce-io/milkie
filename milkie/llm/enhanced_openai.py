@@ -1,5 +1,6 @@
 from queue import Queue
 from typing import Any
+from llama_index.core.llms.llm import LLM
 from openai import OpenAI
 from llama_index.core.base.llms.types import CompletionResponse
 from milkie.llm.enhanced_llm import EnhancedLLM, QueueRequest, QueueResponse
@@ -33,6 +34,9 @@ class EnhancedOpenAI(EnhancedLLM):
         self.endpoint = endpoint
         self.api_key = api_key
         self._client = OpenAI(api_key=api_key, base_url=endpoint)
+
+    def getLLM(self) -> LLM:
+        return self._client
 
     def _completeBatch(
             self, 

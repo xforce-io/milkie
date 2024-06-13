@@ -16,7 +16,7 @@ class Settings(object):
         self.__buildEmbedding(config.embeddingConfig)
 
     def __buildLLM(self, config :LLMConfig):
-        if config.type == LLMType.HUGGINGFACE:
+        if config.type == LLMType.HUGGINGFACE or config.type == LLMType.GEN_OPENAI:
             self.llm = self.modelFactory.getLLM(config)
         elif config.type == LLMType.AZURE_OPENAI:
             logging.info(f"Building AzureOpenAI with model {config.model}")

@@ -63,7 +63,9 @@ class EnhancedLLM(object):
         self.port = port
 
         self._llm :LLM = None
-        self._initTokenizer(tokenizer_name, tokenizer_kwargs)
+
+        if tokenizer_name:
+            self._initTokenizer(tokenizer_name, tokenizer_kwargs)
 
         self._systemPrompt = Loader.load(system_prompt) if system_prompt is not None else None
 

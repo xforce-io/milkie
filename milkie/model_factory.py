@@ -53,7 +53,7 @@ class ModelFactory:
                 context_window=config.ctxLen,
                 concurrency=config.batchSize,
                 tensor_parallel_size=config.tensorParallelSize,
-                tokenizer_name=config.model,
+                tokenizer_name=None,
                 device=config.device,
                 port=config.port,
                 tokenizer_kwargs=tokenizerArgs)
