@@ -33,7 +33,10 @@ class EnhancedOpenAI(EnhancedLLM):
             self.model_name = "deepseek-chat"
         self.endpoint = endpoint
         self.api_key = api_key
-        self._llm = LLMApi(OpenAI(api_key=api_key, base_url=endpoint))
+        self._llm = LLMApi(
+            context_window=context_window,
+            model_name=model_name,
+            client=OpenAI(api_key=api_key, base_url=endpoint))
 
     def _completeBatch(
             self, 

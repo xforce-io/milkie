@@ -1,11 +1,12 @@
 from abc import abstractmethod
-from typing import Any, Sequence
+from typing import Any, Optional, Sequence
 from threading import Thread
 import random, uuid
 from queue import Queue
 from typing import Callable
 
 import time
+from pydantic import Field, PrivateAttr
 import torch
 import logging
 
@@ -31,12 +32,20 @@ logger = logging.getLogger(__name__)
 
 class LLMApi(CustomLLM):
 
+    model: Optional[str] = Field(description="The HuggingFace Model to use.")
+
+    context_window: Optional[int] = Field(
+        default=8192,
+    )
+
+    _client: Any = PrivateAttr()
+
     def __init__(self, 
             context_window :int,
             model_name :str,
             client :Any):
         self.context_window = context_window
-        self.model_name = model_name
+        self.model = model_name
         self._client = client
 
     def getClient(self):
@@ -45,7 +54,7 @@ class LLMApi(CustomLLM):
     @property
     def metadata(self) -> LLMMetadata:
         return LLMMetadata(
-            model_name=self.model_name,
+            model_name=self.model,
             context_window=self.context_window,)
 
     @llm_completion_callback()
