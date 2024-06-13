@@ -74,4 +74,5 @@ class EnhancedOpenAI(EnhancedLLM):
             
             resQueue.put(QueueResponse(
                 requestId=request.requestId, 
-                output=response.choices[0].message.content))
+                output=response.choices[0].message.content,
+                numTokens=response.usage.completion_tokens))

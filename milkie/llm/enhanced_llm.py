@@ -87,9 +87,11 @@ class QueueRequest:
 class QueueResponse:
     def __init__(self,
             requestId :int,
-            output :Any) -> None:
+            output :Any,
+            numTokens: int=0) -> None:
         self.requestId = requestId
         self.output = output
+        self.numTokens = numTokens
         
 class EnhancedLLM(object):
 
@@ -213,7 +215,10 @@ class EnhancedLLM(object):
         responses = self._chatBatch(messages, **kwargs)
         for response in responses:
             output = response.message.content or ""
-            result += [(self._llm._parse_output(output), len(response.raw["model_output"]))]
+            numTokens = response.raw["num_tokens"]
+            result += [(
+                self._llm._parse_output(output), 
+                numTokens if numTokens != 0 else len(response.raw["model_output"]))]
         return result
 
     def _chat(self, messages: Sequence[ChatMessage], **kwargs: Any) -> ChatResponse:
@@ -308,7 +313,7 @@ class EnhancedLLM(object):
         for i, resp in enumerate(resps):
             completionResponses += [CompletionResponse(
                 text=completion[i], 
-                raw={"model_output": tokenIdExtractor(resp.output)})]
+                raw={"model_output": tokenIdExtractor(resp.output), "num_tokens": 0})]
         return completionResponses
 
     def _completeBatchNoTokenizationAsync(
@@ -356,5 +361,7 @@ class EnhancedLLM(object):
 
         completionResponses = []
         for i, resp in enumerate(resps):
-            completionResponses += [CompletionResponse(text=resp.output)]
+            completionResponses += [CompletionResponse(
+                text=resp.output,
+                raw={"model_output": None, "num_tokens": resp.numTokens})]
         return completionResponses
