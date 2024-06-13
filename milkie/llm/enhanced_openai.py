@@ -1,9 +1,12 @@
+import logging
 from queue import Queue
 from typing import Any
 from llama_index.core.llms.llm import LLM
 from openai import OpenAI
 from llama_index.core.base.llms.types import CompletionResponse
 from milkie.llm.enhanced_llm import EnhancedLLM, LLMApi, QueueRequest, QueueResponse
+
+logger = logging.getLogger(__name__)
 
 class EnhancedOpenAI(EnhancedLLM):
     def __init__(self, 
@@ -70,7 +73,12 @@ class EnhancedOpenAI(EnhancedLLM):
                     stream=False
                 )
             except Exception as e:
-                raise ValueError("Failed to complete request, status code: %d" % response.status_code)
+                resQueue.put(QueueResponse(
+                    requestId=request.requestId, 
+                    output="fail answer",
+                    numTokens=1))
+                logger.error("Failed to complete request, status code: %d" % response.status_code)
+                return 
             
             resQueue.put(QueueResponse(
                 requestId=request.requestId, 

@@ -289,6 +289,7 @@ class LLMConfig(BaseConfig):
                 type=LLMType.GEN_OPENAI,
                 model=config["model"],
                 systemPrompt=config["system_prompt"] if "system_prompt" in config else None,
+                ctxLen=config["ctx_len"],
                 apiKey=config["api_key"],
                 endpoint=config["endpoint"],
                 generationArgs=generationArgs,)
