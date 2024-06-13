@@ -199,7 +199,7 @@ class EnhancedLLM(object):
                 messagesDict,
                 add_generation_prompt=True,
                 tokenize=False)
-        return [generic_messages_to_prompt(messagesBatch)]
+        return [generic_messages_to_prompt(messages) for messages in messagesBatch]
 
     @torch.inference_mode()
     def _predictBatch(
@@ -309,4 +309,52 @@ class EnhancedLLM(object):
             completionResponses += [CompletionResponse(
                 text=completion[i], 
                 raw={"model_output": tokenIdExtractor(resp.output)})]
+        return completionResponses
+
+    def _completeBatchNoTokenizationAsync(
+            self, 
+            prompts: list[str], 
+            numThreads: int,
+            inference: Callable[[object, Queue[QueueRequest], Queue[QueueResponse], dict, dict], Any],
+            **genArgs: Any
+    ) -> CompletionResponse:
+
+        reqQueue = Queue[QueueRequest]()
+        resQueue = Queue[QueueResponse]()
+        threads = []
+        
+        order = dict()
+        for i, prompt in enumerate(prompts):
+            request = QueueRequest(
+                    requestId=None,
+                    prompt=prompt, 
+                    tokenized=None,
+                    **genArgs)
+            order[request.requestId] = i
+            reqQueue.put(request)
+
+        for i in range(numThreads):
+            reqQueue.put(None)
+        
+        for i in range(numThreads):
+            t = Thread(
+                    target=inference, 
+                    args=(self, reqQueue, resQueue, genArgs), 
+                    daemon=True)
+            t.start()
+            threads.append(t)
+        
+        for t in threads:
+            t.join()
+
+        resps :list[QueueResponse] = []
+        while not resQueue.empty():
+            resps.append(resQueue.get())
+        resps.sort(key=lambda x: order[x.requestId])
+
+        assert len(resps) == len(prompts)
+
+        completionResponses = []
+        for i, resp in enumerate(resps):
+            completionResponses += [CompletionResponse(text=resp.output)]
         return completionResponses

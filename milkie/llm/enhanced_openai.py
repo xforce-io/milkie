@@ -42,11 +42,10 @@ class EnhancedOpenAI(EnhancedLLM):
             self, 
             prompts: list[str], 
             **kwargs: Any) -> list[CompletionResponse]:
-        return self._completeBatchAsync(
+        return self._completeBatchNoTokenizationAsync(
             prompts=prompts, 
             numThreads=1,
             inference=EnhancedOpenAI._inference,
-            tokenIdExtractor=lambda output : output,
             **kwargs)
 
     def _inference(
