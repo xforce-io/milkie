@@ -125,6 +125,7 @@ class EnhancedLmDeploy(EnhancedLLM):
             concurrency=concurrency, 
             tensor_parallel_size=tensor_parallel_size,
             tokenizer_name=tokenizer_name, 
+            model_name=model_name,
             system_prompt=system_prompt, 
             device=device, 
             tokenizer_kwargs=tokenizer_kwargs)

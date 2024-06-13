@@ -23,12 +23,12 @@ class EnhancedOpenAI(EnhancedLLM):
             concurrency=concurrency,
             tensor_parallel_size=tensor_parallel_size,
             tokenizer_name=tokenizer_name,
+            model_name=model_name,
             system_prompt=system_prompt,
             device=device,
             port=port,
             tokenizer_kwargs=tokenizer_kwargs)
 
-        self.model_name = model_name
         if model_name.startswith("deepseek"):
             self.model_name = "deepseek-chat"
         self.endpoint = endpoint

@@ -12,6 +12,7 @@ import logging
 from transformers import AutoTokenizer
 
 from llama_index_client import ChatMessage
+from llama_index.core.llms.callbacks import llm_completion_callback
 from llama_index.core.base.llms.types import ChatResponse, CompletionResponse
 from llama_index.core import BasePromptTemplate
 from llama_index.core.llms.llm import LLM
@@ -20,6 +21,8 @@ from llama_index.core.base.llms.generic_utils import (
     messages_to_prompt as generic_messages_to_prompt,
 )
 from llama_index.core.llms.custom import CustomLLM
+from llama_index.core.base.llms.types import LLMMetadata
+from llama_index.core.base.llms.types import CompletionResponseGen
 
 from milkie.config.config import QuantMethod
 from milkie.prompt.prompt import Loader
@@ -28,11 +31,34 @@ logger = logging.getLogger(__name__)
 
 class LLMApi(CustomLLM):
 
-    def __init__(self, client :Any):
+    def __init__(self, 
+            context_window :int,
+            model_name :str,
+            client :Any):
+        self.context_window = context_window
+        self.model_name = model_name
         self._client = client
 
     def getClient(self):
         return self._client
+
+    @property
+    def metadata(self) -> LLMMetadata:
+        return LLMMetadata(
+            model_name=self.model_name,
+            context_window=self.context_window,)
+
+    @llm_completion_callback()
+    def complete(
+        self, prompt: str, formatted: bool = False, **kwargs: Any
+    ) -> CompletionResponse:
+        raise (ValueError("Not Implemented")) 
+
+    @llm_completion_callback()
+    def stream_complete(
+        self, prompt: str, formatted: bool = False, **kwargs: Any
+    ) -> CompletionResponseGen:
+        raise (ValueError("Not Implemented"))
 
 class QueueRequest:
     def __init__(
@@ -61,6 +87,7 @@ class EnhancedLLM(object):
             concurrency :int,
             tensor_parallel_size :int,
             tokenizer_name :str,
+            model_name :str,
             system_prompt :str,
             device :str,
             port :int,
@@ -68,6 +95,7 @@ class EnhancedLLM(object):
         self.context_window = context_window
         self.concurrency = concurrency
         self.tensor_parallel_size = tensor_parallel_size
+        self.model_name = model_name
         self.device = device
         self.port = port
 
@@ -77,6 +105,12 @@ class EnhancedLLM(object):
             self._initTokenizer(tokenizer_name, tokenizer_kwargs)
 
         self._systemPrompt = Loader.load(system_prompt) if system_prompt is not None else None
+
+    @property
+    def metadata(self) -> LLMMetadata:
+        return LLMMetadata(
+            model_name=self.model_name,
+            context_window=self.context_window,)
 
     def getLLM(self) -> LLM:
         return self._llm
