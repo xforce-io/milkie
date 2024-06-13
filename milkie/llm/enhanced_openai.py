@@ -3,7 +3,7 @@ from typing import Any
 from llama_index.core.llms.llm import LLM
 from openai import OpenAI
 from llama_index.core.base.llms.types import CompletionResponse
-from milkie.llm.enhanced_llm import EnhancedLLM, QueueRequest, QueueResponse
+from milkie.llm.enhanced_llm import EnhancedLLM, LLMApi, QueueRequest, QueueResponse
 
 class EnhancedOpenAI(EnhancedLLM):
     def __init__(self, 
@@ -33,10 +33,7 @@ class EnhancedOpenAI(EnhancedLLM):
             self.model_name = "deepseek-chat"
         self.endpoint = endpoint
         self.api_key = api_key
-        self._client = OpenAI(api_key=api_key, base_url=endpoint)
-
-    def getLLM(self) -> LLM:
-        return self._client
+        self._llm = LLMApi(OpenAI(api_key=api_key, base_url=endpoint))
 
     def _completeBatch(
             self, 
@@ -65,7 +62,7 @@ class EnhancedOpenAI(EnhancedLLM):
                 messages.append({"role": "system", "content": self._systemPrompt})
             messages.append({"role": "user", "content": request.prompt})
             try:
-                response = self._client.chat.completions.create(
+                response = self._llm.getClient().chat.completions.create(
                     model=self.model_name,
                     messages=messages,
                     stream=False

@@ -19,11 +19,20 @@ from llama_index.core.base.llms.generic_utils import (
     completion_response_to_chat_response,
     messages_to_prompt as generic_messages_to_prompt,
 )
+from llama_index.core.llms.custom import CustomLLM
 
 from milkie.config.config import QuantMethod
 from milkie.prompt.prompt import Loader
 
 logger = logging.getLogger(__name__)
+
+class LLMApi(CustomLLM):
+
+    def __init__(self, client :Any):
+        self._client = client
+
+    def getClient(self):
+        return self._client
 
 class QueueRequest:
     def __init__(
