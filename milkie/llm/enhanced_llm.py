@@ -32,24 +32,26 @@ logger = logging.getLogger(__name__)
 
 class LLMApi(CustomLLM):
 
-    model: Optional[str] = Field(description="The HuggingFace Model to use.")
+    model: Optional[str] = Field(description="The Model to use.")
 
     context_window: Optional[int] = Field(
         default=8192,
     )
 
-    _client: Any = PrivateAttr()
+    client: Any = PrivateAttr()
 
     def __init__(self, 
             context_window :int,
             model_name :str,
             client :Any):
+        super().__init__(model=model_name)
+
         self.context_window = context_window
         self.model = model_name
-        self._client = client
+        self.client = client
 
     def getClient(self):
-        return self._client
+        return self.client
 
     @property
     def metadata(self) -> LLMMetadata:
@@ -112,6 +114,8 @@ class EnhancedLLM(object):
 
         if tokenizer_name:
             self._initTokenizer(tokenizer_name, tokenizer_kwargs)
+        else:
+            self._tokenizer = None
 
         self._systemPrompt = Loader.load(system_prompt) if system_prompt is not None else None
 
@@ -184,7 +188,7 @@ class EnhancedLLM(object):
 
     def _tokenizer_messages_to_prompt(self, messagesBatch: list[Sequence[ChatMessage]]) -> list[str]:
         """Use the tokenizer to convert messages to prompt. Fallback to generic."""
-        if hasattr(self._tokenizer, "apply_chat_template"):
+        if self._tokenizer and hasattr(self._tokenizer, "apply_chat_template"):
             messagesDict = []
             for messages in messagesBatch:
                 messagesDict += [[

@@ -290,7 +290,8 @@ class LLMConfig(BaseConfig):
                 model=config["model"],
                 systemPrompt=config["system_prompt"] if "system_prompt" in config else None,
                 apiKey=config["api_key"],
-                endpoint=config["endpoint"])
+                endpoint=config["endpoint"],
+                generationArgs=generationArgs,)
         elif config["type"] == LLMType.AZURE_OPENAI.name:
             return LLMConfig(
                 type=LLMType.AZURE_OPENAI,
