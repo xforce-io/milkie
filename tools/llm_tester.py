@@ -1,10 +1,9 @@
 import os, glob
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from modelscope import AutoModelForCausalLM, AutoTokenizer
 from transformers.generation.utils import GenerationConfig
 from enum import Enum
 
 ModelNames = [
-    "/mnt/data1/.cache/modelscope/hub/qwen/Qwen-7B-Chat/",
     "/mnt/data1/.cache/modelscope/hub/qwen/Qwen-14B-Chat/",
     "/mnt/data1/.cache/modelscope/hub/baichuan-inc/Baichuan2-7B-Chat/",
     "/mnt/data1/.cache/modelscope/hub/baichuan-inc/Baichuan2-13B-Chat/",

@@ -1,6 +1,9 @@
 import time, logging
-from milkie.agent import Agent
 from milkie.config.config import GlobalConfig
+from milkie.context import Context
+from milkie.global_context import GlobalContext
+from milkie.model_factory import ModelFactory
+from milkie.strategy import Strategy
 
 logger = logging.getLogger(__name__)
 
@@ -30,8 +33,17 @@ class TestSuite(object):
         self.name = name
         self.testCases = testCases
 
-    def run(self, ex, globalConfig :GlobalConfig):
-        agent = Agent(globalConfig)
+    def run(
+            self, 
+            strategy :Strategy,
+            ex, 
+            globalConfig :GlobalConfig,
+            modelFactory :ModelFactory, 
+            **kwargs):
+        globalContext = GlobalContext(globalConfig, modelFactory)
+        context = Context(globalContext=globalContext)
+        agent = strategy.createAgent(context)
+
         cnt = 0
         totalTime = 0
         for testCase in self.testCases:
@@ -46,6 +58,8 @@ class TestSuite(object):
             totalTime += t1-t0
         logger.info(f"Running testsuite[{self.name}] "
                     f"accuracy[{cnt}/{len(self.testCases)}] "
+                    f"strategy[{strategy}] "
+                    f"kwargs[{kwargs}] "
                     f"cost[{totalTime}] "
                     f"avg[{totalTime/len(self.testCases)}] ")
         ex.log_scalar("succ", cnt)

@@ -1,13 +1,18 @@
-from llama_index import QueryBundle
+from milkie.context import Context
 
 
 class DecisionModule():
-    def __init__(self):
-        pass
+    def __init__(self, engine=None):
+        self.engine = engine
 
-    def decide(self, context):
-        decisionResult = context.engine.synthesize(
+    def setEngine(self, engine):
+        self.engine = engine
+
+    def decide(
+            self, 
+            context :Context, 
+            **kwargs):
+        decisionResult = self.engine.synthesize(
             context.getCurQuery(),
             context.retrievalResult)
         context.setDecisionResult(decisionResult)
-        print(decisionResult)

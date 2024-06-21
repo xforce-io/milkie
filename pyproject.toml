@@ -6,8 +6,32 @@ authors = ["Your Name <you@example.com>"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
-python = "^3.12"
+python = "^3.9"
+torch = "^2.1.2"
 openai = "^1.3.5"
+bitsandbytes = "^0.43"
+vllm = "^0.4"
+transformers = "^4.40.1"
+sacred = "^0.8"
+paddleocr = "^2.7"
+common = "^0.1"
+paddle = "^1"
+paddlepaddle = "^2.6"
+
+llama_index = "^0.10"
+llama-index-llms-vllm = "*"
+llama-index-readers-file = "*"
+llama-index-llms-huggingface = "*"
+llama-index-postprocessor-flag-embedding-reranker = "*"
+llama-index-retrievers-bm25 = "*"
+llama-index-embeddings-huggingface = "*"
+
+flash-attn = "^2.5.7"
+optimum = "*"
+auto-gptq = "*"
+autoawq = "*"
+jieba = "*"
+openai = "*"
 
 [build-system]
 requires = ["poetry-core"]
