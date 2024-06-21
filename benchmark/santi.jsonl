@@ -10,7 +10,7 @@
 {"input": "切割“审判日号”的行动代号是什么", "keypoints": "{\"$and\": [\"古筝\"]}", "level": "easy", "is_table": 0}
 {"input": "叶文雪的爸爸是谁", "keypoints": "{\"$and\": [\"叶哲泰\"]}", "level": "easy", "is_table": 0}
 {"input": "汪淼第一次玩三体游戏时，那个世界演化到了中世纪阶段还是战国，毁于寒冷还是炙热", "keypoints": "{\"$and\": [\"战国\", {\"$or\": [\"寒冷\", \"严寒\"]}]}", "level": "easy", "is_table": 0}
-{"input": "红岸系统的目标是摧毁敌人的卫星吗", "keypoints": "{\"$and\": [\"不是\"]}", "level": "easy", "is_table": 0}
+{"input": "红岸系统的目标是摧毁敌人的卫星吗", "keypoints": "{\"$and\": [\"不对\", \"不是\", \"并非\"]}", "level": "easy", "is_table": 0}
 {"input": "申玉菲和他丈夫初次见面是在哪里", "keypoints": "{\"$and\": [\"寺庙\"]}", "level": "easy", "is_table": 0}
 {"input": "在三体游戏中，冯诺依曼和爱因斯坦共同为秦始皇设计了人列计算机，对还是不对", "keypoints": "{\"$or\": [\"不对\", \"不是\"]}", "level": "easy", "is_table": 0}
 {"input": "云河咖啡馆聚会中，主持人是谁", "keypoints": "{\"$and\": [\"潘寒\"]}", "level": "easy", "is_table": 0}

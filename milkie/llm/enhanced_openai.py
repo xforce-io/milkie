@@ -77,10 +77,13 @@ class EnhancedOpenAI(EnhancedLLM):
                     requestId=request.requestId, 
                     output="fail answer",
                     numTokens=1))
-                logger.error("Failed to complete request, status code: %d" % response.status_code)
+                logger.error(f"Failed to complete request[{request.prompt}]")
                 return 
             
             resQueue.put(QueueResponse(
                 requestId=request.requestId, 
                 output=response.choices[0].message.content,
                 numTokens=response.usage.completion_tokens))
+
+    def _getSingleParameterSizeInBytes(self):
+        return 0 
