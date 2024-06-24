@@ -1,4 +1,10 @@
+from enum import Enum
 import re
+
+class ModelType(Enum):
+    NONE = 0,
+    CHAT = 1,
+    CODER = 2
 
 class Model:
     def __init__(
@@ -15,13 +21,13 @@ class Model:
         self.ftFlag = ftFlag
         self.tensorParrallelSize = tensorParrallelSize
 
-        self.isChat = None
+        self.modelType = None
         self.size = None
         self.quantMethod = None
         self.quantBits = None
         self._parseAttributesFromModepath()
 
-        if self.isChat is None:
+        if self.modelType is None:
             raise ValueError(f"Unknown model type: {self.modelpath}")
         
         if self.size is None:
@@ -30,8 +36,11 @@ class Model:
         self.name = f"{self.modelSeries.lower()}"
         if self.ftFlag != None:
             self.name += f"-{self.ftFlag}"
-        if self.isChat:
+        if self.modelType == ModelType.CHAT:
             self.name += "-chat"
+        elif self.modelType == ModelType.CODER:
+            self.name += "-coder"
+
         self.name += f"-{self.size}b"
         if self.quantMethod:
             self.name += f"-{self.quantMethod}"
@@ -48,7 +57,12 @@ class Model:
         return self.tensorParrallelSize
 
     def _parseAttributesFromModepath(self) -> None:
-        self.isChat = "chat" in self.modelpath.lower()
+        if "chat" in self.modelpath.lower():
+            self.modelType = ModelType.CHAT
+        elif "coder" in self.modelpath.lower():
+            self.modelType = ModelType.CODER
+        else:
+            self.modelType = ModelType.NONE
 
         tmp = re.search(r"\d+b", self.modelpath.lower())
         if tmp:
@@ -110,6 +124,7 @@ RootpathYi = "/mnt/data3/models/01ai/"
 GModelRepo.addModel(Model("Yi", RootpathYi, "Yi-1___5-34B-Chat/"))
 
 GModelRepo.addModel(Model("deepseekv2", None, "deepseek-236B-chat"))
+GModelRepo.addModel(Model("deepseekv2", None, "deepseek-236B-coder"))
 
 if __name__ == "__main__" :
     for name, model in GModelRepo.models.items():

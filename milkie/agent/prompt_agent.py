@@ -6,6 +6,7 @@ from llama_index.core.base.llms.types import ChatMessage, MessageRole
 
 from milkie.agent.base_agent import BaseAgent
 from milkie.context import Context
+from milkie.llm.inference import chat, chatBatch
 from milkie.prompt.prompt import Loader
 
 logger = logging.getLogger(__name__)
@@ -20,46 +21,16 @@ class PromptAgent(BaseAgent):
 
         self.prompt = Loader.load(config) if config else None
 
-    def task(self, query :str, argsList :list[dict], **kwargs) -> Response:
-        response = Response(response="", source_nodes=None, metadata={})
-        chatPromptTmpl = ChatPromptTemplate(
-            message_templates=[
-                ChatMessage(
-                    content=self.prompt if self.prompt else query,
-                    role=MessageRole.USER)
-            ]
-        )
+    def execute(self, query :str, argsList :list[dict], **kwargs) -> Response:
+        return chat(
+            self.context.globalContext.settings.llm, 
+            self.prompt if self.prompt else query, 
+            argsList[0], 
+            **kwargs) 
 
-        import time
-        t0 = time.time()
-        response.response, numTokens = self.context.globalContext.settings.llm.predict(
-            prompt=chatPromptTmpl,
-            **argsList[0])
-        t1 = time.time()
-        answer = response.response.replace("\n", "//")
-        response.metadata["numTokens"] = numTokens
-        return response
-
-    def taskBatch(self, query :str, argsList :list[dict], **kwargs) -> list[Response]:
-        chatPromptTmpl = ChatPromptTemplate(
-            message_templates=[
-                ChatMessage(
-                    content=self.prompt if self.prompt else query,
-                    role=MessageRole.USER)
-            ]
-        )
-
-        import time
-        t0 = time.time()
-        resultBatch = self.context.globalContext.settings.llm.predictBatch(
-            prompt=chatPromptTmpl,
-            argsList=argsList,
-            **kwargs)
-        t1 = time.time()
-
-        responses = []
-        for result in resultBatch:
-            response = Response(response=result[0], source_nodes=None, metadata={})
-            response.metadata["numTokens"] = result[1]
-            responses += [response]
-        return responses
+    def executeBatch(self, query :str, argsList :list[dict], **kwargs) -> list[Response]:
+        return chatBatch(
+            self.context.globalContext.settings.llm, 
+            self.prompt if self.prompt else query, 
+            argsList, 
+            **kwargs) 

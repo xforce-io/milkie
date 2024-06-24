@@ -25,13 +25,13 @@ class MapReduceQA(Team):
             context, 
             "block_summary")
 
-    def task(self, query) -> Response:
-        response = self.retrievalAgent.task(query)
+    def execute(self, query) -> Response:
+        response = self.retrievalAgent.execute(query)
         resps = []
         maxCnt = 3
         cnt = 0
         for block in response.metadata["blocks"]:
-            resp = self.blockQA.task(
+            resp = self.blockQA.execute(
                 query,
                 query_str=query,
                 context_str=block)
@@ -41,7 +41,7 @@ class MapReduceQA(Team):
                 break
 
         sep = "\n-------------------\n"
-        resp = self.blockSummary.task(
+        resp = self.blockSummary.execute(
             query,
             query_str=query,
             blocks=sep.join(resps))

@@ -15,10 +15,10 @@ class DeepQA(Team):
          super().__init__(context, config)
          self.qaAgent = QAAgent(context, config)
       
-    def task(self, query, **kwargs) -> Response:
-        return self.qaAgent.task(query, **kwargs)
+    def execute(self, query, **kwargs) -> Response:
+        return self.qaAgent.execute(query, **kwargs)
 
-    def taskBatch(
+    def executeBatch(
             self, 
             prompt, 
             argsList :list, 
@@ -27,7 +27,7 @@ class DeepQA(Team):
             resps = []
             for args in argsList:
                 resps.append(
-                    self.qaAgent.task(prompt.format(**args), **kwargs))
+                    self.qaAgent.execute(prompt.format(**args), **kwargs))
             return resps
         except Exception as e:
             import traceback

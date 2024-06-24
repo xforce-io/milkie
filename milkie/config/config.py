@@ -255,10 +255,11 @@ class LLMConfig(BaseConfig):
     
     def fromArgs(config :dict):
         framework = FRAMEWORK.HUGGINGFACE
-        if config["framework"] == FRAMEWORK.VLLM.name:
-            framework = FRAMEWORK.VLLM
-        elif config["framework"] == FRAMEWORK.LMDEPLOY.name:
-            framework = FRAMEWORK.LMDEPLOY
+        if "framework" in config.keys():
+            if config["framework"] == FRAMEWORK.VLLM.name:
+                framework = FRAMEWORK.VLLM
+            elif config["framework"] == FRAMEWORK.LMDEPLOY.name:
+                framework = FRAMEWORK.LMDEPLOY
 
         device = None
         if "device" in config.keys():
@@ -269,8 +270,14 @@ class LLMConfig(BaseConfig):
         if "port" in config.keys():
             port = config["port"]
         
-        modelArgs = LLMModelArgs.fromArgs(config["model_args"])
-        generationArgs = LLMGenerationArgs.fromArgs(config["generation_args"])
+        modelArgs = None
+        if "model_args" in config.keys():
+            modelArgs = LLMModelArgs.fromArgs(config["model_args"])
+        
+        generationArgs = None
+        if "generation_args" in config.keys():
+            generationArgs = LLMGenerationArgs.fromArgs(config["generation_args"])
+
         if config["type"] == LLMType.HUGGINGFACE.name:
             return LLMConfig(
                 type=LLMType.HUGGINGFACE, 
@@ -367,7 +374,7 @@ class RetrievalConfig(BaseConfig):
 
     def fromArgs(config :dict):
         chunkAugmentType = ChunkAugmentType.NONE
-        if config["chunk_augment"] == ChunkAugmentType.SIMPLE.name:
+        if "chunk_augment" in config.keys() and config["chunk_augment"] == ChunkAugmentType.SIMPLE.name:
             chunkAugmentType = ChunkAugmentType.SIMPLE
         
         rerankerType = RerankerType.NONE
@@ -474,6 +481,7 @@ class GlobalConfig(BaseConfig):
 
     def __init__(self, config :dict):
         self.llmConfig = LLMConfig.fromArgs(config["llm"])
+        self.llmCodeConfig = LLMConfig.fromArgs(config["llm_code"])
         self.embeddingConfig = EmbeddingConfig.fromArgs(config["embedding"])
         self.agentsConfig :AgentsConfig = AgentsConfig.fromArgs(config["agents"])
         self.memoryConfig = MemoryConfig.fromArgs(config["memory"])
@@ -481,6 +489,9 @@ class GlobalConfig(BaseConfig):
 
     def getLLMConfig(self) -> LLMConfig:
         return self.llmConfig
+
+    def getLLMCodeConfig(self) -> LLMConfig:
+        return self.llmCodeConfig
     
     def getEmbeddingConfig(self) -> EmbeddingConfig:
         return self.embeddingConfig

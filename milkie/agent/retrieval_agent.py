@@ -29,7 +29,7 @@ class RetrievalAgent(BaseAgent):
             memoryWithIndex=self.memoryWithIndex,
         )
 
-    def task(self, query) -> Response:
+    def execute(self, query) -> Response:
         self.context.setCurQuery(query)
         self.retrievalModule.retrieve(self.context)
         retrievalResult = self.context.retrievalResult

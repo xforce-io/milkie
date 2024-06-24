@@ -4,5 +4,5 @@ from milkie.agent.base_agent import BaseAgent
 
 class Team(BaseAgent):
     
-    def task(self, query) -> Response:
+    def execute(self, query) -> Response:
         pass

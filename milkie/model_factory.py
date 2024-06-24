@@ -2,10 +2,6 @@ import logging
 from llama_index.core.prompts.base import PromptTemplate
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 
-from milkie.llm.enhanced_hf_llm import EnhancedHFLLM
-from milkie.llm.enhanced_lmdeploy import EnhancedLmDeploy
-from milkie.llm.enhanced_openai import EnhancedOpenAI
-from milkie.llm.enhanced_vllm import EnhancedVLLM
 from milkie.config.config import FRAMEWORK, EmbeddingConfig, LLMConfig, LLMType
 
 logger = logging.getLogger(__name__)
@@ -45,6 +41,7 @@ class ModelFactory:
             "trust_remote_code": True,}
 
         if config.type == LLMType.GEN_OPENAI:
+            from milkie.llm.enhanced_openai import EnhancedOpenAI
             self.llm = EnhancedOpenAI(
                 model_name=config.model,
                 system_prompt=config.systemPrompt,
@@ -59,6 +56,7 @@ class ModelFactory:
                 tokenizer_kwargs=tokenizerArgs)
         else:
             if config.framework == FRAMEWORK.VLLM:
+                from milkie.llm.enhanced_vllm import EnhancedVLLM
                 self.llm = EnhancedVLLM(
                     context_window=config.ctxLen,
                     concurrency=config.batchSize,
@@ -71,6 +69,7 @@ class ModelFactory:
                     max_new_tokens=256,
                     tokenizer_kwargs=tokenizerArgs)
             elif config.framework == FRAMEWORK.LMDEPLOY:
+                from milkie.llm.enhanced_lmdeploy import EnhancedLmDeploy
                 self.llm = EnhancedLmDeploy(
                     context_window=config.ctxLen,
                     concurrency=config.batchSize,
@@ -83,6 +82,7 @@ class ModelFactory:
                     max_new_tokens=256,
                     tokenizer_kwargs=tokenizerArgs)
             else :
+                from milkie.llm.enhanced_hf_llm import EnhancedHFLLM
                 self.llm = EnhancedHFLLM(
                     context_window=config.ctxLen,
                     concurrency=config.batchSize,

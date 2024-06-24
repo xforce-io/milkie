@@ -1,5 +1,5 @@
 llm:
-  type: HUGGINGFACE
+  type: GEN_OPENAI
   model: deepseek-chat
   system_prompt: system_qwen
   framework : VLLM
@@ -23,6 +23,14 @@ llm:
     do_sample: False
     use_cache: True
     prompt_lookup_num_tokens: 20
+llm_code:
+  type: GEN_OPENAI 
+  model: deepseek-coder
+  system_prompt: system_qwen
+  api_key: "sk-d6061da0d2d64e78a8061a2de0060f8d"
+  endpoint: "https://api.deepseek.com"
+  api_version: "2023-12-01-preview"
+  ctx_len: 8192
 memory:
   - type: LONG_TERM
     source: LOCAL
@@ -32,7 +40,7 @@ index:
   chunk_overlap: 50
 embedding:
   type: HUGGINGFACE
-  model: /mnt/data1/.cache/huggingface/hub/models--BAAI--bge-large-zh-v1.5/
+  model: /Users/xupeng/.cache/huggingface/hub/models--BAAI--bge-large-zh-v1.5/snapshots/c11661ba3f9407eeb473765838eb4437e0f015c0/
   device: CUDA
 agents:
   - config: qa
