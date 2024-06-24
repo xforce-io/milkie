@@ -213,9 +213,6 @@ class EnhancedVLLM(EnhancedLLM):
     def _getModel(self):
         return self._llm._engine
 
-    def _complete(self, prompt: str, formatted: bool = False, **kwargs: Any) -> Any:
-        return self._completeBatch([prompt], **kwargs)[0]
-
     def _completeBatch(
             self, 
             prompts: list[str], 

@@ -245,9 +245,8 @@ class EnhancedLLM(object):
 
         return [completion_response_to_chat_response(completionResponse) for completionResponse in completionResponses]
 
-    @abstractmethod
     def _complete(self, prompt: str, formatted: bool = False, **kwargs: Any) -> Any:
-        pass
+        return self._completeBatch([prompt], **kwargs)[0]
 
     @abstractmethod
     def _completeBatch(self, prompts: list[str], **kwargs: Any) -> Any:
