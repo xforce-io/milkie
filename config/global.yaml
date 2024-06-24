@@ -27,7 +27,7 @@ llm_code:
   type: GEN_OPENAI 
   model: deepseek-coder
   system_prompt: system_qwen
-  api_key: "sk-d6061da0d2d64e78a8061a2de0060f8d"
+  api_key: "sk-d6061da0d2d64e78a8061a2de*"
   endpoint: "https://api.deepseek.com"
   api_version: "2023-12-01-preview"
   ctx_len: 8192
