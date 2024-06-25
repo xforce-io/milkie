@@ -16,9 +16,8 @@ class BaseAgent(ABC):
         self.context = context
 
     @abstractmethod
-    def execute(self, query :str, **kwargs) -> Response:
+    def execute(self, query :str, args :dict, **kwargs) -> Response:
         pass
 
-    @abstractmethod
-    def executeBatch(self, query :str, kwargs :list[dict]) -> list[Response]:
-        pass
+    def executeBatch(self, query :str, argsList :list[dict], kwargs :list[dict]) -> list[Response]:
+        return [self.execute(query, args, **kwargs) for args in argsList]

@@ -36,14 +36,14 @@ class QAAgent(BaseAgent):
         self.decisionModule = DecisionModule()
         self.actionModule = ActionModule()
 
-    def execute(self, query, **kwargs) -> Response:
+    def execute(self, query, args :dict, **kwargs) -> Response:
         self.context.setCurQuery(query)
         self.processRound(self.context)
         while not self._end():
             self.processRound(self.context)
         return self.context.decisionResult
 
-    def executeBatch(self, query: str, kwargs: list[dict]) -> list[Response]:
+    def executeBatch(self, query: str, argsList :list[dict], **kwargs) -> list[Response]:
         raise NotImplementedError("QAAgent does not support taskBatch")
 
     def processRound(self, context, **kwargs):

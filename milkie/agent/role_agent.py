@@ -25,10 +25,10 @@ class RoleAgent(BaseAgent):
         self.tools = tools
         self.plan = plan
     
-    def execute(self, query: str, **kwargs) -> Response:
+    def execute(self, query: str, args :dict, **kwargs) -> Response:
         self.plan = self._makePlan(query, **kwargs)
         return None
-
+    
     def _makePlan(self, query: str, **kwargs) -> Response:
         if self.plan:
             return self.plan
