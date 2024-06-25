@@ -5,17 +5,27 @@ from milkie.llm.enhanced_llm import EnhancedLLM
 
 def chat(
         llm :EnhancedLLM, 
+        systemPrompt :str,
         prompt :str, 
         promptArgs :dict, 
         **kwargs) -> Response:
     response = Response(response="", source_nodes=None, metadata={})
-    chatPromptTmpl = ChatPromptTemplate(
-        message_templates=[
+
+    messageTemplates = []
+    if systemPrompt:
+        messageTemplates += [
             ChatMessage(
-                content=prompt,
-                role=MessageRole.USER)
+                content=systemPrompt,
+                role=MessageRole.SYSTEM)
         ]
-    )
+    
+    messageTemplates += [
+        ChatMessage(
+            content=prompt,
+            role=MessageRole.USER)
+    ]
+
+    chatPromptTmpl = ChatPromptTemplate(message_templates=messageTemplates)
 
     import time
     t0 = time.time()
@@ -30,16 +40,25 @@ def chat(
 
 def chatBatch(
         llm :EnhancedLLM, 
+        systemPrompt :str,
         prompt :str, 
         argsList :list[dict], 
         **kwargs) -> list[Response]:
-    chatPromptTmpl = ChatPromptTemplate(
-        message_templates=[
+    messageTemplates = []
+    if systemPrompt:
+        messageTemplates += [
             ChatMessage(
-                content=prompt,
-                role=MessageRole.USER)
+                content=systemPrompt,
+                role=MessageRole.SYSTEM)
         ]
-    )
+    
+    messageTemplates += [
+        ChatMessage(
+            content=prompt,
+            role=MessageRole.USER)
+    ]
+
+    chatPromptTmpl = ChatPromptTemplate(message_templates=messageTemplates)
 
     import time
     t0 = time.time()

@@ -4,6 +4,7 @@ from typing import Any
 from llama_index.core.llms.llm import LLM
 from openai import OpenAI
 from llama_index.core.base.llms.types import CompletionResponse
+from milkie.llm.cache_openai import CacheMgr
 from milkie.llm.enhanced_llm import EnhancedLLM, LLMApi, QueueRequest, QueueResponse
 
 logger = logging.getLogger(__name__)
@@ -46,6 +47,7 @@ class EnhancedOpenAI(EnhancedLLM):
             context_window=context_window,
             model_name=model_name,
             client=OpenAI(api_key=api_key, base_url=endpoint))
+        self._cacheMgr = CacheMgr()
 
     def _completeBatch(
             self, 
@@ -72,6 +74,17 @@ class EnhancedOpenAI(EnhancedLLM):
             if self._systemPrompt:
                 messages.append({"role": "system", "content": self._systemPrompt})
             messages.append({"role": "user", "content": request.prompt})
+
+            cached = self._cacheMgr.getValue(
+                modelName=self.model_name, 
+                key=messages)
+            if cached:
+                resQueue.put(QueueResponse(
+                    requestId=request.requestId, 
+                    output=cached["output"],
+                    numTokens=cached["numTokens"]))
+                return
+            
             try:
                 response = self._llm.getClient().chat.completions.create(
                     model=self.model_name,
@@ -90,6 +103,14 @@ class EnhancedOpenAI(EnhancedLLM):
                 requestId=request.requestId, 
                 output=response.choices[0].message.content,
                 numTokens=response.usage.completion_tokens))
+
+            self._cacheMgr.setValue(
+                modelName=self.model_name, 
+                key=messages, 
+                value={
+                    "output" : response.choices[0].message.content,
+                    "numTokens" : response.usage.completion_tokens,
+                })
 
     def _getSingleParameterSizeInBytes(self):
         return 0 

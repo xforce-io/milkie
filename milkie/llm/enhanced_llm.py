@@ -157,7 +157,10 @@ class EnhancedLLM(object):
         messages = self._llm._get_messages(prompt, **promptArgs)
         response = self._chat(messages, **kwargs)
         output = response.message.content or ""
-        return (self._llm._parse_output(output), len(response.raw["model_output"]))
+        numTokens = response.raw["num_tokens"]
+        if numTokens == 0:
+            numTokens = len(response.raw["model_output"])
+        return (self._llm._parse_output(output), numTokens)
 
     @torch.inference_mode()
     def predictBatch(
@@ -217,9 +220,9 @@ class EnhancedLLM(object):
         for response in responses:
             output = response.message.content or ""
             numTokens = response.raw["num_tokens"]
-            result += [(
-                self._llm._parse_output(output), 
-                numTokens if numTokens != 0 else len(response.raw["model_output"]))]
+            if numTokens == 0:
+                numTokens = len(response.raw["model_output"])
+            result += [(self._llm._parse_output(output), numTokens)]
         return result
 
     def _chat(self, messages: Sequence[ChatMessage], **kwargs: Any) -> ChatResponse:

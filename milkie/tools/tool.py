@@ -98,10 +98,19 @@ class Coding(Tool):
             self, 
             settings :Settings, 
             query :str) -> Response:
-        response = chat(settings.llmCode, query, {})
+        prompt = "请写一段 Python 代码解决下面的问题：%s"
+        response = chat(
+            llm=settings.llmCode, 
+            systemPrompt=None,
+            prompt=prompt % query, 
+            promptArgs={})
 
         #extract code part in response, assign to `code`
-        code = response
+        import re
+        pattern = r'```python\s*(.*?)\s*```'
+        matches = re.findall(pattern, response.response, re.DOTALL)
+        if len(matches) == 1:
+            code = matches[0]
 
         #execute `code` in virtual environment
         outputCapture = io.StringIO()
@@ -111,15 +120,14 @@ class Coding(Tool):
         exceptionOutput = None
         try:
             sys.stdout = outputCapture
-            exec(code)
+            exec(code, globals())
             output = outputCapture.getvalue()
         except Exception as e:
             exceptionOutput = traceback.format_exc()
         finally:
             sys.stdout = originalStdout
 
-        response = Response()
-        response.response = output
+        response = Response(response=output.strip())
         if response.metadata:
             response.metadata = { "exception" : exceptionOutput }
         return response

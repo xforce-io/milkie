@@ -23,14 +23,16 @@ class PromptAgent(BaseAgent):
 
     def execute(self, query :str, argsList :list[dict], **kwargs) -> Response:
         return chat(
-            self.context.globalContext.settings.llm, 
-            self.prompt if self.prompt else query, 
-            argsList[0], 
+            llm=self.context.globalContext.settings.llm, 
+            systemPrompt=None,
+            prompt=self.prompt if self.prompt else query, 
+            promptArgs=argsList[0], 
             **kwargs) 
 
     def executeBatch(self, query :str, argsList :list[dict], **kwargs) -> list[Response]:
         return chatBatch(
-            self.context.globalContext.settings.llm, 
-            self.prompt if self.prompt else query, 
-            argsList, 
+            llm=self.context.globalContext.settings.llm, 
+            systemPrompt=None,
+            prompt=self.prompt if self.prompt else query, 
+            argsList=argsList, 
             **kwargs) 
