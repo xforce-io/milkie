@@ -25,7 +25,11 @@ class FileLookupAgent(BaseAgent):
 
     def execute(self, query: str, args: dict, **kwargs) -> Response:
         response = self.retrievalAgent.execute(query)
-        return response
+        blocks = response.metadata["blocks"]
+        return self.lookuper.execute(
+            query,
+            query_str=query,
+            context_str="\n".join(blocks))
 
 if __name__ == "__main__":
     globalConfig = GlobalConfig("config/global_filelookup.yaml")
