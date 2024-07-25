@@ -477,12 +477,12 @@ class AgentsConfig(BaseConfig):
 class GlobalConfig(BaseConfig):
     def __init__(self, configPath :str):
         config = loadFromYaml(configPath)
-        self.__init__(config)
+        self.initFromDict(config)
 
-    def __init__(self, config :dict):
+    def initFromDict(self, config :dict):
         self.llmConfig = LLMConfig.fromArgs(config["llm"])
         self.llmCodeConfig = LLMConfig.fromArgs(config["llm_code"])
-        self.embeddingConfig = EmbeddingConfig.fromArgs(config["embedding"])
+        self.embeddingConfig = EmbeddingConfig.fromArgs(config["embedding"]) if "embedding" in config.keys() else None
         self.agentsConfig :AgentsConfig = AgentsConfig.fromArgs(config["agents"])
         self.memoryConfig = MemoryConfig.fromArgs(config["memory"])
         self.indexConfig = IndexConfig.fromArgs(config["index"])

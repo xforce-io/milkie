@@ -47,7 +47,7 @@ class EnhancedOpenAI(EnhancedLLM):
             context_window=context_window,
             model_name=model_name,
             client=OpenAI(api_key=api_key, base_url=endpoint))
-        self._cacheMgr = CacheMgr()
+        self._cacheMgr = CacheMgr("data/cache/")
 
     def _completeBatch(
             self, 

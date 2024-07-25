@@ -14,8 +14,10 @@ class Settings(object):
         self.modelFactory = modelFactory
         self.llm = self.__buildLLM(config.llmConfig)
         self.llmCode = self.__buildLLM(config.llmCodeConfig)
-        import pdb; pdb.set_trace()
-        self.__buildEmbedding(config.embeddingConfig)
+        if config.embeddingConfig:
+            self.__buildEmbedding(config.embeddingConfig)
+        else:
+            self.embedding = None
 
     def __buildLLM(self, config :LLMConfig):
         if config.type == LLMType.HUGGINGFACE or config.type == LLMType.GEN_OPENAI:

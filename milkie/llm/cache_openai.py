@@ -8,45 +8,34 @@ from typing import List, Dict
 logger = logging.getLogger(__name__)
 
 class Cache:
-    def __init__(self, filePath: str, dumpInterval: int = 60):
+    def __init__(self, filePath: str, dumpInterval: int = 5):
         self.filePath = filePath
         self.cache = {}
         self.lock = threading.Lock()
         self.dumpInterval = dumpInterval
-        self.stopEvent = threading.Event()
+        self.lastDumpSec = 0
         self.loadCache()
-        self.startDumpThread()
 
     def loadCache(self):
         if os.path.exists(self.filePath):
             try:
-                with open(self.filePath, 'r') as f:
+                with open(self.filePath, 'r', encoding="utf-8") as f:
                     self.cache = json.load(f)
             except (json.JSONDecodeError, IOError) as e:
                 logger.log(f"Error loading cache file {self.filePath}: {e}")
                 self.cache = {}
 
     def dumpCache(self):
+        curTime = time.time()
+        if curTime - self.lastDumpSec < self.dumpInterval:
+            return
+        
         with self.lock:
-            with open(self.filePath, 'w') as f:
-                json.dump(self.cache, f)
-
-    def startDumpThread(self):
-        def dumpPeriodically():
-            while not self.stopEvent.is_set():
-                time.sleep(self.dumpInterval)
-                if not self.stopEvent.is_set():
-                    self.dumpCache()
-
-        self.dumpThread = threading.Thread(target=dumpPeriodically, daemon=True)
-        self.dumpThread.start()
-
-    def stopDumpThread(self):
-        self.stopEvent.set()
-        self.dumpThread.join()
+            with open(self.filePath, 'w', encoding="utf-8") as f:
+                json.dump(self.cache, f, ensure_ascii=False)
 
     def _keyToStr(self, key: List[Dict]) -> str:
-        return json.dumps(key, sort_keys=True)
+        return json.dumps(key, sort_keys=True, ensure_ascii=False)
 
     def get(self, key: List[Dict]) -> Dict:
         keyStr = self._keyToStr(key)
@@ -61,6 +50,7 @@ class Cache:
         keyStr = self._keyToStr(key)
         with self.lock:
             self.cache[keyStr] = value
+        self.dumpCache()
 
 class CacheMgr:
 
@@ -78,7 +68,7 @@ class CacheMgr:
         
         for fileName in os.listdir(self.cacheDir):
             if fileName.startswith(CacheMgr.FilePrefix) and fileName.endswith('.json'):
-                modelName = fileName[len(CacheMgr.FilePrefix):-5]  # 去掉 'cache_' 和 '.json'
+                modelName = fileName[len(CacheMgr.FilePrefix):-5]
                 filePath = os.path.join(self.cacheDir, fileName)
                 try:
                     self.caches[modelName] = Cache(filePath, self.dumpInterval)
@@ -102,22 +92,17 @@ class CacheMgr:
             self.caches[modelName] = cache
         cache.set(key, value)
 
-    def stopAllCaches(self):
-        for cache in self.caches.values():
-            cache.stopDumpThread()
-
-    def __del__(self):
-        self.stopAllCaches()
-
-# 示例用法
 if __name__ == "__main__":
     cacheMgr = CacheMgr('data/cache', dumpInterval=10)
 
     modelName = "exampleModel"
-    key = [{"id": 1}, {"name": "example"}]
+    key = [
+        {"role": "系统", "content": "You are an assistant."}, 
+        {"role": "用户", "content": "system: \n Role:今天天气如何? \n . "}]
     value = {"data": "some data"}
     cacheMgr.setValue(modelName, key, value)
-
+    
+    cacheMgr = CacheMgr('data/cache', dumpInterval=10)
     cachedValue = cacheMgr.getValue(modelName, key)
     assert cachedValue["data"] == "some data"
 

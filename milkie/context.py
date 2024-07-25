@@ -3,12 +3,14 @@ from llama_index.legacy.response.schema import Response
 from llama_index.core.base.response.schema import NodeWithScore
 
 from milkie.global_context import GlobalContext
+from milkie.utils.req_tracer import ReqTracer
 
 class Context:
     def __init__(
             self, 
             globalContext :GlobalContext) -> None:
         self.globalContext = globalContext
+        self.reqTrace = ReqTracer()
             
         self.curQuery :str = None
         self.retrievalResult :List[NodeWithScore] = None

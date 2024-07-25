@@ -1,17 +1,26 @@
-import os, io, sys, traceback
+import os, io, sys, traceback, logging
 from abc import ABC, abstractmethod
 
 from llama_index.core import Response
 
+from milkie.context import Context
 from milkie.global_context import GlobalContext
 from milkie.llm.inference import chat
 from milkie.model_factory import ModelFactory
 from milkie.settings import Settings
 
+logger = logging.getLogger(__name__)
+
 class Tool(ABC):
-    
+ 
+    def __str__(self) -> str:
+        return f"""
+        名称: {self.name()}
+        描述: {self.describe()}
+        """   
+
     @abstractmethod
-    def name() -> str:
+    def name(self) -> str:
         pass
  
     @abstractmethod
@@ -31,7 +40,7 @@ class ScreenShot(Tool):
     def __init__(self) -> None:
         self.defaultPathScreenshot = os.getenv("DEFAULT_PATH_SCREENSHOT")
     
-    def name() -> str:
+    def name(self) -> str:
         return "ScreenShot"
     
     def describe(self) -> str:
@@ -52,57 +61,71 @@ class ScreenShot(Tool):
         screenshot.save(savepath)
         return Response()
 
-from paddleocr import PaddleOCR, draw_ocr
-from PIL import Image
+class CodeContext:
+    def __init__(self, query :str) -> None:
+        self.query = query
+        self.code = None
+        self.output = None 
+        self.error = None
 
-class OCR(Tool):
-    """
-    OCR tool
-    """
-    def __init__(self) -> None:
-        self.defaultPathScreenshot = os.getenv("DEFAULT_PATH_SCREENSHOT")
+    def setResult(
+            self, 
+            code :str, 
+            output :str, 
+            error :str) -> None:
+        self.code = code
+        self.output = output
+        self.error = error
+
+    def isSucc(self) -> bool:
+        return self.output and not self.error
     
-    def name() -> str:
-        return "OCR"
-    
-    def describe(self) -> str:
-        return """
-        Name: OCR
-        Desc: Execute the tool
-        Args:
-            savepath (String): the saved path of the screenshot
+    def hasError(self) -> bool:
+        return self.error
 
-        Returns:
-            dict: A JSON object representing the execution result
-        """
-   
-    def execute(self, savepath :str) -> Response:
-        ocr = PaddleOCR(use_angle_cls=True, lang='ch')
-        if not savepath:
-            savepath = self.defaultPathScreenshot
-        result = ocr.ocr(savepath, cls=True)
-        return Response(response=result)
+    def getOutput(self) -> str:
+        return self.output.strip()
 
-class Coding(Tool):
+class Coder(Tool):
 
-    def name() -> str:
-        return "Coding"
+    def name(self) -> str:
+        return "python自动编程工具"
 
     def describe(self) -> str:
-        return """
-        Name: Coding
-        Desc: Execute the tool
-        """
+        return "能够根据要求自动生成 Python 代码解决问题"
 
     def execute(
             self, 
-            settings :Settings, 
+            context :Context, 
             query :str) -> Response:
-        prompt = "请写一段 Python 代码解决下面的问题：%s"
+        codeContext = CodeContext(query)
+        self._genAndExecCode(context, codeContext)
+        if not codeContext.isSucc():
+            self._genAndExecCode(context, codeContext)
+        
+        if codeContext.isSucc():
+            response = Response(response=codeContext.getOutput())
+            if response.metadata:
+                response.metadata = { "exception" : codeContext.error}
+            return response
+        return None
+
+    def _genAndExecCode(
+            self, 
+            context :Context,
+            codeContext :CodeContext):
+        if not codeContext.hasError():
+            prompt = f"请写一段 Python 代码完成下面的任务：{codeContext.query}"
+        else :
+            prompt = f"""
+            已有代码：{codeContext.code}
+            已有错误信息：{codeContext.error}
+            请修改代码解决下面的问题：{codeContext.query}"""
+            
         response = chat(
-            llm=settings.llmCode, 
+            llm=context.globalContext.settings.llmCode, 
             systemPrompt=None,
-            prompt=prompt % query, 
+            prompt=prompt, 
             promptArgs={})
 
         #extract code part in response, assign to `code`
@@ -114,23 +137,57 @@ class Coding(Tool):
 
         #execute `code` in virtual environment
         outputCapture = io.StringIO()
-        originalStdout = sys.stdout
 
         output = None
         exceptionOutput = None
         try:
             sys.stdout = outputCapture
-            exec(code, globals())
+            exec(code.replace("__main__", __name__), globals())
             output = outputCapture.getvalue()
         except Exception as e:
             exceptionOutput = traceback.format_exc()
+        except SystemExit as e:
+            exceptionOutput = f"SystemExit: {e}"
         finally:
-            sys.stdout = originalStdout
+            sys.stdout = sys.__stdout__
+            logger.info(f"output[{output}] exception[{exceptionOutput}]")
 
-        response = Response(response=output.strip())
-        if response.metadata:
-            response.metadata = { "exception" : exceptionOutput }
+        codeContext.setResult(code, output, exceptionOutput)
+        context.reqTrace.set("codeResp", response.response)
+
+class LLM(Tool):
+
+    def name(self) -> str:
+        return "大语言模型"
+
+    def describe(self) -> str:
+        return "能够针对一段 context 进行深度语义理解，生成对应的回答"
+
+    def execute(
+            self, 
+            context :Context, 
+            query :str) -> Response:
+        prompt = "请使用你强大的理解能力解决下面的问题：%s"
+        response = chat(
+            llm=context.globalContext.settings.llm, 
+            systemPrompt=None,
+            prompt=prompt % query, 
+            promptArgs={})
+        context.reqTrace.set("llmResp", response.response)
         return response
+
+class ToolSet:
+    def __init__(self, tools :list) -> None:
+        self.tools = tools
+
+    def describe(self) -> str:
+        return "\n".join(str(tool) for tool in self.tools)  
+
+    def choose(self, name :str) -> Tool:
+        for tool in self.tools:
+            if tool.name() in name:
+                return tool
+        return None
 
 if __name__ == "__main__":
     from milkie.strategy import Strategy
@@ -139,6 +196,6 @@ if __name__ == "__main__":
     globalConfig = makeGlobalConfig(Strategy.getStrategy("raw"))
     modelFactory = ModelFactory()
     globalContext = GlobalContext(globalConfig, modelFactory)
-    coding = Coding()
+    coding = Coder()
     response = coding.execute(globalContext.settings, "计算不超过32的最大质数是多少")
     print(response)

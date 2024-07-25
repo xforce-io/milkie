@@ -38,7 +38,7 @@ class LLMApi(CustomLLM):
         default=8192,
     )
 
-    client: Any = PrivateAttr()
+    _client: Any = PrivateAttr()
 
     def __init__(self, 
             context_window :int,
@@ -48,10 +48,10 @@ class LLMApi(CustomLLM):
 
         self.context_window = context_window
         self.model = model_name
-        self.client = client
+        self._client = client
 
     def getClient(self):
-        return self.client
+        return self._client
 
     @property
     def metadata(self) -> LLMMetadata:
@@ -154,7 +154,11 @@ class EnhancedLLM(object):
             prompt: BasePromptTemplate, 
             promptArgs: dict,
             **kwargs: Any):
-        messages = self._llm._get_messages(prompt, **promptArgs)
+        if len(promptArgs) > 0:
+            messages = self._llm._get_messages(prompt, **promptArgs)
+        else :
+            messages = prompt.message_templates
+
         response = self._chat(messages, **kwargs)
         output = response.message.content or ""
         numTokens = response.raw["num_tokens"]

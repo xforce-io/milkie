@@ -1,7 +1,10 @@
+import logging
 from llama_index.core import Response, ChatPromptTemplate
 from llama_index.core.base.llms.types import ChatMessage, MessageRole
 
 from milkie.llm.enhanced_llm import EnhancedLLM
+
+logger = logging.getLogger(__name__)
 
 def chat(
         llm :EnhancedLLM, 
@@ -36,6 +39,7 @@ def chat(
     t1 = time.time()
     answer = response.response.replace("\n", "//")
     response.metadata["numTokens"] = numTokens
+    logger.debug(f"chat prompt[{prompt}] answer[{answer}] ({t1-t0:.2f}s)")
     return response
 
 def chatBatch(
