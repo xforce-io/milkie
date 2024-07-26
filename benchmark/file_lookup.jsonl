@@ -1,0 +1,3 @@
+{"input": "汉语语法的书", "keypoints": "{\"$and\": [\"形式汉语句法\", \"汉语词法句法论集 汤廷池\"]}", "level": "easy", "is_table": 0}
+{"input": "心理学的材料", "keypoints": "{\"$and\": [\"荣格文集：让我们重返精神的家园(荣格)\", \"你可以看透任何人\"]}", "level": "easy", "is_table": 0}
+{"input": "知识图谱相关的书", "keypoints": "{\"$and\": [\"Knowledge Base Population  Successful Approaches and Challenges\", \"Ontology based information extraction\"]}", "level": "easy", "is_table": 0}
