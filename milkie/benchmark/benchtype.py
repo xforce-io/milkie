@@ -35,13 +35,14 @@ class KeywordFilter:
             self.filters = [KeywordFilter(cond) for cond in config['$or']]
             self.isOr = True
         elif isinstance(config, str):
-            self.filters = config
+            self.filters = config.replace(" ", "")
         elif isinstance(config, dict):
             self.filters = None
         else:
             raise ValueError("Unknown filter format")
     
     def match(self, text) -> bool:
+        text = text.replace(" ", "")
         if self.isOr == None:
             if self.filters == None:
                 return any(keyword in text for keyword in KeywordFilter.RefuseKeywords)
