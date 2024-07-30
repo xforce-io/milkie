@@ -24,7 +24,7 @@ class FileLookupAgent(BaseAgent):
             "file_lookup")
 
     def execute(self, query: str, args: dict, **kwargs) -> Response:
-        response = self.retrievalAgent.execute(query)
+        response = self.retrievalAgent.execute(args["query_str"])
         blocks = response.metadata["blocks"]
         return self.lookuper.execute(
             query,

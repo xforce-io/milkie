@@ -49,7 +49,7 @@ def experiment(
         t0 = time.time()
         resps = []
         try:
-            resps = agent.taskBatch(
+            resps = agent.executeBatch(
                 prompt, 
                 argsList, 
                 **globalConfig.getLLMConfig().generationArgs.toJson())

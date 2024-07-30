@@ -19,5 +19,5 @@ class BaseAgent(ABC):
     def execute(self, query :str, args :dict, **kwargs) -> Response:
         pass
 
-    def executeBatch(self, query :str, argsList :list[dict], kwargs :list[dict]) -> list[Response]:
+    def executeBatch(self, query :str, argsList :list[dict], **kwargs) -> list[Response]:
         return [self.execute(query, args, **kwargs) for args in argsList]

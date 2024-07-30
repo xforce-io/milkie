@@ -10,7 +10,7 @@ subprocess.run([
         "-m",
         "playground.filelookup.experiment",
         "with",
-        f"strategy=file_lookup"
+        f"strategy=file_lookup",
         f"benchmarks={benchmarks}",
         "-l",
         "DEBUG"

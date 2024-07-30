@@ -475,8 +475,9 @@ class AgentsConfig(BaseConfig):
         return self.agentMap.get(config)
 
 class GlobalConfig(BaseConfig):
-    def __init__(self, configPath :str):
-        config = loadFromYaml(configPath)
+    def __init__(self, config):
+        if type(config) == str:
+            config = loadFromYaml(config)
         self.initFromDict(config)
 
     def initFromDict(self, config :dict):

@@ -39,7 +39,7 @@ index:
   chunk_size: 256
   chunk_overlap: 50
 agents:
-  - config: qa
+  - config: file_lookup
     type: QA
     retrieval:
       rewrite_strategy: HYDE
