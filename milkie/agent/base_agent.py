@@ -10,6 +10,7 @@ class BaseAgent(ABC):
             context :Context=None,
             config :str=None) -> None:
         self.config = context.globalContext.globalConfig.agentsConfig.getConfig(config) if context else None
+        self.logger = context.globalContext.logger
         self.setContext(context)
 
     def setContext(self, context :Context): 

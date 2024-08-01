@@ -1,5 +1,7 @@
 from typing import List, Optional, Sequence
 
+from logging import Logger
+
 from llama_index.core.llms.llm import LLM
 from llama_index.core.prompts import BasePromptTemplate
 from llama_index.core.service_context import ServiceContext
@@ -51,9 +53,11 @@ class GlobalContext():
     def __init__(
             self, 
             globalConfig :GlobalConfig, 
-            modelFactory :ModelFactory):
+            modelFactory :ModelFactory,
+            logger :Logger):
         self.globalConfig = globalConfig
         self.modelFactory = modelFactory
+        self.logger = logger
         self.settings = Settings(globalConfig, modelFactory)
         promptHelper = CustomizedPromptHelper(
             llmConfig=globalConfig.getLLMConfig()
