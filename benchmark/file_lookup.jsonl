@@ -1,11 +1,11 @@
 {"input": "汉语语法的书", "keypoints": "{\"$and\": [\"形式汉语句法\", \"汉语词法句法论集 汤廷池\"]}", "level": "easy", "is_table": 0}
 {"input": "心理学的材料", "keypoints": "{\"$and\": [\"荣格文集：让我们重返精神的家园(荣格)\"]}", "level": "easy", "is_table": 0}
 {"input": "知识图谱和本体相关的英文材料", "keypoints": "{\"$and\": [\"Knowledge Base Population  Successful Approaches and Challenges\", \"Ontology based information extraction\"]}", "level": "easy", "is_table": 0}
-{"input": "面相特定行业的图谱相关的书", "keypoints": "{\"$and\": [\"面相司法案件的案情知识图谱\"]}", "level": "easy", "is_table": 0}
+{"input": "面相特定行业的图谱相关的书", "keypoints": "{\"$and\": [\"面向司法案件的案情知识图谱\"]}", "level": "easy", "is_table": 0}
 {"input": "消息中间件相关的材料", "keypoints": "{\"$and\": [\"分布式发布订阅消息系统\"]}", "level": "easy", "is_table": 0}
 {"input": "编程语言相关的书", "keypoints": "{\"$and\": [\"PYTHON 自然语言处理\"]}", "level": "easy", "is_table": 0}
 {"input": "信息抽取相关的材料", "keypoints": "{\"$and\": [\"Information Extraction\"]}", "level": "easy", "is_table": 0}
-{"input": "如果我要设计一个对话系统，可以参考什么文档", "keypoints": "{\"$and\": [\"基于知识的自然语言问答\"]}", "level": "easy", "is_table": 0}
+{"input": "如果我要设计一个对话系统，可以参考什么中文文档", "keypoints": "{\"$and\": [\"基于知识的自然语言问答\"]}", "level": "easy", "is_table": 0}
 {"input": "我记得有份16年的NLP报告材料", "keypoints": "{\"$and\": [\"中文信息处理发展报告\"]}", "level": "easy", "is_table": 0}
 {"input": "讲运维场景的论文材料", "keypoints": "{\"$and\": [\"esecfse20in-trace\"]}", "level": "easy", "is_table": 0}
 {"input": "适合新手看的自然语言相关的书", "keypoints": "{\"$and\": [\"from Scratch.pdf\"]}", "level": "easy", "is_table": 0}
