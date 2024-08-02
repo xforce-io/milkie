@@ -7,8 +7,6 @@ from llama_index.core.prompts import BasePromptTemplate
 from llama_index.core.service_context import ServiceContext
 from llama_index.core.node_parser.interface import NodeParser
 from llama_index.core.node_parser.text.sentence import (
-    DEFAULT_CHUNK_SIZE,
-    SENTENCE_CHUNK_OVERLAP,
     SentenceSplitter,
 )
 from llama_index.core.callbacks.base import CallbackManager
@@ -20,8 +18,8 @@ from milkie.settings import Settings
 from milkie.model_factory import ModelFactory
 
 def getNodeParser(
-    chunk_size: int = DEFAULT_CHUNK_SIZE,
-    chunk_overlap: int = SENTENCE_CHUNK_OVERLAP,
+    chunk_size: int,
+    chunk_overlap: int,
     callback_manager: Optional[CallbackManager] = None,
 ) -> NodeParser:
     """Get default node parser."""
@@ -29,7 +27,7 @@ def getNodeParser(
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap,
         callback_manager=callback_manager or CallbackManager(),
-        separator="\n\n",
+        separator="\n",
     )
 
 class CustomizedPromptHelper(PromptHelper):
@@ -53,11 +51,9 @@ class GlobalContext():
     def __init__(
             self, 
             globalConfig :GlobalConfig, 
-            modelFactory :ModelFactory,
-            logger :Logger):
+            modelFactory :ModelFactory):
         self.globalConfig = globalConfig
         self.modelFactory = modelFactory
-        self.logger = logger
         self.settings = Settings(globalConfig, modelFactory)
         promptHelper = CustomizedPromptHelper(
             llmConfig=globalConfig.getLLMConfig()
@@ -65,11 +61,14 @@ class GlobalContext():
 
         self.serviceContext = ServiceContext.from_defaults(
             embed_model=self.settings.embedding,
-            chunk_size=globalConfig.indexConfig.chunkSize if globalConfig.indexConfig else None,
-            chunk_overlap=globalConfig.indexConfig.chunkOverlap if globalConfig.indexConfig else None,
+            chunk_size=globalConfig.indexConfig.chunkSize,
+            chunk_overlap=globalConfig.indexConfig.chunkOverlap,
             prompt_helper=promptHelper,
             llm=self.settings.llm.getLLM(),
-            node_parser=getNodeParser())
+            node_parser=getNodeParser(
+                chunk_size=globalConfig.indexConfig.chunkSize,
+                chunk_overlap=globalConfig.indexConfig.chunkOverlap,
+            ))
 
         if globalConfig.memoryConfig and globalConfig.indexConfig:
             self.memoryWithIndex = MemoryWithIndex(
