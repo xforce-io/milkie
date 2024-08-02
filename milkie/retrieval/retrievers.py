@@ -12,9 +12,11 @@ class HybridRetriever(BaseRetriever):
     def __init__(
             self, 
             denseRetriever :VectorStoreIndex, 
-            sparseRetriever :BM25Retriever):
+            sparseRetriever :BM25Retriever,
+            similarityTopK :int):
         self.denseRetriever = denseRetriever
         self.sparseRetriever = sparseRetriever
+        self.similarityTopK = similarityTopK
 
     def _retrieve(self, query_bundle: QueryBundle) -> List[NodeWithScore]:
         #combine two nodes, and record the score in the metadata
@@ -68,7 +70,7 @@ class HybridRetriever(BaseRetriever):
             if not node.metadata["rrf"]:
                 node.score = HybridRetriever.__calcRRF(node.score, 50)
 
-        nodes.sort(key=lambda x: x.score, reverse=True)
+        nodes.sort(key=lambda x: x.score, reverse=True)[:self.similarityTopK]
         logger.debug(f"final_recall[{len(nodes)}]")
         for node in nodes:
             fmtText = truncate_text(node.node.text, 100).replace("\n", "//")

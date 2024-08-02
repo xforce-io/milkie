@@ -52,7 +52,8 @@ class RetrievalModule:
 
         self.hybridRetriever = HybridRetriever(
             self.denseRetriever, 
-            self.sparseRetriever)
+            self.sparseRetriever,
+            self.retrievalConfig.similarityTopK)
 
         self.nodePostProcessors = []
 
