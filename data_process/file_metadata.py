@@ -9,7 +9,6 @@ def get_file_metadata(file_path):
     file_stat = os.stat(file_path)
     metadata = {
         "name": os.path.basename(file_path),
-        "path": str(file_path),
         "size": file_stat.st_size,
     }
 

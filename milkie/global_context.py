@@ -27,7 +27,7 @@ def getNodeParser(
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap,
         callback_manager=callback_manager or CallbackManager(),
-        separator="\n",
+        paragraph_separator="\n",
     )
 
 class CustomizedPromptHelper(PromptHelper):

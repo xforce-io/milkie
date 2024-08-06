@@ -79,6 +79,7 @@ class EnhancedOpenAI(EnhancedLLM):
                 modelName=self.model_name, 
                 key=messages)
             if cached:
+                logger.debug("cache hit!")
                 resQueue.put(QueueResponse(
                     requestId=request.requestId, 
                     output=cached["output"],

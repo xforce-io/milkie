@@ -54,6 +54,9 @@ class HybridRetriever(BaseRetriever):
             bm25Nodes.sort(key=lambda x: x.score, reverse=True)
             rank = 1
             for bm25Node in bm25Nodes:
+                if bm25Node.score < 1.0:
+                    continue
+                
                 theNode = nodeIdToNode.get(bm25Node.node_id)
                 if theNode is None:
                     nodes.append(bm25Node)
@@ -70,7 +73,8 @@ class HybridRetriever(BaseRetriever):
             if not node.metadata["rrf"]:
                 node.score = HybridRetriever.__calcRRF(node.score, 50)
 
-        nodes.sort(key=lambda x: x.score, reverse=True)[:self.similarityTopK]
+        nodes.sort(key=lambda x: x.score, reverse=True)
+        nodes = nodes[:self.similarityTopK]
         logger.debug(f"final_recall[{len(nodes)}]")
         for node in nodes:
             fmtText = truncate_text(node.node.text, 100).replace("\n", "//")
