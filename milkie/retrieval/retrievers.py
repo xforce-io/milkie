@@ -26,6 +26,9 @@ class HybridRetriever(BaseRetriever):
             vectorNodes = self.denseRetriever._retrieve(query_bundle)
             logger.debug(f"dense_retriever_recall_num[{len(vectorNodes)}]")
             for node in vectorNodes:
+                if node.score < 0.4:
+                    continue
+
                 fmtText = truncate_text(node.node.text, 100).replace("\n", "//")
                 logger.debug(f"score[{node.score:.2f}] content[{fmtText}]")
             
@@ -48,6 +51,9 @@ class HybridRetriever(BaseRetriever):
             bm25Nodes = self.sparseRetriever._retrieve(query_bundle)
             logger.debug(f"sparse_retriever_recall_num[{len(bm25Nodes)}]")
             for node in bm25Nodes:
+                if node.score < 1.0:
+                    continue
+
                 fmtText = truncate_text(node.node.text, 100).replace("\n", "//")
                 logger.debug(f"score[{node.score:.2f}] content[{fmtText}]")
 

@@ -20,7 +20,7 @@ from milkie.retrieval.reranker import Reranker
 from milkie.retrieval.retrievers import HybridRetriever
 
 def chineseTokenizer(text) :
-    return list(jieba.cut(text, cut_all=False))
+    return list(jieba.cut(text, cut_all=True))
 
 class RetrievalModule:
     def __init__(

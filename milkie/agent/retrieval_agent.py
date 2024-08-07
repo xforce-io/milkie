@@ -41,20 +41,4 @@ class RetrievalAgent(BaseAgent):
         return response
 
     def __getBlockFromNode(self, node :TextNode) ->str:
-        for i in range(1):
-            prevNode = self.context.getGlobalMemory().getPrevNode(node)
-            if prevNode is not None:
-                node = prevNode
-            else:
-                break
-        
-        block = node.get_text()
-        curNode = node
-        while True:
-            nextNode = self.context.getGlobalMemory().getNextNode(curNode)
-            if nextNode is None or len(block) > 500:
-                break
-
-            block += nextNode.get_text()
-            curNode = nextNode
-        return block
+        return node.get_text()
