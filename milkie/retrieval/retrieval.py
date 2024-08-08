@@ -7,8 +7,10 @@ from llama_index.core.query_engine import RetrieverQueryEngine
 from llama_index.core.response_synthesizers.type import ResponseMode
 from llama_index.core.schema import NodeWithScore
 from llama_index.retrievers.bm25.base import BM25Retriever
+from llama_index_client import TextNode
 
 from milkie.agent.prompt_agent import PromptAgent
+from milkie.agent.query_structure import QueryType
 from milkie.config.config import ChunkAugmentType, GlobalConfig, RerankPosition, RetrievalConfig, RewriteStrategy
 from milkie.context import Context
 from milkie.custom_refine_program import CustomProgramFactory
@@ -74,6 +76,16 @@ class RetrievalModule:
         if self.chunkAugment:
             self.chunkAugment.set_context(context)
 
+        if context.getCurQuery().queryType == QueryType.FILEPATH:
+            #read file content from filepath 'context.curQuery.query'
+            with open(context.getCurQuery().query, "r") as f:
+                content = f.read()
+                nodes = []
+                for i in range(0, len(content), self.retrievalConfig.blockSize):
+                    nodes.append(NodeWithScore(TextNode(text=content[i:i+self.retrievalConfig.blockSize]), 1.0))
+                context.setRetrievalResult(nodes)
+                return content
+
         responseSynthesizer = get_response_synthesizer(
             service_context=self.memoryWithIndex.serviceContext,
             program_factory=CustomProgramFactory(
@@ -95,7 +107,7 @@ class RetrievalModule:
             refine_template=candidateRefinePromptImpl("qa_refine"),
             response_synthesizer=responseSynthesizer)
         
-        curQuery = context.getCurQuery()
+        curQuery = context.getCurQuery().query
         if self.rewriteAgent:
             self.rewriteAgent.setContext(context)
             rewriteResp = self.rewriteAgent.executeBatch(

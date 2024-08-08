@@ -15,8 +15,8 @@ class QAAgent(BaseAgent):
 
     def __init__(
             self, 
-            context :Context,
-            config :str):
+            context :Context = None,
+            config :str = None):
         super().__init__(context, config)
 
         if self.config.memoryConfig and self.config.indexConfig:

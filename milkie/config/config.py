@@ -364,11 +364,13 @@ class RetrievalConfig(BaseConfig):
             rewriteStrategy :RewriteStrategy,
             channelRecall :int,
             similarityTopK :int,
+            blockSize :int,
             chunkAugmentType :ChunkAugmentType,
             rerankerConfig :RerankConfig):
         self.rewriteStrategy = rewriteStrategy
         self.channelRecall = channelRecall
         self.similarityTopK = similarityTopK 
+        self.blockSize = blockSize
         self.chunkAugmentType = chunkAugmentType
         self.rerankerConfig = rerankerConfig
 
@@ -401,6 +403,7 @@ class RetrievalConfig(BaseConfig):
             rewriteStrategy=rewriteStrategy,
             channelRecall=config["channel_recall"],
             similarityTopK=config["similarity_top_k"],
+            blockSize=config["block_size"],
             chunkAugmentType=chunkAugmentType,
             rerankerConfig=reranker)
 
@@ -475,7 +478,15 @@ class AgentsConfig(BaseConfig):
         return self.agentMap.get(config)
 
 class GlobalConfig(BaseConfig):
+
+    instanceCnt = 0
+    
     def __init__(self, config):
+        if GlobalConfig.instanceCnt == 0:
+            GlobalConfig.instanceCnt = 1
+        elif GlobalConfig.instanceCnt >= 0:
+            raise Exception("GlobalConfig can only be initialized once")
+        
         if type(config) == str:
             config = loadFromYaml(config)
         self.initFromDict(config)

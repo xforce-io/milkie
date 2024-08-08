@@ -11,13 +11,11 @@ class FileLookupAgent(BaseAgent):
     
     def __init__(
             self,
-            context :Context,
-            config :str) -> None:
-        super().__init__(context, config)
+            context :Context) -> None:
+        super().__init__(context)
         
         self.retrievalAgent = RetrievalAgent(
-            context, 
-            config)
+            context)
 
         self.lookuper = PromptAgent(
             context, 
@@ -36,14 +34,8 @@ class FileLookupAgent(BaseAgent):
             })
 
 if __name__ == "__main__":
-    globalConfig = GlobalConfig("config/global_filelookup.yaml")
-    globalContext = GlobalContext(
-        globalConfig, 
-        ModelFactory())
-    context = Context(globalContext)
     filelookupAgent = FileLookupAgent(
-        context, 
-        config="qa")
+        Context.createContext("config/global_filelookup.yaml"))
     response = filelookupAgent.execute(
         query="有个技术白皮书文档，路径是什么", 
         args={})

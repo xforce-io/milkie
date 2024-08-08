@@ -19,21 +19,21 @@ class MapReduceQA(Team):
 
         self.blockQA = PromptAgent(
             context, 
-            "qa_init")
+            prompt="qa_init")
 
-        self.blockSummary = PromptAgent(
+        self.blockProcess = PromptAgent(
             context, 
-            "block_summary")
+            prompt="block_process")
 
-    def execute(self, query) -> Response:
-        response = self.retrievalAgent.execute(query)
+    def execute(self, input :str, task :str) -> Response:
+        response = self.retrievalAgent.execute(input)
         resps = []
-        maxCnt = 3
+        maxCnt = 10
         cnt = 0
         for block in response.metadata["blocks"]:
             resp = self.blockQA.execute(
-                query,
-                query_str=query,
+                input,
+                query_str=task,
                 context_str=block)
             resps.append(resp.response)
             cnt += 1
@@ -41,8 +41,15 @@ class MapReduceQA(Team):
                 break
 
         sep = "\n-------------------\n"
-        resp = self.blockSummary.execute(
-            query,
-            query_str=query,
+        resp = self.blockProcess.execute(
+            input,
+            query_str=task,
             blocks=sep.join(resps))
         return resp
+
+if __name__ == "__main__":
+    agent = MapReduceQA()
+    response = agent.execute(
+        input="@filepath:有个技术白皮书文档，路径是什么", 
+        task="写一份总结，不超过 100 字")
+    print(response) 

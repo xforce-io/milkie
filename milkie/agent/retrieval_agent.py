@@ -2,6 +2,7 @@ from llama_index.core import Response
 from llama_index.core.schema import TextNode
 
 from milkie.agent.base_agent import BaseAgent
+from milkie.agent.query_structure import parseQuery
 from milkie.context import Context
 from milkie.memory.memory_with_index import MemoryWithIndex
 from milkie.retrieval.retrieval import RetrievalModule
@@ -11,8 +12,8 @@ class RetrievalAgent(BaseAgent):
 
     def __init__(
             self,
-            context :Context,
-            config :str):
+            context :Context = None,
+            config :str = None):
         super().__init__(context, config)
 
         if self.config.memoryConfig and self.config.indexConfig:
@@ -30,13 +31,25 @@ class RetrievalAgent(BaseAgent):
         )
 
     def execute(self, query) -> Response:
-        self.context.setCurQuery(query)
+        self.context.setCurQuery(parseQuery(query))
         self.retrievalModule.retrieve(self.context)
         retrievalResult = self.context.retrievalResult
         response = Response(response="", source_nodes=None)
+        curBlock = ""
         blocks = []
         for result in retrievalResult:
-            blocks += [self.__getBlockFromNode(result.node)]
+            curContent = self.__getBlockFromNode(result.node)
+            if len(curBlock) + len(curContent) < self.config.retrievalConfig.blockSize:
+                curBlock += curContent
+            else:
+                if len(curBlock) != 0:
+                    blocks += [curBlock]
+                    curBlock = curContent   
+                else:
+                    blocks += [curContent]
+
+        if len(curBlock) > 0:
+            blocks += [curBlock]
         response.metadata = {"blocks": blocks}
         return response
 

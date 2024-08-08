@@ -9,8 +9,8 @@ class BaseAgent(ABC):
             self,
             context :Context=None,
             config :str=None) -> None:
-        self.config = context.globalContext.globalConfig.agentsConfig.getConfig(config) if context else None
-        self.logger = context.globalContext.logger if context else None
+        context = context if context else Context.createContext("config/global.yaml")
+        self.config = context.globalContext.globalConfig.agentsConfig.getConfig(config) if config else context.globalContext.globalConfig
         self.setContext(context)
 
     def setContext(self, context :Context): 

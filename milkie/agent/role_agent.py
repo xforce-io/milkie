@@ -4,12 +4,8 @@ from enum import Enum
 from llama_index.core import Response
 
 from milkie.agent.base_agent import BaseAgent
-from milkie.config.config import GlobalConfig
 from milkie.context import Context
-from milkie.global_context import GlobalContext
 from milkie.llm.inference import chat
-from milkie.model_factory import ModelFactory
-from milkie.settings import Settings
 from milkie.tools.tool import LLM, Coder, Tool, ToolSet
 
 logger = logging.getLogger(__name__)
@@ -18,13 +14,14 @@ class RoleAgent(BaseAgent):
     
     def __init__(
             self, 
-            context: Context, 
-            config: str,
             role: str,
             goal: str,
             backstory: str,
             toolSet :ToolSet,
-            planDesc :str) -> None:
+            planDesc :str,
+            context: Context = None, 
+            config: str = None,
+            ) -> None:
         super().__init__(context, config)
 
         self.role = role
@@ -548,12 +545,7 @@ class TaskEngine:
         return instruction.execute(self.instructions)
 
 if __name__ == "__main__":
-    globalConfig = GlobalConfig("config/global.yaml")
-    globalContext = GlobalContext(globalConfig, ModelFactory())
-    context = Context(globalContext)
     roleAgent = RoleAgent(
-        context=context,
-        config=None,
         role="你是一个仔细认真的数据分析师，需要使用各种提供的工具进行数据分析，来解决问题",
         goal="快速分析和洞察数据，提供有用的见解",
         backstory=None,

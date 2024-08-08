@@ -1,8 +1,6 @@
 import logging
 
 from llama_index.core import Response
-from llama_index.core import ChatPromptTemplate
-from llama_index.core.base.llms.types import ChatMessage, MessageRole
 
 from milkie.agent.base_agent import BaseAgent
 from milkie.context import Context
@@ -15,11 +13,12 @@ class PromptAgent(BaseAgent):
 
     def __init__(
             self,
-            context :Context,
-            config :str) -> None:
+            context :Context = None,
+            config :str = None,
+            prompt :str = None) -> None:
         super().__init__(context, config)
 
-        self.prompt = Loader.load(config) if config else None
+        self.prompt = Loader.load(prompt) if prompt else None
 
     def execute(self, query :str, args :dict, **kwargs) -> Response:
         return chat(
