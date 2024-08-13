@@ -21,17 +21,19 @@ class QAAgent(BaseAgent):
 
         if self.config.memoryConfig and self.config.indexConfig:
             self.memoryWithIndex = MemoryWithIndex(
-                context.globalContext.settings,
+                self.context.globalContext.settings,
                 self.config.memoryConfig,
-                self.config.indexConfig)
+                self.config.indexConfig,
+                self.context.globalContext.serviceContext)
         else:
             self.memoryWithIndex = context.getGlobalContext().memoryWithIndex
 
         self.groundingModule = GroundingModule()
         self.retrievalModule = RetrievalModule(
-            globalConfig=context.globalContext.globalConfig,
+            globalConfig=self.context.globalContext.globalConfig,
             retrievalConfig=self.config.retrievalConfig,
-            memoryWithIndex=self.memoryWithIndex)
+            memoryWithIndex=self.memoryWithIndex,
+            context=self.context)
         self.reasoningModule = ReasoningModule()
         self.decisionModule = DecisionModule()
         self.actionModule = ActionModule()
@@ -65,7 +67,5 @@ class QAAgent(BaseAgent):
         return self.decisionModule.decide(context, **kwargs)
 
 if __name__ == "__main__":
-    globalConfig = GlobalConfig("config/global.yaml")
-    context = Context(globalConfig)
-    agent = QAAgent(globalConfig, context, "qa")
-    agent.execute("你好")
+    agent = QAAgent(config="qa")
+    agent.execute("你好", args=None)

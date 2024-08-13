@@ -18,9 +18,10 @@ class RetrievalAgent(BaseAgent):
 
         if self.config.memoryConfig and self.config.indexConfig:
             self.memoryWithIndex = MemoryWithIndex(
-                context.globalContext.settings,
+                self.context.globalContext.settings,
                 self.config.memoryConfig,
-                self.config.indexConfig)
+                self.config.indexConfig,
+                self.context.globalContext.serviceContext)
         else:
             self.memoryWithIndex = context.getGlobalContext().memoryWithIndex
 
@@ -28,10 +29,10 @@ class RetrievalAgent(BaseAgent):
             globalConfig=context.globalContext.globalConfig,
             retrievalConfig=self.config.retrievalConfig,
             memoryWithIndex=self.memoryWithIndex,
-        )
+            context=context)
 
     def execute(self, query) -> Response:
-        self.context.setCurQuery(parseQuery(query))
+        self.context.setCurQuery(query)
         self.retrievalModule.retrieve(self.context)
         retrievalResult = self.context.retrievalResult
         response = Response(response="", source_nodes=None)

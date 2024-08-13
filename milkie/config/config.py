@@ -450,7 +450,7 @@ class QAAgentConfig(SingleAgentConfig):
             type=AgentType.QA,
             memoryConfig=MemoryConfig.fromArgs(config["memory"]) if "memory" in config else None,
             indexConfig=IndexConfig.fromArgs(config["index"]) if "index" in config else None,
-            retrievalConfig=RetrievalConfig.fromArgs(config["retrieval"]))
+            retrievalConfig=RetrievalConfig.fromArgs(config["retrieval"]) if "retrieval" in config else None)
 
 def createAgentConfig(config :dict):
     if config["type"] == AgentType.QA.name:
@@ -498,6 +498,18 @@ class GlobalConfig(BaseConfig):
         self.agentsConfig :AgentsConfig = AgentsConfig.fromArgs(config["agents"])
         self.memoryConfig = MemoryConfig.fromArgs(config["memory"])
         self.indexConfig = IndexConfig.fromArgs(config["index"])
+        self.retrievalConfig = RetrievalConfig.fromArgs(config["retrieval"]) if "retrieval" in config.keys() else None
+
+        for agentConfig in self.agentsConfig.agentConfigs:
+            if agentConfig.type == AgentType.QA:
+                if agentConfig.memoryConfig is None:
+                    agentConfig.memoryConfig = self.memoryConfig
+
+                if agentConfig.indexConfig is None:
+                    agentConfig.indexConfig = self.indexConfig
+
+                if agentConfig.retrievalConfig is None:
+                    agentConfig.retrievalConfig = self.retrievalConfig
 
     def getLLMConfig(self) -> LLMConfig:
         return self.llmConfig
@@ -516,3 +528,6 @@ class GlobalConfig(BaseConfig):
 
     def getIndexConfig(self) -> IndexConfig:
         return self.indexConfig
+
+    def getRetrievalConfig(self) -> RetrievalConfig:
+        return self.retrievalConfig

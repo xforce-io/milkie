@@ -1,13 +1,13 @@
 from typing import List
+import re
 import jieba
 
 from llama_index.core.schema import QueryBundle
 from llama_index.core.response_synthesizers.factory import get_response_synthesizer
 from llama_index.core.query_engine import RetrieverQueryEngine
 from llama_index.core.response_synthesizers.type import ResponseMode
-from llama_index.core.schema import NodeWithScore
+from llama_index.core.schema import NodeWithScore, TextNode
 from llama_index.retrievers.bm25.base import BM25Retriever
-from llama_index_client import TextNode
 
 from milkie.agent.prompt_agent import PromptAgent
 from milkie.agent.query_structure import QueryType
@@ -29,19 +29,21 @@ class RetrievalModule:
             self, 
             globalConfig :GlobalConfig,
             retrievalConfig :RetrievalConfig,
-            memoryWithIndex :MemoryWithIndex):
+            memoryWithIndex :MemoryWithIndex,
+            context :Context):
         self.globalConfig = globalConfig
         self.retrievalConfig = retrievalConfig
         self.memoryWithIndex = memoryWithIndex
+        self.context = context
             
         self.rewriteAgent = None
         if retrievalConfig.rewriteStrategy == RewriteStrategy.HYDE:
             self.rewriteAgent = PromptAgent(
-                context=None, 
+                context=self.context, 
                 config="hyde")
         elif retrievalConfig.rewriteStrategy == RewriteStrategy.QUERY_REWRITE:
             self.rewriteAgent = PromptAgent(
-                context=None, 
+                context=self.context, 
                 config="query_rewrite")
 
         self.denseRetriever = memoryWithIndex.index.denseIndex.as_retriever(
@@ -77,14 +79,27 @@ class RetrievalModule:
             self.chunkAugment.set_context(context)
 
         if context.getCurQuery().queryType == QueryType.FILEPATH:
-            #read file content from filepath 'context.curQuery.query'
-            with open(context.getCurQuery().query, "r") as f:
-                content = f.read()
-                nodes = []
-                for i in range(0, len(content), self.retrievalConfig.blockSize):
-                    nodes.append(NodeWithScore(TextNode(text=content[i:i+self.retrievalConfig.blockSize]), 1.0))
-                context.setRetrievalResult(nodes)
-                return content
+            filepath = context.getCurQuery().query
+            content = ""
+            if filepath.endswith(".txt"):
+                content = self._getTxtFileContent(filepath)
+            elif filepath.endswith(".pdf"):
+                content = self._getPdfFileContent(filepath)
+            else:
+                raise Exception(f"Unsupported file type[{filepath}]")
+            
+            if content is None:
+                return None
+
+            nodes = list()
+            for i in range(0, len(content), self.retrievalConfig.blockSize):
+                text = content[i:i+self.retrievalConfig.blockSize]
+                textNode = TextNode(text=text)
+                node = NodeWithScore(node=textNode)
+                node.score = 1
+                nodes.append(node)
+            context.setRetrievalResult(nodes)
+            return content
 
         responseSynthesizer = get_response_synthesizer(
             service_context=self.memoryWithIndex.serviceContext,
@@ -119,3 +134,23 @@ class RetrievalModule:
         result = self.engine.retrieve(QueryBundle(curQuery))
         context.setRetrievalResult(result)
         return result
+
+    @staticmethod
+    def _getTxtFileContent(filePath :str) -> str:
+        with open(filePath, "r") as f:
+            return f.read()
+
+    PatternChinese = re.compile(r'[\u4e00-\u9fff]')
+
+    @staticmethod
+    def _getPdfFileContent(filePath :str) -> str:
+        import PyPDF2
+        
+        content = ""
+        with open(filePath, "rb") as f:
+            pdfReader = PyPDF2.PdfReader(f)
+            content = "".join([page.extract_text() for page in pdfReader.pages])
+        
+        if bool(RetrievalModule.PatternChinese.search(content)) :
+            return content
+        return None

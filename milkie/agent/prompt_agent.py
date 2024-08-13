@@ -35,3 +35,7 @@ class PromptAgent(BaseAgent):
             prompt=self.prompt if self.prompt else query, 
             argsList=argsList, 
             **kwargs) 
+
+if __name__ == "__main__":
+    agent = PromptAgent()
+    agent.execute("你好", args={})

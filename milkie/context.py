@@ -2,7 +2,7 @@ from typing import List
 from llama_index.legacy.response.schema import Response
 from llama_index.core.base.response.schema import NodeWithScore
 
-from milkie.agent.query_structure import QueryStructure
+from milkie.agent.query_structure import QueryStructure, parseQuery
 from milkie.config.config import GlobalConfig
 from milkie.global_context import GlobalContext
 from milkie.model_factory import ModelFactory
@@ -28,10 +28,10 @@ class Context:
         memoryWithIndex = self.globalContext.memoryWithIndex
         return memoryWithIndex.memory if memoryWithIndex else None
     
-    def setCurQuery(self, query :QueryStructure):
-        self.curQuery = query
+    def setCurQuery(self, query :str):
+        self.curQuery = parseQuery(query)
 
-    def getCurQuery(self):
+    def getCurQuery(self) -> QueryStructure:
         return self.curQuery
 
     def getCurInstruction(self):
