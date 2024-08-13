@@ -1,6 +1,7 @@
 from typing import List
 import re
 import jieba
+import logging
 
 from llama_index.core.schema import QueryBundle
 from llama_index.core.response_synthesizers.factory import get_response_synthesizer
@@ -20,6 +21,8 @@ from milkie.retrieval.chunk_augment import ChunkAugment
 from milkie.retrieval.position_reranker import PositionReranker
 from milkie.retrieval.reranker import Reranker
 from milkie.retrieval.retrievers import HybridRetriever
+
+logger = logging.getLogger(__name__)
 
 def chineseTokenizer(text) :
     return list(jieba.cut(text, cut_all=True))
@@ -138,7 +141,10 @@ class RetrievalModule:
     @staticmethod
     def _getTxtFileContent(filePath :str) -> str:
         with open(filePath, "r") as f:
-            return f.read()
+            content = f.read()
+            if len(content) < 100:
+                return None
+            return content
 
     PatternChinese = re.compile(r'[\u4e00-\u9fff]')
 
@@ -150,7 +156,16 @@ class RetrievalModule:
         content = ""
         with open(filePath, "rb") as f:
             pdfReader = PyPDF2.PdfReader(f)
-            content = "".join([page.extract_text() for page in pdfReader.pages])
+            pages = []
+            for page in pdfReader.pages:
+                try:
+                    thePage = page.extract_text()
+                    if thePage is not None:
+                        pages.append(thePage)
+                except Exception as e:
+                    logger.error(f"Error extracting text from page [{e}]")
+                
+            content = "".join(pages)
             cleaned = re.sub(r"/G[A-Z0-9]+", "", content)
             cleaned = re.sub(r"\s+", "", cleaned)
         

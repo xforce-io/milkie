@@ -19,7 +19,7 @@ def get_file_metadata(file_path, summaryAgent):
         input="@filepath:%s" % file_path, 
         task="写一段概要总结，不超过 200 字")
     if response is not None:
-        metadata["summary"] = response
+        metadata["summary"] = response.response
 
     #response = chat(
     #    llm=self.roleAgent.context.globalContext.settings.llm, 
