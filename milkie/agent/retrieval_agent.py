@@ -35,6 +35,9 @@ class RetrievalAgent(BaseAgent):
         self.context.setCurQuery(query)
         self.retrievalModule.retrieve(self.context)
         retrievalResult = self.context.retrievalResult
+        if retrievalResult is None:
+            return None
+        
         response = Response(response="", source_nodes=None)
         curBlock = ""
         blocks = []

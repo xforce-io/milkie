@@ -27,6 +27,9 @@ class MapReduceQA(Team):
 
     def execute(self, input :str, task :str) -> Response:
         response = self.retrievalAgent.execute(input)
+        if response is None:
+            return None
+        
         resps = []
         maxCnt = 50
         cnt = 0

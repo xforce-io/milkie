@@ -145,12 +145,18 @@ class RetrievalModule:
     @staticmethod
     def _getPdfFileContent(filePath :str) -> str:
         import PyPDF2
+        import re
         
         content = ""
         with open(filePath, "rb") as f:
             pdfReader = PyPDF2.PdfReader(f)
             content = "".join([page.extract_text() for page in pdfReader.pages])
+            cleaned = re.sub(r"/G[A-Z0-9]+", "", content)
+            cleaned = re.sub(r"\s+", "", cleaned)
         
-        if bool(RetrievalModule.PatternChinese.search(content)) :
-            return content
+        if len(cleaned) < 100:
+            return None
+        
+        if bool(RetrievalModule.PatternChinese.search(cleaned)) :
+            return cleaned
         return None
