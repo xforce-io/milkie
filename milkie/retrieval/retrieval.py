@@ -89,9 +89,10 @@ class RetrievalModule:
             elif filepath.endswith(".pdf"):
                 content = self._getPdfFileContent(filepath)
             else:
-                raise Exception(f"Unsupported file type[{filepath}]")
+                logger.error(f"Unsupported file type[{filepath}]")
             
             if content is None:
+                context.setRetrievalResult(None)
                 return None
 
             nodes = list()
@@ -147,8 +148,6 @@ class RetrievalModule:
                 return None
             return content
 
-    PatternChinese = re.compile(r'[\u4e00-\u9fff]')
-
     @staticmethod
     def _getPdfFileContent(filePath :str) -> str:
         content = ""
@@ -161,10 +160,7 @@ class RetrievalModule:
         
         if len(cleaned) < 100:
             return None
-        
-        if bool(RetrievalModule.PatternChinese.search(cleaned)) :
-            return cleaned
-        return None
+        return cleaned
 
     @staticmethod
     def _tryReadPdf(fp):
