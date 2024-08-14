@@ -140,6 +140,7 @@ class RetrievalModule:
 
     @staticmethod
     def _getTxtFileContent(filePath :str) -> str:
+        logger.info(f"process file[{filePath}]")
         with open(filePath, "r") as f:
             content = f.read()
             if len(content) < 100:
@@ -150,21 +151,10 @@ class RetrievalModule:
 
     @staticmethod
     def _getPdfFileContent(filePath :str) -> str:
-        import PyPDF2
-        import re
-        
         content = ""
+        logger.info(f"process file[{filePath}]")
         with open(filePath, "rb") as f:
-            pdfReader = PyPDF2.PdfReader(f)
-            pages = []
-            for page in pdfReader.pages:
-                try:
-                    thePage = page.extract_text()
-                    if thePage is not None:
-                        pages.append(thePage)
-                except Exception as e:
-                    logger.error(f"Error extracting text from page [{e}]")
-                
+            pages = RetrievalModule._tryReadPdf(f)
             content = "".join(pages)
             cleaned = re.sub(r"/G[A-Z0-9]+", "", content)
             cleaned = re.sub(r"\s+", "", cleaned)
@@ -175,3 +165,38 @@ class RetrievalModule:
         if bool(RetrievalModule.PatternChinese.search(cleaned)) :
             return cleaned
         return None
+
+    @staticmethod
+    def _tryReadPdf(fp):
+        result = RetrievalModule._tryReadPdfUsingPyPdf2(fp)
+        if result is not None:
+            return result
+        
+        return RetrievalModule._tryReadPdfUsingPdfReader(fp)
+
+    @staticmethod
+    def _tryReadPdfUsingPyPdf2(fp):
+        import PyPDF2
+
+        pages = []
+        try:
+            pdfReader = PyPDF2.PdfReader(fp)
+            for page in pdfReader.pages:
+                thePage = page.extract_text()
+                if thePage is not None:
+                    pages.append(thePage)
+        except Exception as e:
+            logger.error(f"Error extracting text from page [{e}]")
+            return None
+        return pages
+    
+    @staticmethod
+    def _tryReadPdfUsingPdfReader(fp):
+        from pdfreader import SimplePDFViewer
+
+        pages = []
+        viewer = SimplePDFViewer(fp)
+        for canvas in viewer:
+            page = "".join(canvas.strings)
+            pages.append(page)
+        return pages
