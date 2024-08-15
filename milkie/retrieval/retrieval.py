@@ -182,7 +182,7 @@ class RetrievalModule:
                 if thePage is not None:
                     pages.append(thePage)
         except Exception as e:
-            logger.error(f"Error extracting text from page [{e}]")
+            logger.error(f"Error extracting text using pypdf2 from page [{e}]")
             return None
         return pages
     
@@ -191,8 +191,12 @@ class RetrievalModule:
         from pdfreader import SimplePDFViewer
 
         pages = []
-        viewer = SimplePDFViewer(fp)
-        for canvas in viewer:
-            page = "".join(canvas.strings)
-            pages.append(page)
+        try:
+            viewer = SimplePDFViewer(fp)
+            for canvas in viewer:
+                page = "".join(canvas.strings)
+                pages.append(page)
+        except Exception as e:
+            logger.error(f"Error extracting text using pdf reader from page [{e}]")
+            return None
         return pages

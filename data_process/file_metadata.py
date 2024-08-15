@@ -5,7 +5,7 @@ from pathlib import Path
 
 from milkie.agent.team.mrqa import MapReduceQA
 
-SupportedFormat = ["pdf"]
+SupportedFormat = ["pdf", "txt"]
 
 def get_file_metadata(file_path, summaryAgent):
     file_stat = os.stat(file_path)
@@ -17,7 +17,7 @@ def get_file_metadata(file_path, summaryAgent):
 
     response = summaryAgent.execute(
         input="@filepath:%s" % file_path, 
-        task="写一段概要总结，不超过 200 字")
+        task="写一段中文概要总结，不超过 150 字")
     if response is not None:
         metadata["summary"] = response.response
 
