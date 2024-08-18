@@ -84,7 +84,7 @@ class StrategyFileLookup(Strategy):
         return self.agentName
 
     def createAgent(self, context :Context) -> BaseAgent:
-        return FileLookupAgent(context, self.agentName)
+        return FileLookupAgent(context)
 
     def __str__(self) -> str:
         return "FileLookup"

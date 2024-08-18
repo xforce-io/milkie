@@ -415,20 +415,24 @@ class SingleAgentConfig(BaseConfig):
     def __init__(
             self, 
             config :str, 
-            type :AgentType):
+            type :AgentType,
+            prompt :str):
         self.config = config
         self.type = type
+        self.prompt = prompt
 
 class PromptAgentConfig(SingleAgentConfig):
     def __init__(
             self, 
             config: str, 
-            type: AgentType):
-        super().__init__(config, type)
+            type: AgentType,
+            prompt :str):
+        super().__init__(config, type, prompt)
 
     def fromArgs(config :dict):
         return PromptAgentConfig(
             config=config["config"],
+            prompt=config["prompt"] if "prompt" in config else None,
             type=AgentType.PROMPT)
 
 class QAAgentConfig(SingleAgentConfig):
@@ -436,10 +440,11 @@ class QAAgentConfig(SingleAgentConfig):
             self, 
             config :str,
             type :AgentType,
+            prompt :str,
             memoryConfig :MemoryConfig,
             indexConfig :IndexConfig,
             retrievalConfig :RetrievalConfig):
-        super().__init__(config, type)
+        super().__init__(config, type, prompt)
         self.memoryConfig = memoryConfig
         self.indexConfig = indexConfig
         self.retrievalConfig = retrievalConfig
@@ -448,6 +453,7 @@ class QAAgentConfig(SingleAgentConfig):
         return QAAgentConfig(
             config=config["config"],
             type=AgentType.QA,
+            prompt=config["prompt"] if "prompt" in config else None,
             memoryConfig=MemoryConfig.fromArgs(config["memory"]) if "memory" in config else None,
             indexConfig=IndexConfig.fromArgs(config["index"]) if "index" in config else None,
             retrievalConfig=RetrievalConfig.fromArgs(config["retrieval"]) if "retrieval" in config else None)

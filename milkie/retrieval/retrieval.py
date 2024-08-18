@@ -154,6 +154,9 @@ class RetrievalModule:
         logger.info(f"process file[{filePath}]")
         with open(filePath, "rb") as f:
             pages = RetrievalModule._tryReadPdf(f)
+            if pages == None:
+                return None
+            
             content = "".join(pages)
             cleaned = re.sub(r"/G[A-Z0-9]+", "", content)
             cleaned = re.sub(r"\s+", "", cleaned)
