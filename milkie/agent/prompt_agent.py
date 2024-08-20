@@ -18,7 +18,7 @@ class PromptAgent(BaseAgent):
             prompt :str = None) -> None:
         super().__init__(context, config)
 
-        prompt = prompt if prompt else config["prompt"]
+        prompt = prompt if prompt else self.config.prompt
         self.prompt = Loader.load(prompt) if prompt else None
 
     def execute(self, query :str, args :dict, **kwargs) -> Response:

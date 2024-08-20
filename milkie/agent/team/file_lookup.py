@@ -27,7 +27,7 @@ class FileLookupAgent(BaseAgent):
         
         blocks = response.metadata["blocks"]
         return self.lookuper.execute(
-            query,
+            response.metadata["curQuery"],
             args={
                 "query_str":query,
                 "context_str":"\n".join(blocks)

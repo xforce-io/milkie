@@ -54,7 +54,9 @@ class RetrievalAgent(BaseAgent):
 
         if len(curBlock) > 0:
             blocks += [curBlock]
-        response.metadata = {"blocks": blocks}
+        response.metadata = {
+            "blocks": blocks,
+            "curQuery" : self.context.getCurQuery().query}
         return response
 
     def __getBlockFromNode(self, node :TextNode) ->str:

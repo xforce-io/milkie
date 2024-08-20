@@ -43,11 +43,11 @@ class RetrievalModule:
         if retrievalConfig.rewriteStrategy == RewriteStrategy.HYDE:
             self.rewriteAgent = PromptAgent(
                 context=self.context, 
-                config="hyde")
+                prompt="hyde")
         elif retrievalConfig.rewriteStrategy == RewriteStrategy.QUERY_REWRITE:
             self.rewriteAgent = PromptAgent(
                 context=self.context, 
-                config="query_rewrite")
+                prompt="query_rewrite")
 
         self.denseRetriever = memoryWithIndex.index.denseIndex.as_retriever(
             similarity_top_k=self.retrievalConfig.channelRecall)
@@ -135,6 +135,7 @@ class RetrievalModule:
                 **kwargs)
             curQuery = curQuery + "|" + rewriteResp[0].response
 
+        context.setCurQuery(curQuery)
         result = self.engine.retrieve(QueryBundle(curQuery))
         context.setRetrievalResult(result)
         return result
