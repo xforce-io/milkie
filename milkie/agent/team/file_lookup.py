@@ -1,3 +1,4 @@
+import logging
 from llama_index.core import Response
 from milkie.agent.base_agent import BaseAgent
 from milkie.agent.prompt_agent import PromptAgent
@@ -6,6 +7,8 @@ from milkie.config.config import GlobalConfig
 from milkie.context import Context
 from milkie.global_context import GlobalContext
 from milkie.model_factory import ModelFactory
+
+logger = logging.getLogger(__name__)
 
 class FileLookupAgent(BaseAgent):
     
@@ -23,13 +26,14 @@ class FileLookupAgent(BaseAgent):
 
     def execute(self, query: str, args: dict, **kwargs) -> Response:
         response = self.retrievalAgent.execute(args["query_str"])
-        self.logger.debug(f"retrieval result[{response}]")
-        
+        curQuery = response.metadata["curQuery"]
         blocks = response.metadata["blocks"]
+        logger.debug(f"retrieval query[{curQuery}] result[{response}] blocks[{len(blocks)}]")
+        
         return self.lookuper.execute(
-            response.metadata["curQuery"],
+            curQuery,
             args={
-                "query_str":query,
+                "query_str":curQuery,
                 "context_str":"\n".join(blocks)
             })
 
