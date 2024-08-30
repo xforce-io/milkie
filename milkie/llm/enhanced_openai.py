@@ -1,8 +1,8 @@
 import logging
 from queue import Queue
 from typing import Any
-from llama_index.core.llms.llm import LLM
 from openai import OpenAI
+from openai.types.chat import ChatCompletion
 from llama_index.core.base.llms.types import CompletionResponse
 from milkie.llm.cache_openai import CacheMgr
 from milkie.llm.enhanced_llm import EnhancedLLM, LLMApi, QueueRequest, QueueResponse
@@ -82,34 +82,38 @@ class EnhancedOpenAI(EnhancedLLM):
                 logger.debug("cache hit!")
                 resQueue.put(QueueResponse(
                     requestId=request.requestId, 
-                    output=cached["output"],
+                    chatCompletion=ChatCompletion.model_validate_json(cached["chatCompletion"]),
                     numTokens=cached["numTokens"]))
                 return
             
             try:
-                response = self._llm.getClient().chat.completions.create(
-                    model=self.model_name,
-                    messages=messages,
-                    stream=False
-                )
+                theArgs = {
+                    "model" : self.model_name,
+                    "messages" : messages,
+                    "stream" : False,
+                }
+                if "tools" in genArgs:
+                    theArgs["tools"] = genArgs["tools"]
+                
+                response = self._llm.getClient().chat.completions.create(**theArgs)
             except Exception as e:
                 resQueue.put(QueueResponse(
                     requestId=request.requestId, 
-                    output="fail answer",
+                    chatCompletion="fail answer",
                     numTokens=1))
                 logger.error(f"Failed to complete request[{request.prompt}]")
                 return 
             
             resQueue.put(QueueResponse(
                 requestId=request.requestId, 
-                output=response.choices[0].message.content,
+                chatCompletion=response,
                 numTokens=response.usage.completion_tokens))
 
             self._cacheMgr.setValue(
                 modelName=self.model_name, 
                 key=messages, 
                 value={
-                    "output" : response.choices[0].message.content,
+                    "chatCompletion" : response.model_dump_json(),
                     "numTokens" : response.usage.completion_tokens,
                 })
 

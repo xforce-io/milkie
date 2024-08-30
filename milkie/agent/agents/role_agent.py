@@ -3,14 +3,14 @@ from enum import Enum
 
 from llama_index.core import Response
 
-from milkie.agent.base_agent import BaseAgent
+from milkie.agent.base_block import BaseBlock
 from milkie.context import Context
 from milkie.llm.inference import chat
 from milkie.tools.tool import LLM, Coder, Tool, ToolSet
 
 logger = logging.getLogger(__name__)
 
-class RoleAgent(BaseAgent):
+class RoleAgent(BaseBlock):
     
     def __init__(
             self, 

@@ -1,11 +1,11 @@
 from llama_index.core import Response
-from milkie.agent.prompt_agent import PromptAgent
-from milkie.agent.retrieval_agent import RetrievalAgent
-from milkie.agent.team.team import Team
+from milkie.agent.llm_block import LLMBlock
+from milkie.agent.retrieval_block import RetrievalAgent
+from milkie.agent.agents.base_agent import BaseAgent
 from milkie.context import Context
 
 
-class MapReduceQA(Team):
+class MapReduceQA(BaseAgent):
 
     def __init__(
             self, 
@@ -17,11 +17,11 @@ class MapReduceQA(Team):
             self.context, 
             self.config)
 
-        self.blockQA = PromptAgent(
+        self.blockQA = LLMBlock(
             self.context, 
             prompt="block_process")
 
-        self.blockProcess = PromptAgent(
+        self.blockProcess = LLMBlock(
             self.context, 
             prompt="block_process")
 

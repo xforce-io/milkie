@@ -1,10 +1,11 @@
 from abc import ABC, abstractmethod
-from llama_index.core import Response
 
+from llama_index.core import Response
 from milkie.config.config import GlobalConfig
 from milkie.context import Context
 
-class BaseAgent(ABC):
+
+class BaseBlock(ABC):
 
     def __init__(
             self,

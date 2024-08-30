@@ -251,7 +251,7 @@ class EnhancedVLLM(EnhancedLLM):
                 result = response.json()
                 resQueue.put(QueueResponse(
                     requestId=request.requestId, 
-                    output=result["raw"]["model_output"]))
+                    chatCompletion=result["raw"]["model_output"]))
             else:
                 raise ValueError("Failed to complete request, status code: %d" % response.status_code)
 

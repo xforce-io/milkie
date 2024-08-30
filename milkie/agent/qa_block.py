@@ -1,7 +1,7 @@
 from llama_index.core import Response
 
 from milkie.action import ActionModule
-from milkie.agent.base_agent import BaseAgent
+from milkie.agent.base_block import BaseBlock
 from milkie.config.config import GlobalConfig
 from milkie.context import Context
 from milkie.decision.decision import DecisionModule
@@ -11,7 +11,7 @@ from milkie.reasoning import ReasoningModule
 from milkie.retrieval.retrieval import RetrievalModule
 
 
-class QAAgent(BaseAgent):
+class QABlock(BaseBlock):
 
     def __init__(
             self, 
@@ -67,5 +67,5 @@ class QAAgent(BaseAgent):
         return self.decisionModule.decide(context, **kwargs)
 
 if __name__ == "__main__":
-    agent = QAAgent(config="qa")
+    agent = QABlock(config="qa")
     agent.execute("你好", args=None)

@@ -1,8 +1,8 @@
 from abc import abstractmethod
 from typing import Any
 
-from milkie.agent.base_agent import BaseAgent
-from milkie.agent.prompt_agent import PromptAgent
+from milkie.agent.base_block import BaseBlock
+from milkie.agent.llm_block import LLMBlock
 from milkie.agent.team.deepqa import DeepQA
 from milkie.agent.team.file_lookup import FileLookupAgent
 from milkie.agent.team.mrqa import MapReduceQA
@@ -15,7 +15,7 @@ class Strategy(object):
         pass
 
     @abstractmethod
-    def createAgent(self) -> BaseAgent:
+    def createAgent(self) -> BaseBlock:
         pass
 
     def __str__(self) -> str:
@@ -41,7 +41,7 @@ class StrategyMRQA(Strategy):
     def getAgentName(self) -> str:
         return self.agentName
 
-    def createAgent(self, context :Context) -> BaseAgent:
+    def createAgent(self, context :Context) -> BaseBlock:
         return MapReduceQA(context, self.agentName)
 
     def __str__(self) -> str:
@@ -55,7 +55,7 @@ class StrategyDeepQA(Strategy):
     def getAgentName(self) -> str:
         return self.agentName
 
-    def createAgent(self, context :Context) -> BaseAgent:
+    def createAgent(self, context :Context) -> BaseBlock:
         return DeepQA(context, self.agentName)
 
     def __str__(self) -> str:
@@ -69,8 +69,8 @@ class StrategyRaw(Strategy):
     def getAgentName(self) -> str:
         return self.agentName
 
-    def createAgent(self, context :Context) -> BaseAgent:
-        return PromptAgent(context, None)
+    def createAgent(self, context :Context) -> BaseBlock:
+        return LLMBlock(context, None)
 
     def __str__(self) -> str:
         return "Raw"
@@ -83,7 +83,7 @@ class StrategyFileLookup(Strategy):
     def getAgentName(self) -> str:
         return self.agentName
 
-    def createAgent(self, context :Context) -> BaseAgent:
+    def createAgent(self, context :Context) -> BaseBlock:
         return FileLookupAgent(context)
 
     def __str__(self) -> str:

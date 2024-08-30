@@ -1,19 +1,19 @@
 import logging
 from llama_index.core import Response
-from milkie.agent.qa_agent import QAAgent
-from milkie.agent.team.team import Team
+from milkie.agent.qa_block import QABlock
+from milkie.agent.agents.base_agent import BaseAgent
 from milkie.context import Context
 
 logger = logging.getLogger(__name__)
 
-class DeepQA(Team):
+class DeepQA(BaseAgent):
    
     def __init__(
             self,
             context :Context,
             config :str) -> None:
          super().__init__(context, config)
-         self.qaAgent = QAAgent(context, config)
+         self.qaAgent = QABlock(context, config)
       
     def execute(self, query, **kwargs) -> Response:
         return self.qaAgent.execute(query, **kwargs)

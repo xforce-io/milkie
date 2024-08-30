@@ -32,13 +32,14 @@ def chat(
 
     import time
     t0 = time.time()
-    response.response, numTokens = llm.predict(
+    response.response, numTokens, chatCompletion = llm.predict(
         prompt=chatPromptTmpl,
         promptArgs=promptArgs,
         **kwargs)
     t1 = time.time()
     answer = response.response.replace("\n", "//")
     response.metadata["numTokens"] = numTokens
+    response.metadata["chatCompletion"] = chatCompletion
     logger.debug(f"chat prompt[{prompt}] answer[{answer}] ({t1-t0:.2f}s)")
     return response
 
@@ -64,17 +65,15 @@ def chatBatch(
 
     chatPromptTmpl = ChatPromptTemplate(message_templates=messageTemplates)
 
-    import time
-    t0 = time.time()
     resultBatch = llm.predictBatch(
         prompt=chatPromptTmpl,
         argsList=argsList,
         **kwargs)
-    t1 = time.time()
 
     responses = []
     for result in resultBatch:
         response = Response(response=result[0], source_nodes=None, metadata={})
         response.metadata["numTokens"] = result[1]
+        response.metadata["chatCompletion"] = result[2]
         responses += [response]
     return responses

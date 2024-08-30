@@ -1,12 +1,9 @@
 import logging
 from llama_index.core import Response
-from milkie.agent.base_agent import BaseAgent
-from milkie.agent.prompt_agent import PromptAgent
-from milkie.agent.retrieval_agent import RetrievalAgent
-from milkie.config.config import GlobalConfig
+from milkie.agent.agents.base_agent import BaseAgent
+from milkie.agent.llm_block import LLMBlock
+from milkie.agent.retrieval_block import RetrievalAgent
 from milkie.context import Context
-from milkie.global_context import GlobalContext
-from milkie.model_factory import ModelFactory
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +17,7 @@ class FileLookupAgent(BaseAgent):
         self.retrievalAgent = RetrievalAgent(
             context)
 
-        self.lookuper = PromptAgent(
+        self.lookuper = LLMBlock(
             context, 
             "file_lookup")
 

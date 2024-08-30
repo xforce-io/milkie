@@ -10,7 +10,7 @@ from llama_index.core.response_synthesizers.type import ResponseMode
 from llama_index.core.schema import NodeWithScore, TextNode
 from llama_index.retrievers.bm25.base import BM25Retriever
 
-from milkie.agent.prompt_agent import PromptAgent
+from milkie.agent.llm_block import LLMBlock
 from milkie.agent.query_structure import QueryType
 from milkie.config.config import ChunkAugmentType, GlobalConfig, RerankPosition, RetrievalConfig, RewriteStrategy
 from milkie.context import Context
@@ -41,11 +41,11 @@ class RetrievalModule:
             
         self.rewriteAgent = None
         if retrievalConfig.rewriteStrategy == RewriteStrategy.HYDE:
-            self.rewriteAgent = PromptAgent(
+            self.rewriteAgent = LLMBlock(
                 context=self.context, 
                 prompt="hyde")
         elif retrievalConfig.rewriteStrategy == RewriteStrategy.QUERY_REWRITE:
-            self.rewriteAgent = PromptAgent(
+            self.rewriteAgent = LLMBlock(
                 context=self.context, 
                 prompt="query_rewrite")
 

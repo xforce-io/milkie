@@ -38,7 +38,7 @@ class LLMApi(CustomLLM):
         default=8192,
     )
 
-    _client: Any = PrivateAttr()
+    _client: PrivateAttr()
 
     def __init__(self, 
             context_window :int,
@@ -48,7 +48,7 @@ class LLMApi(CustomLLM):
 
         self.context_window = context_window
         self.model = model_name
-        self._client = client
+        object.__setattr__(self, "_client", client) 
 
     def getClient(self):
         return self._client
@@ -87,10 +87,10 @@ class QueueRequest:
 class QueueResponse:
     def __init__(self,
             requestId :int,
-            output :Any,
+            chatCompletion :Any,
             numTokens: int=0) -> None:
         self.requestId = requestId
-        self.output = output
+        self.chatCompletion = chatCompletion
         self.numTokens = numTokens
         
 class EnhancedLLM(object):
@@ -164,7 +164,7 @@ class EnhancedLLM(object):
         numTokens = response.raw["num_tokens"]
         if numTokens == 0:
             numTokens = len(response.raw["model_output"])
-        return (self._llm._parse_output(output), numTokens)
+        return (self._llm._parse_output(output), numTokens, response.raw["chat_completion"])
 
     @torch.inference_mode()
     def predictBatch(
@@ -220,13 +220,13 @@ class EnhancedLLM(object):
         if self._systemPrompt is not None:
             for msgs in messages:
                 msgs.insert(0, ChatMessage(role="system", content=self._systemPrompt))
-        responses = self._chatBatch(messages, **kwargs)
-        for response in responses:
-            output = response.message.content or ""
-            numTokens = response.raw["num_tokens"]
+        chatResponses = self._chatBatch(messages, **kwargs)
+        for chatResponse in chatResponses:
+            output = chatResponse.message.content or ""
+            numTokens = chatResponse.raw["num_tokens"]
             if numTokens == 0:
-                numTokens = len(response.raw["model_output"])
-            result += [(self._llm._parse_output(output), numTokens)]
+                numTokens = len(chatResponse.raw["model_output"])
+            result += [(self._llm._parse_output(output), numTokens, chatResponse.raw["chat_completion"])]
         return result
 
     def _chat(self, messages: Sequence[ChatMessage], **kwargs: Any) -> ChatResponse:
@@ -252,11 +252,11 @@ class EnhancedLLM(object):
 
         return [completion_response_to_chat_response(completionResponse) for completionResponse in completionResponses]
 
-    def _complete(self, prompt: str, formatted: bool = False, **kwargs: Any) -> Any:
+    def _complete(self, prompt: str, formatted: bool = False, **kwargs: Any) -> list[CompletionResponse]:
         return self._completeBatch([prompt], **kwargs)[0]
 
     @abstractmethod
-    def _completeBatch(self, prompts: list[str], **kwargs: Any) -> Any:
+    def _completeBatch(self, prompts: list[str], **kwargs: Any) -> list[CompletionResponse]:
         pass
 
     @abstractmethod
@@ -304,23 +304,26 @@ class EnhancedLLM(object):
         for t in threads:
             t.join()
 
-        resps :list[QueueResponse] = []
+        queueResponses :list[QueueResponse] = []
         while not resQueue.empty():
-            resps.append(resQueue.get())
-        resps.sort(key=lambda x: order[x.requestId])
+            queueResponses.append(resQueue.get())
+        queueResponses.sort(key=lambda x: order[x.requestId])
 
-        assert len(resps) == len(prompts)
+        assert len(queueResponses) == len(prompts)
 
         completionTokens = []
-        for resp in resps:
-            completionTokens += [tokenIdExtractor(resp.output)]
+        for queueResponse in queueResponses:
+            completionTokens += [tokenIdExtractor(queueResponse.chatCompletion)]
         completion = self._tokenizer.batch_decode(completionTokens, skip_special_tokens=True)
 
         completionResponses = []
-        for i, resp in enumerate(resps):
+        for i, queueResponse in enumerate(queueResponses):
             completionResponses += [CompletionResponse(
                 text=completion[i], 
-                raw={"model_output": tokenIdExtractor(resp.output), "num_tokens": 0})]
+                raw={
+                    "model_output": tokenIdExtractor(queueResponse.chatCompletion.choices[0].message.content), 
+                    "num_tokens": 0,
+                    "chat_completion": queueResponse.chatCompletion})]
         return completionResponses
 
     def _completeBatchNoTokenizationAsync(
@@ -359,16 +362,20 @@ class EnhancedLLM(object):
         for t in threads:
             t.join()
 
-        resps :list[QueueResponse] = []
+        queueResponses :list[QueueResponse] = []
         while not resQueue.empty():
-            resps.append(resQueue.get())
-        resps.sort(key=lambda x: order[x.requestId])
+            queueResponses.append(resQueue.get())
+        queueResponses.sort(key=lambda x: order[x.requestId])
 
-        assert len(resps) == len(prompts)
+        assert len(queueResponses) == len(prompts)
 
         completionResponses = []
-        for i, resp in enumerate(resps):
+        for i, queueResponse in enumerate(queueResponses):
+            textContent = queueResponse.chatCompletion.choices[0].message.content
             completionResponses += [CompletionResponse(
-                text=resp.output,
-                raw={"model_output": None, "num_tokens": resp.numTokens})]
+                text=textContent if textContent is not None else "",
+                raw={
+                    "model_output": None, 
+                    "num_tokens": queueResponse.numTokens,
+                    "chat_completion": queueResponse.chatCompletion})]
         return completionResponses

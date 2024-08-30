@@ -1,14 +1,14 @@
 from llama_index.core import Response
 from llama_index.core.schema import TextNode
 
-from milkie.agent.base_agent import BaseAgent
+from milkie.agent.base_block import BaseBlock
 from milkie.agent.query_structure import parseQuery
 from milkie.context import Context
 from milkie.memory.memory_with_index import MemoryWithIndex
 from milkie.retrieval.retrieval import RetrievalModule
 
 
-class RetrievalAgent(BaseAgent):
+class RetrievalAgent(BaseBlock):
 
     def __init__(
             self,
