@@ -8,6 +8,7 @@ from typing import List
 from llama_index.core import Response
 
 from milkie.agent.base_block import BaseBlock
+from milkie.config.constant import MaxLenLastStepResult
 from milkie.context import Context
 from milkie.functions.base import BaseToolkit, FuncExecRecord
 from milkie.functions.sample_tool_kits import SampleToolKit
@@ -100,12 +101,11 @@ class InstFlag:
 
 class PromptMaker:
 
-    MaxLenLastStepResult = 5000
-    
     def __init__(self) -> None:
         self.task :str = None
         self.taskDetails :str = None
-        self.instruction :str = None
+        self.origInstruction :str = None
+        self.formattedInstruction :str = None
         self.instructionDetails :str = None
         self.toolsDesc :str = None
         self.optionDecompose = False
@@ -117,8 +117,12 @@ class PromptMaker:
     def setTaskDetails(self, details: str):
         self.taskDetails = details
 
-    def setInstruction(self, instruction: str):
-        self.instruction = instruction
+    def setOrigInstruction(self, instruction: str):
+        self.origInstruction = instruction
+        self.formattedInstruction = instruction
+
+    def setFormattedInstruction(self, instruction: str):
+        self.formattedInstruction = instruction
 
     def setInstructionDetails(self, details: str):
         self.instructionDetails = details
@@ -146,7 +150,7 @@ class PromptMaker:
             instructionRecords :list[InstructionRecord],
             **args):
         resultPrompt = f"""
-        你当前的指令是： {self.instruction}
+        你当前的指令是： {self.origInstruction}
         """
 
         resultPrompt += "前序指令情况如下:\n"
@@ -155,15 +159,15 @@ class PromptMaker:
         resultPrompt += "```\n"
 
         resultPrompt += f"""
-        你当前的指令是： {self.instruction}
+        你当前的指令是： {self.formattedInstruction}
         """
         return resultPrompt
 
     def prevStepSummary(self, instructionRecords :list[InstructionRecord]):
         result = ""
         if len(instructionRecords) > 0:
-            result += f"上一步总结: {instructionRecords[0].synthesizedInstructionRecord[:self.MaxLenLastStepResult]}\n"
-            result += f"上一步详情: {instructionRecords[0].result.response.response[:self.MaxLenLastStepResult]}\n"
+            result += f"上一步总结: {instructionRecords[0].synthesizedInstructionRecord[:MaxLenLastStepResult]}\n"
+            result += f"上一步详情: {instructionRecords[0].result.response.response[:MaxLenLastStepResult]}\n"
         return result
 
 class StepLLMBlock(StepLLM):
@@ -178,8 +182,9 @@ class StepLLMAnalysis(StepLLMBlock):
     def makePrompt(self, **args) -> str:
         resultPrompt = self.promptMaker.promptForTask(**args)
         resultPrompt += f"""
-        如果任务目标是逐点表述，请根据任务目标字面表述��照以下格式拆为逐条指令。
+        如果任务目标是逐点表述，请根据任务目标字面表述按照格式拆为逐条指令。
         如果任务目标没有逐点表述，仅保留原始任务即可。
+        ‘逐点’的定义为“[非符号字符串]]+[.或者、]+空格”，每一点可以跨行
         注意：请不要根据自己对任务目标的理解进行拆解!仅仅根据字面的逐点指示进行拆解!
 
         示例如下
@@ -194,45 +199,53 @@ class StepLLMAnalysis(StepLLMBlock):
         任务目标：
         请执行任务 
         Bob. 生成个随机数 
-        Alice, #IF 如果上一步结果是奇数，跳到 三，如果是偶数，跳到 4 
-        Cath. 讲个笑话 #END
-        Dave. #CODE用结果写一篇短文
+            这个随机数需要时奇数
+            返回这个数
+        Alice, #IF 如果上一步结果是奇数，跳到 三，
+            如果是偶数，跳到 4 
+        Cath. 讲个笑话 
+            #END
+        Dave. #CODE
+            用结果写一篇短文
         
         拆解结果：
         1. **指令 Bob**
-        - 生成个随机数
+        - 生成个随机数//这个随机数需要是奇数//返回这个数
           
         2. **指令 Alice**
-        - #IF 如果上一步结果是奇数，跳到 三，如果是偶数，跳到 4 
+        - #IF 如果上一步结果是奇数，跳到 三//如果是偶数，跳到 4 
        
         3. **指令 Cath**
-        - 讲个笑话 #END
+        - 讲个笑话//#END
        
         4. **指令 Dave**
-        - #CODE用结果写一篇短文
+        - #CODE //用结果写一篇短文
 
         任务目标：
         请执行任务 
         1. 生成个随机数 
-        二、 #IF 如果上一步结果是奇数，跳到 三，如果是偶数，跳到 4 
+        二、 #IF 如果上一步结果是奇数，跳到 三，
+            如果是偶数，跳到 4 
         三. 讲个笑话 #END
-        四、 #CODE用结果写一篇短文
+        四、 #CODE
+            用结果写一篇短文
         
         拆解结果：
         1. **指令 1**
         - 生成个随机数
           
         2. **指令 二**
-        - #IF 如果上一步结果是奇数，跳到 三，如果是偶数，跳到 4 
+        - #IF 如果上一步结果是奇数，跳到 三，//如果是偶数，跳到 4 
        
         3. **指令 三**
         - 讲个笑话 #END
        
         4. **指令 四**
-        - #CODE用结果写一篇短文
+        - #CODE //用结果写一篇短文
 
         ...
         ```
+        现在，请给我指令拆解的结果：
         """
         return resultPrompt
 
@@ -369,7 +382,7 @@ class Instruction:
 
         self.promptMaker = PromptMaker()
         self.promptMaker.setTask(llmBlock.taskEngine.task)
-        self.promptMaker.setInstruction(self.curInstruct)
+        self.promptMaker.setOrigInstruction(self.curInstruct)
         self.promptMaker.setPrev(self.prev)
         self.promptMaker.setToolsDesc(self.llmBlock.tools.getToolsDesc())
         self.stepInstAnalysis = StepLLMInstAnalysis(
@@ -441,7 +454,7 @@ class Instruction:
         self.formattedInstruct = self._nested_format(self.curInstruct, self.varDict)
         if self.flag.flag == InstFlag.Flag.GOTO:
             self.formattedInstruct = self.formattedInstruct.replace(f"#GOTO {self.flag.label}", "")
-        self.promptMaker.setInstruction(self.formattedInstruct)
+        self.promptMaker.setFormattedInstruction(self.formattedInstruct)
 
     @staticmethod
     def _nested_format(template, data):
@@ -550,7 +563,7 @@ class LLMBlock(BaseBlock):
             context :Context = None,
             config :str = None,
             prompt :str = None,
-            promptExpr :str = None,
+            promptExpr :str = "execute task: {query_str}",
             tools :BaseToolkit = None,
             jsonKeys :list = None) -> None:
         super().__init__(context, config)
@@ -616,18 +629,8 @@ if __name__ == "__main__":
 #
     links = llmBlock.execute("""
         1. 获取 https://huggingface.co/papers 页面内容
-        2. 页面内容如下：--{resp.1}--。从页面内容中提取出所有论文的标题和链接，格式为： -- 标题1~~链接1||-- 标题2~~链接2||-- 标题3~~链接3
+        2. 从页面内容中提取出所有论文的标题和链接，格式为： -- 标题1~~链接1||-- 标题2~~链接2||-- 标题3~~链接3。页面内容如下：--{resp.1}--。从页面内容中提取出所有论文的标题和链接，格式为： -- 标题1~~链接1||-- 标题2~~链接2||-- 标题3~~链接3
     """).response
 
     import pdb; pdb.set_trace()
-
-    paper_list = []
-    papers = links.split("||")
-    for paper in papers:
-        if "~~" in paper:
-            title, link = paper.split("~~")
-            title = title.strip("-- ").strip()
-            link = link.strip()
-            paper_list.append((title, link))
-
-    print(paper_list)
+    print(paperList)

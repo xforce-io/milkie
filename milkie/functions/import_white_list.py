@@ -6,6 +6,4 @@ WhiteListImport = [
     "typing.Dict",
     "typing.Optional",
     "typing.Union",
-    "requests",
-    "PyPDF2",
 ]
