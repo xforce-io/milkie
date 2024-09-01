@@ -1,12 +1,12 @@
 # =========== Copyright 2023 @ CAMEL-AI.org. All Rights Reserved. ===========
-# Licensed under the Apache License, Version 2.0 (the “License”);
+# Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
 #
 # Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an “AS IS” BASIS,
+# distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
@@ -14,8 +14,11 @@
 import ast
 import difflib
 import importlib
+import math
+import random
 import typing
 from typing import Any, ClassVar, Dict, List, Optional
+import contextlib
 
 from milkie.interpreter.base import BaseInterpreter
 from milkie.interpreter.interpreter_error import InterpreterError
@@ -93,6 +96,32 @@ class InternalPythonInterpreter(BaseInterpreter):
         self.import_white_list = import_white_list or list()
         self.raise_error = raise_error
         self.unsafe_mode = unsafe_mode
+        
+        # 添加内置函数到 state 中
+        self._add_builtins_to_state()
+
+    def _add_builtins_to_state(self):
+        # 添加常用的内置函数到 state 中
+        builtins = {
+            'len': len,
+            'range': range,
+            'int': int,
+            'float': float,
+            'str': str,
+            'list': list,
+            'dict': dict,
+            'tuple': tuple,
+            'set': set,
+            'sum': sum,
+            'max': max,
+            'min': min,
+            'random': random,
+            'math': math,
+            'print': print,
+            "open": open,
+            # 可以根据需要添加更多内置函数
+        }
+        self.state.update(builtins)
 
     def run(self, code: str, code_type: str) -> str:
         r"""Executes the given code with specified code type in the
@@ -288,6 +317,12 @@ class InternalPythonInterpreter(BaseInterpreter):
         elif isinstance(expression, ast.UnaryOp):
             # Binary Operator -> return the result value
             return self._execute_unaryop(expression)
+        elif isinstance(expression, ast.With):
+            return self._execute_with(expression)
+        elif isinstance(expression, ast.Try):
+            return self._execute_try(expression)
+        elif isinstance(expression, ast.FunctionDef):
+            return self._execute_function_def(expression)
         else:
             # For now we refuse anything else. Let's add things as we need
             # them.
@@ -503,10 +538,103 @@ class InternalPythonInterpreter(BaseInterpreter):
         else:
             raise InterpreterError(f"Operator not supported: {operator}")
 
+    def _execute_with(self, with_stmt: ast.With) -> Any:
+        context_managers = []
+        for item in with_stmt.items:
+            cm = self._execute_ast(item.context_expr)
+            if item.optional_vars:
+                self._assign(item.optional_vars, cm.__enter__())
+            context_managers.append(cm)
+
+        result = None
+        try:
+            for stmt in with_stmt.body:
+                result = self._execute_ast(stmt)
+        finally:
+            for cm in reversed(context_managers):
+                cm.__exit__(None, None, None)
+
+        return result
+
+    def _execute_try(self, try_stmt: ast.Try) -> Any:
+        try:
+            for stmt in try_stmt.body:
+                result = self._execute_ast(stmt)
+        except Exception as e:
+            for handler in try_stmt.handlers:
+                if handler.type is None or isinstance(e, self._execute_ast(handler.type)):
+                    if handler.name:
+                        self.state[handler.name] = e
+                    for stmt in handler.body:
+                        result = self._execute_ast(stmt)
+                    break
+            else:
+                raise
+        else:
+            return result
+        finally:
+            for stmt in try_stmt.finalbody:
+                self._execute_ast(stmt)
+
+    def _execute_function_def(self, func_def: ast.FunctionDef) -> None:
+        def function(*args, **kwargs):
+            # 创建一个新的局部作用域
+            local_scope = {}
+            
+            # 处理参数
+            for arg, value in zip(func_def.args.args, args):
+                local_scope[arg.arg] = value
+            
+            # 处理默认参数
+            defaults = func_def.args.defaults
+            for arg, default in zip(reversed(func_def.args.args), reversed(defaults)):
+                if arg.arg not in local_scope:
+                    local_scope[arg.arg] = self._execute_ast(default)
+            
+            # 处理关键字参数
+            for kwarg, value in kwargs.items():
+                local_scope[kwarg] = value
+            
+            # 保存当前状态
+            old_state = self.state.copy()
+            
+            # 更新状态以包含局部变量
+            self.state.update(local_scope)
+            
+            result = None
+            try:
+                # 执行函数体
+                for stmt in func_def.body:
+                    result = self._execute_ast(stmt)
+                    if isinstance(stmt, ast.Return):
+                        break
+            finally:
+                # 恢复原始状态
+                self.state = old_state
+            
+            return result
+
+        # 将函数添加到解释器的状态中
+        self.state[func_def.name] = function
+
+    def _execute_return(self, return_stmt: ast.Return) -> Any:
+        if return_stmt.value:
+            return self._execute_ast(return_stmt.value)
+        else:
+            return None
+
     def _get_value_from_state(self, key: str) -> Any:
         if key in self.state:
             return self.state[key]
+        elif key in self.fuzz_state:
+            return self.fuzz_state[key]
         else:
+            # 尝试从 Python 内置函数中获取
+            builtin_value = getattr(__builtins__, key, None)
+            if builtin_value is not None:
+                return builtin_value
+            
+            # 如果仍然找不到，尝试模糊匹配
             close_matches = difflib.get_close_matches(
                 key, list(self.fuzz_state.keys()), n=1
             )

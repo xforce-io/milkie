@@ -483,8 +483,35 @@ class AgentsConfig(BaseConfig):
     def getConfig(self, config :str) -> SingleAgentConfig:
         return self.agentMap.get(config)
 
-class GlobalConfig(BaseConfig):
+class EmailConfig(BaseConfig):
+    def __init__(self, smtp_server: str, smtp_port: int, username: str, password: str):
+        self.smtp_server = smtp_server
+        self.smtp_port = smtp_port
+        self.username = username
+        self.password = password
 
+    @classmethod
+    def fromArgs(cls, config: dict):
+        return cls(
+            smtp_server=config["smtp_server"],
+            smtp_port=config["smtp_port"],
+            username=config["username"],
+            password=config["password"]
+        )
+
+class ToolsConfig(BaseConfig):
+    def __init__(self, email_config: EmailConfig):
+        self.email_config = email_config
+
+    def getEmailConfig(self) -> EmailConfig:
+        return self.email_config
+
+    @classmethod
+    def fromArgs(cls, config: dict):
+        email_config = EmailConfig.fromArgs(config.get("email", {}))
+        return cls(email_config=email_config)
+
+class GlobalConfig(BaseConfig):
     instanceCnt = 0
     
     def __init__(self, config):
@@ -497,14 +524,15 @@ class GlobalConfig(BaseConfig):
             config = loadFromYaml(config)
         self.initFromDict(config)
 
-    def initFromDict(self, config :dict):
+    def initFromDict(self, config: dict):
         self.llmConfig = LLMConfig.fromArgs(config["llm"])
         self.llmCodeConfig = LLMConfig.fromArgs(config["llm_code"])
         self.embeddingConfig = EmbeddingConfig.fromArgs(config["embedding"]) if "embedding" in config.keys() else None
-        self.agentsConfig :AgentsConfig = AgentsConfig.fromArgs(config["agents"])
+        self.agentsConfig: AgentsConfig = AgentsConfig.fromArgs(config["agents"])
         self.memoryConfig = MemoryConfig.fromArgs(config["memory"])
         self.indexConfig = IndexConfig.fromArgs(config["index"])
         self.retrievalConfig = RetrievalConfig.fromArgs(config["retrieval"]) if "retrieval" in config.keys() else None
+        self.toolsConfig = ToolsConfig.fromArgs(config.get("tools", {}))
 
         for agentConfig in self.agentsConfig.agentConfigs:
             if agentConfig.type == AgentType.QA:
@@ -537,3 +565,9 @@ class GlobalConfig(BaseConfig):
 
     def getRetrievalConfig(self) -> RetrievalConfig:
         return self.retrievalConfig
+
+    def getToolsConfig(self) -> ToolsConfig:
+        return self.toolsConfig
+    
+    def getEmailConfig(self) -> EmailConfig:
+        return self.toolsConfig.getEmailConfig()

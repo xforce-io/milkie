@@ -7,7 +7,7 @@ from typing import List, Dict
 
 logger = logging.getLogger(__name__)
 
-class Cache:
+class CacheKV:
     def __init__(self, filePath: str, dumpInterval: int = 5):
         self.filePath = filePath
         self.cache = {}
@@ -52,7 +52,7 @@ class Cache:
             self.cache[keyStr] = value
         self.dumpCache()
 
-class CacheMgr:
+class CacheKVMgr:
 
     FilePrefix = "cache_"
     
@@ -67,15 +67,15 @@ class CacheMgr:
             os.makedirs(self.cacheDir)
         
         for fileName in os.listdir(self.cacheDir):
-            if fileName.startswith(CacheMgr.FilePrefix) and fileName.endswith('.json'):
-                modelName = fileName[len(CacheMgr.FilePrefix):-5]
+            if fileName.startswith(CacheKVMgr.FilePrefix) and fileName.endswith('.json'):
+                modelName = fileName[len(CacheKVMgr.FilePrefix):-5]
                 filePath = os.path.join(self.cacheDir, fileName)
                 try:
-                    self.caches[modelName] = Cache(filePath, self.dumpInterval)
+                    self.caches[modelName] = CacheKV(filePath, self.dumpInterval)
                 except Exception as e:
                     logger.error(f"Error initializing cache for {modelName}: {e}")
 
-    def getCache(self, modelName: str) -> Cache:
+    def getCache(self, modelName: str) -> CacheKV:
         return self.caches.get(modelName)
 
     def getValue(self, modelName: str, key: List[Dict]) -> Dict:
@@ -88,12 +88,12 @@ class CacheMgr:
         cache = self.getCache(modelName)
         if not cache:
             filePath = os.path.join(self.cacheDir, f"cache_{modelName}.json")
-            cache = Cache(filePath, self.dumpInterval)
+            cache = CacheKV(filePath, self.dumpInterval)
             self.caches[modelName] = cache
         cache.set(key, value)
 
 if __name__ == "__main__":
-    cacheMgr = CacheMgr('data/cache', dumpInterval=10)
+    cacheMgr = CacheKVMgr('data/cache', dumpInterval=10)
 
     modelName = "exampleModel"
     key = [
@@ -102,7 +102,7 @@ if __name__ == "__main__":
     value = {"data": "some data"}
     cacheMgr.setValue(modelName, key, value)
     
-    cacheMgr = CacheMgr('data/cache', dumpInterval=10)
+    cacheMgr = CacheKVMgr('data/cache', dumpInterval=10)
     cachedValue = cacheMgr.getValue(modelName, key)
     assert cachedValue["data"] == "some data"
 

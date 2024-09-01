@@ -20,6 +20,8 @@ from typing import Any, List
 
 from openai.types.chat.chat_completion_message_tool_call import ChatCompletionMessageToolCall
 
+from milkie.config.constant import MaxLenLogField
+
 from .openai_function import OpenAIFunction
 
 logger = logging.getLogger(__name__)
@@ -67,7 +69,7 @@ class BaseToolkit():
             tool = self.getToolsDict()[toolCall.function.name]
             args = json.loads(toolCall.function.arguments)
             result = tool.func(**args)
-            logger.info(f"funcCall func[{toolCall.function.name}] args[{toolCall.function.arguments}] result[{result}]")
+            logger.info(f"funcCall func[{toolCall.function.name}] args[{toolCall.function.arguments}] result[{result[:MaxLenLogField]}]")
             
             record = FuncExecRecord(toolCall, tool, result)
             records.append(record)

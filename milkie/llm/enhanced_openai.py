@@ -4,7 +4,7 @@ from typing import Any
 from openai import OpenAI
 from openai.types.chat import ChatCompletion
 from llama_index.core.base.llms.types import CompletionResponse
-from milkie.llm.cache_openai import CacheMgr
+from milkie.cache.cache_kv import CacheKVMgr
 from milkie.llm.enhanced_llm import EnhancedLLM, LLMApi, QueueRequest, QueueResponse
 
 logger = logging.getLogger(__name__)
@@ -47,7 +47,7 @@ class EnhancedOpenAI(EnhancedLLM):
             context_window=context_window,
             model_name=model_name,
             client=OpenAI(api_key=api_key, base_url=endpoint))
-        self._cacheMgr = CacheMgr("data/cache/")
+        self._cacheMgr = CacheKVMgr("data/cache/")
 
     def _completeBatch(
             self, 
