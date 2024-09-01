@@ -31,25 +31,6 @@ class SampleToolKit(BaseToolkit):
         self.robotPolicies = loadRobotPolicies("config/robots.yaml")
         self.lastAccessTime = {} 
 
-    def testToolFactorialDifference(self, a: int, b: int) -> int:
-        r"""计算两个数字的阶乘差的绝对值。
-
-        此函数首先计算两给定整数的阶乘，然后计算它们的差的绝对值。
-        这对于比较两个数字的阶乘大小很有用。
-
-        Args:
-            a (int): 第一个整数。
-            b (int): 第二个整数。
-
-        Returns:
-            int: 两个数字的阶乘之差的绝对值。
-
-        Examples:
-            >>> testToolFactorialDifference(4, 3)
-            18  # |4! - 3!| = |24 - 6| = 18
-        """
-        return abs(SampleToolKit._factorial(a) - SampleToolKit._factorial(b))
-
     def searchWebFromDuckDuckGo(
         self, query: str, maxResults: int = 10
     ) -> str:
@@ -94,7 +75,7 @@ class SampleToolKit(BaseToolkit):
         return json.dumps(responses, ensure_ascii=False)
 
     def getWebContentFromUrls(self, inputText: str) -> str:
-        r"""从给定的文本中提取URL并获取网页内容。
+        r"""从给定的文本中提取 urls， 并且获取这些 urls 对应的网页内容。
 
         Args:
             inputText (str): 包含URL的文本。
@@ -131,7 +112,7 @@ class SampleToolKit(BaseToolkit):
 
     def sendEmail(self, to_email: str, subject: str, body: str) -> str:
         """
-        发送电子邮件
+        发送电子邮件给指定邮箱
 
         Args:
             to_email (str): 收件人邮箱地
@@ -236,6 +217,11 @@ class SampleToolKit(BaseToolkit):
             # 构建完整的本地文件路径
             local_path = os.path.join(local_directory, file_name)
             
+            # 检查文件是否已经存在
+            if os.path.exists(local_path):
+                logger.info(f"File already exists: {local_path}")
+                return local_path
+            
             # 使用 requests 直接下载文件
             response = requests.get(url, stream=True)
             response.raise_for_status()  # 如果请求不成功则抛出异常
@@ -261,7 +247,6 @@ class SampleToolKit(BaseToolkit):
 
     def getTools(self) -> List[OpenAIFunction]:
         return [
-            OpenAIFunction(self.testToolFactorialDifference),
             OpenAIFunction(self.searchWebFromDuckDuckGo),
             OpenAIFunction(self.getWebContentFromUrls),
             OpenAIFunction(self.sendEmail),

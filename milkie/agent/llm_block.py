@@ -8,7 +8,7 @@ from typing import List
 from llama_index.core import Response
 
 from milkie.agent.base_block import BaseBlock
-from milkie.config.constant import MaxLenLastStepResult
+from milkie.config.constant import MaxLenLastStepResult, MaxLenLogField
 from milkie.context import Context
 from milkie.functions.base import BaseToolkit, FuncExecRecord
 from milkie.functions.sample_tool_kits import SampleToolKit
@@ -88,6 +88,7 @@ class InstFlag:
     def __init__(self, instruction :str) -> None:
         self.flag = InstFlag.Flag.NONE
         self.label = None
+        self.storeVar = None
 
         if "#END" in instruction:
             self.flag = InstFlag.Flag.END
@@ -98,6 +99,10 @@ class InstFlag:
         elif "GOTO" in instruction:
             self.flag = InstFlag.Flag.GOTO
             self.label = instruction.split("GOTO")[1].split()[0].strip()
+        
+        store_var_match = re.search(r'->\s*([a-zA-Z0-9]+)$', instruction)
+        if store_var_match:
+            self.storeVar = store_var_match.group(1)
 
 class PromptMaker:
 
@@ -175,112 +180,19 @@ class StepLLMBlock(StepLLM):
         super().__init__(llmBlock.context.globalContext, promptMaker)
         self.llmBlock = llmBlock
 
-class StepLLMAnalysis(StepLLMBlock):
-    def __init__(self, promptMaker, llmBlock):
-        super().__init__(promptMaker, llmBlock)
-
-    def makePrompt(self, **args) -> str:
-        resultPrompt = self.promptMaker.promptForTask(**args)
-        resultPrompt += f"""
-        如果任务目标是逐点表述，请根据任务目标字面表述按照格式拆为逐条指令。
-        如果任务目标没有逐点表述，仅保留原始任务即可。
-        ‘逐点’的定义为“[非符号字符串]]+[.或者、]+空格”，每一点可以跨行
-        注意：请不要根据自己对任务目标的理解进行拆解!仅仅根据字面的逐点指示进行拆解!
-
-        示例如下
-        ``` 
-        任务目标：
-        请帮我计算下，1 和 2 的平均数是多少
-        
-        拆解结果：
-        1. **指令 1**
-        - 计算 1 和 2 的平均数是多少
-        
-        任务目标：
-        请执行任务 
-        Bob. 生成个随机数 
-            这个随机数需要时奇数
-            返回这个数
-        Alice, #IF 如果上一步结果是奇数，跳到 三，
-            如果是偶数，跳到 4 
-        Cath. 讲个笑话 
-            #END
-        Dave. #CODE
-            用结果写一篇短文
-        
-        拆解结果：
-        1. **指令 Bob**
-        - 生成个随机数//这个随机数需要是奇数//返回这个数
-          
-        2. **指令 Alice**
-        - #IF 如果上一步结果是奇数，跳到 三//如果是偶数，跳到 4 
-       
-        3. **指令 Cath**
-        - 讲个笑话//#END
-       
-        4. **指令 Dave**
-        - #CODE //用结果写一篇短文
-
-        任务目标：
-        请执行任务 
-        1. 生成个随机数 
-        二、 #IF 如果上一步结果是奇数，跳到 三，
-            如果是偶数，跳到 4 
-        三. 讲个笑话 #END
-        四、 #CODE
-            用结果写一篇短文
-        
-        拆解结果：
-        1. **指令 1**
-        - 生成个随机数
-          
-        2. **指令 二**
-        - #IF 如果上一步结果是奇数，跳到 三，//如果是偶数，跳到 4 
-       
-        3. **指令 三**
-        - 讲个笑话 #END
-       
-        4. **指令 四**
-        - #CODE //用结果写一篇短文
-
-        ...
-        ```
-        现在，请给我指令拆解的结果：
-        """
-        return resultPrompt
-
-    def formatResult(self, result :Response):
-        pattern = re.compile(r'\d+\.\s\*\*指令\s(.*?)\*\*\n((\s*-\s+.*\n)*)')
-        matches = pattern.findall(result.response)
-        instructions = []
-        lastInstruction :Instruction = None
-        for match in matches:
-            label = match[0].strip()
-            instruction = match[1].strip()
-            curInstruction = Instruction(
-                llmBlock=self.llmBlock, 
-                curInstruct=instruction, 
-                label=label,
-                prev=lastInstruction,
-                instructionRecords=self.llmBlock.taskEngine.instructionRecords)
-            instructions.append((label, curInstruction))
-            lastInstruction = curInstruction
-        return AnalysisResult(
-            AnalysisResult.Result.DECOMPOSE,
-            instructions=instructions
-        )
-
 class StepLLMInstAnalysis(StepLLMBlock):
-    def __init__(self, promptMaker, llmBlock, instructionRecords: list[InstructionRecord]) -> None:
+    def __init__(
+            self, 
+            promptMaker, 
+            llmBlock, 
+            instructionRecords: list[InstructionRecord]) -> None:
         super().__init__(promptMaker, llmBlock)
         self.instructionRecords = instructionRecords
         
     def makePrompt(self, **args) -> str:
-        resultPrompt = self.promptMaker.promptForInstruction(
+        return self.promptMaker.promptForInstruction(
             instructionRecords=self.instructionRecords,
             **args)
-        resultPrompt += "请直接给出当前指令的执行结果:"
-        return resultPrompt
 
     def formatResult(self, result :Response) -> InstAnalysisResult:
         chatCompletion = result.metadata["chatCompletion"]
@@ -389,16 +301,12 @@ class Instruction:
             promptMaker=self.promptMaker,
             llmBlock=llmBlock,
             instructionRecords=instructionRecords)
-        self.stepInstAnswer = StepLLMInstAnswer(
-            promptMaker=self.promptMaker,
-            llmBlock=llmBlock,
-            instructionRecords=instructionRecords)
 
     def execute(self, args :dict) -> InstructResult:
         self._formatCurInstruct()
         if self.flag.flag == InstFlag.Flag.CODE:
             result = self.llmBlock.tools.runCodeInterpreter(self.formattedInstruct)
-            logger.info(f"instrExec({self.label}|code): instr[{self.formattedInstruct}] ans[{result}]")
+            logger.info(f"instrExec({self.label}|code): instr[{self.formattedInstruct[:MaxLenLogField]}] ans[{result}]")
             return self._create_result(
                 result,
                 useTool=True,
@@ -412,7 +320,7 @@ class Instruction:
                 goto=result,
                 analysis=self.curInstruct)
             instructResult.goto = result
-            logger.info(f"instrExec({self.label}|if): instr[{self.formattedInstruct}] ans[{result}]")
+            logger.info(f"instrExec({self.label}|if): instr[{self.formattedInstruct[:MaxLenLogField]}] ans[{result}]")
             return instructResult
         
         instAnalysisResult = self.stepInstAnalysis.run(
@@ -422,14 +330,14 @@ class Instruction:
 
         if instAnalysisResult.result == InstAnalysisResult.Result.ANSWER:
             resp = instAnalysisResult.response.replace('\n', '')
-            logger.info(f"instrExec({self.label}|ans): instr[{self.formattedInstruct}] ans[{resp}]")
+            logger.info(f"instrExec({self.label}|ans): instr[{self.formattedInstruct[:MaxLenLogField]}] ans[{resp}]")
             return self._create_result(
                 instAnalysisResult.response, 
                 useTool=False,
                 goto=None,
                 analysis=instAnalysisResult.response)
 
-        logger.info(f"instrExec({self.label}|tool): instr[{self.formattedInstruct}] "
+        logger.info(f"instrExec({self.label}|tool): instr[{self.formattedInstruct[:MaxLenLogField]}] "
                     f"tool[{instAnalysisResult.funcExecRecords[0].tool.get_function_name()}]")
         return self._create_result(
             instAnalysisResult.funcExecRecords[0].result,
@@ -502,18 +410,33 @@ class TaskEngine:
         self.promptMaker = PromptMaker()
         self.promptMaker.setTask(self.task)
 
-        self.stepAnalysis = StepLLMAnalysis(
-            promptMaker=self.promptMaker,
-            llmBlock=llmBlock)
-
         self.instructionRecords :list[InstructionRecord] = []
-        self.varDict = {"resp": {}}  # 修改: 初始化 varDict 和 resp 子字典
+        self.varDict = {"_resp": {}}  # 修改: 初始化 varDict 和 _resp 子字典
 
-    def execute(self, taskArgs :dict) -> tuple:
+    def execute(self, taskArgs :dict, decomposeTask :bool=True) -> tuple:
         self.instructionRecords.clear()
-        self.varDict["resp"].clear()  # 新增: 清空之前的结果
-        analysisResult = self.stepAnalysis.run(args=taskArgs)
+        self.lastInstruction = None
+        self.varDict.clear()
+        self.varDict["_resp"] = {}
+
+        if decomposeTask:
+            analysisResult = self._decomposeTask(self.task.format(**taskArgs))
+        else:
+            analysisResult = AnalysisResult(
+                AnalysisResult.Result.DECOMPOSE, 
+                instructions=[(1, self.task.format(**taskArgs).strip().replace('\n', '//'))])
+
         if analysisResult.result == AnalysisResult.Result.DECOMPOSE:
+            for i in range(len(analysisResult.instructions)):
+                label, instruction = analysisResult.instructions[i]
+                analysisResult.instructions[i] = (
+                    label, 
+                    Instruction(
+                        llmBlock=self.llmBlock, 
+                        curInstruct=instruction, 
+                        label=label,
+                        prev=self.lastInstruction,
+                        instructionRecords=self.instructionRecords))
             self.instructions = analysisResult.instructions
             logger.info(f"analysis ans[{analysisResult.instrSummary()}]")
         else:
@@ -526,9 +449,12 @@ class TaskEngine:
             if not instructResult:
                 raise ValueError(f"TaskEngine failed to execute")
             
-            # 新增: 存储结果
-            self.varDict["resp"][label] = instructResult.response.response
+            #set varDict
+            self.varDict["_resp"][label] = instructResult.response.response
+            if self.lastInstruction.flag.storeVar:
+                self.varDict[self.lastInstruction.flag.storeVar] = instructResult.response.response
 
+            #add instruction record
             self.instructionRecords.append(
                 InstructionRecord(
                     instruction=self.lastInstruction, 
@@ -556,6 +482,43 @@ class TaskEngine:
             self.curIdx += 1
         return instructResult
 
+    @staticmethod
+    def _decomposeTask(task: str) -> AnalysisResult:
+        label_pattern = r'^([\w\u4e00-\u9fff]+)[.、]\s+'
+        
+        lines = task.split('\n')
+        instructions = []
+        current_label = None
+        current_content = []
+
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+
+            match = re.match(label_pattern, line)
+            if match:
+                # 如果有之前的内容，保存它
+                if current_label is not None:
+                    instructions.append((current_label, '//'.join(current_content)))
+                
+                # 开始新的指令
+                current_label = match.group(1)
+                current_content = [line[len(match.group(0)):].strip()]
+            else:
+                # 继续添加到当前内容
+                current_content.append(line)
+
+        # 添加最后一个指令
+        if current_label is not None:
+            instructions.append((current_label, '//'.join(current_content)))
+
+        # 如果没有找到任何指令，将整个任务作为一个指令
+        if not instructions:
+            instructions.append(("1", task.strip().replace('\n', '//')))
+
+        return AnalysisResult(AnalysisResult.Result.DECOMPOSE, instructions=instructions)
+
 class LLMBlock(BaseBlock):
 
     def __init__(
@@ -563,7 +526,7 @@ class LLMBlock(BaseBlock):
             context :Context = None,
             config :str = None,
             prompt :str = None,
-            promptExpr :str = "execute task: {query_str}",
+            promptExpr :str = "执行任务: {query_str}",
             tools :BaseToolkit = None,
             jsonKeys :list = None) -> None:
         super().__init__(context, config)
@@ -581,56 +544,33 @@ class LLMBlock(BaseBlock):
 
         self.taskEngine = TaskEngine(self, self.prompt)
 
-    def execute(self, query :str, args :dict={}) -> Response:
+    def execute(
+            self, 
+            query :str, 
+            args :dict={}, 
+            decomposeTask :bool=True) -> Response:
         logger.info(f"LLMBlock execute: query[{query}] args[{args}]")
         
         taskArgs = {"query_str": query, **args}
-        result = self.taskEngine.execute(taskArgs=taskArgs)
+        result = self.taskEngine.execute(taskArgs=taskArgs, decomposeTask=decomposeTask)
         if result[0]:
-            return Response(response=result[1], metadata={"resp": self.taskEngine.varDict["resp"]})
+            return Response(
+                response=result[1], 
+                metadata=self.taskEngine.varDict)
         else:
             raise ValueError(f"TaskEngine failed to execute")
 
 if __name__ == "__main__":
     llmBlock = LLMBlock(promptExpr="执行任务：{query_str}")
 
-#    print(agent.execute("""
-#        Dog. #CODE 生成一个随机数
-#        Cat. #IF 如果{resp.Dog}是奇数，返回Tiger，如果是偶数，返回Monkey
-#        Tiger、 根据{resp.Dog}讲个笑话, #GOTO Slime
-#        Monkey、 说一首诗
-#        Slime. 把上一步结果中的创作内容发送到我的邮箱里,邮箱是 Freeman.xu@aishu.cn, 标题为哈哈哈
-#        """).response)
+    print(llmBlock.execute("""
+        Dog. #CODE 生成一个随机数
+        Cat. #IF 如果{_resp.Dog}是奇数，返回Tiger，如果是偶数，返回Monkey
+        Tiger、 根据{_resp.Dog}讲个笑话, #GOTO Slime
+        Monkey、 说一首诗
+        Slime. 把上一步结果中的创作内容发送到我的邮箱里,邮箱是 Freeman.xu@aishu.cn, 标题为'测试内容'
+        """).response)
 #        
 #    print(agent.execute(
-#        "1.搜索爱数信息 2.把结果中的链接都贴出来 3.获取链接对应的网页内容 4.根据上面的内容写一段介绍"
+#        "1.搜索爱数信息 2.把结果中的链接都贴出来 3.获取链接对应的网页内容 4.根据上面的内容��一段介绍"
 #        ).response)
-#
-#    print(agent.execute(
-#        "1.计算 12 和 24 的阶乘差多少 2. 上一步结果加上 7 等于多少 3、根据上一���结果写一首诗"
-#        ).response)
-
-    #print(llmBlock.execute("""
-    #1. 获取https://huggingface.co/papers页面内容
-    #2. 从页面内容中提取出所有论文的标题和链接，格式为： - 标题1: 链接1\n- 标题2: 链接2\n- 标题3: 链接3\n
-    #""").response)
-
-#    print(llmBlock.execute("""
-#    1. 获取https://huggingface.co/papers/2408.14608页面内容
-#    2. 输出内容中 pdf 链接的相关内容
-#    """).response)
-
-#    print(llmBlock.execute("""
-#    1. #CODE 从 https://arxiv.org/pdf/2408.14608.pdf 下载文件, 并且返回下载文件地址
-#    2. 读取 {resp.1} 中的内容
-#    3. {resp.2}, 对上一步中的内容用中文进行总结,分为"问题概要"、"问题分析"、"问题解决"三部分阐述
-#    4. #CODE 输出下面内容写到 summary.txt 文件中 -> {resp.3}
-#    """).response)
-#
-    links = llmBlock.execute("""
-        1. 获取 https://huggingface.co/papers 页面内容
-        2. 从页面内容中提取出所有论文的标题和链接，格式为： -- 标题1~~链接1||-- 标题2~~链接2||-- 标题3~~链接3。页面内容如下：--{resp.1}--。从页面内容中提取出所有论文的标题和链接，格式为： -- 标题1~~链接1||-- 标题2~~链接2||-- 标题3~~链接3
-    """).response
-
-    import pdb; pdb.set_trace()
-    print(paperList)
