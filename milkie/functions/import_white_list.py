@@ -6,4 +6,5 @@ WhiteListImport = [
     "typing.Dict",
     "typing.Optional",
     "typing.Union",
+    "datetime",
 ]

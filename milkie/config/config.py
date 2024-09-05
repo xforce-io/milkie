@@ -6,6 +6,7 @@ from transformers import BitsAndBytesConfig
 
 import torch
 
+from milkie.prompt.prompt import Loader
 from milkie.utils.data_utils import loadFromYaml
 
 
@@ -278,11 +279,12 @@ class LLMConfig(BaseConfig):
         if "generation_args" in config.keys():
             generationArgs = LLMGenerationArgs.fromArgs(config["generation_args"])
 
+        systemPrompt = Loader.load(config["system_prompt"]) if "system_prompt" in config else None
         if config["type"] == LLMType.HUGGINGFACE.name:
             return LLMConfig(
                 type=LLMType.HUGGINGFACE, 
                 model=config["model"],
-                systemPrompt=config["system_prompt"] if "system_prompt" in config else None,
+                systemPrompt=systemPrompt,
                 ctxLen=config["ctx_len"],
                 batchSize=config["batch_size"],
                 tensorParallelSize=config["tensor_parallel_size"],
@@ -295,7 +297,7 @@ class LLMConfig(BaseConfig):
             return LLMConfig(
                 type=LLMType.GEN_OPENAI,
                 model=config["model"],
-                systemPrompt=config["system_prompt"] if "system_prompt" in config else None,
+                systemPrompt=systemPrompt,
                 ctxLen=config["ctx_len"],
                 apiKey=config["api_key"],
                 endpoint=config["endpoint"],

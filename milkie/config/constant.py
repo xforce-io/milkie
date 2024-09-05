@@ -1,2 +1,2 @@
-MaxLenLogField = 500
-MaxLenLastStepResult = 300
+MaxLenLog = 1024
+MaxLenLastStepResult = 1024

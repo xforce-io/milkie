@@ -3,6 +3,7 @@ from llama_index.core import Response, ChatPromptTemplate
 from llama_index.core.base.llms.types import ChatMessage, MessageRole
 
 from milkie.llm.enhanced_llm import EnhancedLLM
+from milkie.log import DEBUG
 
 logger = logging.getLogger(__name__)
 
@@ -12,6 +13,8 @@ def chat(
         prompt :str, 
         promptArgs :dict, 
         **kwargs) -> Response:
+    prompt = prompt.replace("{", "{{").replace("}", "}}")
+
     response = Response(response="", source_nodes=None, metadata={})
 
     messageTemplates = []
@@ -40,7 +43,7 @@ def chat(
     answer = response.response.replace("\n", "//")
     response.metadata["numTokens"] = numTokens
     response.metadata["chatCompletion"] = chatCompletion
-    logger.debug(f"chat prompt[{prompt}] answer[{answer}] ({t1-t0:.2f}s)")
+    DEBUG(logger, f"chat prompt[{chatPromptTmpl.get_template()}] answer[{answer}] ({t1-t0:.2f}s)")
     return response
 
 def chatBatch(
@@ -49,6 +52,8 @@ def chatBatch(
         prompt :str, 
         argsList :list[dict], 
         **kwargs) -> list[Response]:
+    prompt = prompt.replace("{", "{{").replace("}", "}}")
+
     messageTemplates = []
     if systemPrompt:
         messageTemplates += [

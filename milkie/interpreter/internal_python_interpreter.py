@@ -119,6 +119,7 @@ class InternalPythonInterpreter(BaseInterpreter):
             'math': math,
             'print': print,
             "open": open,
+            "abs": abs,
             # 可以根据需要添加更多内置函数
         }
         self.state.update(builtins)
@@ -323,6 +324,9 @@ class InternalPythonInterpreter(BaseInterpreter):
             return self._execute_try(expression)
         elif isinstance(expression, ast.FunctionDef):
             return self._execute_function_def(expression)
+        elif isinstance(expression, ast.IfExp):
+            # 三元表达式 -> 根据条件返回相应的值
+            return self._execute_ifexp(expression)
         else:
             # For now we refuse anything else. Let's add things as we need
             # them.
@@ -403,46 +407,44 @@ class InternalPythonInterpreter(BaseInterpreter):
             raise InterpreterError(f"{name.ctx} is not supported.")
 
     def _execute_condition(self, condition: ast.Compare):
-        if len(condition.ops) > 1:
-            raise InterpreterError(
-                "Cannot evaluate conditions with multiple operators"
-            )
-
         left = self._execute_ast(condition.left)
-        comparator = condition.ops[0]
-        right = self._execute_ast(condition.comparators[0])
-
-        if isinstance(comparator, ast.Eq):
-            return left == right
-        elif isinstance(comparator, ast.NotEq):
-            return left != right
-        elif isinstance(comparator, ast.Lt):
-            return left < right
-        elif isinstance(comparator, ast.LtE):
-            return left <= right
-        elif isinstance(comparator, ast.Gt):
-            return left > right
-        elif isinstance(comparator, ast.GtE):
-            return left >= right
-        elif isinstance(comparator, ast.Is):
-            return left is right
-        elif isinstance(comparator, ast.IsNot):
-            return left is not right
-        elif isinstance(comparator, ast.In):
-            return left in right
-        elif isinstance(comparator, ast.NotIn):
-            return left not in right
-        else:
-            raise InterpreterError(f"Unsupported operator: {comparator}")
+        
+        for op, comparator in zip(condition.ops, condition.comparators):
+            right = self._execute_ast(comparator)
+            
+            if isinstance(op, ast.Eq):
+                result = left == right
+            elif isinstance(op, ast.NotEq):
+                result = left != right
+            elif isinstance(op, ast.Lt):
+                result = left < right
+            elif isinstance(op, ast.LtE):
+                result = left <= right
+            elif isinstance(op, ast.Gt):
+                result = left > right
+            elif isinstance(op, ast.GtE):
+                result = left >= right
+            elif isinstance(op, ast.Is):
+                result = left is right
+            elif isinstance(op, ast.IsNot):
+                result = left is not right
+            elif isinstance(op, ast.In):
+                result = left in right
+            elif isinstance(op, ast.NotIn):
+                result = left not in right
+            else:
+                raise InterpreterError(f"不支持的操作符: {op}")
+            
+            if not result:
+                return False
+            
+            left = right  # 为下一次比较准备
+        
+        return True
 
     def _execute_if(self, if_statement: ast.If):
         result = None
-        if not isinstance(if_statement.test, ast.Compare):
-            raise InterpreterError(
-                "Only Campare expr supported in if statement, get"
-                f" {if_statement.test.__class__.__name__}"
-            )
-        if self._execute_condition(if_statement.test):
+        if self._execute_ast(if_statement.test):
             for line in if_statement.body:
                 line_result = self._execute_ast(line)
                 if line_result is not None:
@@ -642,3 +644,10 @@ class InternalPythonInterpreter(BaseInterpreter):
                 return self.fuzz_state[close_matches[0]]
             else:
                 raise InterpreterError(f"The variable `{key}` is not defined.")
+
+    def _execute_ifexp(self, ifexp: ast.IfExp) -> Any:
+        condition = self._execute_ast(ifexp.test)
+        if condition:
+            return self._execute_ast(ifexp.body)
+        else:
+            return self._execute_ast(ifexp.orelse)

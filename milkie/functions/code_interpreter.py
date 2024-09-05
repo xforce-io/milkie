@@ -17,7 +17,7 @@ class StepLLMCode(StepLLM):
             instruction: str, 
             prevResult: str,
             errorContext: Optional[str] = None):
-        super().__init__(globalContext, None)
+        super().__init__(globalContext, None, codeModel=True)
         self.instruction = instruction
         self.prevResult = prevResult
         self.errorContext = errorContext
@@ -41,15 +41,6 @@ class StepLLMCode(StepLLM):
         请直接根据指令翻译成可执行的Python代码,不需要其他解释。
         """
         return prompt
-
-    def llmCall(self, args: dict, **kwargs) -> Response:
-        self.prompt = self.makePrompt(**args)
-        return chat(
-            llm=self.globalContext.settings.llmCode, 
-            systemPrompt=self.globalContext.globalConfig.getLLMConfig().systemPrompt,
-            prompt=self.prompt, 
-            promptArgs={},
-            **kwargs)
 
     def formatResult(self, result: Response) -> str:
         return result.response.strip()
@@ -85,6 +76,9 @@ class CodeInterpreter:
                 
                 if attempt >= self.maxAttempts:
                     return f"执行失败。最后一次错误: {errorContext}"
+    
+    def executeCode(self, code: str) -> str:
+        return self.interpreter.run(code, code_type="python3")
 
 if __name__ == "__main__":
     context = Context.createContext("config/global.yaml")

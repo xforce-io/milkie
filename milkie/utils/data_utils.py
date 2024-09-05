@@ -14,6 +14,10 @@ def preprocessHtml(htmlContent):
     for comment in soup.find_all(text=lambda text: isinstance(text, Comment)):
         comment.extract()
     
+    # 移除所有<script>和<style>标签
+    for tag in soup.find_all(['script', 'style']):
+        tag.decompose()
+    
     # 保留主要内容区域
     main_content = soup.find('main')
     if main_content:
@@ -31,6 +35,16 @@ def preprocessHtml(htmlContent):
     # 移除所有类名和多余属性
     for tag in soup.find_all(True):
         tag.attrs = {k: v for k, v in tag.attrs.items() if k in ['href', 'datetime']}
+    
+    # 删除只包含其他标签而没有文本内容的标签
+    def remove_empty_tags(soup):
+        for tag in soup.find_all():
+            if len(tag.get_text(strip=True)) == 0 and len(tag.contents) > 0:
+                tag.unwrap()
+    
+    # 多次应用删除操作，以处理嵌套的空标签
+    for _ in range(3):  # 通常3次迭代足够处理大多数情况
+        remove_empty_tags(soup)
     
     # 压缩HTML
     html = str(soup)

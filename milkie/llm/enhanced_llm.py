@@ -75,7 +75,7 @@ class QueueRequest:
     def __init__(
             self, 
             requestId :str,
-            prompt: str, 
+            prompt: Any, 
             tokenized: list[int],
             **kwargs: Any) -> None:
         self.requestId = str(uuid.uuid4()) if requestId is None else requestId
@@ -119,7 +119,7 @@ class EnhancedLLM(object):
         else:
             self._tokenizer = None
 
-        self._systemPrompt = Loader.load(system_prompt) if system_prompt is not None else None
+        self._systemPrompt = system_prompt
 
     @property
     def metadata(self) -> LLMMetadata:
@@ -328,11 +328,11 @@ class EnhancedLLM(object):
 
     def _completeBatchNoTokenizationAsync(
             self, 
-            prompts: list[str], 
+            prompts: list, 
             numThreads: int,
             inference: Callable[[object, Queue[QueueRequest], Queue[QueueResponse], dict, dict], Any],
             **genArgs: Any
-    ) -> CompletionResponse:
+    ) -> list[CompletionResponse]:
 
         reqQueue = Queue[QueueRequest]()
         resQueue = Queue[QueueResponse]()

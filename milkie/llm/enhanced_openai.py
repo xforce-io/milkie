@@ -1,11 +1,17 @@
 import logging
 from queue import Queue
-from typing import Any
+from typing import Any, Sequence
 from openai import OpenAI
 from openai.types.chat import ChatCompletion
-from llama_index.core.base.llms.types import CompletionResponse
+from openai.types.chat.chat_completion_user_message_param import ChatCompletionUserMessageParam
+from openai.types.chat.chat_completion_system_message_param import ChatCompletionSystemMessageParam
+from llama_index_client import ChatMessage
+from llama_index.core.base.llms.types import ChatResponse, CompletionResponse
 from milkie.cache.cache_kv import CacheKVMgr
 from milkie.llm.enhanced_llm import EnhancedLLM, LLMApi, QueueRequest, QueueResponse
+from llama_index.core.base.llms.generic_utils import (
+    completion_response_to_chat_response,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -49,15 +55,14 @@ class EnhancedOpenAI(EnhancedLLM):
             client=OpenAI(api_key=api_key, base_url=endpoint))
         self._cacheMgr = CacheKVMgr("data/cache/", expireTimeByDay=7)
 
-    def _completeBatch(
-            self, 
-            prompts: list[str], 
-            **kwargs: Any) -> list[CompletionResponse]:
-        return self._completeBatchNoTokenizationAsync(
-            prompts=prompts, 
+    def _chat(
+            self, messages: Sequence[ChatMessage], **kwargs: Any) -> ChatResponse:
+        resps = self._completeBatchNoTokenizationAsync(
+            prompts=[messages],
             numThreads=1,
             inference=EnhancedOpenAI._inference,
             **kwargs)
+        return completion_response_to_chat_response(resps[0])
 
     def _inference(
             self, 
@@ -70,14 +75,23 @@ class EnhancedOpenAI(EnhancedLLM):
             if not request:
                 break
             
-            messages = []
-            if self._systemPrompt:
-                messages.append({"role": "system", "content": self._systemPrompt})
-            messages.append({"role": "user", "content": request.prompt})
+            messages = request.prompt
+            messagesJson = []
+            for message in messages:
+                if message.role == "system":
+                    messagesJson.append(ChatCompletionSystemMessageParam(
+                        role=message.role,
+                        content=message.content,
+                    ))
+                else:
+                    messagesJson.append(ChatCompletionUserMessageParam(
+                        role=message.role,
+                        content=message.content,
+                    ))
 
             cached = self._cacheMgr.getValue(
                 modelName=self.model_name, 
-                key=messages)
+                key=messagesJson)
             if cached:
                 logger.debug("cache hit!")
                 resQueue.put(QueueResponse(
@@ -89,7 +103,7 @@ class EnhancedOpenAI(EnhancedLLM):
             try:
                 theArgs = {
                     "model" : self.model_name,
-                    "messages" : messages,
+                    "messages" : messagesJson,
                     "stream" : False,
                 }
                 if "tools" in genArgs:
@@ -111,7 +125,7 @@ class EnhancedOpenAI(EnhancedLLM):
 
             self._cacheMgr.setValue(
                 modelName=self.model_name, 
-                key=messages, 
+                key=messagesJson, 
                 value={
                     "chatCompletion" : response.model_dump_json(),
                     "numTokens" : response.usage.completion_tokens,

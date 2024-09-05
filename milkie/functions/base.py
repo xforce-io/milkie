@@ -20,7 +20,7 @@ from typing import Any, List
 
 from openai.types.chat.chat_completion_message_tool_call import ChatCompletionMessageToolCall
 
-from milkie.config.constant import MaxLenLogField
+from milkie.config.constant import MaxLenLog
 
 from .openai_function import OpenAIFunction
 
@@ -63,13 +63,19 @@ class BaseToolkit():
     def getToolsDesc(self) -> str:
         raise NotImplementedError("Subclasses must implement this method.")
 
-    def exec(self, toolCalls: List[ChatCompletionMessageToolCall]) -> List[FuncExecRecord]:
+    def exec(self, toolCalls: List[ChatCompletionMessageToolCall], varDict: dict) -> List[FuncExecRecord]:
         records = []
         for toolCall in toolCalls:
             tool = self.getToolsDict()[toolCall.function.name]
-            args = json.loads(toolCall.function.arguments)
+            args = json.loads(toolCall.function.arguments) #avoid json.loads error
+            for argKey, argValue in args.items():
+                for key, value in varDict.items():
+                    toReplaced = f"#{key}#"
+                    if toReplaced in argValue and isinstance(value, str):
+                        args[argKey] = argValue.replace(toReplaced, value)
+
             result = tool.func(**args)
-            logger.info(f"funcCall func[{toolCall.function.name}] args[{toolCall.function.arguments}] result[{result[:MaxLenLogField]}]")
+            logger.info(f"funcCall func[{toolCall.function.name}] args[{toolCall.function.arguments}] result[{result[:MaxLenLog]}]")
             
             record = FuncExecRecord(toolCall, tool, result)
             records.append(record)

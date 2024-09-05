@@ -19,6 +19,8 @@ from milkie.functions.base import BaseToolkit
 from milkie.functions.openai_function import OpenAIFunction
 from milkie.cache.cache_kv import CacheKVMgr
 from milkie.utils.data_utils import preprocessHtml
+from milkie.log import ERROR, INFO, DEBUG
+from milkie.functions.code_interpreter import CodeInterpreter
 
 logger = logging.getLogger(__name__)
 
@@ -31,10 +33,12 @@ class SampleToolKit(BaseToolkit):
         self.robotPolicies = loadRobotPolicies("config/robots.yaml")
         self.lastAccessTime = {} 
 
+        self.codeInterpreter = CodeInterpreter(self.globalContext)
+
     def searchWebFromDuckDuckGo(
         self, query: str, maxResults: int = 10
     ) -> str:
-        r"""在互联网搜索信息。
+        r"""在互联网搜索信息
 
         此函数使用DuckDuckGo搜索引擎在互联网上搜索信息。
 
@@ -105,7 +109,7 @@ class SampleToolKit(BaseToolkit):
 
             except Exception as e:
                 error_msg = f"Error processing the article from {url}: {str(e)}"
-                logger.error(error_msg)
+                ERROR(logger, error_msg)
                 cleanTexts.append(error_msg)
 
         return "\n\n".join(cleanTexts)
@@ -148,19 +152,6 @@ class SampleToolKit(BaseToolkit):
         except Exception as e:
             return f"failed to send email[{str(e)}]"
 
-
-    def runCodeInterpreter(self, instruction: str) -> str:
-        r"""根据指令生成代码，并且用代码解释器执行代码。
-
-        Args:
-            instruction (str): 要执行的指令。
-
-        Returns: 执行结果
-        """
-        from milkie.functions.code_interpreter import CodeInterpreter
-        codeInterpreter = CodeInterpreter(self.globalContext)
-        return codeInterpreter.execute(instruction)
-
     def getHtmlContent(self, url: str) -> str:
         """
         获取指定URL的HTML页面内容。
@@ -175,7 +166,7 @@ class SampleToolKit(BaseToolkit):
 
     def readPdfContent(self, file_path: str) -> str:
         """
-        读取PDF文件的内容。
+        读取本地PDF文件的内容。
 
         Args:
             file_path (str): PDF文件的路径
@@ -219,7 +210,7 @@ class SampleToolKit(BaseToolkit):
             
             # 检查文件是否已经存在
             if os.path.exists(local_path):
-                logger.info(f"File already exists: {local_path}")
+                INFO(logger, f"File already exists: {local_path}")
                 return local_path
             
             # 使用 requests 直接下载文件
@@ -238,11 +229,11 @@ class SampleToolKit(BaseToolkit):
             return local_path
         except requests.RequestException as e:
             error_msg = f"Error downloading file from {url}: {str(e)}"
-            logger.error(error_msg)
+            ERROR(logger, error_msg)
             return error_msg
         except Exception as e:
             error_msg = f"Unexpected error while downloading file from {url}: {str(e)}"
-            logger.error(error_msg)
+            ERROR(logger, error_msg)
             return error_msg
 
     def getTools(self) -> List[OpenAIFunction]:
@@ -254,6 +245,26 @@ class SampleToolKit(BaseToolkit):
             OpenAIFunction(self.readPdfContent),
             OpenAIFunction(self.downloadFileFromUrl),  # 添加新的下载文件函数
         ]
+
+    def genCodeAndRun(self, instruction: str) -> str:
+        r"""根据指令生成代码，并且用代码解释器执行代码。
+
+        Args:
+            instruction (str): 要执行的指令。
+
+        Returns: 执行结果
+        """
+        return self.codeInterpreter.execute(instruction)
+
+    def runCode(self, code: str) -> str:
+        r"""直接执行代码解释器
+
+        Args:
+            code (str): 要执行的代码。
+
+        Returns: 执行结果
+        """
+        return self.codeInterpreter.executeCode(code)
 
     def getToolsDesc(self) -> str:
         tools = self.getTools()
@@ -302,7 +313,7 @@ class SampleToolKit(BaseToolkit):
                 timeSinceLastAccess = currentTime - self.lastAccessTime[urlKey]
                 if timeSinceLastAccess < robotPolicy.delay:
                     waitTime = robotPolicy.delay - timeSinceLastAccess
-                    logger.info(f"Waiting {waitTime:.2f} seconds before accessing {url}")
+                    DEBUG(logger, f"Waiting {waitTime:.2f} seconds before accessing {url}")
                     time.sleep(waitTime)  # 仍然需要等待，但只在必要时等待
 
             # 更新最后访问时间
@@ -329,11 +340,11 @@ class SampleToolKit(BaseToolkit):
             return preprocessHtml(content)
         except requests.RequestException as e:
             errorMsg = f"Error fetching the URL: {str(e)}"
-            logger.error(errorMsg)
+            ERROR(logger, errorMsg)
             return errorMsg
         except Exception as e:
             errorMsg = f"Unexpected error: {str(e)}"
-            logger.error(errorMsg)
+            ERROR(logger, errorMsg)
             return errorMsg
 
 if __name__ == "__main__":
