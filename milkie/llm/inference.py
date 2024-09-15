@@ -1,9 +1,10 @@
 import logging
-from llama_index.core import Response, ChatPromptTemplate
+from llama_index.core import ChatPromptTemplate
 from llama_index.core.base.llms.types import ChatMessage, MessageRole
 
 from milkie.llm.enhanced_llm import EnhancedLLM
 from milkie.log import DEBUG
+from milkie.response import Response
 
 logger = logging.getLogger(__name__)
 
@@ -13,9 +14,9 @@ def chat(
         prompt :str, 
         promptArgs :dict, 
         **kwargs) -> Response:
-    prompt = prompt.replace("{", "{{").replace("}", "}}")
+    prompt = preprocessPrompt(prompt)
 
-    response = Response(response="", source_nodes=None, metadata={})
+    response = Response(respStr="", source_nodes=None, metadata={})
 
     messageTemplates = []
     if systemPrompt:
@@ -35,12 +36,12 @@ def chat(
 
     import time
     t0 = time.time()
-    response.response, numTokens, chatCompletion = llm.predict(
+    response.respStr, numTokens, chatCompletion = llm.predict(
         prompt=chatPromptTmpl,
         promptArgs=promptArgs,
         **kwargs)
     t1 = time.time()
-    answer = response.response.replace("\n", "//")
+    answer = response.respStr.replace("\n", "//")
     response.metadata["numTokens"] = numTokens
     response.metadata["chatCompletion"] = chatCompletion
     DEBUG(logger, f"chat prompt[{chatPromptTmpl.get_template()}] answer[{answer}] ({t1-t0:.2f}s)")
@@ -52,7 +53,7 @@ def chatBatch(
         prompt :str, 
         argsList :list[dict], 
         **kwargs) -> list[Response]:
-    prompt = prompt.replace("{", "{{").replace("}", "}}")
+    prompt = preprocessPrompt(prompt)
 
     messageTemplates = []
     if systemPrompt:
@@ -77,8 +78,12 @@ def chatBatch(
 
     responses = []
     for result in resultBatch:
-        response = Response(response=result[0], source_nodes=None, metadata={})
+        response = Response(respStr=result[0], source_nodes=None, metadata={})
         response.metadata["numTokens"] = result[1]
         response.metadata["chatCompletion"] = result[2]
         responses += [response]
     return responses
+
+def preprocessPrompt(prompt :str) :
+    # to prevent 'format' exception in get_template_vars
+    return prompt.replace("{", "{{").replace("}", "}}")

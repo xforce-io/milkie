@@ -1,6 +1,5 @@
-from llama_index.core import Response
-
 from milkie.agent.base_block import BaseBlock
+from milkie.response import Response
 
 class BaseAgent(BaseBlock):
     

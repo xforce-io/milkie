@@ -1,10 +1,10 @@
-from llama_index.core import Response
 from llama_index.core.schema import TextNode
 
 from milkie.agent.base_block import BaseBlock
 from milkie.agent.query_structure import parseQuery
 from milkie.context import Context
 from milkie.memory.memory_with_index import MemoryWithIndex
+from milkie.response import Response
 from milkie.retrieval.retrieval import RetrievalModule
 
 

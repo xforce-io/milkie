@@ -1,4 +1,5 @@
 import logging
+import re
 from queue import Queue
 from typing import Any, Sequence
 from openai import OpenAI
@@ -84,9 +85,10 @@ class EnhancedOpenAI(EnhancedLLM):
                         content=message.content,
                     ))
                 else:
+                    content = re.sub(r'[\uD800-\uDFFF]', '', message.content)
                     messagesJson.append(ChatCompletionUserMessageParam(
                         role=message.role,
-                        content=message.content,
+                        content=content,
                     ))
 
             cached = self._cacheMgr.getValue(
@@ -100,6 +102,7 @@ class EnhancedOpenAI(EnhancedLLM):
                     numTokens=cached["numTokens"]))
                 return
             
+            theArgs = ""
             try:
                 theArgs = {
                     "model" : self.model_name,

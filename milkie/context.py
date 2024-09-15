@@ -1,14 +1,18 @@
 from typing import List
-from llama_index.legacy.response.schema import Response
 from llama_index.core.base.response.schema import NodeWithScore
 
 from milkie.agent.query_structure import QueryStructure, parseQuery
 from milkie.config.config import GlobalConfig
+from milkie.config.constant import KeyResp
 from milkie.global_context import GlobalContext
 from milkie.model_factory import ModelFactory
+from milkie.response import Response
 from milkie.utils.req_tracer import ReqTracer
 
 class Context:
+
+    globalContext :GlobalContext = None
+    
     def __init__(
             self, 
             globalContext :GlobalContext) -> None:
@@ -20,6 +24,7 @@ class Context:
         self.decisionResult :Response = None
         self.engine = None
         self.instructions = []
+        self.varDict = {KeyResp: {}}
         
     def getGlobalContext(self):
         return self.globalContext
@@ -45,10 +50,14 @@ class Context:
 
     @staticmethod
     def createContext(configPath :str):
+        if Context.globalContext:
+            return Context(Context.globalContext)
+
         configPath = configPath if configPath else "config/global.yaml"
 
         globalConfig = GlobalConfig(configPath)
         globalContext = GlobalContext(
             globalConfig, 
             ModelFactory())
+        Context.globalContext = globalContext
         return Context(globalContext)

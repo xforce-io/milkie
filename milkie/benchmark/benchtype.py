@@ -5,8 +5,9 @@ import threading
 import time
 from typing import Callable
 from sacred import Experiment
-from llama_index.core import Response
 from llama_index.core.utils import truncate_text
+
+from milkie.response import Response
 
 logger = logging.getLogger(__name__)
 

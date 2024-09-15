@@ -15,7 +15,7 @@ import os
 from milkie.config.config_robots_whitelist import loadRobotPolicies, getRobotPolicy
 
 from milkie.context import Context, GlobalContext
-from milkie.functions.base import BaseToolkit
+from milkie.functions.toolkits.base import BaseToolkit
 from milkie.functions.openai_function import OpenAIFunction
 from milkie.cache.cache_kv import CacheKVMgr
 from milkie.utils.data_utils import preprocessHtml
@@ -184,13 +184,13 @@ class SampleToolKit(BaseToolkit):
         except Exception as e:
             return f"Error reading PDF: {str(e)}"
 
-    def downloadFileFromUrl(self, url: str, local_directory: str = "./") -> str:
+    def downloadFileFromUrl(self, url: str, localDirectory: str = "data/pdf/") -> str:
         """
         从指定URL下载文件并保存到本地目录。
 
         Args:
             url (str): 要下载的文件的URL
-            local_directory (str): 保存下载文件的本地目录，默认为 './'
+            localDirectory (str): 保存下载文件的本地目录，默认为 'data/pdf/'
 
         Returns:
             str: 下载文件的本地路径或错误信息
@@ -198,35 +198,35 @@ class SampleToolKit(BaseToolkit):
         try:
             # 从URL中提取文件名
             parsed_url = urlparse(url)
-            file_name = os.path.basename(parsed_url.path)
-            if not file_name:
-                file_name = "downloaded_file"
+            fileName = os.path.basename(parsed_url.path)
+            if not fileName:
+                fileName = "downloaded_file"
             
             # 确保本地目录存在
-            os.makedirs(local_directory, exist_ok=True)
+            os.makedirs(localDirectory, exist_ok=True)
             
             # 构建完整的本地文件路径
-            local_path = os.path.join(local_directory, file_name)
+            localPath = os.path.join(localDirectory, fileName)
             
             # 检查文件是否已经存在
-            if os.path.exists(local_path):
-                INFO(logger, f"File already exists: {local_path}")
-                return local_path
+            if os.path.exists(localPath):
+                INFO(logger, f"File already exists: {localPath}")
+                return localPath
             
             # 使用 requests 直接下载文件
             response = requests.get(url, stream=True)
             response.raise_for_status()  # 如果请求不成功则抛出异常
             
             # 保存文件
-            with open(local_path, 'wb') as file:
+            with open(localPath, 'wb') as file:
                 for chunk in response.iter_content(chunk_size=8192):
                     file.write(chunk)
             
             # 验证文件是否下载成功
-            if os.path.getsize(local_path) == 0:
+            if os.path.getsize(localPath) == 0:
                 raise Exception("Downloaded file is empty")
             
-            return local_path
+            return localPath
         except requests.RequestException as e:
             error_msg = f"Error downloading file from {url}: {str(e)}"
             ERROR(logger, error_msg)
@@ -243,7 +243,7 @@ class SampleToolKit(BaseToolkit):
             OpenAIFunction(self.sendEmail),
             OpenAIFunction(self.getHtmlContent),
             OpenAIFunction(self.readPdfContent),
-            OpenAIFunction(self.downloadFileFromUrl),  # 添加新的下载文件函数
+            OpenAIFunction(self.downloadFileFromUrl),
         ]
 
     def genCodeAndRun(self, instruction: str) -> str:
@@ -268,7 +268,7 @@ class SampleToolKit(BaseToolkit):
 
     def getToolsDesc(self) -> str:
         tools = self.getTools()
-        toolDescriptions = [tool.get_function_name() + ": " + tool.get_function_description() for tool in tools]
+        toolDescriptions = [tool.get_function_name() + " | " + tool.get_function_description() for tool in tools]
         return "\n".join(toolDescriptions)
 
     def _factorial(n):
@@ -351,4 +351,4 @@ if __name__ == "__main__":
     context = Context.createContext("config/global.yaml")
 
     #print(SampleToolKit().searchWebFromDuckDuckGo("拜仁"))
-    print(SampleToolKit(context.globalContext).sendEmail("Freeman.xu@aishu.cn", "testHead", "testBody"))
+    print(SampleToolKit(context.getGlobalContext()).getToolsDesc())

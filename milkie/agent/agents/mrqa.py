@@ -1,8 +1,8 @@
-from llama_index.core import Response
 from milkie.agent.llm_block import LLMBlock
 from milkie.agent.retrieval_block import RetrievalAgent
 from milkie.agent.agents.base_agent import BaseAgent
 from milkie.context import Context
+from milkie.response import Response
 
 
 class MapReduceQA(BaseAgent):

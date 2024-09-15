@@ -327,6 +327,12 @@ class InternalPythonInterpreter(BaseInterpreter):
         elif isinstance(expression, ast.IfExp):
             # 三元表达式 -> 根据条件返回相应的值
             return self._execute_ifexp(expression)
+        elif isinstance(expression, ast.AugAssign):
+            # 增强赋值操作 -> 执行操作并更新状态
+            return self._execute_augassign(expression)
+        elif isinstance(expression, ast.ListComp):
+            # 列表推导式 -> 执行并返回结果列表
+            return self._execute_listcomp(expression)
         else:
             # For now we refuse anything else. Let's add things as we need
             # them.
@@ -600,7 +606,7 @@ class InternalPythonInterpreter(BaseInterpreter):
             # 保存当前状态
             old_state = self.state.copy()
             
-            # 更新状态以包含局部变量
+            # 更新状态��包含局部变量
             self.state.update(local_scope)
             
             result = None
@@ -651,3 +657,59 @@ class InternalPythonInterpreter(BaseInterpreter):
             return self._execute_ast(ifexp.body)
         else:
             return self._execute_ast(ifexp.orelse)
+
+    def _execute_augassign(self, augassign: ast.AugAssign) -> Any:
+        target = self._execute_ast(augassign.target)
+        value = self._execute_ast(augassign.value)
+        op = augassign.op
+
+        if isinstance(op, ast.Add):
+            result = target + value
+        elif isinstance(op, ast.Sub):
+            result = target - value
+        elif isinstance(op, ast.Mult):
+            result = target * value
+        elif isinstance(op, ast.Div):
+            result = target / value
+        elif isinstance(op, ast.FloorDiv):
+            result = target // value
+        elif isinstance(op, ast.Mod):
+            result = target % value
+        elif isinstance(op, ast.Pow):
+            result = target ** value
+        elif isinstance(op, ast.LShift):
+            result = target << value
+        elif isinstance(op, ast.RShift):
+            result = target >> value
+        elif isinstance(op, ast.BitOr):
+            result = target | value
+        elif isinstance(op, ast.BitXor):
+            result = target ^ value
+        elif isinstance(op, ast.BitAnd):
+            result = target & value
+        else:
+            raise InterpreterError(f"不支持的增强赋值操作符: {op}")
+
+        self._assign(augassign.target, result)
+        return result
+
+    def _execute_listcomp(self, listcomp: ast.ListComp) -> List[Any]:
+        result = []
+        generators = listcomp.generators
+        
+        def execute_generators(generators, current_index=0):
+            if current_index == len(generators):
+                result.append(self._execute_ast(listcomp.elt))
+                return
+
+            gen = generators[current_index]
+            iterable = self._execute_ast(gen.iter)
+            
+            for item in iterable:
+                self._assign(gen.target, item)
+                
+                if all(self._execute_ast(if_expr) for if_expr in gen.ifs):
+                    execute_generators(generators, current_index + 1)
+        
+        execute_generators(generators)
+        return result

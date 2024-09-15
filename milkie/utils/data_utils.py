@@ -1,4 +1,7 @@
 import yaml
+import logging
+
+logger = logging.getLogger(__name__)
 
 def loadFromYaml(path):
     with open(path, "r") as f:
@@ -52,3 +55,37 @@ def preprocessHtml(htmlContent):
     html = re.sub(r'>\s+<', '><', html)
     
     return html.strip()
+
+def restoreVariablesInDict(data :dict, varDict :dict) -> dict:
+    newDict = {}
+    for argKey, argValue in data.items():
+        key = restoreVariablesInStr(argKey, varDict)
+        if isinstance(argValue, str):
+            newDict[key] = restoreVariablesInStr(argValue, varDict)
+    return newDict
+ 
+def restoreVariablesInStr(data :str, varDict :dict):
+    from string import Formatter
+
+    def recursive_lookup(data, key):
+        keys = key.split('.')
+        val = data
+        for k in keys:
+            if isinstance(val, dict):
+                val = val.get(k)
+            elif isinstance(val, list):
+                try:
+                    val = val[int(k)]
+                except (ValueError, IndexError):
+                    logger.error(f"Error looking up key: {key}")
+                    return None
+            else:
+                logger.error(f"Error looking up key: {key}")
+                return None
+        return val
+
+    class NestedFormatter(Formatter):
+        def get_field(self, fieldName, args, kwargs):
+            return recursive_lookup(varDict, fieldName), fieldName
+
+    return NestedFormatter().format(data)

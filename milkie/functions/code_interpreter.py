@@ -1,12 +1,11 @@
-from requests import Response
 from typing import Optional
 import logging
 import traceback
 from milkie.context import Context, GlobalContext
-from milkie.functions.import_white_list import WhiteListImport
+from milkie.functions.import_white_list import WhiteListImport, addPreImport
 from milkie.interpreter.internal_python_interpreter import InternalPythonInterpreter
-from milkie.llm.inference import chat
 from milkie.llm.step_llm import StepLLM
+from milkie.response import Response
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +42,7 @@ class StepLLMCode(StepLLM):
         return prompt
 
     def formatResult(self, result: Response) -> str:
-        return result.response.strip()
+        return result.respStr.strip()
 
 class CodeInterpreter:
 
@@ -63,6 +62,7 @@ class CodeInterpreter:
                     errorContext)
                 code = stepLLMCode.run()
                 code = code.replace("```python", "").replace("```", "")
+                code = addPreImport(code)
                 
                 codeRepr = code.replace('\n', '//')
                 logger.info(f"execute code [{codeRepr}]")

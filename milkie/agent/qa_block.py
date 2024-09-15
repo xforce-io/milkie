@@ -1,13 +1,11 @@
-from llama_index.core import Response
-
 from milkie.action import ActionModule
 from milkie.agent.base_block import BaseBlock
 from milkie.config.config import GlobalConfig
 from milkie.context import Context
 from milkie.decision.decision import DecisionModule
-from milkie.grounding import GroundingModule
 from milkie.memory.memory_with_index import MemoryWithIndex
 from milkie.reasoning import ReasoningModule
+from milkie.response import Response
 from milkie.retrieval.retrieval import RetrievalModule
 
 
@@ -28,7 +26,6 @@ class QABlock(BaseBlock):
         else:
             self.memoryWithIndex = context.getGlobalContext().memoryWithIndex
 
-        self.groundingModule = GroundingModule()
         self.retrievalModule = RetrievalModule(
             globalConfig=self.context.globalContext.globalConfig,
             retrievalConfig=self.config.retrievalConfig,
