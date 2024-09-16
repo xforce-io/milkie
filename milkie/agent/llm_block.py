@@ -165,12 +165,6 @@ class PromptMakerInstruction(PromptMaker):
     def setPrev(self, prev):
         self.prev = prev
 
-    def promptForTask(self, **args):
-        resultPrompt = f"""
-        你的任务目标是： {self.task.format(**args)}
-        """
-        return resultPrompt
-
     def promptForInstruction(
             self, 
             instructionRecords :list[InstructionRecord],
@@ -193,6 +187,50 @@ class PromptMakerInstruction(PromptMaker):
         """
         return resultPrompt
 
+    def promptForThought(self, llmBlock :LLMBlock):
+        result = f"""
+            任务目标: [{self.formattedInstruction}]
+            Toolkit: {llmBlock.toolkit.getToolsDesc()}
+            请思考如何解决这个问题，基于Toolkit中的工具。
+            方法如下：
+            """
+        return result
+
+    def promptForDecompose(self, llmBlock :LLMBlock):
+        sampleToolKit = SampleToolKit(llmBlock.context.globalContext)
+        sampleAllDesc = sampleToolKit.getToolsDesc()
+        sampleEmailDesc = BaseToolkit.getToolsDescWithSingleFunc(sampleToolKit.sendEmail)
+        result = f"""
+            请将任务分解为指令，要求如下：
+            (1)每条指令必须仅对应一次Toolkit工具调用，或者直接生成response
+            (2)这些指令的逐步执行可以完成任务目标
+            (3)生成的指令的格式请参考下面示例
+            
+            示例如下
+
+            ```
+            任务目标：检查https://www.xxx.com/paper是否包含相关的PDF报告或白皮书。如果有，将这些文件下载到本地计算机上
+            Toolkit：{sampleAllDesc}
+            任务分解：
+            1. 首先，我们需要获取 https://www.xxx.com/paper 页面的HTML内容。这可以使用 getHtmlContent 工具来完成 -> pageContent
+            2. 我们需要分析这个内容，查找指向PDF文件的链接 ------{{pageContent}}------ -> paperLink
+            3. 如果确认是PDF文件，我们就使用 downloadFileFromUrl 工具将{{paperLink}}下载到本地计算机上
+
+            任务目标：针对 {{topic}} 写一篇文章，做摘要，用 markdown 格式格式化，并且邮件发送给{{email}}
+            Toolkit：{sampleEmailDesc}
+            任务分解：
+            1. 详细分析下面的问题{{topic}} -> topicInfo
+            2. 我现在要针对主题{{topic}}写一篇文章，根据下述信息写一篇摘要: --{{topicInfo}}-- -> summary
+            3. 用 markdown 格式化下面内容{{summary}} -> markdown
+            4. 邮件发送给{{email}}, 邮件标题为{{topic}}, 邮件内容为{{markdown}}
+            ```
+
+            任务目标: [{llmBlock.getVarDict()[KeyVarDictThought]}]
+            Toolkit：{llmBlock.toolkit.getToolsDesc()}
+            任务分解：
+            """
+        return result
+
     def prevStepSummary(self, instructionRecords :list[InstructionRecord]):
         result = ""
         if len(instructionRecords) > 0:
@@ -208,17 +246,23 @@ class StepLLMBlock(StepLLM):
 class StepLLMInstAnalysis(StepLLMBlock):
     def __init__(
             self, 
-            promptMaker, 
-            llmBlock, 
+            promptMaker :PromptMakerInstruction, 
+            llmBlock :LLMBlock, 
             instruction: Instruction) -> None:
         super().__init__(promptMaker, llmBlock)
         self.instruction = instruction
         self.instructionRecords = llmBlock.taskEngine.instructionRecords
         
     def makePrompt(self, **args) -> str:
-        result = self.promptMaker.promptForInstruction(
-            instructionRecords=self.instructionRecords,
-            **args)
+        if args.get("prompt", None) == InstFlagDecompose:
+            result = self.promptMaker.promptForDecompose(self.llmBlock)
+        elif args.get("prompt", None) == InstFlagThought:
+            result = self.promptMaker.promptForThought(self.llmBlock)
+        else:
+            result = self.promptMaker.promptForInstruction(
+                instructionRecords=self.instructionRecords,
+                **args)
+
         if self.instruction.flag.outputSyntax:
             result += f"""
             请按照下述语义严格以 jsonify 格式输出结果：{self.instruction.flag.getOutputSyntax()}，现在请直接输出 json:
@@ -366,39 +410,28 @@ class Instruction:
                 goto=None,
                 analysis=self.curInstruct,
                 logType="ret")
-        elif self.flag.flag == InstFlag.Flag.THOUGHT:
-            self.formattedInstruct = f"""
-                任务目标: {self.formattedInstruct}
-                请思考如何解决这个问题，基于现有的工具。
-                方法如下：
-                """
+
+        if self.flag.flag == InstFlag.Flag.THOUGHT:
+            self.promptMaker.promptForThought(self.llmBlock)
+            args["prompt"] = InstFlagThought
             useTool = False
             logTypes.append("thought")
         elif self.flag.flag == InstFlag.Flag.DECOMPOSE:
-            sampleDesc = SampleToolKit(self.llmBlock.context.globalContext).getToolsDesc()
-            self.formattedInstruct = f"""
-                任务目标: {self.formattedInstruct}
-                请将任务分解为可以调用工具或直接生成的指令。示例如下
-                、、、
-                任务目标：检查https://www.xxx.com/paper是否包含相关的PDF报告或白皮书。如果有，将这些文件下载到本地计算机上
-                工具：{sampleDesc}
-                任务分解：
-                1. 首先，我们需要获取 https://www.xxx.com/paper 页面的HTML内容。这可以使用 getHtmlContent 工具来完成 -> pageContent
-                2. 我们需要分析这个内容，查找指向PDF文件的链接 ------{{pageContent}}------ -> paperLink
-                3. 如果确认是PDF文件，我们就使用 downloadFileFromUrl 工具将{{paperLink}}下载到本地计算机上
-                、、、
-
-                任务目标: {self.formattedInstruct}
-                工具：{self.llmBlock.toolkit.getToolsDesc()}
-                任务分解：
-                """
+            self.promptMaker.promptForDecompose(self.llmBlock)
+            args["prompt"] = InstFlagDecompose
             useTool = False
             logTypes.append("decompose")
+        else:
+            args["prompt"] = None
 
-        instAnalysisResult = self.stepInstAnalysis.run(
-            args=args,
-            toolkit=self.llmBlock.toolkit.getToolsSchema() if useTool else None
-        )
+        if useTool:
+            instAnalysisResult = self.stepInstAnalysis.run(
+                args=args,
+                tools=self.llmBlock.toolkit.getToolsSchema()
+            )
+        else:
+            instAnalysisResult = self.stepInstAnalysis.run(
+                args=args)
 
         if instAnalysisResult.result == InstAnalysisResult.Result.ANSWER:
             logTypes.append("ans")
@@ -483,12 +516,6 @@ class TaskEngine:
         self.task = task
         self.instructions :list[tuple[str, Instruction]] = []
         self.lastInstruction :Instruction = None
-
-        self.promptMaker = PromptMakerInstruction(
-            toolkit=self.llmBlock.toolkit,
-            usePrevResult=self.llmBlock.usePrevResult)
-        self.promptMaker.setTask(self.task)
-
         self.instructionRecords :list[InstructionRecord] = []
 
     def execute(self, taskArgs :dict, instructions: list[tuple[str, Instruction]]) -> tuple:
@@ -631,7 +658,7 @@ class LLMBlock(BaseBlock):
         self.compile()
 
     def _decomposeTask(self, task: str) -> list[tuple[str, Instruction]]:
-        label_pattern = r'\s*([\w\u4e00-\u9fff]+)[.、]\s+'
+        label_pattern = r'\s*([\w\u4e00-\u9fff]+[.、]|\-)\s+'
         
         lines = task.split('\n')
         instructions = []
@@ -647,7 +674,7 @@ class LLMBlock(BaseBlock):
                 if current_label is not None:
                     instructions.append((current_label, '\n'.join(current_content)))
                 
-                current_label = match.group(1)
+                current_label = "-" if match.group(1) == "-" else match.group(1)[:-1]
                 current_content = [line[len(match.group(0)):].strip()]
             else:
                 stripped = line.rstrip()

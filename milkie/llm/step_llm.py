@@ -1,4 +1,3 @@
-import logging
 from abc import ABC, abstractmethod
 from milkie.context import GlobalContext
 from milkie.llm.inference import chat
@@ -15,7 +14,6 @@ class StepLLM(ABC):
         self.codeModel = codeModel
     
     def run(self, args: dict = {}, **kwargs):
-        import pdb; pdb.set_trace()
         return self.formatResult(self.llmCall(args, **kwargs))
     
     @abstractmethod

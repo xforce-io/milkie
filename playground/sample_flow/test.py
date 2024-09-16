@@ -16,9 +16,7 @@ class TestAgent(BaseAgent):
         ) -> None:
         super().__init__(context, config)
 
-        flowCode = """
-                5. 邮件发送给{email}, 邮件标题为{topic}, 邮件内容为"ABC"
-            """
+        flowCode = "邮件发送给{email}, 邮件标题为{topic}, 邮件内容为'ABC'"
 
         self.flowBlock = FlowBlock(
             flowCode=flowCode, 

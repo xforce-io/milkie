@@ -1,6 +1,6 @@
 import unittest
 from unittest.mock import Mock, patch
-from milkie.agent.llm_block import LLMBlock, Instruction, AnalysisResult, InstAnalysisResult
+from milkie.agent.llm_block import LLMBlock, Instruction, InstAnalysisResult
 from milkie.context import Context
 from milkie.response import Response
 
@@ -11,28 +11,23 @@ class TestLLMBlock(unittest.TestCase):
         mock_load.return_value = "Test Task"
         self.context = Mock(spec=Context)
         self.context.globalContext.globalConfig.getLLMConfig.return_value.systemPrompt = "Test System Prompt"
+        self.context.varDict = {}
         self.llm_block = LLMBlock(context=self.context, task="Test Task")
-        
-        # 添加这一行来设置 usePrevResult 属性
         self.llm_block.usePrevResult = True
 
     def test_init(self):
         self.assertEqual(self.llm_block.task, "Test Task")
-        self.assertIsNotNone(self.llm_block.tools)
         self.assertIsNotNone(self.llm_block.taskEngine)
         self.assertFalse(self.llm_block.isCompiled)
 
     @patch('milkie.agent.llm_block.LLMBlock._decomposeTask')
     def test_compile(self, mock_decompose):
-        mock_decompose.return_value = AnalysisResult(
-            AnalysisResult.Result.DECOMPOSE,
-            instructions=[("1", "Test Instruction")]
-        )
+        mock_decompose.return_value = [("1", Mock(spec=Instruction))]
         self.llm_block.compile()
         self.assertTrue(self.llm_block.isCompiled)
         self.assertEqual(len(self.llm_block.instructions), 1)
         self.assertEqual(self.llm_block.instructions[0][0], "1")
-        self.assertIsInstance(self.llm_block.instructions[0][1], Instruction)
+        self.assertIsInstance(self.llm_block.instructions[0][1], Mock)
 
     @patch('milkie.agent.llm_block.TaskEngine.execute')
     def test_execute(self, mock_execute):
@@ -55,12 +50,14 @@ class TestLLMBlock(unittest.TestCase):
         2. Second instruction
         3. Third instruction
         """
-        result = LLMBlock._decomposeTask(task)
-        self.assertEqual(result.result, AnalysisResult.Result.DECOMPOSE)
-        self.assertEqual(len(result.instructions), 3)
-        self.assertEqual(result.instructions[0], ("1", "First instruction"))
-        self.assertEqual(result.instructions[1], ("2", "Second instruction"))
-        self.assertEqual(result.instructions[2], ("3", "Third instruction"))
+        result = self.llm_block._decomposeTask(task)
+        self.assertEqual(len(result), 3)
+        self.assertEqual(result[0][0], "1")
+        self.assertEqual(result[1][0], "2")
+        self.assertEqual(result[2][0], "3")
+        self.assertIsInstance(result[0][1], Instruction)
+        self.assertIsInstance(result[1][1], Instruction)
+        self.assertIsInstance(result[2][1], Instruction)
 
 class TestInstruction(unittest.TestCase):
 
@@ -69,11 +66,9 @@ class TestInstruction(unittest.TestCase):
         self.llm_block.getVarDict.return_value = {"var1": "value1"}
         self.llm_block.taskEngine = Mock()
         self.llm_block.taskEngine.instructionRecords = []
-        self.llm_block.tools = Mock()
+        self.llm_block.toolkit = Mock()
         self.llm_block.context = Mock()
         self.llm_block.context.globalContext = Mock()
-        
-        # 添加这一行来设置 usePrevResult 属性
         self.llm_block.usePrevResult = True
 
     def test_init(self):

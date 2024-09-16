@@ -1,4 +1,4 @@
-MaxLenLog = 1024
+MaxLenLog = 2048
 MaxLenLastStepResult = 768
 
 KeyResp = "_resp_"

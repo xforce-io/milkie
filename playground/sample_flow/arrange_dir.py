@@ -11,8 +11,8 @@ class ArrangeDir(BaseAgent):
         super().__init__(context, config)
 
         flowCode = """
-                0. 获取目录{dir}下的文件树 -> fileTree
-                1. #THOUGHT 整理目录{dir}下的文件, 根据文件树{fileTree}
+                0. 获取目录{dir}下的树形结构 -> fileTree
+                1. #THOUGHT 使用Toolkit中工具自动整理目录{dir}下的文件，最后删除空目录，文件树如下： --{fileTree}--:
                 2. #DECOMPOSE
             """
 
