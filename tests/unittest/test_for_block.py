@@ -1,3 +1,7 @@
+import os, sys
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
+
 import unittest
 from milkie.agent.for_block import ForBlock
 from milkie.agent.llm_block import LLMBlock, Response
@@ -19,7 +23,7 @@ class MockLLMBlock(LLMBlock):
 class TestForBlock(unittest.TestCase):
 
     def setUp(self):
-        self.context = Context.createContext("config/global.yaml")
+        self.context = Context.create("config/global.yaml")
 
     def testParseForStatement(self):
         forBlock = ForBlock(

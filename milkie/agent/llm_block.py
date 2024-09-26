@@ -7,9 +7,9 @@ import re
 from typing import List
 
 from milkie.agent.base_block import BaseBlock
-from milkie.config.constant import DefaultUsePrevResult, InstFlagCode, InstFlagDecompose, InstFlagGoto, InstFlagIf, InstFlagPy, InstFlagRet, InstFlagThought, KeyNext, KeyRet, KeyVarDictThought, MaxLenLastStepResult
+from milkie.config.constant import DefaultUsePrevResult, InstFlagCode, InstFlagDecompose, InstFlagGoto, InstFlagIf, InstFlagPy, InstFlagRet, InstFlagThought, KeyNext, KeyRet, KeyVarDictThought, KeyVarDictThtTask, MaxLenLastStepResult, MaxLenThtTask
 from milkie.context import Context
-from milkie.functions.toolkits.base import BaseToolkit, FuncExecRecord
+from milkie.functions.toolkits.base_toolkits import BaseToolkit, FuncExecRecord
 from milkie.functions.toolkits.sample_toolkits import SampleToolKit
 from milkie.prompt.prompt import Loader
 from milkie.prompt.prompt_maker import PromptMaker
@@ -108,10 +108,14 @@ class InstFlag:
             self.instruction = goto_parts[0].strip() + " ".join(goto_parts[1].split()[1:]).strip()
         elif InstFlagPy in self.instruction:
             self.flag = InstFlag.Flag.PY
-            self.instruction = self.instruction.replace(InstFlagPy, "").strip()
-            if not self.instruction.startswith("```") and not self.instruction.endswith("```"):
-                raise Exception("python code must be wrapped by ```")
-            self.instruction = self.instruction[3:-3]
+
+            def extractCode(text):
+                pattern = r"```(.*?)```"
+                matches = re.findall(pattern, text, re.DOTALL)
+                return matches[0] if matches else None
+            
+            self.instruction = extractCode(self.instruction)
+
             for i in range(len(self.instruction)):
                 if self.instruction[i] == ' ':
                     continue
@@ -198,7 +202,6 @@ class PromptMakerInstruction(PromptMaker):
 
     def promptForDecompose(self, llmBlock :LLMBlock):
         sampleToolKit = SampleToolKit(llmBlock.context.globalContext)
-        sampleAllDesc = sampleToolKit.getToolsDesc()
         sampleEmailDesc = BaseToolkit.getToolsDescWithSingleFunc(sampleToolKit.sendEmail)
         result = f"""
             请将任务分解为指令，要求如下：
@@ -209,24 +212,19 @@ class PromptMakerInstruction(PromptMaker):
             示例如下
 
             ```
-            任务目标：检查https://www.xxx.com/paper是否包含相关的PDF报告或白皮书。如果有，将这些文件下载到本地计算机上
-            Toolkit：{sampleAllDesc}
-            任务分解：
-            1. 首先，我们需要获取 https://www.xxx.com/paper 页面的HTML内容。这可以使用 getHtmlContent 工具来完成 -> pageContent
-            2. 我们需要分析这个内容，查找指向PDF文件的链接 ------{{pageContent}}------ -> paperLink
-            3. 如果确认是PDF文件，我们就使用 downloadFileFromUrl 工具将{{paperLink}}下载到本地计算机上
-
             任务目标：针对 {{topic}} 写一篇文章，做摘要，用 markdown 格式格式化，并且邮件发送给{{email}}
             Toolkit：{sampleEmailDesc}
             任务分解：
             1. 详细分析下面的问题{{topic}} -> topicInfo
             2. 我现在要针对主题{{topic}}写一篇文章，根据下述信息写一篇摘要: --{{topicInfo}}-- -> summary
-            3. 用 markdown 格式化下面内容{{summary}} -> markdown
-            4. 邮件发送给{{email}}, 邮件标题为{{topic}}, 邮件内容为{{markdown}}
+            3. 用 markdown 格式化下面内容--{{summary}}-- -> markdown
+            4. 邮件发送给{{email}}, 邮件标题为{{title}}, 邮件内容为{{markdown}}
             ```
 
-            任务目标: [{llmBlock.getVarDict()[KeyVarDictThought]}]
+            任务目标: [{llmBlock.getVarDict()[KeyVarDictThtTask]}]
+            任务思路：[{llmBlock.getVarDict()[KeyVarDictThought]}]
             Toolkit：{llmBlock.toolkit.getToolsDesc()}
+            注意：分解任务时，请不要对已知的信息做重复计算
             任务分解：
             """
         return result
@@ -235,7 +233,7 @@ class PromptMakerInstruction(PromptMaker):
         result = ""
         if len(instructionRecords) > 0:
             result += f"上一步总结: {instructionRecords[-1].synthesizedInstructionRecord[:MaxLenLastStepResult]}\n"
-            result += f"上一步详情: {str(instructionRecords[-1].result.response)[:MaxLenLastStepResult]}\n"
+            result += f"上一步详情: {str(instructionRecords[-1].result.response.resp)[:MaxLenLastStepResult]}\n"
         return result
 
 class StepLLMBlock(StepLLM):
@@ -373,7 +371,7 @@ class Instruction:
         useTool = True
         logTypes = []
         if self.flag.flag == InstFlag.Flag.CODE:
-            result = self.llmBlock.toolkit.genCodeAndRun(self.formattedInstruct)
+            result = self.llmBlock.toolkit.genCodeAndRun(self.formattedInstruct, self.varDict)
             return self._createResult(
                 result,
                 useTool=True,
@@ -381,7 +379,7 @@ class Instruction:
                 analysis=self.curInstruct,
                 logType="code")
         elif self.flag.flag == InstFlag.Flag.IF:
-            result = self.llmBlock.toolkit.genCodeAndRun(self.formattedInstruct)
+            result = self.llmBlock.toolkit.genCodeAndRun(self.formattedInstruct, self.varDict)
             return self._createResult(
                 result,
                 useTool=True,
@@ -396,7 +394,8 @@ class Instruction:
                 return instruct
 
             result = self.llmBlock.toolkit.runCode(
-                preprocessPyInstruct(self.formattedInstruct))
+                preprocessPyInstruct(self.formattedInstruct),
+                self.varDict)
             return self._createResult(
                 result,
                 useTool=False,
@@ -537,7 +536,9 @@ class TaskEngine:
 
             #set variables
             self.llmBlock.setResp(label, instructResult.response.resp)
+            print(f"{label} -> {instructResult.response.resp}")
             if instruction.flag.flag == InstFlag.Flag.THOUGHT:
+                self.llmBlock.setVarDict(KeyVarDictThtTask, instruction.formattedInstruct[:MaxLenThtTask])
                 self.llmBlock.setVarDict(KeyVarDictThought, instructResult.response.resp)
             
             if instruction.flag.storeVar:
@@ -658,34 +659,37 @@ class LLMBlock(BaseBlock):
         self.compile()
 
     def _decomposeTask(self, task: str) -> list[tuple[str, Instruction]]:
-        label_pattern = r'\s*([\w\u4e00-\u9fff]+[.、]|\-)\s+'
+        labelPattern = r'\s*([\w\u4e00-\u9fff]+[.、]|\-)\s+'
         
         lines = task.split('\n')
         instructions = []
-        current_label = None
-        current_content = []
+        currentLabel = None
+        currentContent = []
 
         for line in lines:
             if not line:
                 continue
 
-            match = re.match(label_pattern, line)
+            match = re.match(labelPattern, line)
             if match:
-                if current_label is not None:
-                    instructions.append((current_label, '\n'.join(current_content)))
+                if currentLabel is not None:
+                    instructions.append((currentLabel, '\n'.join(currentContent)))
                 
-                current_label = "-" if match.group(1) == "-" else match.group(1)[:-1]
-                current_content = [line[len(match.group(0)):].strip()]
+                currentLabel = "-" if match.group(1) == "-" else match.group(1)[:-1]
+                currentContent = [line[len(match.group(0)):].strip()]
             else:
                 stripped = line.rstrip()
                 if len(stripped) > 0:
-                    current_content.append(stripped)
+                    currentContent.append(stripped)
 
-        if current_label is not None:
-            instructions.append((current_label, '\n'.join(current_content)))
+        if currentLabel is not None:
+            instructions.append((currentLabel, '\n'.join(currentContent)))
 
         if not instructions:
             instructions.append(("1", task.strip()))
+
+        # 处理 Markdown 无序列表项
+        processedInstructions = self._processMarkdownList(instructions)
 
         return [
             (label, Instruction(
@@ -693,8 +697,27 @@ class LLMBlock(BaseBlock):
                 curInstruct=instruction,
                 label=label,
                 prev=None))
-            for label, instruction in instructions
+            for label, instruction in processedInstructions
         ]
+
+    def _processMarkdownList(self, instructions: list[tuple[str, str]]) -> list[tuple[str, str]]:
+        processedInstructions = []
+        lastNonDashLabel = None
+        lastNonDashInstruction = None
+        instructionsToRemove = {}
+        for label, instruction in instructions:
+            if label == "-":
+                if lastNonDashInstruction:
+                    instruction = f"{lastNonDashInstruction}. {instruction}"
+                    instructionsToRemove[(lastNonDashLabel, lastNonDashInstruction)] = True
+            else:
+                lastNonDashLabel = label
+                lastNonDashInstruction = instruction
+            processedInstructions.append((label, instruction))
+
+        for label, instruction in instructionsToRemove:
+            instructions.remove((label, instruction))
+        return processedInstructions
 
 if __name__ == "__main__":
     task = """

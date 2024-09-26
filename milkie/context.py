@@ -49,15 +49,9 @@ class Context:
         self.decisionResult = decisionResult
 
     @staticmethod
-    def createContext(configPath :str):
+    def create(configPath :str = None):
         if Context.globalContext:
             return Context(Context.globalContext)
 
-        configPath = configPath if configPath else "config/global.yaml"
-
-        globalConfig = GlobalConfig(configPath)
-        globalContext = GlobalContext(
-            globalConfig, 
-            ModelFactory())
-        Context.globalContext = globalContext
-        return Context(globalContext)
+        Context.globalContext = GlobalContext.create(configPath)
+        return Context(Context.globalContext)

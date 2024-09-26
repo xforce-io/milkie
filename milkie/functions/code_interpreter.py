@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Any, Dict, Optional
 import logging
 import traceback
 from milkie.context import Context, GlobalContext
@@ -51,7 +51,7 @@ class CodeInterpreter:
         self.maxAttempts = 2
         self.globalContext = globalContext
 
-    def execute(self, instruction: str) -> str:
+    def execute(self, instruction: str, varDict: Optional[Dict[str, Any]] = None) -> str:
         attempt = 0
         errorContext = ""
         while attempt < self.maxAttempts:
@@ -66,7 +66,7 @@ class CodeInterpreter:
                 
                 codeRepr = code.replace('\n', '//')
                 logger.info(f"execute code [{codeRepr}]")
-                result = self.interpreter.run(code, code_type="python3")
+                result = self.interpreter.run(code, code_type="python3", varDict=varDict)
                 return str(result)
 
             except Exception as e:
@@ -77,11 +77,11 @@ class CodeInterpreter:
                 if attempt >= self.maxAttempts:
                     return f"执行失败。最后一次错误: {errorContext}"
     
-    def executeCode(self, code: str) -> str:
-        return self.interpreter.run(code, code_type="python3")
+    def executeCode(self, code: str, varDict: Optional[Dict[str, Any]] = None) -> str:
+        return self.interpreter.run(code, code_type="python3", varDict=varDict)
 
 if __name__ == "__main__":
-    context = Context.createContext("config/global.yaml")
+    context = Context.create("config/global.yaml")
     #codeInterpreter = CodeInterpreter(context.globalContext)
     #print(codeInterpreter.interpreter.run("print(random.randint(1, 10))", code_type="python3"))
     import pdb; pdb.set_trace()

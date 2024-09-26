@@ -1,4 +1,6 @@
 WhiteListImport = [
+    "os",
+    "os.path",
     "math",
     "random",
     "typing",

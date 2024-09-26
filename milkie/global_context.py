@@ -78,3 +78,11 @@ class GlobalContext():
                 serviceContext=self.serviceContext)
         else:
             self.memoryWithIndex = None
+
+    @staticmethod
+    def create(configPath :str = None):
+        configPath = configPath if configPath else "config/global.yaml"
+
+        globalConfig = GlobalConfig(configPath)
+        modelFactory = ModelFactory()
+        return GlobalContext(globalConfig, modelFactory)

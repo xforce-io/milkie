@@ -1,3 +1,7 @@
+import os, sys
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
+
 import unittest
 from milkie.agent.flow_block import FlowBlock
 from milkie.agent.llm_block import LLMBlock
@@ -6,7 +10,7 @@ from milkie.context import Context
 
 class TestFlowBlock(unittest.TestCase):
     def setUp(self):
-        self.context = Context.createContext("config/global.yaml")
+        self.context = Context.create("config/global.yaml")
         self.flowCode = """
         1. First step
         2. Second step

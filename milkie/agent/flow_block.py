@@ -5,7 +5,7 @@ from milkie.agent.for_block import ForBlock
 from milkie.config.constant import DefaultUsePrevResult, KeywordForEnd, KeywordForStart
 from milkie.context import Context
 from milkie.config.config import GlobalConfig
-from milkie.functions.toolkits.base import BaseToolkit
+from milkie.functions.toolkits.base_toolkits import BaseToolkit
 
 class FlowBlock(BaseBlock):
     def __init__(
@@ -38,7 +38,8 @@ class FlowBlock(BaseBlock):
                             '\n'.join(forBlock), 
                             context=self.context, 
                             config=self.config, 
-                            toolkit=self.toolkit))
+                            toolkit=self.toolkit,
+                            usePrevResult=self.usePrevResult))
                     forBlock = []
                 elif currentBlock:
                     self.blocks.append(
@@ -46,7 +47,8 @@ class FlowBlock(BaseBlock):
                             context=self.context, 
                             config=self.config, 
                             taskExpr='\n'.join(currentBlock),
-                            toolkit=self.toolkit))
+                            toolkit=self.toolkit,
+                            usePrevResult=self.usePrevResult))
                     currentBlock = []
                 
                 inForLoop = True
@@ -74,7 +76,8 @@ class FlowBlock(BaseBlock):
                             context=self.context, 
                             config=self.config, 
                             retStorage=retStorage,
-                            toolkit=self.toolkit))
+                            toolkit=self.toolkit,
+                            usePrevResult=self.usePrevResult))
                     inForLoop = False
                     forBlock = []
                 else:
@@ -90,14 +93,16 @@ class FlowBlock(BaseBlock):
                     context=self.context, 
                     config=self.config, 
                     retStorage=retStorage,
-                    toolkit=self.toolkit))
+                    toolkit=self.toolkit,
+                    usePrevResult=self.usePrevResult))
         elif currentBlock:
             self.blocks.append(
                 LLMBlock(
                     context=self.context, 
                     config=self.config, 
                     taskExpr='\n'.join(currentBlock),
-                    toolkit=self.toolkit))
+                    toolkit=self.toolkit,
+                    usePrevResult=self.usePrevResult))
 
         for block in self.blocks:
             block.compile()

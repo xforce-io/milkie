@@ -1,5 +1,6 @@
-MaxLenLog = 2048
+MaxLenLog = 4096
 MaxLenLastStepResult = 768
+MaxLenThtTask = 128
 
 KeyResp = "_resp_"
 KeyRet = "_RET_"
@@ -16,6 +17,7 @@ InstFlagPy = "#PY"
 InstFlagThought = "#THOUGHT"
 InstFlagDecompose = "#DECOMPOSE"
 
+KeyVarDictThtTask = "_ThtTask_"
 KeyVarDictThought = "_Thought_"
 
 DefaultUsePrevResult = False

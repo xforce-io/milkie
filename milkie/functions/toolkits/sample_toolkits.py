@@ -15,7 +15,7 @@ import os
 from milkie.config.config_robots_whitelist import loadRobotPolicies, getRobotPolicy
 
 from milkie.context import Context, GlobalContext
-from milkie.functions.toolkits.base import BaseToolkit
+from milkie.functions.toolkits.base_toolkits import BaseToolkit
 from milkie.functions.openai_function import OpenAIFunction
 from milkie.cache.cache_kv import CacheKVMgr
 from milkie.utils.data_utils import preprocessHtml
@@ -26,10 +26,9 @@ logger = logging.getLogger(__name__)
 
 class SampleToolKit(BaseToolkit):
     def __init__(self, globalContext: GlobalContext):
-        super().__init__()
+        super().__init__(globalContext)
 
         self.cacheMgr = CacheKVMgr("data/cache/", expireTimeByDay=1)
-        self.globalContext = globalContext
         self.robotPolicies = loadRobotPolicies("config/robots.yaml")
         self.lastAccessTime = {} 
 
@@ -246,27 +245,6 @@ class SampleToolKit(BaseToolkit):
             OpenAIFunction(self.downloadFileFromUrl),
         ]
 
-    def genCodeAndRun(self, instruction: str) -> str:
-        r"""根据指令生成代码，并且用代码解释器执行代码。
-
-        Args:
-            instruction (str): 要执行的指令。
-
-        Returns: 执行结果
-        """
-        return self.codeInterpreter.execute(instruction)
-
-    def runCode(self, code: str) -> str:
-        r"""直接执行代码解释器
-
-        Args:
-            code (str): 要执行的代码。
-
-        Returns: 执行结果
-        """
-        return self.codeInterpreter.executeCode(code)
-
-
     def _factorial(n):
         if n == 0 or n == 1:
             return 1
@@ -344,7 +322,7 @@ class SampleToolKit(BaseToolkit):
             return errorMsg
 
 if __name__ == "__main__":
-    context = Context.createContext("config/global.yaml")
+    context = Context.create("config/global.yaml")
 
     #print(SampleToolKit().searchWebFromDuckDuckGo("拜仁"))
     print(SampleToolKit(context.getGlobalContext()).getToolsDesc())

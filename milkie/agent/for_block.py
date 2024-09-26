@@ -4,7 +4,7 @@ from milkie.agent.llm_block import LLMBlock, Response
 from milkie.config.config import GlobalConfig
 from milkie.config.constant import DefaultUsePrevResult, KeywordForStart, KeyRet
 from milkie.context import Context
-from milkie.functions.toolkits.base import BaseToolkit
+from milkie.functions.toolkits.base_toolkits import BaseToolkit
 
 class ForBlock(BaseBlock):
     def __init__(

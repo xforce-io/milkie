@@ -36,7 +36,7 @@ class FileLookupAgent(BaseAgent):
 
 if __name__ == "__main__":
     filelookupAgent = FileLookupAgent(
-        Context.createContext("config/global_filelookup.yaml"))
+        Context.create("config/global_filelookup.yaml"))
     response = filelookupAgent.execute(
         query="有个技术白皮书文档，路径是什么", 
         args={})

@@ -3,7 +3,7 @@ import os
 import sys
 
 # 将项目根目录添加到 Python 路径
-projectRoot = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+projectRoot = os.path.abspath(os.path.join(os.path.dirname(__file__), '../tests/unittest'))
 sys.path.insert(0, projectRoot)
 
 def runAllTests():

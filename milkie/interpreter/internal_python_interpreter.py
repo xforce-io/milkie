@@ -124,7 +124,7 @@ class InternalPythonInterpreter(BaseInterpreter):
         }
         self.state.update(builtins)
 
-    def run(self, code: str, code_type: str) -> str:
+    def run(self, code: str, code_type: str, varDict: Optional[Dict[str, Any]] = None) -> str:
         r"""Executes the given code with specified code type in the
         interpreter.
 
@@ -156,9 +156,9 @@ class InternalPythonInterpreter(BaseInterpreter):
                 f"{', '.join(self._CODE_TYPES)}."
             )
         if not self.unsafe_mode:
-            return str(self.execute(code))
+            return str(self.execute(code, state=varDict))
         else:
-            return str(eval(code, self.action_space))
+            return str(eval(code, self.action_space, globals=varDict))
 
     def update_action_space(self, action_space: Dict[str, Any]) -> None:
         r"""Updates action space for *python* interpreter."""

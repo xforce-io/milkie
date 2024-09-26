@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import Any, Callable, List, Tuple, Dict
+from typing import Any, Callable, List, Optional, Tuple, Dict
 
 from openai.types.chat.chat_completion_message_tool_call import ChatCompletionMessageToolCall
 
@@ -25,6 +25,7 @@ from milkie.config.constant import MaxLenLog
 from milkie.utils.data_utils import restoreVariablesInDict
 
 from ..openai_function import OpenAIFunction
+from milkie.functions.code_interpreter import CodeInterpreter
 
 logger = logging.getLogger(__name__)
 
@@ -49,9 +50,11 @@ class FuncExecRecord:
         """
 
 class BaseToolkit():
-
-    def __init__(self) -> None:
+    def __init__(self, globalContext=None) -> None:
         self.records = []
+        self.globalContext = globalContext
+        if globalContext:
+            self.codeInterpreter = CodeInterpreter(self.globalContext)
 
     def getTools(self) -> List[OpenAIFunction]:
         raise NotImplementedError("Subclasses must implement this method.")
@@ -72,6 +75,19 @@ class BaseToolkit():
 
     def getToolsDesc(self) -> str:
         return self.getDesc(self.getTools())
+
+
+    @staticmethod
+    def getUnionToolkit(toolkits: List[BaseToolkit]) -> BaseToolkit:
+        if len(toolkits) == 0:
+            return None
+        elif len(toolkits) == 1:
+            return toolkits[0]
+        
+        newToolkit = toolkits[0]
+        for toolkit in toolkits[1:]:
+            newToolkit.getTools().extend(toolkit.getTools())
+        return newToolkit
 
     @staticmethod
     def getDesc(tools :List[OpenAIFunction]) -> str:
@@ -138,3 +154,23 @@ class BaseToolkit():
         result = tool.func(**args)
         logger.info(f"funcCall func[{funcName}] args[{args}] result[{result[:MaxLenLog]}]")
         return FuncExecRecord(toolCall, tool, result)
+
+    def genCodeAndRun(self, instruction: str, varDict: Optional[Dict[str, Any]] = None) -> str:
+        r"""根据指令生成代码，并且用代码解释器执行代码。
+
+        Args:
+            instruction (str): 要执行的指令。
+
+        Returns: 执行结果
+        """
+        return self.codeInterpreter.execute(instruction, varDict=varDict)
+
+    def runCode(self, code: str, varDict: Optional[Dict[str, Any]] = None) -> str:
+        r"""直接执行代码解释器
+
+        Args:
+            code (str): 要执行的代码。
+
+        Returns: 执行结果
+        """
+        return self.codeInterpreter.executeCode(code, varDict)

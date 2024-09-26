@@ -5,7 +5,7 @@ from typing import Any
 from milkie.config.config import GlobalConfig
 from milkie.config.constant import DefaultUsePrevResult, KeyResp
 from milkie.context import Context
-from milkie.functions.toolkits.base import BaseToolkit
+from milkie.functions.toolkits.base_toolkits import BaseToolkit
 from milkie.response import Response
 
 class BaseBlock(ABC):
@@ -16,7 +16,7 @@ class BaseBlock(ABC):
             config :str|GlobalConfig=None,
             toolkit :BaseToolkit=None,
             usePrevResult :bool=DefaultUsePrevResult) -> None:
-        context = context if context else Context.createContext("config/global.yaml")
+        context = context if context else Context.create("config/global.yaml")
         self.setContext(context)
 
         if isinstance(config, str) or config is None:

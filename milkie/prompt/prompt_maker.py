@@ -1,4 +1,4 @@
-from milkie.functions.toolkits.base import BaseToolkit
+from milkie.functions.toolkits.base_toolkits import BaseToolkit
 
 
 class PromptMaker:

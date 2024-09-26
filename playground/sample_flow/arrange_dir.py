@@ -12,8 +12,11 @@ class ArrangeDir(BaseAgent):
 
         flowCode = """
                 0. 获取目录{dir}下的树形结构 -> fileTree
-                1. #THOUGHT 使用Toolkit中工具自动整理目录{dir}下的文件，最后删除空目录，文件树如下： --{fileTree}--:
-                2. #DECOMPOSE
+                1. 根据{fileTree}，分析出一些主题或者分类,请直接输出 -> categories
+                2. #THOUGHT 使用Toolkit中工具将目录{dir}下的所有文件，按照主题整理后放置在目录{destDir}中(主题为[{categories}])。
+                    注意：请不要改变{dir}下的任何文件
+                    {dir}文件树如下： --{fileTree}--
+                3. #DECOMPOSE
             """
 
         self.flowBlock = FlowBlock(
@@ -30,5 +33,6 @@ if __name__ == "__main__":
 
     args = {
         "dir" : "/Users/xupeng/Documents/aishu/test/",
+        "destDir" : "/Users/xupeng/Documents/aishu/test_bak",
     }
     arrangeDir.execute(args=args)
