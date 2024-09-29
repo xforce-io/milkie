@@ -10,14 +10,14 @@ class ForBlock(BaseBlock):
     def __init__(
             self, 
             forStatement: str, 
-            context :Context=None, 
-            config :str|GlobalConfig=None,
-            toolkit :BaseToolkit=None,
+            context: Context = None, 
+            config: str | GlobalConfig = None,
+            toolkit: BaseToolkit = None,
             usePrevResult=DefaultUsePrevResult,
             loopBlockClass=LLMBlock,
-            retStorage=None):
-        super().__init__(context, config, toolkit, usePrevResult)
-
+            retStorage=None,
+            repoFuncs=None):
+        super().__init__(context, config, toolkit, usePrevResult, repoFuncs)
         self.forStatement = forStatement.strip()
         self.loopVar = None
         self.iterable = None
@@ -32,7 +32,7 @@ class ForBlock(BaseBlock):
         lines = self.forStatement.split('\n')
         for_line = lines[0].strip()
         
-        pattern = r'%s\s+(\w+)\s+in\s+(.+)\s*:' % KeywordForStart
+        pattern = r'%s\s+(\w+)\s+in\s+(.+)\s*' % KeywordForStart
         match = re.match(pattern, for_line)
         if not match:
             raise ValueError("Invalid for statement syntax")
@@ -49,7 +49,8 @@ class ForBlock(BaseBlock):
             context=self.context,
             config=self.config,
             taskExpr=self.loopBody,
-            decomposeTask=True
+            decomposeTask=True,
+            repoFuncs=self.repoFuncs
         )
         self.loopBlock.compile()
 
@@ -107,3 +108,15 @@ class ForBlock(BaseBlock):
 
     def __str__(self):
         return f"ForBlock(loopVar={self.loopVar}, iterable={self.iterable}, loopType={self.loopType.__name__ if self.loopType else 'None'})"
+
+    @staticmethod
+    def create(
+            forStatement: str, 
+            context: Context = None, 
+            config: str | GlobalConfig = None,
+            toolkit: BaseToolkit = None,
+            usePrevResult=DefaultUsePrevResult,
+            loopBlockClass=LLMBlock,
+            retStorage=None,
+            repoFuncs=None) -> 'ForBlock':
+        return ForBlock(forStatement, context, config, toolkit, usePrevResult, loopBlockClass, retStorage, repoFuncs)

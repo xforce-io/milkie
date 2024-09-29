@@ -7,7 +7,8 @@ import re
 from typing import List
 
 from milkie.agent.base_block import BaseBlock
-from milkie.config.constant import DefaultUsePrevResult, InstFlagCode, InstFlagDecompose, InstFlagGoto, InstFlagIf, InstFlagPy, InstFlagRet, InstFlagThought, KeyNext, KeyRet, KeyVarDictThought, KeyVarDictThtTask, MaxLenLastStepResult, MaxLenThtTask
+from milkie.agent.func_block import RepoFuncs
+from milkie.config.constant import *
 from milkie.context import Context
 from milkie.functions.toolkits.base_toolkits import BaseToolkit, FuncExecRecord
 from milkie.functions.toolkits.sample_toolkits import SampleToolKit
@@ -23,7 +24,7 @@ logger = logging.getLogger(__name__)
 class AnswerResult:
     class Result(Enum):
         ANSWER = 1
-        NOANS = 2
+        NOANS = 2 
     
     def __init__(
             self,
@@ -71,19 +72,26 @@ class InstFlag:
         THOUGHT = 7
         DECOMPOSE = 8
 
-    def __init__(self, instruction: str) -> None:
+    def __init__(
+            self, 
+            instruction: str,
+            repoFuncs: RepoFuncs) -> None:
         self.flag = InstFlag.Flag.NONE
         self.label = None
         self.storeVar = None
         self.outputSyntax = None  # 新增: 初始化 outputSyntax
         self.returnVal = False 
         self.instruction = instruction.strip()
+        self.funcsToCall = []
+        self.repoFuncs = repoFuncs
 
+        #handle output syntax
         outputSyntaxMatch = re.search(r'(=>\s*(.+?)\s*)->', instruction)
         if outputSyntaxMatch:
             self.outputSyntax = outputSyntaxMatch.group(2).strip()
             self.instruction = self.instruction.replace(outputSyntaxMatch.group(1), "")
 
+        #handle store var
         storeVarMatch = re.search(r'(->\s*([a-zA-Z0-9_]+)\s*)$', instruction)
         if storeVarMatch:
             self.storeVar = storeVarMatch.group(2)
@@ -91,6 +99,25 @@ class InstFlag:
         elif outputSyntaxMatch and "->" in instruction:
             raise Exception("there seems to be a error in storeVar name")
 
+        #handle functions
+        for funcName, funcBlock in repoFuncs.getAll().items():
+            pattern = funcBlock.getFuncPattern()
+            if pattern not in self.instruction:
+                continue
+            
+            paramsPattern = r'%s\(\s*([a-zA-Z0-9_,{}\s]+)\s*\)' % pattern
+            paramsMatch = re.search(paramsPattern, self.instruction)
+            if paramsMatch:
+                params = paramsMatch.group(1).strip()
+                params = params.replace(" ", "")
+                params = params.split(",")
+                funcBlock.setParams(params)
+                self.funcsToCall.append(funcBlock)
+                self.instruction = self.instruction.replace(paramsMatch.group(0), pattern)
+            else:
+                raise SyntaxError(f"function[{funcName}] params not found")
+
+        #handle flag
         self.instruction = self.instruction.strip()
         if InstFlagRet in self.instruction:
             self.flag = InstFlag.Flag.RET
@@ -253,17 +280,21 @@ class StepLLMInstAnalysis(StepLLMBlock):
         
     def makePrompt(self, **args) -> str:
         if args.get("prompt", None) == InstFlagDecompose:
-            result = self.promptMaker.promptForDecompose(self.llmBlock)
+            return self.promptMaker.promptForDecompose(self.llmBlock)
         elif args.get("prompt", None) == InstFlagThought:
-            result = self.promptMaker.promptForThought(self.llmBlock)
-        else:
-            result = self.promptMaker.promptForInstruction(
-                instructionRecords=self.instructionRecords,
-                **args)
+            return self.promptMaker.promptForThought(self.llmBlock)
+
+        result = self.promptMaker.promptForInstruction(
+            instructionRecords=self.instructionRecords,
+            **args)
 
         if self.instruction.flag.outputSyntax:
             result += f"""
             请按照下述语义严格以 jsonify 格式输出结果：{self.instruction.flag.getOutputSyntax()}，现在请直接输出 json:
+            """
+        else:
+            result += f"""
+            请直接输出结果，不要输出任何其他内容:
             """
         return result
 
@@ -282,15 +313,16 @@ class StepLLMInstAnalysis(StepLLMBlock):
                 response=chatCompletion.choices[0].message.tool_calls)
             
         # if function call is not in tools, but it is an answer
-        funcExecRecords = self.llmBlock.toolkit.extractToolFromMsg(
-            chatCompletion.choices[0].message.content,
-            self.llmBlock.getVarDict(),
-            needToParse=needToParse)
-        if funcExecRecords:
-            return InstAnalysisResult(
-                InstAnalysisResult.Result.TOOL,
-                funcExecRecords=funcExecRecords,
-                response=chatCompletion.choices[0].message.content)
+        if self.llmBlock.toolkit:
+            funcExecRecords = self.llmBlock.toolkit.extractToolFromMsg(
+                chatCompletion.choices[0].message.content,
+                self.llmBlock.getVarDict(),
+                needToParse=needToParse)
+            if funcExecRecords:
+                return InstAnalysisResult(
+                    InstAnalysisResult.Result.TOOL,
+                    funcExecRecords=funcExecRecords,
+                    response=chatCompletion.choices[0].message.content)
 
         return InstAnalysisResult(
             InstAnalysisResult.Result.ANSWER,
@@ -342,14 +374,14 @@ class Instruction:
             observation: str = None,
             prev = None) -> None:
         self.llmBlock = llmBlock
-        self.flag = InstFlag(curInstruct)
+        self.flag = InstFlag(curInstruct, llmBlock.repoFuncs)
         self.curInstruct = self.flag.getInstruction()
         self.formattedInstruct = self.curInstruct
         self.label = label
         self.prev: Instruction = prev
         self.observation = observation
         self.instructionRecords = llmBlock.taskEngine.instructionRecords
-        self.varDict = llmBlock.getVarDict()  # 新增: 访问 TaskEngine 的 varDict
+        self.varDict = llmBlock.getVarDict()
 
         self.promptMaker = PromptMakerInstruction(
             toolkit=self.llmBlock.toolkit,
@@ -368,7 +400,7 @@ class Instruction:
         except Exception as e:
             raise SyntaxError(f"fail parse instruct[{self.curInstruct}]")
 
-        useTool = True
+        useTool = (self.llmBlock.toolkit != None)
         logTypes = []
         if self.flag.flag == InstFlag.Flag.CODE:
             result = self.llmBlock.toolkit.genCodeAndRun(self.formattedInstruct, self.varDict)
@@ -483,9 +515,18 @@ class Instruction:
             goto=goto)
 
     def _formatCurInstruct(self, args :dict):
-        allArgs = {**args, **self.varDict}
+        allArgs = {**args, **self.varDict.getAllDict()}
+
+        #call functions
+        curInstruct = self.curInstruct
+        if len(self.flag.funcsToCall) > 0:
+            for funcBlock in self.flag.funcsToCall:
+                resp = funcBlock.execute(args=allArgs)
+                curInstruct = curInstruct.replace(funcBlock.getFuncPattern(), resp.respStr)
+        
+        #restore variables
         self.formattedInstruct = restoreVariablesInStr(
-            self.curInstruct, 
+            curInstruct, 
             allArgs)
         if self.flag.flag == InstFlag.Flag.GOTO:
             self.formattedInstruct = self.formattedInstruct.replace(f"#GOTO {self.flag.label}", "")
@@ -538,19 +579,19 @@ class TaskEngine:
             self.llmBlock.setResp(label, instructResult.response.resp)
             print(f"{label} -> {instructResult.response.resp}")
             if instruction.flag.flag == InstFlag.Flag.THOUGHT:
-                self.llmBlock.setVarDict(KeyVarDictThtTask, instruction.formattedInstruct[:MaxLenThtTask])
-                self.llmBlock.setVarDict(KeyVarDictThought, instructResult.response.resp)
+                self.llmBlock.setVarDictGlobal(KeyVarDictThtTask, instruction.formattedInstruct[:MaxLenThtTask])
+                self.llmBlock.setVarDictGlobal(KeyVarDictThought, instructResult.response.resp)
             
             if instruction.flag.storeVar:
                 if instruction.flag.outputSyntax:
                     jsonStr = instructResult.response.respStr.replace("```json", '').replace("```", '').replace("\n", '')
                     try:
-                        self.llmBlock.setVarDict(instruction.flag.storeVar, json.loads(jsonStr))
+                        self.llmBlock.setVarDictGlobal(instruction.flag.storeVar, json.loads(jsonStr))
                     except Exception as e:
                         logger.error(f"Error parsing JSON: {e}")
-                        self.llmBlock.setVarDict(instruction.flag.storeVar, jsonStr)
+                        self.llmBlock.setVarDictGlobal(instruction.flag.storeVar, jsonStr)
                 else:
-                    self.llmBlock.setVarDict(instruction.flag.storeVar, instructResult.response.resp)
+                    self.llmBlock.setVarDictGlobal(instruction.flag.storeVar, instructResult.response.resp)
 
             #append instruction record
             self.instructionRecords.append(
@@ -592,15 +633,16 @@ class LLMBlock(BaseBlock):
 
     def __init__(
             self,
-            context :Context = None,
-            config :str = None,
-            usePrevResult :bool = DefaultUsePrevResult,
-            task :str = None,
-            taskExpr :str = None,
-            toolkit :BaseToolkit = None,
-            jsonKeys :list = None,
-            decomposeTask: bool = True) -> None:
-        super().__init__(context, config, toolkit, usePrevResult)
+            context: Context = None,
+            config: str = None,
+            usePrevResult: bool = DefaultUsePrevResult,
+            task: str = None,
+            taskExpr: str = None,
+            toolkit: BaseToolkit = None,
+            jsonKeys: list = None,
+            decomposeTask: bool = True,
+            repoFuncs=None) -> None:
+        super().__init__(context, config, toolkit, usePrevResult, repoFuncs)
 
         self.usePrevResult = usePrevResult  # 确保这个属性被设置
 
@@ -639,9 +681,9 @@ class LLMBlock(BaseBlock):
 
     def execute(
             self, 
-            query :str=None, 
-            args :dict={},
-            prevBlock :LLMBlock=None) -> Response:
+            query: str = None, 
+            args: dict = {},
+            prevBlock: LLMBlock = None) -> Response:
         self.updateFromPrevBlock(prevBlock, args)
 
         INFO(logger, f"LLMBlock execute: query[{query}] args[{args}]")
@@ -719,6 +761,19 @@ class LLMBlock(BaseBlock):
             instructions.remove((label, instruction))
         return processedInstructions
 
+    @staticmethod
+    def create(
+            context: Context = None,
+            config: str = None,
+            usePrevResult: bool = DefaultUsePrevResult,
+            task: str = None,
+            taskExpr: str = None,
+            toolkit: BaseToolkit = None,
+            jsonKeys: list = None,
+            decomposeTask: bool = True,
+            repoFuncs=None) -> 'LLMBlock':
+        return LLMBlock(context, config, usePrevResult, task, taskExpr, toolkit, jsonKeys, decomposeTask, repoFuncs)
+
 if __name__ == "__main__":
     task = """
     Dog. #CODE 生成两个随机数 => [第个随机数，第二个随机数] -> random_nums
@@ -728,5 +783,5 @@ if __name__ == "__main__":
     Fish. #RET {poetry}
     Slime. #RET {{"result": "{joke}"}}
     """
-    llmBlock = LLMBlock(taskExpr=task)
+    llmBlock = LLMBlock.create(taskExpr=task)
     print(llmBlock.execute().resp)

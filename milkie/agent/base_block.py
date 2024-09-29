@@ -3,29 +3,25 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 from milkie.config.config import GlobalConfig
-from milkie.config.constant import DefaultUsePrevResult, KeyResp
-from milkie.context import Context
+from milkie.config.constant import DefaultUsePrevResult
+from milkie.context import Context, VarDict
 from milkie.functions.toolkits.base_toolkits import BaseToolkit
 from milkie.response import Response
 
 class BaseBlock(ABC):
 
     def __init__(
-            self,
-            context :Context=None,
-            config :str|GlobalConfig=None,
-            toolkit :BaseToolkit=None,
-            usePrevResult :bool=DefaultUsePrevResult) -> None:
-        context = context if context else Context.create("config/global.yaml")
-        self.setContext(context)
-
-        if isinstance(config, str) or config is None:
-            self.config = context.globalContext.globalConfig.agentsConfig.getConfig(config) if config else context.globalContext.globalConfig
-        else:
-            self.config = config
-
+            self, 
+            context: Context = None, 
+            config: str | GlobalConfig = None,
+            toolkit: BaseToolkit = None,
+            usePrevResult=DefaultUsePrevResult,
+            repoFuncs=None):
+        self.context = context or Context.create()
+        self.config = config
         self.toolkit = toolkit
         self.usePrevResult = usePrevResult
+        self.repoFuncs = repoFuncs
 
     def setContext(self, context :Context): 
         self.context = context
@@ -43,20 +39,31 @@ class BaseBlock(ABC):
     def updateFromPrevBlock(self, prevBlock :BaseBlock, args :dict={}):
         if prevBlock:
             self.updateVarDict(prevBlock.getVarDict())
-        self.updateVarDict(args)
+        self.updateVarDictFromDict(args)
 
-    def getVarDict(self):
+    def getVarDict(self) -> VarDict:
         return self.context.varDict
 
-    def setVarDict(self, key: str, val):
-        self.context.varDict[key] = val
+    def setVarDictGlobal(self, key: str, val):
+        self.context.varDict.setGlobal(key, val)
+
+    def setVarDictLocal(self, key: str, val):
+        self.context.varDict.setLocal(key, val)
+
+    def getVarDictValue(self, key: str):
+        return self.context.varDict.get(key)
 
     def setResp(self, key: str, val: Any):
-        self.context.varDict[KeyResp][key] = val
+        self.context.varDict.setResp(key, val)
 
-    def updateVarDict(self, newDict: dict):
+    def updateVarDict(self, newDict: VarDict):
         self.context.varDict.update(newDict)
+
+    def updateVarDictFromDict(self, newDict: dict):
+        self.context.varDict.updateFromDict(newDict)
 
     def clearVarDict(self):
         self.context.varDict.clear()
-        self.context.varDict[KeyResp] = {}
+
+    def clearVarDictLocal(self):
+        self.context.varDict.clearLocal()

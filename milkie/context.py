@@ -1,13 +1,53 @@
+from __future__ import annotations
 from typing import List
 from llama_index.core.base.response.schema import NodeWithScore
 
 from milkie.agent.query_structure import QueryStructure, parseQuery
-from milkie.config.config import GlobalConfig
 from milkie.config.constant import KeyResp
 from milkie.global_context import GlobalContext
-from milkie.model_factory import ModelFactory
 from milkie.response import Response
 from milkie.utils.req_tracer import ReqTracer
+
+class VarDict:
+    def __init__(self):
+        self.globalDict = {KeyResp: {}}
+        self.localDict = {}
+
+    def get(self, key :str):
+        resp = self.localDict.get(key)
+        if resp:
+            return resp
+        return self.globalDict.get(key)
+
+    def getAllDict(self):
+        return {**self.globalDict, **self.localDict}
+
+    def getLocalDict(self):
+        return self.localDict
+    
+    def setGlobal(self, key :str, value):
+        self.globalDict[key] = value
+
+    def setLocal(self, key :str, value):
+        self.localDict[key] = value
+
+    def setResp(self, key :str, value):
+        self.globalDict[KeyResp][key] = value
+
+    def update(self, newDict :VarDict):
+        self.globalDict.update(newDict.globalDict)
+        self.localDict.update(newDict.localDict)
+
+    def updateFromDict(self, newDict :dict):
+        self.globalDict.update(newDict)
+
+    def clear(self):
+        self.localDict.clear()
+        self.globalDict.clear()
+        self.globalDict[KeyResp] = {}
+
+    def clearLocal(self):
+        self.localDict.clear()
 
 class Context:
 
@@ -24,7 +64,7 @@ class Context:
         self.decisionResult :Response = None
         self.engine = None
         self.instructions = []
-        self.varDict = {KeyResp: {}}
+        self.varDict = VarDict()
         
     def getGlobalContext(self):
         return self.globalContext

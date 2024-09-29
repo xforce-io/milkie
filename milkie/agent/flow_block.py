@@ -11,107 +11,108 @@ class FlowBlock(BaseBlock):
     def __init__(
             self, 
             flowCode: str, 
-            context :Context=None, 
-            config :str|GlobalConfig=None,
-            toolkit :BaseToolkit=None,
-            usePrevResult=DefaultUsePrevResult):
-        super().__init__(context, config, toolkit, usePrevResult)
-
+            context: Context = None, 
+            config: str | GlobalConfig = None,
+            toolkit: BaseToolkit = None,
+            usePrevResult=DefaultUsePrevResult,
+            repoFuncs=None):
+        super().__init__(context, config, toolkit, usePrevResult, repoFuncs)
         self.flowCode = flowCode
         self.blocks: List[Union[LLMBlock, ForBlock]] = []
 
     def compile(self):
         lines = self.flowCode.split('\n')
-        currentBlock = []
-        inForLoop = False
-        forBlock = []
-        retStorage = None
-
-        for line in lines:
-            strippedLine = line.strip()
-            
-            if strippedLine.startswith(f'{KeywordForStart} ') and strippedLine.endswith(":"):
-                if inForLoop:
-                    # 如果已经在 for 循环中，结束当前的 ForBlock
-                    self.blocks.append(
-                        ForBlock(
-                            '\n'.join(forBlock), 
-                            context=self.context, 
-                            config=self.config, 
-                            toolkit=self.toolkit,
-                            usePrevResult=self.usePrevResult))
-                    forBlock = []
-                elif currentBlock:
-                    self.blocks.append(
-                        LLMBlock(
-                            context=self.context, 
-                            config=self.config, 
-                            taskExpr='\n'.join(currentBlock),
-                            toolkit=self.toolkit,
-                            usePrevResult=self.usePrevResult))
-                    currentBlock = []
-                
-                inForLoop = True
-                forBlock = [line]
-            elif inForLoop:
-                if strippedLine.startswith(KeywordForEnd):
-                    parts = strippedLine.split('->')
-                    if len(parts) > 1:
-                        end_part = parts[0].strip()
-                        if end_part != KeywordForEnd:
-                            raise SyntaxError(f"Invalid for loop end statement: '{strippedLine}'. Should be 'end' or 'end -> variable_name'.")
-
-                        variable = parts[1].strip()
-                        if not variable.isidentifier():
-                            raise SyntaxError(f"Invalid variable name: '{variable}'. 'end -> ' should be followed by a valid variable name.")
-
-                        retStorage = variable
-                    elif strippedLine != KeywordForEnd:
-                        raise SyntaxError(f"Invalid for loop end statement: '{strippedLine}'. Should be 'end' or 'end -> variable_name'.")
-                    
-                    # 结束当前的 ForBlock
-                    self.blocks.append(
-                        ForBlock(
-                            '\n'.join(forBlock), 
-                            context=self.context, 
-                            config=self.config, 
-                            retStorage=retStorage,
-                            toolkit=self.toolkit,
-                            usePrevResult=self.usePrevResult))
-                    inForLoop = False
-                    forBlock = []
-                else:
-                    forBlock.append(line)
-            else:
-                currentBlock.append(line)
-
-        # 处理最后一个块
-        if inForLoop:
-            self.blocks.append(
-                ForBlock(
-                    '\n'.join(forBlock), 
-                    context=self.context, 
-                    config=self.config, 
-                    retStorage=retStorage,
-                    toolkit=self.toolkit,
-                    usePrevResult=self.usePrevResult))
-        elif currentBlock:
-            self.blocks.append(
-                LLMBlock(
-                    context=self.context, 
-                    config=self.config, 
-                    taskExpr='\n'.join(currentBlock),
-                    toolkit=self.toolkit,
-                    usePrevResult=self.usePrevResult))
+        self.processBlocks(lines)
 
         for block in self.blocks:
             block.compile()
+
+    def processBlocks(self, lines, depth=0):
+        currentBlock = []
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            strippedLine = line.strip()
+
+            if strippedLine.startswith(f'{KeywordForStart} ') and strippedLine.endswith(":"):
+                if currentBlock:
+                    self.addLlmBlock(currentBlock)
+                    currentBlock = []
+                
+                forBlock, i = self.processForBlock(lines, i, depth + 1)
+                self.blocks.append(forBlock)
+            else:
+                currentBlock.append(line)
+            
+            i += 1
+
+        if currentBlock:
+            self.addLlmBlock(currentBlock)
+
+    def processForBlock(self, lines, startIndex, depth):
+        forLines = []
+        retStorage = None
+        i = startIndex
+
+        while i < len(lines):
+            line = lines[i]
+            strippedLine = line.strip()
+
+            if strippedLine.startswith(KeywordForEnd):
+                retStorage = self.processForEnd(strippedLine)
+                break
+            else:
+                forLines.append(line)
+            
+            i += 1
+
+        if i == len(lines) and not strippedLine.startswith(KeywordForEnd):
+            # 处理未闭合的 for 循环
+            forLines.append(f"{KeywordForEnd}")  # 自动添加结束标记
+
+        return ForBlock.create(
+            '\n'.join(forLines), 
+            context=self.context, 
+            config=self.config, 
+            retStorage=retStorage,
+            toolkit=self.toolkit,
+            usePrevResult=self.usePrevResult
+        ), i
+
+    def processForEnd(self, line):
+        parts = line.split('->')
+        if len(parts) > 1:
+            endPart = parts[0].strip()
+            if endPart != KeywordForEnd:
+                raise SyntaxError(f"Invalid for loop end statement: '{line}'. Should be 'end' or 'end -> variable_name'.")
+
+            variable = parts[1].strip()
+            if not variable.isidentifier():
+                raise SyntaxError(f"Invalid variable name: '{variable}'. 'end -> ' should be followed by a valid variable name.")
+
+            return variable
+        elif line != KeywordForEnd:
+            raise SyntaxError(f"Invalid for loop end statement: '{line}'. Should be 'end' or 'end -> variable_name'.")
+        
+        return None
+
+    def addLlmBlock(self, blockLines):
+        self.blocks.append(
+            LLMBlock.create(
+                context=self.context, 
+                config=self.config, 
+                taskExpr='\n'.join(blockLines),
+                toolkit=self.toolkit,
+                usePrevResult=self.usePrevResult,
+                repoFuncs=self.repoFuncs
+            )
+        )
 
     def execute(
             self, 
             query: str = None, 
             args: dict = {}, 
-            prevBlock :BaseBlock=None) -> Response:
+            prevBlock: BaseBlock = None) -> Response:
         self.updateFromPrevBlock(prevBlock, args)
 
         result = Response()
@@ -123,6 +124,16 @@ class FlowBlock(BaseBlock):
                 prevBlock=lastBlock)
             lastBlock = block
         return result
+
+    @staticmethod
+    def create(
+            flowCode: str, 
+            context: Context = None, 
+            config: str | GlobalConfig = None,
+            toolkit: BaseToolkit = None,
+            usePrevResult=DefaultUsePrevResult,
+            repoFuncs=None) -> 'FlowBlock':
+        return FlowBlock(flowCode, context, config, toolkit, usePrevResult, repoFuncs)
 
 if __name__ == "__main__":
     flowCode = """
