@@ -15,6 +15,7 @@ InstFlagRet = "#RET"
 InstFlagCode = "#CODE"
 InstFlagIf = "#IF"
 InstFlagPy = "#PY"
+InstFlagCall = "#CALL"
 InstFlagThought = "#THOUGHT"
 InstFlagDecompose = "#DECOMPOSE"
 InstFlagFunc = "@"
@@ -26,3 +27,7 @@ DefaultUsePrevResult = False
 
 KeywordFuncStart = "DEF"
 KeywordFuncEnd = "END"
+
+KeywordMute = "__mute__"
+
+ExprNoInfoToExtract = "无相关信息"

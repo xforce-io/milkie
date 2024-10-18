@@ -9,7 +9,6 @@ import torch
 from milkie.prompt.prompt import Loader
 from milkie.utils.data_utils import loadFromYaml
 
-
 @dataclass
 class BaseConfig(ABC):
     pass

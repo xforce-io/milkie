@@ -22,6 +22,8 @@ from typing import Any, Callable, List, Optional, Tuple, Dict
 from openai.types.chat.chat_completion_message_tool_call import ChatCompletionMessageToolCall
 
 from milkie.config.constant import MaxLenLog
+from milkie.context import VarDict
+from milkie.trace import stdout
 from milkie.utils.data_utils import restoreVariablesInDict
 
 from ..openai_function import OpenAIFunction
@@ -49,7 +51,7 @@ class FuncExecRecord:
         ```
         """
 
-class BaseToolkit():
+class Toolkit():
     def __init__(self, globalContext=None) -> None:
         self.records = []
         self.globalContext = globalContext
@@ -65,7 +67,7 @@ class BaseToolkit():
 
     @staticmethod
     def getToolsDescWithSingleFunc(func :Callable) -> str:
-        return BaseToolkit.getDesc(BaseToolkit.getToolsWithSingleFunc(func))
+        return Toolkit.getDesc(Toolkit.getToolsWithSingleFunc(func))
 
     def getToolsSchema(self) -> list:
         return [tool.get_openai_tool_schema() for tool in self.getTools()]
@@ -78,7 +80,7 @@ class BaseToolkit():
 
 
     @staticmethod
-    def getUnionToolkit(toolkits: List[BaseToolkit]) -> BaseToolkit:
+    def getUnionToolkit(toolkits: List[Toolkit]) -> Toolkit:
         if len(toolkits) == 0:
             return None
         elif len(toolkits) == 1:
@@ -97,7 +99,7 @@ class BaseToolkit():
     def extractToolFromMsg(
             self, 
             msg: str, 
-            varDict :dict,
+            varDict :VarDict,
             needToParse :bool = False) -> List[FuncExecRecord]:
         if not msg.startswith("```json"):
             return None
@@ -124,7 +126,7 @@ class BaseToolkit():
     def exec(
             self, 
             toolCalls: List[ChatCompletionMessageToolCall], 
-            varDict: dict,
+            allDict: dict,
             needToParse :bool = False) -> List[FuncExecRecord]:
         records = []
         for toolCall in toolCalls:
@@ -134,7 +136,7 @@ class BaseToolkit():
             record = self.execFromJson(
                 toolCall.function.name, 
                 args, 
-                varDict, 
+                allDict, 
                 toolCall,
                 needToParse=needToParse)
             records.append(record)
@@ -145,14 +147,17 @@ class BaseToolkit():
             self, 
             funcName: str, 
             args: dict, 
-            varDict: dict,
+            allDict: dict,
             toolCall: Any,
             needToParse :bool = False) -> FuncExecRecord:
         tool = self.getToolsDict()[funcName]
         if needToParse:
-            args = restoreVariablesInDict(args, varDict)
+            args = restoreVariablesInDict(args, allDict)
         result = tool.func(**args)
-        logger.info(f"funcCall func[{funcName}] args[{args}] result[{result[:MaxLenLog]}]")
+
+        info = f"funcCall func[{funcName}] args[{args}] result[{result[:MaxLenLog]}]"
+        stdout(info, args=args)
+        logger.info(info)
         return FuncExecRecord(toolCall, tool, result)
 
     def genCodeAndRun(self, instruction: str, varDict: Optional[Dict[str, Any]] = None) -> str:

@@ -6,7 +6,7 @@ from milkie.context import Context
 import unittest
 from tests.integration_test.base_test import BaseIntegrationTest
 from milkie.agent.flow_block import FlowBlock
-from milkie.functions.toolkits.filesys_toolkits import FilesysToolKits
+from milkie.functions.toolkits.filesys_toolkit import FilesysToolKit
 
 class FilesysIntegrationTest(BaseIntegrationTest):
     def setUp(self):
@@ -84,7 +84,7 @@ class FilesysIntegrationTest(BaseIntegrationTest):
         flowBlock = FlowBlock(
             flowCode=flowCode,
             context=self.context,
-            toolkit=FilesysToolKits(self.context.globalContext),
+            toolkit=FilesysToolKit(self.context.globalContext),
             usePrevResult=usePrevResult
         )
         flowBlock.compile()

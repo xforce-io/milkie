@@ -1,7 +1,5 @@
 from typing import List, Optional, Sequence
 
-from logging import Logger
-
 from llama_index.core.llms.llm import LLM
 from llama_index.core.prompts import BasePromptTemplate
 from llama_index.core.service_context import ServiceContext
@@ -12,9 +10,6 @@ from llama_index.core.node_parser.text.sentence import (
 from llama_index.core.callbacks.base import CallbackManager
 from llama_index.core.indices.prompt_helper import DEFAULT_PADDING, PromptHelper
 
-from milkie.config.config import GlobalConfig, LLMConfig
-from milkie.memory.memory_with_index import MemoryWithIndex
-from milkie.settings import Settings
 from milkie.model_factory import ModelFactory
 
 def getNodeParser(
@@ -29,6 +24,8 @@ def getNodeParser(
         callback_manager=callback_manager or CallbackManager(),
         paragraph_separator="\n",
     )
+
+from milkie.config.config import LLMConfig
 
 class CustomizedPromptHelper(PromptHelper):
 
@@ -45,6 +42,10 @@ class CustomizedPromptHelper(PromptHelper):
             llm: Optional[LLM] = None) -> List[str]:
         chunks = super().repack(prompt, text_chunks, padding, llm)
         return chunks[:2]
+
+from milkie.config.config import GlobalConfig
+from milkie.memory.memory_with_index import MemoryWithIndex
+from milkie.settings import Settings
 
 class GlobalContext():
     
@@ -78,6 +79,12 @@ class GlobalContext():
                 serviceContext=self.serviceContext)
         else:
             self.memoryWithIndex = None
+
+    def setEnv(self, env):
+        self.env = env
+        
+    def getEnv(self):
+        return self.env
 
     @staticmethod
     def create(configPath :str = None):

@@ -1,11 +1,12 @@
 from typing import List, Union
 from milkie.agent.base_block import BaseBlock
-from milkie.agent.llm_block import LLMBlock, Response
 from milkie.agent.for_block import ForBlock
+from milkie.agent.llm_block.llm_block import LLMBlock
 from milkie.config.constant import DefaultUsePrevResult, KeywordForEnd, KeywordForStart
 from milkie.context import Context
 from milkie.config.config import GlobalConfig
-from milkie.functions.toolkits.base_toolkits import BaseToolkit
+from milkie.functions.toolkits.toolkit import Toolkit
+from milkie.response import Response
 
 class FlowBlock(BaseBlock):
     def __init__(
@@ -13,7 +14,7 @@ class FlowBlock(BaseBlock):
             flowCode: str, 
             context: Context = None, 
             config: str | GlobalConfig = None,
-            toolkit: BaseToolkit = None,
+            toolkit: Toolkit = None,
             usePrevResult=DefaultUsePrevResult,
             repoFuncs=None):
         super().__init__(context, config, toolkit, usePrevResult, repoFuncs)
@@ -34,7 +35,7 @@ class FlowBlock(BaseBlock):
             line = lines[i]
             strippedLine = line.strip()
 
-            if strippedLine.startswith(f'{KeywordForStart} ') and strippedLine.endswith(":"):
+            if strippedLine.startswith(f'{KeywordForStart} '):
                 if currentBlock:
                     self.addLlmBlock(currentBlock)
                     currentBlock = []
@@ -130,7 +131,7 @@ class FlowBlock(BaseBlock):
             flowCode: str, 
             context: Context = None, 
             config: str | GlobalConfig = None,
-            toolkit: BaseToolkit = None,
+            toolkit: Toolkit = None,
             usePrevResult=DefaultUsePrevResult,
             repoFuncs=None) -> 'FlowBlock':
         return FlowBlock(flowCode, context, config, toolkit, usePrevResult, repoFuncs)

@@ -5,7 +5,7 @@ from typing import Any
 from milkie.config.config import GlobalConfig
 from milkie.config.constant import DefaultUsePrevResult
 from milkie.context import Context, VarDict
-from milkie.functions.toolkits.base_toolkits import BaseToolkit
+from milkie.functions.toolkits.toolkit import Toolkit
 from milkie.response import Response
 
 class BaseBlock(ABC):
@@ -14,7 +14,7 @@ class BaseBlock(ABC):
             self, 
             context: Context = None, 
             config: str | GlobalConfig = None,
-            toolkit: BaseToolkit = None,
+            toolkit: Toolkit = None,
             usePrevResult=DefaultUsePrevResult,
             repoFuncs=None):
         self.context = context or Context.create()

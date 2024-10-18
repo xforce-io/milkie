@@ -4,7 +4,6 @@ from llama_index.core.base.response.schema import NodeWithScore
 
 from milkie.agent.query_structure import QueryStructure, parseQuery
 from milkie.config.constant import KeyResp
-from milkie.global_context import GlobalContext
 from milkie.response import Response
 from milkie.utils.req_tracer import ReqTracer
 
@@ -21,6 +20,9 @@ class VarDict:
 
     def getAllDict(self):
         return {**self.globalDict, **self.localDict}
+
+    def getGlobalDict(self):
+        return self.globalDict
 
     def getLocalDict(self):
         return self.localDict
@@ -49,13 +51,14 @@ class VarDict:
     def clearLocal(self):
         self.localDict.clear()
 
+
 class Context:
 
-    globalContext :GlobalContext = None
+    globalContext = None
     
     def __init__(
             self, 
-            globalContext :GlobalContext) -> None:
+            globalContext) -> None:
         self.globalContext = globalContext
         self.reqTrace = ReqTracer()
             
@@ -68,6 +71,9 @@ class Context:
         
     def getGlobalContext(self):
         return self.globalContext
+
+    def getEnv(self):
+        return self.globalContext.env
 
     def getGlobalMemory(self):
         memoryWithIndex = self.globalContext.memoryWithIndex
@@ -93,5 +99,6 @@ class Context:
         if Context.globalContext:
             return Context(Context.globalContext)
 
+        from milkie.global_context import GlobalContext
         Context.globalContext = GlobalContext.create(configPath)
         return Context(Context.globalContext)

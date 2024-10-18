@@ -1,8 +1,9 @@
 from typing import Any, Dict, Optional
 import logging
 import traceback
-from milkie.context import Context, GlobalContext
+from milkie.context import Context
 from milkie.functions.import_white_list import WhiteListImport, addPreImport
+from milkie.global_context import GlobalContext
 from milkie.interpreter.internal_python_interpreter import InternalPythonInterpreter
 from milkie.llm.step_llm import StepLLM
 from milkie.response import Response
@@ -21,7 +22,7 @@ class StepLLMCode(StepLLM):
         self.prevResult = prevResult
         self.errorContext = errorContext
 
-    def makePrompt(self, **args) -> str:
+    def makePrompt(self, useTool: bool = False, **args) -> str:
         prompt = self.prevResult + f"""
         请根据指令生成Python代码，要求如下：
         （1）请不要调用'return'

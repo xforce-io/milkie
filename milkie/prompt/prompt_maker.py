@@ -1,9 +1,9 @@
-from milkie.functions.toolkits.base_toolkits import BaseToolkit
+from milkie.functions.toolkits.toolkit import Toolkit
 
 
 class PromptMaker:
 
-    def __init__(self, toolkit :BaseToolkit) -> None:
+    def __init__(self, toolkit :Toolkit) -> None:
         self.task :str = None
         self.toolkit = toolkit
 

@@ -9,11 +9,11 @@ from milkie.agent.flow_block import FlowBlock
 from milkie.agent.func_block import FuncBlock
 from milkie.context import Context
 from milkie.config.constant import KeywordFuncStart, KeywordFuncEnd
-from milkie.functions.toolkits.base_toolkits import BaseToolkit
+from milkie.functions.toolkits.toolkit import Toolkit
 
 logging.basicConfig(level=logging.DEBUG)
 
-class MockToolkit(BaseToolkit):
+class MockToolkit(Toolkit):
     def getToolsSchema(self):
         return []
 

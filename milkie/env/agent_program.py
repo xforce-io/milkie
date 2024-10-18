@@ -1,10 +1,10 @@
-from milkie.functions.toolkits.base_toolkits import BaseToolkit
+from milkie.functions.toolkits.toolkit import Toolkit
 from milkie.global_context import GlobalContext
 import logging
 
 logger = logging.getLogger(__name__)
 
-class ProgramFile:
+class AgentProgram:
     def __init__(
             self, 
             programFilepath: str,
@@ -21,6 +21,8 @@ class ProgramFile:
         self.programFilepath = programFilepath
         self.toolkitMaps = toolkitMaps
         self.globalContext = globalContext
+        self.name = None
+        self.systemPrompt = None
         self.code = None
         self.imports = []
         self.toolkit = None
@@ -47,19 +49,31 @@ class ProgramFile:
         """
         lines = self.program.split('\n')
         parsedLines = []
+        inSystemPrompt = False
+        systemPromptLines = []
         
         for line in lines:
             line = line.strip()
             if line.startswith('@import'):
                 self._handleImport(line)
+            elif line.startswith('@name'):
+                self.name = line.split()[-1].strip()
+                if self.name == "":
+                    raise SyntaxError(f"Agent name is empty[{self.programFilepath}]")
+            elif line.startswith('@system'):
+                inSystemPrompt = not inSystemPrompt
+                continue
+            elif inSystemPrompt:
+                systemPromptLines.append(line)
             elif not line.startswith('//'):
                 parsedLines.append(line)
         
-        if len(self.imports) == 0:
-            raise SyntaxError("No toolkit imported")
+        if self.name is None:
+            raise SyntaxError(f"Agent name is not set[{self.programFilepath}]")
         
-        self.toolkit = BaseToolkit.getUnionToolkit(self.imports)
+        self.toolkit = Toolkit.getUnionToolkit(self.imports)
         self.code = '\n'.join(parsedLines)
+        self.systemPrompt = '\n'.join(systemPromptLines).strip()
         logger.info("Program file parsed successfully")
 
     def _handleImport(self, line: str) -> None:
@@ -93,3 +107,10 @@ class ProgramFile:
             raise ValueError("Program has not been parsed yet")
         return self.code
 
+    def getSystemPrompt(self) -> str:
+        """
+        获取系统提示
+
+        :return: 系统提示字符串
+        """
+        return self.systemPrompt

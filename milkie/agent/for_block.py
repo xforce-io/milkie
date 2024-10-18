@@ -1,10 +1,11 @@
 import re
 from milkie.agent.base_block import BaseBlock
-from milkie.agent.llm_block import LLMBlock, Response
+from milkie.agent.llm_block.llm_block import LLMBlock
 from milkie.config.config import GlobalConfig
 from milkie.config.constant import DefaultUsePrevResult, KeywordForStart, KeyRet
-from milkie.context import Context
-from milkie.functions.toolkits.base_toolkits import BaseToolkit
+from milkie.context import Context, VarDict
+from milkie.functions.toolkits.toolkit import Toolkit
+from milkie.response import Response
 
 class ForBlock(BaseBlock):
     def __init__(
@@ -12,7 +13,7 @@ class ForBlock(BaseBlock):
             forStatement: str, 
             context: Context = None, 
             config: str | GlobalConfig = None,
-            toolkit: BaseToolkit = None,
+            toolkit: Toolkit = None,
             usePrevResult=DefaultUsePrevResult,
             loopBlockClass=LLMBlock,
             retStorage=None,
@@ -48,22 +49,23 @@ class ForBlock(BaseBlock):
         self.loopBlock = self.loopBlockClass(
             context=self.context,
             config=self.config,
+            toolkit=self.toolkit,
             taskExpr=self.loopBody,
             decomposeTask=True,
             repoFuncs=self.repoFuncs
         )
         self.loopBlock.compile()
 
-    def validate(self, args: dict):
+    def validate(self, args: VarDict):
         variable = ""
         rest = None
-        for key, _ in args.items():
+        for key, _ in args.getAllDict().items():
             if self.iterable.startswith(key) and len(key) > len(variable):
                 variable = key
                 rest = self.iterable[len(key):]
 
         try:
-            iterableValue = eval(f"args['{variable}']{rest}")
+            iterableValue = eval(f"args.get('{variable}'){rest}")
         except Exception as e:
             raise ValueError(f"Iterable '{self.iterable}' not found in variable dictionary")
 
@@ -90,11 +92,11 @@ class ForBlock(BaseBlock):
 
         for key, value in items:
             if self.loopType == dict:
-                self.loopBlock.setVarDict(
+                self.setVarDictGlobal(
                     self.loopVar, 
                     { "key": key, "value": value})
             else:
-                self.loopBlock.setVarDict(self.loopVar, value)
+                self.setVarDictGlobal(self.loopVar, value)
 
             result = self.loopBlock.execute(
                 query=query, 
@@ -103,7 +105,7 @@ class ForBlock(BaseBlock):
                results.append(result.resp)
             prevBlock = None
 
-        self.setVarDict(self.retStorage, results)
+        self.setVarDictGlobal(self.retStorage, results)
         return Response(respList=results)
 
     def __str__(self):
@@ -114,7 +116,7 @@ class ForBlock(BaseBlock):
             forStatement: str, 
             context: Context = None, 
             config: str | GlobalConfig = None,
-            toolkit: BaseToolkit = None,
+            toolkit: Toolkit = None,
             usePrevResult=DefaultUsePrevResult,
             loopBlockClass=LLMBlock,
             retStorage=None,

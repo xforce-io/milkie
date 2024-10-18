@@ -13,18 +13,20 @@ import PyPDF2
 import logging
 import os
 from milkie.config.config_robots_whitelist import loadRobotPolicies, getRobotPolicy
+import markdown2
 
-from milkie.context import Context, GlobalContext
-from milkie.functions.toolkits.base_toolkits import BaseToolkit
+from milkie.context import Context
+from milkie.functions.toolkits.toolkit import Toolkit
 from milkie.functions.openai_function import OpenAIFunction
 from milkie.cache.cache_kv import CacheKVMgr
+from milkie.global_context import GlobalContext
 from milkie.utils.data_utils import preprocessHtml
-from milkie.log import ERROR, INFO, DEBUG
+from milkie.log import ERROR, INFO, DEBUG, WARNING
 from milkie.functions.code_interpreter import CodeInterpreter
 
 logger = logging.getLogger(__name__)
 
-class SampleToolKit(BaseToolkit):
+class BasicToolKit(Toolkit):
     def __init__(self, globalContext: GlobalContext):
         super().__init__(globalContext)
 
@@ -107,20 +109,22 @@ class SampleToolKit(BaseToolkit):
                 cleanTexts.append(cleanText if cleanText else "No article content found.")
 
             except Exception as e:
-                error_msg = f"Error processing the article from {url}: {str(e)}"
-                ERROR(logger, error_msg)
-                cleanTexts.append(error_msg)
+                errorMsg = f"Error processing the article from {url}: {str(e)}"
+                ERROR(logger, errorMsg)
+                cleanTexts.append(errorMsg)
+                raise RuntimeError(errorMsg)
 
         return "\n\n".join(cleanTexts)
 
-    def sendEmail(self, to_email: str, subject: str, body: str) -> str:
+    def sendEmail(self, to_email: str, subject: str, body: str, content_type: str = "plain") -> str:
         """
         发送电子邮件给指定邮箱
 
         Args:
-            to_email (str): 收件人邮箱地
+            to_email (str): 收件人邮箱地址
             subject (str): 邮件主题
             body (str): 邮件正文
+            content_type (str): 内容类型，可选值为 "plain"、"html" 或 "markdown"，默认为 "plain"
 
         Returns:
             str: 发送结果描述
@@ -138,8 +142,14 @@ class SampleToolKit(BaseToolkit):
             msg['To'] = to_email
             msg['Subject'] = subject
 
-            # 添加邮件正文
-            msg.attach(MIMEText(body, 'plain'))
+            # 处理不同类型的内容
+            if content_type == "html":
+                msg.attach(MIMEText(body, 'html'))
+            elif content_type == "markdown":
+                html_content = markdown2.markdown(body)
+                msg.attach(MIMEText(html_content, 'html'))
+            else:  # 默认为纯文本
+                msg.attach(MIMEText(body, 'plain'))
 
             # 连接到SMTP服务器并发送邮件
             with smtplib.SMTP(emailConfig.smtp_server, emailConfig.smtp_port) as server:
@@ -147,21 +157,37 @@ class SampleToolKit(BaseToolkit):
                 server.login(emailConfig.username, emailConfig.password)
                 server.send_message(msg)
 
-            return f"success to send email to [{to_email}]"
+            return f"成功发送邮件至 [{to_email}]"
         except Exception as e:
-            return f"failed to send email[{str(e)}]"
+            errorMsg = f"Error sending email[{subject}]: {str(e)}"
+            ERROR(logger, errorMsg)
+            raise RuntimeError(errorMsg)
 
     def getHtmlContent(self, url: str) -> str:
         """
-        获取指定URL的HTML页面内容。
+        获取指定URL的HTML内容。
 
         Args:
             url (str): 要获取内容的网页URL
 
         Returns:
-            str: HTML页面内容或错误信息
+            str: HTML页面内容
+
+        Raises:
+            RuntimeError: 如果在重试后仍然无法获取内容
         """
-        return self._fetchUrl(url)
+        for attempt in range(2):  # 最多尝试两次
+            try:
+                content = self._fetchUrl(url)
+                return content
+            except Exception as e:
+                if attempt == 0:  # 第一次尝试失败
+                    WARNING(logger, f"First attempt to get HTML content failed [{url}], retrying: {str(e)}")
+                    time.sleep(2)  # 等待2秒后重试
+                else:  # 第二次尝试也失败
+                    errorMsg = f"Failed to get HTML content after retry [{url}]: {str(e)}"
+                    ERROR(logger, errorMsg)
+                    raise RuntimeError(errorMsg)
 
     def readPdfContent(self, file_path: str) -> str:
         """
@@ -181,7 +207,9 @@ class SampleToolKit(BaseToolkit):
                     content += page.extract_text()
                 return content
         except Exception as e:
-            return f"Error reading PDF: {str(e)}"
+            errorMsg = f"Error reading PDF[{file_path}]: {str(e)}"
+            ERROR(logger, errorMsg)
+            raise RuntimeError(errorMsg)
 
     def downloadFileFromUrl(self, url: str, localDirectory: str = "data/pdf/") -> str:
         """
@@ -229,11 +257,11 @@ class SampleToolKit(BaseToolkit):
         except requests.RequestException as e:
             error_msg = f"Error downloading file from {url}: {str(e)}"
             ERROR(logger, error_msg)
-            return error_msg
+            raise RuntimeError(error_msg)
         except Exception as e:
             error_msg = f"Unexpected error while downloading file from {url}: {str(e)}"
             ERROR(logger, error_msg)
-            return error_msg
+            raise RuntimeError(error_msg)
 
     def getTools(self) -> List[OpenAIFunction]:
         return [
@@ -312,17 +340,25 @@ class SampleToolKit(BaseToolkit):
             self.cacheMgr.setValue("urlContent", [{"url": url}], content)
 
             return preprocessHtml(content)
+        except requests.Timeout as e:
+            errorMsg = f"Request {url} timeout"
+            ERROR(logger, errorMsg)
+            raise RuntimeError(f"Error: {errorMsg}")
+        except requests.ConnectionError as e:
+            errorMsg = f"Connection {url} error"
+            ERROR(logger, errorMsg)
+            raise RuntimeError(f"Error: {errorMsg}")
         except requests.RequestException as e:
-            errorMsg = f"Error fetching the URL: {str(e)}"
+            errorMsg = f"Request {url} exception"
             ERROR(logger, errorMsg)
-            return errorMsg
+            raise RuntimeError(f"Error: {errorMsg}")
         except Exception as e:
-            errorMsg = f"Unexpected error: {str(e)}"
+            errorMsg = f"Unexpected error {url}"
             ERROR(logger, errorMsg)
-            return errorMsg
+            raise RuntimeError(f"Error: {errorMsg}")
 
 if __name__ == "__main__":
     context = Context.create("config/global.yaml")
 
     #print(SampleToolKit().searchWebFromDuckDuckGo("拜仁"))
-    print(SampleToolKit(context.getGlobalContext()).getToolsDesc())
+    print(BasicToolKit(context.getGlobalContext()).getToolsDesc())

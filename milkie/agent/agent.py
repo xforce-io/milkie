@@ -1,11 +1,12 @@
-from typing import List, Union
+from sys import stdin
+from typing import List
 from milkie.agent.base_block import BaseBlock
 from milkie.agent.flow_block import FlowBlock
 from milkie.agent.func_block import FuncBlock, RepoFuncs
 from milkie.config.constant import KeywordFuncStart, KeywordFuncEnd
 from milkie.context import Context
 from milkie.config.config import GlobalConfig
-from milkie.functions.toolkits.base_toolkits import BaseToolkit
+from milkie.functions.toolkits.toolkit import Toolkit
 from milkie.response import Response
 import logging
 
@@ -17,11 +18,13 @@ class Agent(BaseBlock):
             code: str, 
             context: Context = None, 
             config: str | GlobalConfig = None,
-            toolkit: BaseToolkit = None,
-            usePrevResult=False):
+            toolkit: Toolkit = None,
+            usePrevResult=False,
+            systemPrompt: str = None):
         self.repoFuncs = RepoFuncs()
         super().__init__(context, config, toolkit, usePrevResult, self.repoFuncs)
         self.code = code
+        self.systemPrompt = systemPrompt
         self.funcBlocks: List[FuncBlock] = []
         self.flowBlocks: List[FlowBlock] = []
 
@@ -96,6 +99,7 @@ class Agent(BaseBlock):
         result = Response()
         lastBlock = prevBlock
 
+        args["system_prompt"] = self.systemPrompt
         for block in self.flowBlocks:
             result = block.execute(
                 query=query,
@@ -104,6 +108,25 @@ class Agent(BaseBlock):
             )
             lastBlock = block
         return result
+
+class FakeAgentStdin(Agent):
+    def __init__(
+            self, 
+            code: str, 
+            context: Context = None, 
+            config: str | GlobalConfig = None, 
+            toolkit: Toolkit = None, 
+            usePrevResult=False, 
+            systemPrompt: str = None):
+        super().__init__(code, context, config, toolkit, usePrevResult, systemPrompt)
+
+    def execute(
+            self, 
+            query: str = None, 
+            args: dict = {}, 
+            prevBlock: BaseBlock = None) -> Response:
+        resp = stdin.readline()
+        return Response(respStr=resp)
 
 if __name__ == "__main__":
     code = """

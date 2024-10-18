@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from milkie.context import GlobalContext
+from milkie.global_context import GlobalContext
 from milkie.llm.inference import chat
 from milkie.response import Response
 
@@ -17,18 +17,25 @@ class StepLLM(ABC):
         return self.formatResult(self.llmCall(args, **kwargs))
     
     @abstractmethod
-    def makePrompt(self, **args) -> str:
+    def makePrompt(self, useTool: bool = False, **args) -> str:
         pass
 
     def llmCall(self, args: dict, **kwargs) -> Response:
-        self.prompt = self.makePrompt(**args)
+        self.prompt = self.makePrompt(useTool="tools" in kwargs, **args)
         llm = self.globalContext.settings.llmCode if self.codeModel else self.globalContext.settings.llm
+
+        if "system_prompt" in args:
+            systemPrompt = args["system_prompt"]
+        else:
+            systemPrompt = self.globalContext.globalConfig.getLLMConfig().systemPrompt
+
         return chat(
             llm=llm, 
-            systemPrompt=self.globalContext.globalConfig.getLLMConfig().systemPrompt,
+            systemPrompt=systemPrompt,
             prompt=self.prompt, 
             promptArgs={},
             **kwargs)
 
+    @abstractmethod
     def formatResult(self, result: Response):
-        pass
+        return result

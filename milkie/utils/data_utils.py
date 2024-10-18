@@ -56,17 +56,16 @@ def preprocessHtml(htmlContent):
     
     return html.strip()
 
-def restoreVariablesInDict(data :dict, varDict :dict) -> dict:
+
+def restoreVariablesInDict(data :dict, allDict :dict) -> dict:
     newDict = {}
     for argKey, argValue in data.items():
-        key = restoreVariablesInStr(argKey, varDict)
+        key = restoreVariablesInStr(argKey, allDict)
         if isinstance(argValue, str):
-            newDict[key] = restoreVariablesInStr(argValue, varDict)
+            newDict[key] = restoreVariablesInStr(argValue, allDict)
     return newDict
  
-def restoreVariablesInStr(data :str, varDict :dict):
-    from string import Formatter
-
+def restoreVariablesInStr(data :str, allDict :dict):
     def recursive_lookup(data, key):
         keys = key.split('.')
         val = data
@@ -84,8 +83,9 @@ def restoreVariablesInStr(data :str, varDict :dict):
                 return None
         return val
 
+    from string import Formatter
     class NestedFormatter(Formatter):
         def get_field(self, fieldName, args, kwargs):
-            return recursive_lookup(varDict, fieldName), fieldName
+            return recursive_lookup(allDict, fieldName), fieldName
 
     return NestedFormatter().format(data)

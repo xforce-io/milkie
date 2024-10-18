@@ -7,15 +7,25 @@ from llama_index.core.schema import NodeWithScore
 @dataclass
 class Response:
 
+    respInt: Optional[int] = None
+    respFloat: Optional[float] = None
+    respBool: Optional[bool] = None
     respStr: Optional[str] = None
     respDict: Optional[Dict[str, Any]] = None
     respList: Optional[List[Any]] = None
+
     source_nodes: List[NodeWithScore] = field(default_factory=list)
     metadata: Optional[Dict[str, Any]] = None   
 
     @property
     def resp(self) -> Any:
-        if self.respStr is not None:
+        if self.respInt is not None:
+            return self.respInt
+        elif self.respFloat is not None:
+            return self.respFloat
+        elif self.respBool is not None:
+            return self.respBool
+        elif self.respStr is not None:
             return self.respStr
         elif self.respDict is not None:
             return self.respDict
@@ -25,11 +35,17 @@ class Response:
             return None
 
     def __str__(self) -> str:
-        if self.respStr:
+        if self.respInt:
+            return str(self.respInt)
+        elif self.respFloat:
+            return str(self.respFloat)
+        elif self.respBool:
+            return str(self.respBool)
+        elif self.respStr:
             return self.respStr
-        elif self.respDict:
-            return str(self.respDict)
         elif self.respList:
             return str(self.respList)
-        else:
+        elif self.respDict:
             return str(self.respDict)
+        else:
+            return ""

@@ -2,13 +2,13 @@ import os
 import shutil
 import logging
 from typing import List, Callable
-from milkie.functions.toolkits.base_toolkits import BaseToolkit
+from milkie.functions.toolkits.toolkit import Toolkit
 from milkie.functions.openai_function import OpenAIFunction
 from milkie.global_context import GlobalContext
 
 logger = logging.getLogger(__name__)
 
-class FilesysToolKits(BaseToolkit):
+class FilesysToolKit(Toolkit):
     MaxFilesPerDirectory = 3  # 每个目录最多显示的文件数
     MaxTreeDepth = 3  # 树的最大深度
 
@@ -295,5 +295,5 @@ class FilesysToolKits(BaseToolkit):
         return not nameFilter or nameFilter.lower() in name.lower()
 
 if __name__ == "__main__":
-    filesysTools = FilesysToolKits()
+    filesysTools = FilesysToolKit()
     print(filesysTools.getToolsDesc())

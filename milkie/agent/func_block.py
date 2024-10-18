@@ -4,11 +4,12 @@ from typing import List
 from milkie.agent.base_block import BaseBlock
 from milkie.context import Context
 from milkie.config.config import GlobalConfig
-from milkie.functions.toolkits.base_toolkits import BaseToolkit
+from milkie.functions.toolkits.toolkit import Toolkit
 from milkie.response import Response
 from milkie.config.constant import InstFlagFunc, KeywordForStart
 import logging
 
+from milkie.trace import stdout
 from milkie.utils.data_utils import restoreVariablesInStr
 
 logger = logging.getLogger(__name__)
@@ -19,7 +20,7 @@ class FuncBlock(BaseBlock):
             funcDefinition: str,
             context: Context = None,
             config: str | GlobalConfig = None,
-            toolkit: BaseToolkit = None,
+            toolkit: Toolkit = None,
             repoFuncs=None  # 添加 repoFuncs 参数
     ):
         super().__init__(context, config, toolkit, repoFuncs=repoFuncs)  # 传递 repoFuncs 给父类
@@ -111,18 +112,24 @@ class FuncBlock(BaseBlock):
             self.setVarDictLocal(param, value)
 
     def execute(self, query: str = None, args: dict = {}, prevBlock: BaseBlock = None) -> Response:
-        self._restoreParams(args)
+        params = self._restoreParams(args)
+
+        stdout(f"called func start: {self.funcName}, params: {params}", args=args)
         response = self.flowBlock.execute(query, args, prevBlock)
+        stdout(f"called func end: {self.funcName}", args=args)
+
         self.clearVarDictLocal()
         return response
 
-    def _restoreParams(self, args :dict):
+    def _restoreParams(self, args :dict) -> dict:
         replaced = {}
         for param, value in self.getVarDict().getLocalDict().items():
-            replaced[param] = restoreVariablesInStr(value, args)
+            replaced[param] = restoreVariablesInStr(value, self.getVarDict().getGlobalDict())
+            if param in args: args[param] = replaced[param]
         
         for param, value in replaced.items():
             self.setVarDictLocal(param, value)
+        return replaced
 
     def __str__(self):
         return f"FuncBlock(funcName={self.funcName}, params={self.params})"
@@ -132,7 +139,7 @@ class FuncBlock(BaseBlock):
             funcDefinition: str,
             context: Context = None,
             config: str | GlobalConfig = None,
-            toolkit: BaseToolkit = None,
+            toolkit: Toolkit = None,
             repoFuncs=None) -> 'FuncBlock':
         return FuncBlock(funcDefinition, context, config, toolkit, repoFuncs)
 
