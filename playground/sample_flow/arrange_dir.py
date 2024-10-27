@@ -2,7 +2,7 @@ from milkie.agent.agents.base_agent import BaseAgent
 from milkie.agent.flow_block import FlowBlock
 from milkie.config.config import GlobalConfig
 from milkie.context import Context
-from milkie.functions.toolkits.filesys_toolkit import FilesysToolKit
+from milkie.functions.toolkits.filesys_toolkit import FilesysToolkit
 from milkie.response import Response
 
 class ArrangeDir(BaseAgent):
@@ -21,7 +21,7 @@ class ArrangeDir(BaseAgent):
 
         self.flowBlock = FlowBlock(
             flowCode=flowCode, 
-            toolkit=FilesysToolKit(), 
+            toolkit=FilesysToolkit(), 
             usePrevResult=False)
         self.flowBlock.compile()
 

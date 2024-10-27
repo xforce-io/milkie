@@ -1,5 +1,5 @@
 from abc import abstractmethod
-from typing import Any, Optional, Sequence
+from typing import Any, Optional, Sequence, Generator
 from threading import Thread
 import random, uuid
 from queue import Queue
@@ -26,7 +26,6 @@ from llama_index.core.base.llms.types import LLMMetadata
 from llama_index.core.base.llms.types import CompletionResponseGen
 
 from milkie.config.config import QuantMethod
-from milkie.prompt.prompt import Loader
 
 logger = logging.getLogger(__name__)
 
@@ -159,13 +158,33 @@ class EnhancedLLM(object):
         else :
             messages = prompt.message_templates
 
-        response = self._chat(messages, **kwargs)
+        response = self._completion(messages, **kwargs)
         output = response.message.content or ""
         numTokens = response.raw["num_tokens"]
         if numTokens == 0:
             numTokens = len(response.raw["model_output"])
         return (self._llm._parse_output(output), numTokens, response.raw["chat_completion"])
 
+    @torch.inference_mode()
+    def stream(
+            self, 
+            prompt: BasePromptTemplate, 
+            promptArgs: dict,
+            **kwargs: Any
+    ) -> Generator[ChatResponse, None, None]:
+        if len(promptArgs) > 0:
+            messages = self._llm._get_messages(prompt, **promptArgs)
+        else:
+            messages = prompt.message_templates
+        return self._stream(messages, **kwargs)
+
+    def filterGenArgs(kwargs :dict):
+        return EnhancedLLM.filterArgs(kwargs, ["repetition_penalty", "temperature", "top_k", "top_p"])
+
+    def filterArgs(kwargs :dict, keysLeft :list[str]):
+        return {k: v for k, v in kwargs.items() if k in keysLeft} 
+
+    #deprecated
     @torch.inference_mode()
     def predictBatch(
             self, 
@@ -177,12 +196,6 @@ class EnhancedLLM(object):
         else:
             messages = [self._llm._get_messages(prompt, **{})]
         return self._predictBatch(messages, **kwargs)
-
-    def filterGenArgs(kwargs :dict):
-        return EnhancedLLM.filterArgs(kwargs, ["repetition_penalty", "temperature", "top_k", "top_p"])
-
-    def filterArgs(kwargs :dict, keysLeft :list[str]):
-        return {k: v for k, v in kwargs.items() if k in keysLeft} 
 
     @abstractmethod
     def _getModel(self):
@@ -229,7 +242,7 @@ class EnhancedLLM(object):
             result += [(self._llm._parse_output(output), numTokens, chatResponse.raw["chat_completion"])]
         return result
 
-    def _chat(self, messages: Sequence[ChatMessage], **kwargs: Any) -> ChatResponse:
+    def _completion(self, messages: Sequence[ChatMessage], **kwargs: Any) -> ChatResponse:
         prompt = self._llm.messages_to_prompt(messages)
         completion_response = self._complete(prompt, formatted=True, **kwargs)
         return completion_response_to_chat_response(completion_response)
@@ -379,3 +392,7 @@ class EnhancedLLM(object):
                     "num_tokens": queueResponse.numTokens,
                     "chat_completion": queueResponse.chatCompletion})]
         return completionResponses
+
+    @abstractmethod
+    def _stream(self, messages: Sequence[ChatMessage], **kwargs: Any) -> Generator[ChatResponse, None, None]:
+        pass

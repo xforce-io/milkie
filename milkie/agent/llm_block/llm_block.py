@@ -4,21 +4,23 @@ from enum import Enum
 import json
 import logging
 import re
-from typing import Any, List
+from typing import Any, List, Optional, Tuple
 
 from milkie.agent.base_block import BaseBlock
-from milkie.agent.llm_block.inst_flag import InstFlag, ResultOutputProcess
+from milkie.agent.llm_block.step_llm_toolcall import StepLLMToolCall
 from milkie.agent.llm_block.step_llm_extractor import StepLLMExtractor
 from milkie.config.constant import *
 from milkie.context import Context
+from milkie.functions.toolkits.toolbox import Toolbox
 from milkie.functions.toolkits.toolkit import Toolkit, FuncExecRecord
-from milkie.functions.toolkits.basic_toolkit import BasicToolKit
+from milkie.functions.toolkits.basic_toolkit import BasicToolkit
 from milkie.prompt.prompt import Loader
 from milkie.prompt.prompt_maker import PromptMaker
 from milkie.llm.step_llm import StepLLM
 from milkie.log import INFO, DEBUG
 from milkie.response import Response
 from milkie.trace import stdout
+from milkie.utils.commons import mergeDict
 from milkie.utils.data_utils import restoreVariablesInDict, restoreVariablesInStr
 
 logger = logging.getLogger(__name__)
@@ -122,7 +124,7 @@ class PromptMakerInstruction(PromptMaker):
         return result
 
     def promptForDecompose(self, llmBlock :LLMBlock):
-        sampleToolKit = BasicToolKit(llmBlock.context.globalContext)
+        sampleToolKit = BasicToolkit(llmBlock.context.globalContext)
         sampleEmailDesc = Toolkit.getToolsDescWithSingleFunc(sampleToolKit.sendEmail)
         result = f"""
             请将任务分解为指令，要求如下：
@@ -162,7 +164,7 @@ class StepLLMBlock(StepLLM):
         super().__init__(llmBlock.context.globalContext, promptMaker)
         self.llmBlock = llmBlock
 
-class StepLLMInstAnalysis(StepLLMBlock):
+class StepLLMInstrAnalysis(StepLLMBlock):
     def __init__(
             self, 
             promptMaker :PromptMakerInstruction, 
@@ -171,6 +173,7 @@ class StepLLMInstAnalysis(StepLLMBlock):
         super().__init__(promptMaker, llmBlock)
         self.instruction = instruction
         self.instructionRecords = llmBlock.taskEngine.instructionRecords
+        self.stepToolCall = StepLLMToolCall(llmBlock.context.globalContext)
         
     def makePrompt(self, useTool: bool = False, **args) -> str:
         if args.get("prompt", None) == InstFlagDecompose:
@@ -182,9 +185,9 @@ class StepLLMInstAnalysis(StepLLMBlock):
             instructionRecords=self.instructionRecords,
             **args)
 
-        if self.instruction.flag.getNormalFormat():
+        if self.instruction.syntaxParser.getNormalFormat():
             result += f"""
-            请按照下述语义严格以 jsonify 格式输出结果：{self.instruction.flag.getOutputSyntax()}，现在请直接输出 json:
+            请按照下述语义严格以 jsonify 格式输出结果：{self.instruction.syntaxParser.getOutputSyntax()}，现在请直接输出 json:
             """
         elif not useTool:
             result += f"""
@@ -192,44 +195,104 @@ class StepLLMInstAnalysis(StepLLMBlock):
             """
         return result
 
-    def formatResult(self, result :Response) -> InstAnalysisResult:
+    def formatResult(self, result :Response, **kwargs) -> InstAnalysisResult:
         allDict = self.llmBlock.getVarDict().getAllDict()
         needToParse = self.instruction.formattedInstruct.find("{") >= 0
-        chatCompletion = result.metadata["chatCompletion"]
-        if chatCompletion.choices[0].message.tool_calls:
-            toolCalls = chatCompletion.choices[0].message.tool_calls
+        toolUsed, result = StepLLMInstrAnalysis.readFromGen(
+            result,
+            stepToolCall=self.stepToolCall,
+            **kwargs)
+        if toolUsed:
             funcExecRecords = self.llmBlock.toolkit.exec(
-                toolCalls, 
+                [(toolUsed, result)], 
                 allDict,
                 needToParse=needToParse)
+            stdout(funcExecRecords[0].result, **kwargs)
             return InstAnalysisResult(
                 InstAnalysisResult.Result.TOOL,
                 funcExecRecords=funcExecRecords,
-                response=chatCompletion.choices[0].message.tool_calls)
+                response=f"{toolUsed}({result})")
             
         # if function call is not in tools, but it is an answer
         if self.llmBlock.toolkit:
             funcExecRecords = self.llmBlock.toolkit.extractToolFromMsg(
-                chatCompletion.choices[0].message.content,
+                result,
                 allDict,
                 needToParse=needToParse)
             if funcExecRecords:
+                stdout(funcExecRecords[0].result, **kwargs)
                 return InstAnalysisResult(
                     InstAnalysisResult.Result.TOOL,
                     funcExecRecords=funcExecRecords,
-                    response=chatCompletion.choices[0].message.content)
+                    response=result)
 
         return InstAnalysisResult(
             InstAnalysisResult.Result.ANSWER,
             funcExecRecords=None,
-            response=result.resp)
+            response=result)
+
+    @staticmethod
+    def readFromGen(
+            response :Response, 
+            stepToolCall: Optional[StepLLMToolCall] = None, 
+            respToolbox: Optional[Toolbox] = None,
+            **kwargs) -> Tuple[Optional[str], str]:
+        toolUsed = None
+        result = []
+        currentSentence = []
+
+        def processDeltaContentNormal(deltaContent: str) -> str:
+            nonlocal currentSentence
+            currentSentence.append(deltaContent)
+            if any(symbol in deltaContent for symbol in SymbolEndSentence):
+                sentence = ''.join(currentSentence)
+                if stepToolCall:
+                    toolCheck = stepToolCall.completionAndFormat(
+                        query_str=sentence,
+                        tools=respToolbox
+                    )
+
+                    if toolCheck["need_tool"] and respToolbox:
+                        stdout(f"\nexecute call {toolCheck['tool_name']} with args {toolCheck['tool_args']} ==> ", **kwargs)
+                        respToolbox.execFromJson(
+                            funcName=toolCheck["tool_name"], 
+                            args=toolCheck["tool_args"],
+                            allDict={},
+                            **{KeywordMute: True},
+                            **kwargs)
+                        stdout(f"\n===============", **kwargs)
+                currentSentence = []
+            return deltaContent
+            
+        for chunk in response.respGen:
+            if chunk.raw.role == "assistant":
+                continue
+
+            if toolUsed is None:
+                if chunk.raw.tool_calls:
+                    toolUsed = chunk.raw.tool_calls[0].function.name
+                    continue
+                toolUsed = ""
+            
+            if toolUsed == "":
+                deltaContent = processDeltaContentNormal(chunk.raw.content)
+            else:
+                if chunk.raw.content is None:
+                    deltaContent = chunk.raw.tool_calls[0].function.arguments
+                else:
+                    deltaContent = ""
+
+            result.append(deltaContent)
+            stdout(deltaContent, end="", flush=True, **kwargs)
+
+        return (toolUsed or None, ''.join(result))
 
 class StepLLMSynthsisInstructionRecord(StepLLMBlock):
     def __init__(self, promptMaker, llmBlock, instructionRecord: InstructionRecord) -> None:
         super().__init__(promptMaker, llmBlock)
         self.instructionRecord = instructionRecord
 
-    def makePrompt(self, useTool: bool = False, **args) -> str:
+    def makePrompt(self, useTool: bool = False, args: dict = {}, **kwargs) -> str:
         resultPrompt = f"""
         指令为：
         {self.instructionRecord.instruction.curInstruct}
@@ -260,6 +323,8 @@ class InstructResult:
     def isNext(self):
         return self.response.respStr == KeyNext
 
+from milkie.agent.llm_block.syntax_parser import SyntaxParser
+
 class Instruction:
     def __init__(
             self, 
@@ -269,8 +334,11 @@ class Instruction:
             observation: str = None,
             prev = None) -> None:
         self.llmBlock = llmBlock
-        self.flag = InstFlag(curInstruct, llmBlock.repoFuncs)
-        self.curInstruct = self.flag.getInstruction()
+        self.syntaxParser = SyntaxParser(
+            curInstruct, 
+            llmBlock.repoFuncs, 
+            llmBlock.getEnv().getGlobalToolkits())
+        self.curInstruct = self.syntaxParser.getInstruction()
         self.formattedInstruct = self.curInstruct
         self.onlyFuncCall = False
         self.isNaiveType = False
@@ -286,12 +354,12 @@ class Instruction:
         self.promptMaker.setTask(llmBlock.taskEngine.task)
         self.promptMaker.setOrigInstruction(self.curInstruct)
         self.promptMaker.setPrev(self.prev)
-        self.stepInstAnalysis = StepLLMInstAnalysis(
+        self.stepInstAnalysis = StepLLMInstrAnalysis(
             promptMaker=self.promptMaker,
             llmBlock=llmBlock,
             instruction=self)
 
-    def execute(self, args :dict) -> InstructResult:
+    def execute(self, args :dict, **kwargs) -> InstructResult:
         try:
             self._formatCurInstruct(args)
         except Exception as e:
@@ -299,6 +367,7 @@ class Instruction:
 
         if self.onlyFuncCall or self.isNaiveType:
             # in this case, the response is the result of the only function call, or a naive type
+            stdout(self.formattedInstruct, args=args, **kwargs)
             return self._createResult(
                 self.formattedInstruct,
                 useTool=False,
@@ -308,8 +377,9 @@ class Instruction:
 
         useTool = (self.llmBlock.toolkit != None)
         logTypes = []
-        if self.flag.flag == InstFlag.Flag.CODE:
+        if self.syntaxParser.flag == SyntaxParser.Flag.CODE:
             result = self.llmBlock.toolkit.genCodeAndRun(self.formattedInstruct, self.varDict.getAllDict())
+            stdout(result, args=args, **kwargs)
             return self._createResult(
                 result,
                 useTool=True,
@@ -317,8 +387,9 @@ class Instruction:
                 analysis=self.curInstruct,
                 logType="code")
 
-        elif self.flag.flag == InstFlag.Flag.IF:
+        elif self.syntaxParser.flag == SyntaxParser.Flag.IF:
             result = self.llmBlock.toolkit.genCodeAndRun(self.formattedInstruct, self.varDict.getAllDict())
+            stdout(result, args=args, **kwargs)
             return self._createResult(
                 result,
                 useTool=True,
@@ -326,7 +397,7 @@ class Instruction:
                 analysis=self.curInstruct,
                 logType="if")
 
-        elif self.flag.flag == InstFlag.Flag.PY:
+        elif self.syntaxParser.flag == SyntaxParser.Flag.PY:
             def preprocessPyInstruct(instruct: str):
                 instruct = instruct.replace("$varDict", "self.varDict")
                 instruct = instruct.replace(KeyNext, f'"{KeyNext}"')
@@ -336,6 +407,7 @@ class Instruction:
             result = self.llmBlock.toolkit.runCode(
                 preprocessPyInstruct(self.formattedInstruct),
                 self.varDict.getAllDict())
+            stdout(result, args=args, **kwargs)
             return self._createResult(
                 result,
                 useTool=False,
@@ -343,23 +415,24 @@ class Instruction:
                 analysis=self.curInstruct,
                 logType="py")
 
-        elif self.flag.flag == InstFlag.Flag.CALL:
-            query = self.flag.callArg
+        elif self.syntaxParser.flag == SyntaxParser.Flag.CALL:
+            query = self.syntaxParser.callArg
             MaxRetry = 2
             for i in range(MaxRetry):
-                stdout(f"execute call {self.flag.callObj} with query {self.flag.callArg}", args=args)
+                stdout(f"execute call {self.syntaxParser.callObj} with query {query} ==> ", args=args, **kwargs)
                 resp = self.llmBlock.context.getEnv().execute(
-                    agentName=self.flag.callObj,
+                    agentName=self.syntaxParser.callObj,
                     query=query,
                     args=args)
 
-                instrOutput = self.flag.getInstrOutput()
+                instrOutput = self.syntaxParser.getInstrOutput()
                 instrOutput.processOutputAndStore(
                     stepLLMExtractor=self.llmBlock.stepLLMExtractor,
                     output=resp.respStr,
                     varDict=self.varDict,
                     retry=True)
                 if not instrOutput.hasError():
+                    stdout(f"==> {resp.respStr}", args=args, **kwargs)
                     return self._createResult(
                         resp,
                         useTool=False,
@@ -370,7 +443,8 @@ class Instruction:
                 query = "\n".join(instrOutput.getErrMsgs() + [query])
             raise RuntimeError(f"fail execute instruction[{self.curInstruct}] error[{instrOutput.getErrMsgs()}]")
 
-        elif self.flag.flag == InstFlag.Flag.RET and self.flag.returnVal:
+        elif self.syntaxParser.flag == SyntaxParser.Flag.RET and self.syntaxParser.returnVal:
+            stdout(self.formattedInstruct, args=args, **kwargs)
             return self._createResult(
                 self.formattedInstruct,
                 useTool=False,
@@ -378,13 +452,13 @@ class Instruction:
                 analysis=self.curInstruct,
                 logType="ret")
 
-        if self.flag.flag == InstFlag.Flag.THOUGHT:
+        if self.syntaxParser.flag == SyntaxParser.Flag.THOUGHT:
             self.promptMaker.promptForThought(self.llmBlock)
             args["prompt"] = InstFlagThought
             useTool = False
             logTypes.append("thought")
 
-        elif self.flag.flag == InstFlag.Flag.DECOMPOSE:
+        elif self.syntaxParser.flag == SyntaxParser.Flag.DECOMPOSE:
             self.promptMaker.promptForDecompose(self.llmBlock)
             args["prompt"] = InstFlagDecompose
             useTool = False
@@ -393,14 +467,16 @@ class Instruction:
         else:
             args["prompt"] = None
 
-        if useTool:
-            instAnalysisResult = self.stepInstAnalysis.run(
-                args=args,
-                tools=self.llmBlock.toolkit.getToolsSchema()
-            )
-        else:
-            instAnalysisResult = self.stepInstAnalysis.run(
-                args=args)
+        kwargs = {}
+        if not self.syntaxParser.respToolbox and useTool:
+            kwargs["tools"] = self.llmBlock.toolkit
+        
+        if self.syntaxParser.respToolbox:
+            kwargs["respToolbox"] = self.syntaxParser.respToolbox
+        
+        instAnalysisResult = self.stepInstAnalysis.streamAndFormat(
+            args=args,
+            **kwargs)
 
         if instAnalysisResult.result == InstAnalysisResult.Result.ANSWER:
             logTypes.append("ans")
@@ -438,7 +514,7 @@ class Instruction:
         self.llmBlock.context.reqTrace.add("instruction", logData)
         if type(response) == str:
             #normal response
-            if self.flag.flag == InstFlag.Flag.RET and self.flag.returnVal:
+            if self.syntaxParser.flag == SyntaxParser.Flag.RET and self.syntaxParser.returnVal:
                 if response.startswith("{"):
                     retJson = json.loads(response)
                     retJson = restoreVariablesInDict(retJson, self.varDict.getAllDict())
@@ -489,12 +565,12 @@ class Instruction:
             raise RuntimeError(f"unsupported response type[{type(response)}]")
 
     def _formatCurInstruct(self, args :dict):
-        allArgs = {**args, **self.varDict.getAllDict()}
+        allArgs = mergeDict(args, self.varDict.getAllDict())
 
         #call functions
         curInstruct = self.curInstruct
-        if len(self.flag.funcsToCall) > 0:
-            for funcBlock in self.flag.funcsToCall:
+        if len(self.syntaxParser.funcsToCall) > 0:
+            for funcBlock in self.syntaxParser.funcsToCall:
                 resp = funcBlock.execute(args=allArgs)
                 if curInstruct.strip() == funcBlock.getFuncPattern().strip():
                     self.onlyFuncCall = True
@@ -506,7 +582,7 @@ class Instruction:
                 except Exception as e:
                     raise RuntimeError(f"fail replace func[{funcBlock.getFuncPattern()}] with [{resp.resp}]")
             
-        if self.flag.flag == InstFlag.Flag.NONE:
+        if self.syntaxParser.flag == SyntaxParser.Flag.NONE:
             naiveType = Instruction._isNaiveType(curInstruct)
             if naiveType != None:
                 self.isNaiveType = True
@@ -521,8 +597,8 @@ class Instruction:
         except Exception as e:
             raise RuntimeError(f"fail restore variables in [{curInstruct}]")
 
-        if self.flag.flag == InstFlag.Flag.GOTO:
-            self.formattedInstruct = self.formattedInstruct.replace(f"#GOTO {self.flag.label}", "")
+        if self.syntaxParser.flag == SyntaxParser.Flag.GOTO:
+            self.formattedInstruct = self.formattedInstruct.replace(f"#GOTO {self.syntaxParser.label}", "")
         self.promptMaker.setFormattedInstruction(self.formattedInstruct)
 
     @staticmethod   
@@ -574,7 +650,11 @@ class TaskEngine:
         self.lastInstruction :Instruction = None
         self.instructionRecords :list[InstructionRecord] = []
 
-    def execute(self, taskArgs :dict, instructions: list[tuple[str, Instruction]]) -> tuple:
+    def execute(
+            self, 
+            taskArgs :dict, 
+            instructions: list[tuple[str, Instruction]], 
+            **kwargs) -> tuple:
         self.lastInstruction = None
         self.instructions = instructions
 
@@ -583,28 +663,28 @@ class TaskEngine:
         while curIdx < len(self.instructions):
             label, instruction = self.instructions[curIdx]
             if len(instruction.curInstruct.strip()) == 0 and \
-                    instruction.flag.flag == InstFlag.Flag.RET:
+                    instruction.syntaxParser.flag == SyntaxParser.Flag.RET:
                 break
             
-            instructResult = self._step(instruction, args=taskArgs)
-            stdout(f"{label} -> {instructResult.response.resp}", args=taskArgs)
+            stdout(f"{label} -> ", **kwargs)
+            instructResult = self._step(instruction, args=taskArgs, **kwargs)
             self.llmBlock.setResp(label, instructResult.response.resp)
             if instructResult.isRet():
                 logger.info("end of the task")
                 break
 
             #set variables
-            if instruction.flag.flag == InstFlag.Flag.THOUGHT:
+            if instruction.syntaxParser.flag == SyntaxParser.Flag.THOUGHT:
                 self.llmBlock.setVarDictGlobal(KeyVarDictThtTask, instruction.formattedInstruct[:MaxLenThtTask])
                 self.llmBlock.setVarDictGlobal(KeyVarDictThought, instructResult.response.resp)
             
             #process output
-            instruction.flag.getInstrOutput().processOutputAndStore(
+            instruction.syntaxParser.getInstrOutput().processOutputAndStore(
                 stepLLMExtractor=self.llmBlock.stepLLMExtractor,
                 output=instructResult.response.respStr,
                 varDict=instruction.varDict,
                 retry=False)
-            if instruction.flag.getInstrOutput().hasError():
+            if instruction.syntaxParser.getInstrOutput().hasError():
                 raise RuntimeError(f"fail process output[{instructResult.response}]")
 
             #append instruction record
@@ -613,11 +693,11 @@ class TaskEngine:
                     instruction=instruction, 
                     result=instructResult))
 
-            if instruction.flag.flag == InstFlag.Flag.RET:
+            if instruction.syntaxParser.flag == SyntaxParser.Flag.RET:
                 break
 
             # adjust instructions and curIdx
-            if instruction.flag.flag == InstFlag.Flag.DECOMPOSE:
+            if instruction.syntaxParser.flag == SyntaxParser.Flag.DECOMPOSE:
                 newInstructions = self.llmBlock._decomposeTask(instructResult.response.resp)
                 for i, (label, instruction) in enumerate(newInstructions):
                     self.instructions.insert(curIdx + i + 1, (label, instruction))  
@@ -629,8 +709,8 @@ class TaskEngine:
                 curIdx += 1
             elif instructResult.goto:
                 curIdx = self.getInstrLabels().index(instructResult.goto)
-            elif instruction.flag.flag == InstFlag.Flag.GOTO:
-                curIdx = self.getInstrLabels().index(instruction.flag.label)
+            elif instruction.syntaxParser.flag == SyntaxParser.Flag.GOTO:
+                curIdx = self.getInstrLabels().index(instruction.syntaxParser.label)
             else:
                 curIdx += 1
 
@@ -639,8 +719,8 @@ class TaskEngine:
     def getInstrLabels(self) -> list[str]:
         return [label for label, _ in self.instructions]
 
-    def _step(self, instruction: Instruction, args: dict) -> InstructResult:
-        instructResult = instruction.execute(args)
+    def _step(self, instruction: Instruction, args: dict, **kwargs) -> InstructResult:
+        instructResult = instruction.execute(args, **kwargs)
         return instructResult
 
 class LLMBlock(BaseBlock):
@@ -699,7 +779,8 @@ class LLMBlock(BaseBlock):
             self, 
             query: str = None, 
             args: dict = {},
-            prevBlock: LLMBlock = None) -> Response:
+            prevBlock: LLMBlock = None,
+            **kwargs) -> Response:
         self.updateFromPrevBlock(prevBlock, args)
 
         INFO(logger, f"LLMBlock execute: query[{query}] args[{args}]")
@@ -709,7 +790,8 @@ class LLMBlock(BaseBlock):
             self.compile()  # 只在未编译时进行编译
         _, result = self.taskEngine.execute(
             taskArgs=taskArgs, 
-            instructions=self.instructions)
+            instructions=self.instructions,
+            **kwargs)
         return result
     
     def recompile(self):

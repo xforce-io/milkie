@@ -2,26 +2,22 @@ from milkie.functions.toolkits.toolkit import Toolkit
 from milkie.global_context import GlobalContext
 import logging
 
+from milkie.runtime.global_toolkits import GlobalToolkits
+
 logger = logging.getLogger(__name__)
 
 class AgentProgram:
     def __init__(
             self, 
             programFilepath: str,
-            toolkitMaps: dict = None,
+            globalToolkits: GlobalToolkits = None,
             globalContext: GlobalContext = None
         ) -> None:
-        """
-        初始化 ProgramFile 对象
-
-        :param programFilepath: 程序文件的路径
-        :param toolkits: 工具包字典
-        :param globalContext: 全局上下文对象
-        """
         self.programFilepath = programFilepath
-        self.toolkitMaps = toolkitMaps
+        self.globalToolkits = globalToolkits
         self.globalContext = globalContext
         self.name = None
+        self.desc = None
         self.systemPrompt = None
         self.code = None
         self.imports = []
@@ -29,11 +25,6 @@ class AgentProgram:
         self.program = self._readProgramFile()
 
     def _readProgramFile(self) -> str:
-        """
-        读取程序文件内容
-
-        :return: 文件内容字符串
-        """
         try:
             with open(self.programFilepath, 'r', encoding='utf-8') as file:
                 content = file.read()
@@ -44,11 +35,14 @@ class AgentProgram:
             raise IOError(f"Unable to read program file: {e}")
 
     def parse(self) -> None:
-        """
-        解析程序文件内容，提取导入的工具包并处理代码
-        """
         lines = self.program.split('\n')
         parsedLines = []
+
+        self.desc = None
+        inDesc = False
+        descLines = []
+        
+        self.systemPrompt = None
         inSystemPrompt = False
         systemPromptLines = []
         
@@ -60,10 +54,29 @@ class AgentProgram:
                 self.name = line.split()[-1].strip()
                 if self.name == "":
                     raise SyntaxError(f"Agent name is empty[{self.programFilepath}]")
-            elif line.startswith('@system'):
-                inSystemPrompt = not inSystemPrompt
+            elif line.startswith('@desc'):
+                if self.desc is not None:
+                    raise SyntaxError(f"Agent description is already set[{self.programFilepath}]")
+                
+                inDesc = not inDesc
+                if inDesc:
+                    line = line[len('@desc'):].strip()
+                    if line != "":
+                        self.desc = line
                 continue
-            elif inSystemPrompt:
+            elif inDesc and self.desc is None:
+                descLines.append(line)
+            elif line.startswith('@system'):
+                if self.systemPrompt is not None:
+                    raise SyntaxError(f"Agent system prompt is already set[{self.programFilepath}]")
+                
+                inSystemPrompt = not inSystemPrompt
+                if inSystemPrompt:
+                    line = line.split('@system')[1].strip()
+                    if line != "":
+                        self.systemPrompt = line
+                continue
+            elif inSystemPrompt and self.systemPrompt is None:
                 systemPromptLines.append(line)
             elif not line.startswith('//'):
                 parsedLines.append(line)
@@ -73,44 +86,36 @@ class AgentProgram:
         
         self.toolkit = Toolkit.getUnionToolkit(self.imports)
         self.code = '\n'.join(parsedLines)
-        self.systemPrompt = '\n'.join(systemPromptLines).strip()
+
+        if self.systemPrompt is None:
+            self.systemPrompt = '\n'.join(systemPromptLines).strip()
+
+        if self.desc is None:
+            self.desc = '\n'.join(descLines).strip()
+
+        if self.desc == "":
+            raise SyntaxError(f"Agent description is empty[{self.programFilepath}]")
+        
         logger.info("Program file parsed successfully")
 
     def _handleImport(self, line: str) -> None:
-        """
-        处理导入语句
-
-        :param line: 导入语句行
-        """
         toolkitName = line.split()[-1]
-        if self.toolkitMaps and toolkitName in self.toolkitMaps:
-            self.imports.append(self.toolkitMaps[toolkitName])
+        if self.globalToolkits and self.globalToolkits.isValidToolkit(toolkitName):
+            self.imports.append(self.globalToolkits.getToolkit(toolkitName))
             logger.debug(f"Imported toolkit: {toolkitName}")
         else:
             logger.warning(f"Toolkit not found: {toolkitName}")
 
     def getImports(self) -> list:
-        """
-        获取导入的工具包列表
-
-        :return: 导入的工具包列表
-        """
         return self.imports
 
     def getCode(self) -> str:
-        """
-        获取处理后的代码
-
-        :return: 处理后的代码字符串
-        """
         if self.code is None:
             raise ValueError("Program has not been parsed yet")
         return self.code
 
     def getSystemPrompt(self) -> str:
-        """
-        获取系统提示
-
-        :return: 系统提示字符串
-        """
         return self.systemPrompt
+    
+    def getDesc(self) -> str:
+        return self.desc

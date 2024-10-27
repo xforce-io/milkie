@@ -28,13 +28,22 @@ class VarDict:
         return self.localDict
     
     def setGlobal(self, key :str, value):
-        self.globalDict[key] = value
+        if value is None:
+            self.globalDict.pop(key)
+        else:
+            self.globalDict[key] = value
 
     def setLocal(self, key :str, value):
-        self.localDict[key] = value
+        if value is None:
+            self.localDict.pop(key)
+        else:
+            self.localDict[key] = value
 
     def setResp(self, key :str, value):
-        self.globalDict[KeyResp][key] = value
+        if value is None:
+            self.globalDict[KeyResp].pop(key)
+        else:
+            self.globalDict[KeyResp][key] = value
 
     def update(self, newDict :VarDict):
         self.globalDict.update(newDict.globalDict)

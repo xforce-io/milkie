@@ -111,12 +111,12 @@ class FuncBlock(BaseBlock):
         for param, value in zip(self.params, args):
             self.setVarDictLocal(param, value)
 
-    def execute(self, query: str = None, args: dict = {}, prevBlock: BaseBlock = None) -> Response:
+    def execute(self, query: str = None, args: dict = {}, prevBlock: BaseBlock = None, **kwargs) -> Response:
         params = self._restoreParams(args)
 
-        stdout(f"called func start: {self.funcName}, params: {params}", args=args)
+        stdout(f"called func start: {self.funcName}, params: {params}", **kwargs)
         response = self.flowBlock.execute(query, args, prevBlock)
-        stdout(f"called func end: {self.funcName}", args=args)
+        stdout(f"called func end: {self.funcName}", **kwargs)
 
         self.clearVarDictLocal()
         return response

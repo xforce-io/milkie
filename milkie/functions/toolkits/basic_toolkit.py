@@ -26,7 +26,7 @@ from milkie.functions.code_interpreter import CodeInterpreter
 
 logger = logging.getLogger(__name__)
 
-class BasicToolKit(Toolkit):
+class BasicToolkit(Toolkit):
     def __init__(self, globalContext: GlobalContext):
         super().__init__(globalContext)
 
@@ -361,4 +361,4 @@ if __name__ == "__main__":
     context = Context.create("config/global.yaml")
 
     #print(SampleToolKit().searchWebFromDuckDuckGo("拜仁"))
-    print(BasicToolKit(context.getGlobalContext()).getToolsDesc())
+    print(BasicToolkit(context.getGlobalContext()).getToolsDesc())

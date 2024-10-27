@@ -22,7 +22,7 @@ class StepLLMCode(StepLLM):
         self.prevResult = prevResult
         self.errorContext = errorContext
 
-    def makePrompt(self, useTool: bool = False, **args) -> str:
+    def makePrompt(self, useTool: bool = False, args: dict = {}, **kwargs) -> str:
         prompt = self.prevResult + f"""
         请根据指令生成Python代码，要求如下：
         （1）请不要调用'return'
@@ -61,7 +61,7 @@ class CodeInterpreter:
                     self.globalContext, 
                     instruction, 
                     errorContext)
-                code = stepLLMCode.run()
+                code = stepLLMCode.streamOutputAndFormat()
                 code = code.replace("```python", "").replace("```", "")
                 code = addPreImport(code)
                 

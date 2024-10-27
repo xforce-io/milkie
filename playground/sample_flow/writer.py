@@ -3,7 +3,7 @@ from milkie.agent.flow_block import FlowBlock
 from milkie.config.config import GlobalConfig
 from milkie.context import Context
 from milkie.functions.toolkits.toolkit import Toolkit
-from milkie.functions.toolkits.basic_toolkit import BasicToolKit
+from milkie.functions.toolkits.basic_toolkit import BasicToolkit
 from milkie.response import Response
 
 class Writer(BaseAgent):
@@ -40,7 +40,7 @@ class Writer(BaseAgent):
     
 if __name__ == "__main__":
     context = Context.create("config/global.yaml")
-    writer = Writer(context=context, toolkit=BasicToolKit(context.getGlobalContext()))
+    writer = Writer(context=context, toolkit=BasicToolkit(context.getGlobalContext()))
     args = {
         "topic" : "为什么中国队这么差",
         "email" : "freeman.xu@aishu.cn"

@@ -1,5 +1,8 @@
-def stdout(value :str, args :dict = {}):
-    if "__mute__" in args and args["__mute__"]:
+from milkie.config.constant import KeywordMute
+
+
+def stdout(value :str, **kwargs):
+    if KeywordMute in kwargs and kwargs[KeywordMute]:
         return
 
-    print(value)
+    print(value, **kwargs)

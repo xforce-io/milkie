@@ -1,8 +1,11 @@
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Generator, List, Optional
+
+from openai.types.chat.chat_completion_message import ChatCompletionMessage
 
 from llama_index.core.schema import NodeWithScore
+from llama_index.core.base.llms.types import ChatResponse
+
 
 @dataclass
 class Response:
@@ -13,9 +16,13 @@ class Response:
     respStr: Optional[str] = None
     respDict: Optional[Dict[str, Any]] = None
     respList: Optional[List[Any]] = None
+    respGen: Optional[Generator[ChatResponse, None, None]] = None
 
     source_nodes: List[NodeWithScore] = field(default_factory=list)
     metadata: Optional[Dict[str, Any]] = None   
+
+    def getChoice0Message(self) -> ChatCompletionMessage:
+        return self.metadata["chatCompletion"].choices[0].message
 
     @property
     def resp(self) -> Any:
@@ -31,6 +38,8 @@ class Response:
             return self.respDict
         elif self.respList is not None:
             return self.respList
+        elif self.respGen is not None:
+            return self.respGen
         else:
             return None
 

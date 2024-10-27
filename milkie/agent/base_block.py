@@ -41,6 +41,9 @@ class BaseBlock(ABC):
             self.updateVarDict(prevBlock.getVarDict())
         self.updateVarDictFromDict(args)
 
+    def getEnv(self):
+        return self.context.getEnv()
+
     def getVarDict(self) -> VarDict:
         return self.context.varDict
 

@@ -2,11 +2,12 @@ from enum import Enum
 import json
 import logging
 import re
-from typing import Dict, List, Union
+from typing import Dict, List
 from milkie.agent.func_block import RepoFuncs
 from milkie.agent.llm_block.step_llm_extractor import StepLLMExtractor
 from milkie.config.constant import *
 from milkie.context import VarDict
+from milkie.runtime.global_toolkits import GlobalToolkits
 
 logger = logging.getLogger(__name__)
 
@@ -123,7 +124,7 @@ class OutputSyntax:
         if self.format == OutputSyntaxFormat.REGEX:
             return self.regExpr.search(output).group(1)
         elif self.format == OutputSyntaxFormat.EXTRACT:
-            return stepLLMExtractor.run(
+            return stepLLMExtractor.completionAndFormat(
                 args={
                     "toExtract": self.extractPattern,
                     "text": output
@@ -222,7 +223,9 @@ class InstrOutput:
                     outputStruct.storeVar,
                     output=output)
 
-class InstFlag:
+from milkie.functions.toolkits.toolbox import Toolbox
+
+class SyntaxParser:
     class Flag(Enum):
         NONE = 1
         RET = 2
@@ -241,14 +244,18 @@ class InstFlag:
     def __init__(
             self, 
             instruction: str,
-            repoFuncs: RepoFuncs) -> None:
-        self.flag = InstFlag.Flag.NONE
+            repoFuncs: RepoFuncs,
+            toolkits: GlobalToolkits) -> None:
+        self.flag = SyntaxParser.Flag.NONE
         self.label = None
         self.instOutput = InstrOutput()
         self.returnVal = False 
         self.instruction = instruction.strip()
         self.funcsToCall = []
+        self.respToolbox: Toolbox = None
+        
         self.repoFuncs = repoFuncs
+        self.toolkits = toolkits
         self.typeCall = None
         self.callObj = None
         self.callArg = None
@@ -271,6 +278,7 @@ class InstFlag:
         self._handleOutputAndStore()
         self._handleFlags()
         self._handleFunctions()
+        self._handleRespToolkit()
 
     def _handleOutputAndStore(self):
         parts = re.split(r'(=>|->)', self.instruction)
@@ -320,6 +328,30 @@ class InstFlag:
                 else:
                     raise SyntaxError(f"function[{funcName}] params not found")
 
+    def _handleRespToolkit(self):
+        indexStart = self.instruction.find(InstFlagRespToolkitStart)
+        if indexStart == -1:
+            return
+
+        indexEnd = self.instruction.find(InstFlagRespToolkitEnd, indexStart)
+        if indexEnd == -1 or indexEnd <= indexStart:
+            return
+
+        toolbox = self.instruction[indexStart+len(InstFlagRespToolkitStart):indexEnd].strip()
+        if not toolbox:
+            self.respToolbox = None
+            return
+
+        toolnames = [t.strip() for t in toolbox.split("/")]
+
+        self.respToolbox = Toolbox.createToolbox(self.toolkits, toolnames)
+        if not self.respToolbox or not self.respToolbox.getTools():
+            raise RuntimeError(f"Invalid toolkit: {toolbox}")
+
+        # Remove the respToolkit instruction from the main instruction
+        self.instruction = self.instruction[:indexStart] + self.instruction[indexEnd+len(InstFlagRespToolkitEnd):]
+        self.instruction = self.instruction.strip()
+
     def _handleFlags(self):
         flagHandlers = {
             InstFlagRet: self._handleRetFlag,
@@ -340,38 +372,38 @@ class InstFlag:
         if flagsFound:
             flagHandlers[flagsFound[0]]()
         else:
-            self.flag = InstFlag.Flag.NONE
+            self.flag = SyntaxParser.Flag.NONE
 
     def _handleRetFlag(self):
-        self.flag = InstFlag.Flag.RET
+        self.flag = SyntaxParser.Flag.RET
         self.returnVal = self.instruction.startswith(InstFlagRet)
         self.instruction = self.instruction.replace(InstFlagRet, "").strip()
 
     def _handleCodeFlag(self):
-        self.flag = InstFlag.Flag.CODE
+        self.flag = SyntaxParser.Flag.CODE
         self.instruction = self.instruction.replace(InstFlagCode, "")
 
     def _handleIfFlag(self):
-        self.flag = InstFlag.Flag.IF
+        self.flag = SyntaxParser.Flag.IF
 
     def _handleGotoFlag(self):
-        self.flag = InstFlag.Flag.GOTO
+        self.flag = SyntaxParser.Flag.GOTO
         gotoParts = self.instruction.split(InstFlagGoto)
         self.label = gotoParts[1].split()[0].strip()
         self.instruction = gotoParts[0].strip() + " ".join(gotoParts[1].split()[1:]).strip()
 
     def _handlePyFlag(self):
-        self.flag = InstFlag.Flag.PY
+        self.flag = SyntaxParser.Flag.PY
         pyCode = self._extractPyCode()
         self.instruction = pyCode if pyCode else self.instruction.replace(InstFlagPy, "").strip()
 
     def _handleCallFlag(self):
-        self.flag = InstFlag.Flag.CALL
+        self.flag = SyntaxParser.Flag.CALL
         callParts = self.instruction.split(InstFlagCall)
 
         self.callObj = callParts[1].split()[0].strip()
         if self.callObj.startswith("@"):
-            self.typeCall = InstFlag.TypeCall.Agent
+            self.typeCall = SyntaxParser.TypeCall.Agent
             self.callObj = self.callObj[1:]
         else:
             raise Exception(f"Invalid call object: {self.callObj}")
@@ -385,11 +417,11 @@ class InstFlag:
             raise SyntaxError(f"function[{self.callObj}] params not found or not properly quoted")
 
     def _handleThoughtFlag(self):
-        self.flag = InstFlag.Flag.THOUGHT
+        self.flag = SyntaxParser.Flag.THOUGHT
         self.instruction = self.instruction.replace(InstFlagThought, "").strip()
 
     def _handleDecomposeFlag(self):
-        self.flag = InstFlag.Flag.DECOMPOSE
+        self.flag = SyntaxParser.Flag.DECOMPOSE
         self.instruction = self.instruction.replace(InstFlagDecompose, "").strip()
 
     def _extractPyCode(self):
@@ -408,3 +440,4 @@ class InstFlag:
 
     def getOutputSyntaxes(self):
         return [struct.outputSyntax for struct in self.instOutput.outputStructs if struct.outputSyntax]
+

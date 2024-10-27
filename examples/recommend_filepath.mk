@@ -1,5 +1,7 @@
 @name recommend_filepath
 
+@desc 推荐一个文件路径
+
 @import FilesysToolKit
 
 1. 获取目录{dir}下的树形结构 -> fileTree

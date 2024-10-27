@@ -113,7 +113,8 @@ class FlowBlock(BaseBlock):
             self, 
             query: str = None, 
             args: dict = {}, 
-            prevBlock: BaseBlock = None) -> Response:
+            prevBlock: BaseBlock = None,
+            **kwargs) -> Response:
         self.updateFromPrevBlock(prevBlock, args)
 
         result = Response()
@@ -122,7 +123,9 @@ class FlowBlock(BaseBlock):
             result = block.execute(
                 query=query, 
                 args=args,
-                prevBlock=lastBlock)
+                prevBlock=lastBlock,
+                **kwargs
+            )
             lastBlock = block
         return result
 

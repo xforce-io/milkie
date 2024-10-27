@@ -1,9 +1,8 @@
 import os
 from milkie.context import Context
-from milkie.env.agent_program import AgentProgram
-from milkie.env.env import Env
-from milkie.functions.toolkits.filesys_toolkit import FilesysToolKit
-from milkie.functions.toolkits.basic_toolkit import BasicToolKit
+from milkie.runtime.agent_program import AgentProgram
+from milkie.runtime.env import Env
+from milkie.runtime.global_toolkits import GlobalToolkits
 from milkie.global_context import GlobalContext
 import logging
 
@@ -16,10 +15,7 @@ class Engine:
             programFilepath: str = None,
             configPath: str = None) -> None:
         self.globalContext = GlobalContext.create(configPath)
-        self.toolKits = {
-            "FilesysToolKit": FilesysToolKit(self.globalContext),
-            "BasicToolKit": BasicToolKit(self.globalContext),
-        }
+        self.globalToolkits = GlobalToolkits(self.globalContext)
 
         self.agentPrograms = []
         if programFolder:
@@ -28,7 +24,7 @@ class Engine:
                     programFilePath = os.path.join(programFolder, filename)
                     program = AgentProgram(
                         programFilepath=programFilePath,
-                        toolkitMaps=self.toolKits,
+                        globalToolkits=self.globalToolkits,
                         globalContext=self.globalContext
                     )
                     program.parse()
@@ -37,7 +33,7 @@ class Engine:
         if programFilepath:
             program = AgentProgram(
                 programFilepath=programFilepath,
-                toolkitMaps=self.toolKits,
+                globalToolkits=self.globalToolkits,
                 globalContext=self.globalContext
             )
             program.parse()
@@ -46,10 +42,12 @@ class Engine:
         self.env = Env(
             context=Context(self.globalContext),
             config=self.globalContext.globalConfig,
-            agentPrograms=self.agentPrograms)
+            agentPrograms=self.agentPrograms,
+            globalToolkits=self.globalToolkits)
 
-    def run(self, agent: str = None, args: dict = {}):
+    def run(self, agent: str = None, args: dict = {}, **kwargs):
         return self.env.execute(
             query=args["query_str"] if "query_str" in args else None, 
             args=args, 
-            agentName=agent)
+            agentName=agent,
+            **kwargs)

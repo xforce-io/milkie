@@ -3,7 +3,7 @@ import shutil
 import unittest
 from base_test import BaseIntegrationTest
 from milkie.agent.flow_block import FlowBlock
-from milkie.functions.toolkits.filesys_toolkit import FilesysToolKit
+from milkie.functions.toolkits.filesys_toolkit import FilesysToolkit
 
 class FilesysIntegrationTest(BaseIntegrationTest):
     def setUp(self):
@@ -44,7 +44,7 @@ class FilesysIntegrationTest(BaseIntegrationTest):
         
         flowBlock = FlowBlock(
             flowCode=flowCode,
-            toolkit=FilesysToolKit()
+            toolkit=FilesysToolkit()
         )
         flowBlock.compile()
         

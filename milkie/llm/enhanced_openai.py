@@ -1,17 +1,18 @@
 import logging
 import re
 from queue import Queue
-from typing import Any, Sequence
+from typing import Any, Sequence, Generator
 from openai import OpenAI
 from openai.types.chat import ChatCompletion
 from openai.types.chat.chat_completion_user_message_param import ChatCompletionUserMessageParam
 from openai.types.chat.chat_completion_system_message_param import ChatCompletionSystemMessageParam
 from llama_index_client import ChatMessage
-from llama_index.core.base.llms.types import ChatResponse, CompletionResponse
+from llama_index.core.base.llms.types import ChatResponse, ChatResponseGen, CompletionResponse, CompletionResponseGen
 from milkie.cache.cache_kv import CacheKVMgr
 from milkie.llm.enhanced_llm import EnhancedLLM, LLMApi, QueueRequest, QueueResponse
 from llama_index.core.base.llms.generic_utils import (
     completion_response_to_chat_response,
+    stream_completion_response_to_chat_response,
 )
 
 logger = logging.getLogger(__name__)
@@ -56,15 +57,103 @@ class EnhancedOpenAI(EnhancedLLM):
             client=OpenAI(api_key=api_key, base_url=endpoint))
         self._cacheMgr = CacheKVMgr("data/cache/", expireTimeByDay=7)
 
-    def _chat(
-            self, messages: Sequence[ChatMessage], **kwargs: Any) -> ChatResponse:
-        resps = self._completeBatchNoTokenizationAsync(
-            prompts=[messages],
-            numThreads=1,
-            inference=EnhancedOpenAI._inference,
-            **kwargs)
-        return completion_response_to_chat_response(resps[0])
+    def _completion(self, messages: Sequence[ChatMessage], **kwargs: Any) -> ChatResponse:
+        messagesJson = []
+        for message in messages:
+            if message.role == "system":
+                messagesJson.append(ChatCompletionSystemMessageParam(
+                    role=message.role,
+                    content=message.content,
+                ))
+            else:
+                content = re.sub(r'[\uD800-\uDFFF]', '', message.content)
+                messagesJson.append(ChatCompletionUserMessageParam(
+                    role=message.role,
+                    content=content,
+                ))
 
+        cached = self._cacheMgr.getValue(
+            modelName=self.model_name, 
+            key=messagesJson)
+        if cached:
+            logger.debug("cache hit!")
+            chatCompletion = ChatCompletion.model_validate_json(cached["chatCompletion"])
+            numTokens = cached["numTokens"]
+        else:
+            theArgs = {
+                "model": self.model_name,
+                "messages": messagesJson,
+                "stream": False,
+            }
+            if "tools" in kwargs:
+                theArgs["tools"] = kwargs["tools"]
+            
+            try:
+                response = self._llm.getClient().chat.completions.create(**theArgs)
+            except Exception as e:
+                logger.error(f"Failed to complete request: {e}")
+                return ChatResponse(message=ChatMessage(role="assistant", content="Failed to generate response"))
+
+            chatCompletion = response
+            numTokens = response.usage.completion_tokens
+
+            self._cacheMgr.setValue(
+                modelName=self.model_name, 
+                key=messagesJson, 
+                value={
+                    "chatCompletion": response.model_dump_json(),
+                    "numTokens": numTokens,
+                })
+
+        completionResponse = CompletionResponse(
+            text=chatCompletion.choices[0].message.content or "",
+            raw={
+                "model_output": None,
+                "num_tokens": numTokens,
+                "chat_completion": chatCompletion
+            }
+        )
+
+        return completion_response_to_chat_response(completionResponse)
+
+    def _stream(self, messages: Sequence[ChatMessage], **kwargs: Any) -> ChatResponseGen:
+        return stream_completion_response_to_chat_response(self._streamImpl(messages, **kwargs))
+
+    def _streamImpl(self, messages: Sequence[ChatMessage], **kwargs: Any) -> CompletionResponseGen:
+        messagesJson = []
+        for message in messages:
+            if message.role == "system":
+                messagesJson.append(ChatCompletionSystemMessageParam(
+                    role=message.role,
+                    content=message.content,
+                ))
+            else:
+                content = re.sub(r'[\uD800-\uDFFF]', '', message.content)
+                messagesJson.append(ChatCompletionUserMessageParam(
+                    role=message.role,
+                    content=content,
+                ))
+
+        theArgs = {
+            "model": self.model_name,
+            "messages": messagesJson,
+            "stream": True,
+        }
+        if "tools" in kwargs:
+            theArgs["tools"] = kwargs["tools"]
+        
+        try:
+            stream = self._llm.getClient().chat.completions.create(**theArgs)
+            for chunk in stream:
+                if chunk.choices[0].delta.content is not None:
+                    yield CompletionResponse(
+                        text=chunk.choices[0].delta.content,
+                        raw=chunk.choices[0].delta)
+        except Exception as e:
+            logger.error(f"Failed to stream request: {e}")
+            raise RuntimeError(f"Failed to stream request: {e}")
+
+    #deprecated
     def _inference(
             self, 
             reqQueue :Queue[QueueRequest], 

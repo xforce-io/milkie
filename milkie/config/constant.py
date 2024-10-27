@@ -19,6 +19,8 @@ InstFlagCall = "#CALL"
 InstFlagThought = "#THOUGHT"
 InstFlagDecompose = "#DECOMPOSE"
 InstFlagFunc = "@"
+InstFlagRespToolkitStart = "<<"
+InstFlagRespToolkitEnd = ">>"
 
 KeyVarDictThtTask = "_ThtTask_"
 KeyVarDictThought = "_Thought_"
@@ -31,3 +33,5 @@ KeywordFuncEnd = "END"
 KeywordMute = "__mute__"
 
 ExprNoInfoToExtract = "无相关信息"
+
+SymbolEndSentence = ['.', '!', '?', "。", "！", "？", "\n"]

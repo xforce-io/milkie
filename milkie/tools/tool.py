@@ -6,7 +6,6 @@ from milkie.global_context import GlobalContext
 from milkie.llm.inference import chat
 from milkie.model_factory import ModelFactory
 from milkie.response import Response
-from milkie.settings import Settings
 
 logger = logging.getLogger(__name__)
 

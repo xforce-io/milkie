@@ -15,6 +15,8 @@ logger = logging.getLogger(__name__)
 class Agent(BaseBlock):
     def __init__(
             self, 
+            name: str,
+            desc: str,
             code: str, 
             context: Context = None, 
             config: str | GlobalConfig = None,
@@ -23,6 +25,9 @@ class Agent(BaseBlock):
             systemPrompt: str = None):
         self.repoFuncs = RepoFuncs()
         super().__init__(context, config, toolkit, usePrevResult, self.repoFuncs)
+
+        self.name = name
+        self.desc = desc
         self.code = code
         self.systemPrompt = systemPrompt
         self.funcBlocks: List[FuncBlock] = []
@@ -95,7 +100,8 @@ class Agent(BaseBlock):
             self, 
             query: str = None, 
             args: dict = {}, 
-            prevBlock: BaseBlock = None) -> Response:
+            prevBlock: BaseBlock = None,
+            **kwargs) -> Response:
         result = Response()
         lastBlock = prevBlock
 
@@ -104,7 +110,8 @@ class Agent(BaseBlock):
             result = block.execute(
                 query=query,
                 args=args,
-                prevBlock=lastBlock
+                prevBlock=lastBlock,
+                **kwargs
             )
             lastBlock = block
         return result
@@ -118,13 +125,23 @@ class FakeAgentStdin(Agent):
             toolkit: Toolkit = None, 
             usePrevResult=False, 
             systemPrompt: str = None):
-        super().__init__(code, context, config, toolkit, usePrevResult, systemPrompt)
+        super().__init__(
+            "fake stdin",
+            "mock stdin agent",
+            code,
+            context,
+            config,
+            toolkit,
+            usePrevResult,
+            systemPrompt
+        )
 
     def execute(
             self, 
             query: str = None, 
             args: dict = {}, 
-            prevBlock: BaseBlock = None) -> Response:
+            prevBlock: BaseBlock = None,
+            **kwargs) -> Response:
         resp = stdin.readline()
         return Response(respStr=resp)
 

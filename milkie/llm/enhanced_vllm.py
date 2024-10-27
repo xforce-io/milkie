@@ -206,7 +206,7 @@ class EnhancedVLLM(EnhancedLLM):
             prompt: BasePromptTemplate, 
             **prompt_args: Any):
         messages = self._llm._get_messages(prompt, **prompt_args)
-        response = self._chat(messages)
+        response = self._completion(messages)
         output = response.message.content or ""
         return (self._llm._parse_output(output), len(response.raw["model_output"]))
 

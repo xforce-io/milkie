@@ -23,7 +23,6 @@ from openai.types.chat.chat_completion_message_tool_call import ChatCompletionMe
 
 from milkie.config.constant import MaxLenLog
 from milkie.context import VarDict
-from milkie.trace import stdout
 from milkie.utils.data_utils import restoreVariablesInDict
 
 from ..openai_function import OpenAIFunction
@@ -34,7 +33,7 @@ logger = logging.getLogger(__name__)
 class FuncExecRecord:
     def __init__(
             self, 
-            toolCall: ChatCompletionMessageToolCall, 
+            toolCall: Tuple[str, dict], 
             tool: OpenAIFunction,
             result: Any):
         self.toolCall = toolCall
@@ -42,14 +41,17 @@ class FuncExecRecord:
         self.result = result
 
     def __str__(self) -> str:
-        return f"""
-        ```
-        function_name: {self.toolCall.function.name}
-        function_description: {self.tool.get_function_description()}
-        arguments: {self.toolCall.function.arguments}
-        result: {self.result}
-        ```
-        """
+        if self.toolCall:
+            return f"""
+            ```
+            function_name: {self.toolCall[0]}
+            function_description: {self.tool.get_function_description()}
+            arguments: {self.toolCall[1]}
+            result: {self.result}
+            ```
+            """
+        else:
+            return f"tool: {self.tool}"
 
 class Toolkit():
     def __init__(self, globalContext=None) -> None:
@@ -77,7 +79,6 @@ class Toolkit():
 
     def getToolsDesc(self) -> str:
         return self.getDesc(self.getTools())
-
 
     @staticmethod
     def getUnionToolkit(toolkits: List[Toolkit]) -> Toolkit:
@@ -125,19 +126,18 @@ class Toolkit():
 
     def exec(
             self, 
-            toolCalls: List[ChatCompletionMessageToolCall], 
+            toolCalls: List[tuple], 
             allDict: dict,
             needToParse :bool = False) -> List[FuncExecRecord]:
         records = []
         for toolCall in toolCalls:
-            arguments = toolCall.function.arguments
+            arguments = toolCall[1]
             arguments = arguments.replace("{{", "{").replace("}}", "}")
             args = json.loads(arguments)
             record = self.execFromJson(
-                toolCall.function.name, 
+                toolCall[0], 
                 args, 
                 allDict, 
-                toolCall,
                 needToParse=needToParse)
             records.append(record)
         self.records.extend(records)
@@ -148,17 +148,16 @@ class Toolkit():
             funcName: str, 
             args: dict, 
             allDict: dict,
-            toolCall: Any,
-            needToParse :bool = False) -> FuncExecRecord:
+            needToParse :bool = False,
+            **kwargs) -> FuncExecRecord:
         tool = self.getToolsDict()[funcName]
         if needToParse:
             args = restoreVariablesInDict(args, allDict)
-        result = tool.func(**args)
+        result = tool.func(**args, **kwargs)
 
         info = f"funcCall func[{funcName}] args[{args}] result[{result[:MaxLenLog]}]"
-        stdout(info, args=args)
         logger.info(info)
-        return FuncExecRecord(toolCall, tool, result)
+        return FuncExecRecord((funcName, args), tool, result)
 
     def genCodeAndRun(self, instruction: str, varDict: Optional[Dict[str, Any]] = None) -> str:
         r"""根据指令生成代码，并且用代码解释器执行代码。

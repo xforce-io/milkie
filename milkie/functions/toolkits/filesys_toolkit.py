@@ -8,7 +8,7 @@ from milkie.global_context import GlobalContext
 
 logger = logging.getLogger(__name__)
 
-class FilesysToolKit(Toolkit):
+class FilesysToolkit(Toolkit):
     MaxFilesPerDirectory = 3  # 每个目录最多显示的文件数
     MaxTreeDepth = 3  # 树的最大深度
 
@@ -295,5 +295,5 @@ class FilesysToolKit(Toolkit):
         return not nameFilter or nameFilter.lower() in name.lower()
 
 if __name__ == "__main__":
-    filesysTools = FilesysToolKit()
+    filesysTools = FilesysToolkit()
     print(filesysTools.getToolsDesc())
