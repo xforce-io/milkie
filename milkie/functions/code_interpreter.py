@@ -61,7 +61,7 @@ class CodeInterpreter:
                     self.globalContext, 
                     instruction, 
                     errorContext)
-                code = stepLLMCode.streamOutputAndFormat()
+                code = stepLLMCode.completionAndFormat()
                 code = code.replace("```python", "").replace("```", "")
                 code = addPreImport(code)
                 

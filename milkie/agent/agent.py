@@ -1,8 +1,10 @@
+from __future__ import annotations
 from sys import stdin
 from typing import List
 from milkie.agent.base_block import BaseBlock
 from milkie.agent.flow_block import FlowBlock
 from milkie.agent.func_block import FuncBlock, RepoFuncs
+from milkie.agent.retrieval_block import RetrievalBlock
 from milkie.config.constant import KeywordFuncStart, KeywordFuncEnd
 from milkie.context import Context
 from milkie.config.config import GlobalConfig
@@ -23,17 +25,27 @@ class Agent(BaseBlock):
             toolkit: Toolkit = None,
             usePrevResult=False,
             systemPrompt: str = None):
+
         self.repoFuncs = RepoFuncs()
+
         super().__init__(context, config, toolkit, usePrevResult, self.repoFuncs)
 
         self.name = name
         self.desc = desc
+        self.experts = dict[str, Agent]()
         self.code = code
         self.systemPrompt = systemPrompt
         self.funcBlocks: List[FuncBlock] = []
         self.flowBlocks: List[FlowBlock] = []
+        self.repoFuncs.add("Retrieval", RetrievalBlock(self.context, self.config, self.repoFuncs))
+
+    def assignExpert(self, expert: Agent):
+        self.experts[expert.name] = expert
 
     def compile(self):
+        if self.isCompiled:
+            return
+        
         lines = self.code.split('\n')
         currentBlock = []
         inFuncBlock = False
@@ -45,7 +57,7 @@ class Agent(BaseBlock):
 
             if strippedLine.startswith(KeywordFuncStart):
                 if currentBlock:
-                    self.addFlowBlock(currentBlock)
+                    self._addFlowBlock(currentBlock)
                     currentBlock = []
                 inFuncBlock = True
                 currentBlock = [line]
@@ -53,17 +65,14 @@ class Agent(BaseBlock):
                 logger.debug(f"Found function definition: {strippedLine}")
             elif strippedLine == KeywordFuncEnd and inFuncBlock:
                 currentBlock.append(line)
-                self.addFuncBlock(currentBlock)
+                self._addFuncBlock(currentBlock)
                 currentBlock = []
                 inFuncBlock = False
             else:
                 currentBlock.append(line)
 
         if currentBlock:
-            self.addFlowBlock(currentBlock)
-
-        logger.debug(f"Total function blocks found: {funcBlockCount}")
-        logger.debug(f"Total function blocks added: {len(self.repoFuncs.funcs)}")
+            self._addFlowBlock(currentBlock)
 
         for block in self.funcBlocks:
             block.compile()
@@ -76,7 +85,7 @@ class Agent(BaseBlock):
         for block in self.flowBlocks:
             block.compile()
 
-    def addFuncBlock(self, lines):
+    def _addFuncBlock(self, lines):
         funcBlock = FuncBlock.create(
             '\n'.join(lines),
             context=self.context,
@@ -86,7 +95,7 @@ class Agent(BaseBlock):
         )
         self.funcBlocks.append(funcBlock)
 
-    def addFlowBlock(self, lines):
+    def _addFlowBlock(self, lines):
         self.flowBlocks.append(FlowBlock.create(
             '\n'.join(lines),
             context=self.context,
@@ -98,22 +107,44 @@ class Agent(BaseBlock):
 
     def execute(
             self, 
+            context: Context = None,
             query: str = None, 
             args: dict = {}, 
             prevBlock: BaseBlock = None,
             **kwargs) -> Response:
+        super().execute(
+            context=context,
+            query=query, 
+            args=args, 
+            prevBlock=prevBlock, 
+            **kwargs)
+        
         result = Response()
         lastBlock = prevBlock
 
         args["system_prompt"] = self.systemPrompt
+
+        if len(self.experts) > 0:
+            kwargs["experts"] = self.experts
+
+        if "top" in kwargs and not kwargs["top"]:
+            kwargs["history"] = None
+        else:
+            history = self.context.getHistory()
+            history.resetUse()
+            kwargs["history"] = history
+
         for block in self.flowBlocks:
             result = block.execute(
+                context=context,
                 query=query,
                 args=args,
                 prevBlock=lastBlock,
-                **kwargs
+                **{k: v for k, v in kwargs.items() if k != "top"}
             )
             lastBlock = block
+
+        self.context.addHistoryAssistantPrompt(result.respStr)
         return result
 
 class FakeAgentStdin(Agent):

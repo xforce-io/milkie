@@ -136,7 +136,7 @@ class BenchTypeKeyword(BenchType):
             batchSize :int):
         for i in range(0, len(self.testcases), batchSize):
             batch = self.testcases[i:i+batchSize]
-            argsList = [{"query_str": testcase.input, "context_str": testcase.context} for testcase in batch]
+            argsList = [{"query": testcase.input, "context": testcase.context} for testcase in batch]
             responses = agent(prompt=prompt, argsList=argsList)
             for j, response in enumerate(responses):
                 status = f'Testcase[{batch[j].input[:35]}] Ans[{truncate_text(response.response, 500)}] Keypoints[{batch[j].keypoints}]'.replace("\n", "//")
@@ -189,7 +189,7 @@ class BenchTypeKeyword(BenchType):
             prompt :str,
             batch: list[TestcaseKeyword],
             statistics: Statistics):
-        argsList = [{"query_str": testcase.input, "context_str": testcase.context} for testcase in batch]
+        argsList = [{"query": testcase.input, "context": testcase.context} for testcase in batch]
         responses = agent(prompt=prompt, argsList=argsList)
         for j, response in enumerate(responses):
             status = f'Testcase[{batch[j].input[:30]}] Ans[{truncate_text(response.response, 500)}] Keypoints[{batch[j].keypoints}]'.replace("\n", "//")

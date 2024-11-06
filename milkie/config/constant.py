@@ -32,6 +32,9 @@ KeywordFuncEnd = "END"
 
 KeywordMute = "__mute__"
 
+KeywordExpertWholeDialog = "_WHOLE_DIALOG_"
+KeywordEnd = "_END_"
+
 ExprNoInfoToExtract = "无相关信息"
 
 SymbolEndSentence = ['.', '!', '?', "。", "！", "？", "\n"]

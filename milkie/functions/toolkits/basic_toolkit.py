@@ -211,6 +211,24 @@ class BasicToolkit(Toolkit):
             ERROR(logger, errorMsg)
             raise RuntimeError(errorMsg)
 
+    def readTxtContent(self, file_path: str) -> str:
+        """
+        读取本地TXT文件的内容。
+
+        Args:
+            file_path (str): TXT文件的路径
+
+        Returns:
+            str: TXT文件的文本内容
+        """
+        try:
+            with open(file_path, 'r') as file:
+                return file.read()
+        except Exception as e:
+            errorMsg = f"Error reading TXT[{file_path}]: {str(e)}"
+            ERROR(logger, errorMsg)
+            raise RuntimeError(errorMsg)
+
     def downloadFileFromUrl(self, url: str, localDirectory: str = "data/pdf/") -> str:
         """
         从指定URL下载文件并保存到本地目录。
@@ -270,6 +288,7 @@ class BasicToolkit(Toolkit):
             OpenAIFunction(self.sendEmail),
             OpenAIFunction(self.getHtmlContent),
             OpenAIFunction(self.readPdfContent),
+            OpenAIFunction(self.readTxtContent),
             OpenAIFunction(self.downloadFileFromUrl),
         ]
 

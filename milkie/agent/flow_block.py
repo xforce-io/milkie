@@ -22,11 +22,16 @@ class FlowBlock(BaseBlock):
         self.blocks: List[Union[LLMBlock, ForBlock]] = []
 
     def compile(self):
+        if self.isCompiled:
+            return
+
         lines = self.flowCode.split('\n')
         self.processBlocks(lines)
 
         for block in self.blocks:
             block.compile()
+
+        self.isCompiled = True
 
     def processBlocks(self, lines, depth=0):
         currentBlock = []
@@ -111,16 +116,18 @@ class FlowBlock(BaseBlock):
 
     def execute(
             self, 
+            context: Context,
             query: str = None, 
             args: dict = {}, 
             prevBlock: BaseBlock = None,
             **kwargs) -> Response:
-        self.updateFromPrevBlock(prevBlock, args)
-
+        super().execute(context, query, args, prevBlock, **kwargs)
+        
         result = Response()
         lastBlock = prevBlock
         for block in self.blocks:
             result = block.execute(
+                context=context,
                 query=query, 
                 args=args,
                 prevBlock=lastBlock,

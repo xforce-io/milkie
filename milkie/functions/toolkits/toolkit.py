@@ -63,6 +63,9 @@ class Toolkit():
     def getTools(self) -> List[OpenAIFunction]:
         raise NotImplementedError("Subclasses must implement this method.")
 
+    def getCertainTools(self, toolNames: List[str]) -> List[OpenAIFunction]:
+        return [tool for tool in self.getTools() if tool.get_function_name() in toolNames]
+
     @staticmethod
     def getToolsWithSingleFunc(func :Callable) -> List[OpenAIFunction]:
         return [OpenAIFunction(func)]
@@ -73,6 +76,9 @@ class Toolkit():
 
     def getToolsSchema(self) -> list:
         return [tool.get_openai_tool_schema() for tool in self.getTools()]
+
+    def getToolsSchemaForCertainTools(self, toolNames: List[str]) -> list:
+        return [tool.get_openai_tool_schema() for tool in self.getCertainTools(toolNames)]
 
     def getToolsDict(self) -> dict:
         return {tool.get_function_name(): tool for tool in self.getTools()}
@@ -96,6 +102,9 @@ class Toolkit():
     def getDesc(tools :List[OpenAIFunction]) -> str:
         toolDescriptions = [tool.get_function_name() + " | " + tool.get_function_description() for tool in tools]
         return "\n".join(toolDescriptions)
+
+    def isEmpty(self) -> bool:
+        return len(self.getTools()) == 0
 
     def extractToolFromMsg(
             self, 
@@ -178,3 +187,11 @@ class Toolkit():
         Returns: 执行结果
         """
         return self.codeInterpreter.executeCode(code, varDict)
+
+class EmptyToolkit(Toolkit):
+
+    def __init__(self, globalContext=None) -> None:
+        super().__init__(globalContext)
+
+    def getTools(self) -> List[OpenAIFunction]:
+        return []

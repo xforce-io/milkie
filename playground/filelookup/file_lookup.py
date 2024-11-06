@@ -1,7 +1,7 @@
 import logging
 from milkie.agent.agents.base_agent import BaseAgent
-from milkie.agent.llm_block import LLMBlock
-from milkie.agent.retrieval_block import RetrievalAgent
+from milkie.agent.llm_block.llm_block import LLMBlock
+from milkie.agent.retrieval_block import RetrievalBlock
 from milkie.context import Context
 from milkie.response import Response
 
@@ -14,7 +14,7 @@ class FileLookupAgent(BaseAgent):
             context :Context) -> None:
         super().__init__(context)
         
-        self.retrievalAgent = RetrievalAgent(
+        self.retrievalAgent = RetrievalBlock(
             context)
 
         self.lookuper = LLMBlock(
@@ -22,7 +22,7 @@ class FileLookupAgent(BaseAgent):
             "file_lookup")
 
     def execute(self, query: str, args: dict, **kwargs) -> Response:
-        response = self.retrievalAgent.execute(args["query_str"])
+        response = self.retrievalAgent.execute(args["query"])
         curQuery = response.metadata["curQuery"]
         blocks = response.metadata["blocks"]
         logger.debug(f"retrieval query[{curQuery}] result[{response}] blocks[{len(blocks)}]")
@@ -30,8 +30,8 @@ class FileLookupAgent(BaseAgent):
         return self.lookuper.execute(
             curQuery,
             args={
-                "query_str":curQuery,
-                "context_str":"\n".join(blocks)
+                "query":curQuery,
+                "context":"\n".join(blocks)
             })
 
 if __name__ == "__main__":

@@ -6,6 +6,8 @@ from openai.types.chat.chat_completion_message import ChatCompletionMessage
 from llama_index.core.schema import NodeWithScore
 from llama_index.core.base.llms.types import ChatResponse
 
+from milkie.config.constant import KeywordEnd
+
 
 @dataclass
 class Response:
@@ -23,6 +25,9 @@ class Response:
 
     def getChoice0Message(self) -> ChatCompletionMessage:
         return self.metadata["chatCompletion"].choices[0].message
+    
+    def getChoicesMessages(self) -> List[ChatCompletionMessage]:
+        return [choice.message for choice in self.metadata["chatCompletion"].choices]
 
     @property
     def resp(self) -> Any:
@@ -42,6 +47,9 @@ class Response:
             return self.respGen
         else:
             return None
+
+    def isEnd(self) -> bool:
+        return KeywordEnd in self.respStr
 
     def __str__(self) -> str:
         if self.respInt:

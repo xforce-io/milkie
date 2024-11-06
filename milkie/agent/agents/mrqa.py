@@ -1,5 +1,5 @@
 from milkie.agent.llm_block import LLMBlock
-from milkie.agent.retrieval_block import RetrievalAgent
+from milkie.agent.retrieval_block import RetrievalBlock
 from milkie.agent.agents.base_agent import BaseAgent
 from milkie.context import Context
 from milkie.response import Response
@@ -13,7 +13,7 @@ class MapReduceQA(BaseAgent):
             config: str=None) -> None:
         super().__init__(context, config)
 
-        self.retrievalAgent = RetrievalAgent(
+        self.retrievalAgent = RetrievalBlock(
             self.context, 
             self.config)
 
@@ -37,7 +37,7 @@ class MapReduceQA(BaseAgent):
             resp = self.blockQA.execute(
                 input,
                 args={
-                    "query_str":task,
+                    "query":task,
                     "blocks":block})
             resps.append(resp.response)
             cnt += 1
@@ -48,7 +48,7 @@ class MapReduceQA(BaseAgent):
         resp = self.blockProcess.execute(
             input,
             args={
-                "query_str":task,
+                "query":task,
                 "blocks":sep.join(resps)})
         return resp
 

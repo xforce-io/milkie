@@ -10,6 +10,8 @@ WhiteListImport = [
     "typing.Union",
     "datetime",
     "datetime.datetime",
+    "csv",
+    "json",
 ]
 
 PreImport = [

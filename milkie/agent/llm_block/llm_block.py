@@ -101,16 +101,16 @@ class PromptMakerInstruction(PromptMaker):
             prevSummary = self.prevStepSummary(instructionRecords)
             if len(prevSummary) > 0:
                 resultPrompt += f"""
-                你当前的指令是： {self.origInstruction}
+                你当前的Query是： {self.origInstruction}
                 """
 
-                resultPrompt += "前序指令情况如下:\n"
+                resultPrompt += "前序Query情况如下:\n"
                 resultPrompt += "```\n"
                 resultPrompt += prevSummary
                 resultPrompt += "```\n"
 
         resultPrompt += f"""
-        你当前的指令是： {self.formattedInstruction}
+        {self.formattedInstruction}
         """
         return resultPrompt
 
@@ -174,6 +174,20 @@ class StepLLMInstrAnalysis(StepLLMBlock):
         self.instruction = instruction
         self.instructionRecords = llmBlock.taskEngine.instructionRecords
         self.stepToolCall = StepLLMToolCall(llmBlock.context.globalContext)
+
+    def makeSystemPrompt(self, args: dict, **kwargs) -> str:
+        systemPrompt = super().makeSystemPrompt(args=args, **kwargs)
+        if "experts" in kwargs:
+            systemPrompt += f"""
+            注意：专家团成员如下
+            ```
+            """
+            for name, desc in kwargs["experts"].items():
+                systemPrompt += f"{name} -> {desc}\n"
+            systemPrompt += '''```\n
+            如果需要咨询专家团，请使用 ” @expertName ('->'前面的字符串) + 问题 + ？“ 来调用专家团中的专家。
+            '''
+        return systemPrompt
         
     def makePrompt(self, useTool: bool = False, **args) -> str:
         if args.get("prompt", None) == InstFlagDecompose:
@@ -187,7 +201,7 @@ class StepLLMInstrAnalysis(StepLLMBlock):
 
         if self.instruction.syntaxParser.getNormalFormat():
             result += f"""
-            请按照下述语义严格以 jsonify 格式输出结果：{self.instruction.syntaxParser.getOutputSyntax()}，现在请直接输出 json:
+            请按照下述语义严格以 jsonify 格式输出结果：{self.instruction.syntaxParser.getJsonOutputSyntax()}，现在请直接输出 json:
             """
         elif not useTool:
             result += f"""
@@ -201,6 +215,7 @@ class StepLLMInstrAnalysis(StepLLMBlock):
         toolUsed, result = StepLLMInstrAnalysis.readFromGen(
             result,
             stepToolCall=self.stepToolCall,
+            context=self.llmBlock.context,
             **kwargs)
         if toolUsed:
             funcExecRecords = self.llmBlock.toolkit.exec(
@@ -214,7 +229,7 @@ class StepLLMInstrAnalysis(StepLLMBlock):
                 response=f"{toolUsed}({result})")
             
         # if function call is not in tools, but it is an answer
-        if self.llmBlock.toolkit:
+        if not self.llmBlock.toolkit.isEmpty():
             funcExecRecords = self.llmBlock.toolkit.extractToolFromMsg(
                 result,
                 allDict,
@@ -236,34 +251,115 @@ class StepLLMInstrAnalysis(StepLLMBlock):
             response :Response, 
             stepToolCall: Optional[StepLLMToolCall] = None, 
             respToolbox: Optional[Toolbox] = None,
+            context: Optional[Context] = None,
             **kwargs) -> Tuple[Optional[str], str]:
         toolUsed = None
         result = []
         currentSentence = []
 
-        def processDeltaContentNormal(deltaContent: str) -> str:
-            nonlocal currentSentence
-            currentSentence.append(deltaContent)
-            if any(symbol in deltaContent for symbol in SymbolEndSentence):
-                sentence = ''.join(currentSentence)
-                if stepToolCall:
-                    toolCheck = stepToolCall.completionAndFormat(
-                        query_str=sentence,
-                        tools=respToolbox
-                    )
-
-                    if toolCheck["need_tool"] and respToolbox:
-                        stdout(f"\nexecute call {toolCheck['tool_name']} with args {toolCheck['tool_args']} ==> ", **kwargs)
-                        respToolbox.execFromJson(
-                            funcName=toolCheck["tool_name"], 
-                            args=toolCheck["tool_args"],
-                            allDict={},
-                            **{KeywordMute: True},
-                            **kwargs)
-                        stdout(f"\n===============", **kwargs)
-                currentSentence = []
-            return deltaContent
+        def extractExperts(sentence: str, respToolbox: Optional[Toolbox]) -> List[str]:
+            """从句子中提取专家名称。
             
+            Args:
+                sentence: 要分析的句子
+                respToolbox: 工具箱对象，包含专家信息
+                
+            Returns:
+                找到的专家名称列表
+            """
+            if not respToolbox:
+                return []
+            
+            return [name for name in respToolbox.getToolsDict().keys() 
+                   if f"@{name}" in sentence]
+
+        def processExpertQuery(
+                currentContent: List[str],
+                deltaContent: str) -> str:
+            completeSentence = ''.join(currentSentence)
+            experts = extractExperts(completeSentence, respToolbox)
+            
+            # 如果找到专家，处理工具调用
+            expertsResp = ""
+            if experts:
+                if KeywordExpertWholeDialog in completeSentence:
+                    toolChecks = []
+                    for expert in experts:
+                        toolChecks.append({
+                            "tool_name": expert,
+                            "tool_args": {
+                                "query": context.getHistory().getDialogueStr() + "".join(currentContent) + deltaContent
+                            }
+                        })
+                else:
+                    toolChecks = []
+                    for expert in experts:
+                        toolChecks.append({
+                            "tool_name": expert,
+                            "tool_args": {
+                                "query": completeSentence
+                            }
+                        })
+
+                kwargs[KeywordMute] = True
+                for toolCheck in toolChecks:
+                    stdout(
+                            f"\nexecute call {toolCheck['tool_name']} with args {toolCheck['tool_args']} ==> ", 
+                            info=True, 
+                            flush=True,
+                            **kwargs)
+
+                    response = respToolbox.execFromJson(
+                        funcName=toolCheck["tool_name"], 
+                        args=toolCheck["tool_args"],
+                        allDict={},
+                        **{k: v for k, v in kwargs.items() if k != "experts"})
+                    stdout(response.result, info=True, flush=True, **kwargs)
+                    expertsResp += f" ==({toolCheck['tool_name']})=> " + response.result
+                    stdout(f"\n===============", info=True, flush=True, **kwargs)
+            return expertsResp
+ 
+        def processDeltaContentNormal(
+                currentContent: List[str], 
+                deltaContent: str) -> str:
+            """处理普通的增量内容。
+            
+            Args:
+                deltaContent: 要处理的增量内容
+                
+            Returns:
+                处理后的内容
+            """
+            nonlocal currentSentence
+
+            # 查找第一个句子结束符
+            endIndex = -1
+            for i, char in enumerate(deltaContent):
+                if char in SymbolEndSentence:
+                    endIndex = i
+                    break
+            
+            # 如果找到句子结束符
+            expertsResp = ""
+            if endIndex >= 0:
+                # 添加当前内容到句子并输出
+                currentPart = deltaContent[:endIndex]
+                currentSentence.append(currentPart)
+                stdout(currentPart, info=True, end="", flush=True, **kwargs)
+                
+                # 处理完整句子
+                expertsResp = processExpertQuery(currentContent, currentPart)
+
+                # 开始新句子
+                currentSentence = [deltaContent[endIndex+1:]]
+                stdout(deltaContent[endIndex+1:], info=True, end="", flush=True, **kwargs)
+            else:
+                # 继续累积当前句子
+                currentSentence.append(deltaContent)
+                stdout(deltaContent, info=True, end="", flush=True, **kwargs)
+            
+            return deltaContent + expertsResp
+
         for chunk in response.respGen:
             if chunk.raw.role == "assistant":
                 continue
@@ -275,16 +371,23 @@ class StepLLMInstrAnalysis(StepLLMBlock):
                 toolUsed = ""
             
             if toolUsed == "":
-                deltaContent = processDeltaContentNormal(chunk.raw.content)
+                if respToolbox:
+                    deltaContent = processDeltaContentNormal(result, chunk.raw.content)
+                else:
+                    deltaContent = chunk.raw.content
+                    stdout(deltaContent, info=True, end="", flush=True, **kwargs)
             else:
                 if chunk.raw.content is None:
                     deltaContent = chunk.raw.tool_calls[0].function.arguments
                 else:
                     deltaContent = ""
+                stdout(deltaContent, info=True, end="", flush=True, **kwargs)
 
             result.append(deltaContent)
-            stdout(deltaContent, end="", flush=True, **kwargs)
 
+        expertsResp = processExpertQuery(result, "")
+        stdout(expertsResp, info=True, end="", flush=True, **kwargs)
+        logger.info(f"response: {''.join(result)}")
         return (toolUsed or None, ''.join(result))
 
 class StepLLMSynthsisInstructionRecord(StepLLMBlock):
@@ -467,12 +570,16 @@ class Instruction:
         else:
             args["prompt"] = None
 
-        kwargs = {}
-        if not self.syntaxParser.respToolbox and useTool:
-            kwargs["tools"] = self.llmBlock.toolkit
+        if useTool:
+            kwargs["tools"] = self.llmBlock.toolkit.getTools()
         
+        respToolbox = Toolbox(self.llmBlock.getEnv().getGlobalToolkits())
         if self.syntaxParser.respToolbox:
-            kwargs["respToolbox"] = self.syntaxParser.respToolbox
+            respToolbox.merge(self.syntaxParser.respToolbox)
+
+        if self.llmBlock.respToolbox:
+            respToolbox.merge(self.llmBlock.respToolbox)
+        kwargs["respToolbox"] = respToolbox
         
         instAnalysisResult = self.stepInstAnalysis.streamAndFormat(
             args=args,
@@ -495,6 +602,9 @@ class Instruction:
             answer=instAnalysisResult.funcExecRecords[0].result,
             logType="tool",
             toolName=instAnalysisResult.funcExecRecords[0].tool.get_function_name())
+        
+    def __str__(self) -> str:
+        return f"Instruction({self.label}): {self.formattedInstruct}"
         
     def _createResult(
             self, 
@@ -571,7 +681,7 @@ class Instruction:
         curInstruct = self.curInstruct
         if len(self.syntaxParser.funcsToCall) > 0:
             for funcBlock in self.syntaxParser.funcsToCall:
-                resp = funcBlock.execute(args=allArgs)
+                resp = funcBlock.execute(context=self.llmBlock.context, args=allArgs)
                 if curInstruct.strip() == funcBlock.getFuncPattern().strip():
                     self.onlyFuncCall = True
                     self.formattedInstruct = resp
@@ -650,11 +760,15 @@ class TaskEngine:
         self.lastInstruction :Instruction = None
         self.instructionRecords :list[InstructionRecord] = []
 
+        self.context = None
+
     def execute(
             self, 
+            context: Context,
             taskArgs :dict, 
             instructions: list[tuple[str, Instruction]], 
-            **kwargs) -> tuple:
+            **kwargs) ->tuple:
+        self.context = context
         self.lastInstruction = None
         self.instructions = instructions
 
@@ -666,7 +780,7 @@ class TaskEngine:
                     instruction.syntaxParser.flag == SyntaxParser.Flag.RET:
                 break
             
-            stdout(f"{label} -> ", **kwargs)
+            stdout(f"\n{label} -> ", **kwargs)
             instructResult = self._step(instruction, args=taskArgs, **kwargs)
             self.llmBlock.setResp(label, instructResult.response.resp)
             if instructResult.isRet():
@@ -752,19 +866,19 @@ class LLMBlock(BaseBlock):
 
         self.taskEngine = TaskEngine(self, self.task)
         self.instructions = []
-        self.isCompiled = False
         self.stepLLMExtractor = StepLLMExtractor(
             globalContext=self.context.globalContext)
+        self.respToolbox = None
 
     def compile(self):
         if self.isCompiled:
-            return  # 如果已经编译过，直接返回
+            return
 
         if self.decomposeTask:
             self.instructions = self._decomposeTask(self.task)
             instrSummary = ""
-            for label, instruction in self.instructions:
-                instrSummary += f"{label}: {instruction}\n"
+            for _, instruction in self.instructions:
+                instrSummary += f"{instruction}\n"
             INFO(logger, f"analysis ans[{instrSummary}]")
         else:
             self.instructions = [("1", Instruction(
@@ -777,18 +891,31 @@ class LLMBlock(BaseBlock):
 
     def execute(
             self, 
+            context: Context,
             query: str = None, 
             args: dict = {},
             prevBlock: LLMBlock = None,
             **kwargs) -> Response:
-        self.updateFromPrevBlock(prevBlock, args)
+        super().execute(
+            context=context, 
+            query=query, 
+            args=args, 
+            prevBlock=prevBlock, 
+            **kwargs)
 
         INFO(logger, f"LLMBlock execute: query[{query}] args[{args}]")
 
-        taskArgs = {"query_str": query, **args}
+        taskArgs = {**args}
+        taskArgs["query"] = query
+
         if not self.isCompiled:
             self.compile()  # 只在未编译时进行编译
+
+        self.respToolbox = Toolbox.createToolbox(
+            globalToolkits=self.getEnv().globalToolkits)
+
         _, result = self.taskEngine.execute(
+            context=context,
             taskArgs=taskArgs, 
             instructions=self.instructions,
             **kwargs)

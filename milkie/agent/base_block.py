@@ -22,17 +22,32 @@ class BaseBlock(ABC):
         self.toolkit = toolkit
         self.usePrevResult = usePrevResult
         self.repoFuncs = repoFuncs
+        self.isCompiled = False
 
     def setContext(self, context :Context): 
         self.context = context
 
     @abstractmethod
-    def execute(self, query :str, args :dict, prevBlock :BaseBlock=None, **kwargs) -> Response:
-        pass
+    def execute(
+            self, 
+            context: Context,
+            query :str, 
+            args :dict, 
+            prevBlock :BaseBlock=None, 
+            **kwargs) -> Response:
+        if context:
+            self.setContext(context)
+        self.updateFromPrevBlock(prevBlock, args)
 
-    def executeBatch(self, query :str, argsList :list[dict], **kwargs) -> list[Response]:
-        return [self.execute(query, args, **kwargs) for args in argsList]
+    def executeBatch(
+            self, 
+            context: Context,
+            query :str, 
+            argsList :list[dict], 
+            **kwargs) -> list[Response]:
+        return [self.execute(context, query, args, **kwargs) for args in argsList]
 
+    @abstractmethod
     def compile(self):
         pass
 

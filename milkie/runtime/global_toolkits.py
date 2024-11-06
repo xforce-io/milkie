@@ -27,5 +27,8 @@ class GlobalToolkits(object):
         
         raise RuntimeError(f"Toolkit not found: {name}")
 
+    def getToolkitNames(self):
+        return list(self.toolkits.keys()) + list(self.agents.keys())
+
     def isValidToolkit(self, name: str):
         return name in self.toolkits or name in self.agents

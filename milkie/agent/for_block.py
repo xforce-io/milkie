@@ -79,10 +79,18 @@ class ForBlock(BaseBlock):
 
     def execute(
             self, 
+            context: Context,
             query: str = None, 
             args: dict = {}, 
-            prevBlock :BaseBlock=None) -> Response:
-        self.updateFromPrevBlock(prevBlock, args)
+            prevBlock :BaseBlock=None,
+            **kwargs) -> Response:
+        super().execute(
+            context=context, 
+            query=query, 
+            args=args, 
+            prevBlock=prevBlock,
+            **kwargs)
+
         iterableValue = self.validate(self.getVarDict())
         results = []
         if self.loopType == dict:
@@ -99,8 +107,10 @@ class ForBlock(BaseBlock):
                 self.setVarDictGlobal(self.loopVar, value)
 
             result = self.loopBlock.execute(
+                context=context,
                 query=query, 
-                prevBlock=prevBlock)
+                prevBlock=prevBlock,
+                **kwargs)
             if result.resp != KeyRet:
                results.append(result.resp)
             prevBlock = None

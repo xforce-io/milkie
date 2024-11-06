@@ -52,8 +52,8 @@ class ResultOutputProcess:
             if result.hasError():
                 continue
 
-            if result.output.startswith("```json"):
-                jsonStr = result.output.replace("```json", '').replace("```", '').replace("\n", '')
+            if result.output.startswith("```json") or result.output.startswith("json"):
+                jsonStr = result.output.replace("```json", '').replace("json", '').replace("```", '').replace("\n", '')
                 try:
                     varDict.setGlobal(storeVar, json.loads(jsonStr))
                 except Exception as e:
@@ -73,6 +73,9 @@ class OutputSyntax:
         self.extractPattern = None
         self.errorMessage = None
         self._parse()
+    
+    def getOriginalSyntax(self):
+        return self.originalSyntax
 
     def _determineFormat(self) -> OutputSyntaxFormat:
         if self.originalSyntax.startswith("r'") or self.originalSyntax.startswith('r"'):
@@ -130,7 +133,7 @@ class OutputSyntax:
                     "text": output
                 })
         else:
-            return None
+            return output
 
     def __str__(self) -> str:
         return f"OutputSyntax(originalSyntax={self.originalSyntax}, format={self.format}, regExpr={self.regExpr}, extractPattern={self.extractPattern}, errorMessage={self.errorMessage})"
@@ -274,6 +277,12 @@ class SyntaxParser:
     def getStoreVars(self):
         return [struct.storeVar for struct in self.instOutput.outputStructs if struct.storeVar]
 
+    def getJsonOutputSyntax(self):
+        outputStructs = [struct for struct in self.instOutput.outputStructs if struct.outputSyntax and struct.outputSyntax.format == OutputSyntaxFormat.NORMAL]
+        if not outputStructs:
+            return None
+        return outputStructs[0].outputSyntax.getOriginalSyntax()
+
     def parseInstruction(self):
         self._handleOutputAndStore()
         self._handleFlags()
@@ -323,6 +332,7 @@ class SyntaxParser:
                     params = params.replace(" ", "")
                     params = params.split(",")
                     funcBlock.setParams(params)
+                    funcBlock.compile()
                     self.funcsToCall.append(funcBlock)
                     self.instruction = self.instruction.replace(paramsMatch.group(0), pattern)
                 else:

@@ -1,21 +1,28 @@
 from llama_index.core.schema import TextNode
 
 from milkie.agent.base_block import BaseBlock
-from milkie.agent.query_structure import parseQuery
+from milkie.agent.func_block import FuncBlock
 from milkie.context import Context
 from milkie.memory.memory_with_index import MemoryWithIndex
 from milkie.response import Response
 from milkie.retrieval.retrieval import RetrievalModule
 
 
-class RetrievalAgent(BaseBlock):
+class RetrievalBlock(FuncBlock):
 
     def __init__(
             self,
             context :Context = None,
-            config :str = None):
-        super().__init__(context, config)
+            config :str = None,
+            repoFuncs=None):
+        super().__init__(
+            context=context, 
+            config=config, 
+            repoFuncs=repoFuncs)
 
+        self.funcName = "Retrieval"
+        self.params = ["query"]
+        
         if self.config.memoryConfig and self.config.indexConfig:
             self.memoryWithIndex = MemoryWithIndex(
                 self.context.globalContext.settings,
@@ -25,24 +32,43 @@ class RetrievalAgent(BaseBlock):
         else:
             self.memoryWithIndex = context.getGlobalContext().memoryWithIndex
 
+        self.retrievalModule = None
+
+    def compile(self):
+        if self.isCompiled:
+            return
+
         self.retrievalModule = RetrievalModule(
-            globalConfig=context.globalContext.globalConfig,
+            globalConfig=self.context.globalContext.globalConfig,
             retrievalConfig=self.config.retrievalConfig,
             memoryWithIndex=self.memoryWithIndex,
-            context=context)
+            context=self.context)
 
-    def execute(self, query) -> Response:
+        self.isCompiled = True
+
+    def execute(
+            self, 
+            context: Context, 
+            query: str = None, 
+            args: dict = None, 
+            prevBlock: BaseBlock = None, 
+            **kwargs) -> Response:
+        BaseBlock.execute(self, context, query, args, prevBlock, **kwargs)
+
+        return self._retrieve(query if query else args["query"], args)
+
+    def _retrieve(self, query :str, args :dict) -> Response:
         self.context.setCurQuery(query)
         self.retrievalModule.retrieve(self.context)
         retrievalResult = self.context.retrievalResult
         if retrievalResult is None:
             return None
         
-        response = Response(response="", source_nodes=None)
+        response = Response()
         curBlock = ""
         blocks = []
         for result in retrievalResult:
-            curContent = self.__getBlockFromNode(result.node)
+            curContent = self._getBlockFromNode(result.node)
             if len(curBlock) + len(curContent) < self.config.retrievalConfig.blockSize:
                 curBlock += curContent
             else:
@@ -54,10 +80,12 @@ class RetrievalAgent(BaseBlock):
 
         if len(curBlock) > 0:
             blocks += [curBlock]
+
         response.metadata = {
             "blocks": blocks,
             "curQuery" : self.context.getCurQuery().query}
+        response.respStr = "\n".join(blocks)
         return response
 
-    def __getBlockFromNode(self, node :TextNode) ->str:
+    def _getBlockFromNode(self, node :TextNode) ->str:
         return node.get_text()

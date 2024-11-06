@@ -354,20 +354,30 @@ class InternalPythonInterpreter(BaseInterpreter):
         elif isinstance(target, ast.Tuple):
             if not isinstance(value, tuple):
                 raise InterpreterError(
-                    f"Expected type tuple, but got"
+                    f"Expected type tuple, but got "
                     f"{value.__class__.__name__} instead."
                 )
             if len(target.elts) != len(value):
                 raise InterpreterError(
-                    f"Expected {len(target.elts)} values but got"
-                    f" {len(value)}."
+                    f"Expected {len(target.elts)} values but got "
+                    f"{len(value)}."
                 )
             for t, v in zip(target.elts, value):
-                self.state[self._execute_ast(t)] = v
+                self._assign(t, v)
+        elif isinstance(target, ast.Subscript):
+            container = self._execute_ast(target.value)
+            index = self._execute_ast(target.slice)
+            try:
+                container[index] = value
+            except TypeError:
+                raise InterpreterError(
+                    f"Cannot assign to subscript of type "
+                    f"{container.__class__.__name__}"
+                )
         else:
             raise InterpreterError(
                 f"Unsupported variable type. Expected "
-                f"ast.Name or ast.Tuple, got "
+                f"ast.Name, ast.Tuple, or ast.Subscript, got "
                 f"{target.__class__.__name__} instead."
             )
 
@@ -606,7 +616,7 @@ class InternalPythonInterpreter(BaseInterpreter):
             # 保存当前状态
             old_state = self.state.copy()
             
-            # 更新状态��包含局部变量
+            # 更新状态包含局部变量
             self.state.update(local_scope)
             
             result = None

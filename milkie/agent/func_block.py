@@ -17,22 +17,33 @@ logger = logging.getLogger(__name__)
 class FuncBlock(BaseBlock):
     def __init__(
             self,
-            funcDefinition: str,
+            funcDefinition: str=None,
+            funcName: str = None,
+            params: List[str] = [],
             context: Context = None,
             config: str | GlobalConfig = None,
             toolkit: Toolkit = None,
             repoFuncs=None  # 添加 repoFuncs 参数
     ):
         super().__init__(context, config, toolkit, repoFuncs=repoFuncs)  # 传递 repoFuncs 给父类
-        self.funcDefinition = funcDefinition.strip()
-        self.funcName = None
-        self.params = []
+        if funcDefinition:
+            self.funcDefinition = funcDefinition.strip()
+            self.funcName = None
+            self.params = []
+        else:
+            self.funcDefinition = None
+            self.funcName = funcName
+            self.params = params
+
         self.flowBlock = None
 
     def getFuncPattern(self):
         return f"{InstFlagFunc}{self.funcName}"
 
     def compile(self):
+        if not self.funcDefinition:
+            return
+
         lines = self.funcDefinition.strip().split('\n')
         self.parseFunctionDefinition(lines)
 
@@ -111,11 +122,29 @@ class FuncBlock(BaseBlock):
         for param, value in zip(self.params, args):
             self.setVarDictLocal(param, value)
 
-    def execute(self, query: str = None, args: dict = {}, prevBlock: BaseBlock = None, **kwargs) -> Response:
+    def execute(
+            self, 
+            context: Context,
+            query: str = None, 
+            args: dict = {}, 
+            prevBlock: BaseBlock = None, 
+            **kwargs) -> Response:
+        super().execute(
+            context=context, 
+            query=query, 
+            args=args, 
+            prevBlock=prevBlock, 
+            **kwargs)
+        
         params = self._restoreParams(args)
 
         stdout(f"called func start: {self.funcName}, params: {params}", **kwargs)
-        response = self.flowBlock.execute(query, args, prevBlock)
+        response = self.flowBlock.execute(
+            context=context,
+            query=query, 
+            args=args, 
+            prevBlock=prevBlock, 
+            **kwargs)
         stdout(f"called func end: {self.funcName}", **kwargs)
 
         self.clearVarDictLocal()

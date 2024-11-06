@@ -10,9 +10,8 @@ from llama_index.core.response_synthesizers.type import ResponseMode
 from llama_index.core.schema import NodeWithScore, TextNode
 from llama_index.retrievers.bm25.base import BM25Retriever
 
-from milkie.agent.llm_block import LLMBlock
 from milkie.agent.query_structure import QueryType
-from milkie.config.config import ChunkAugmentType, GlobalConfig, RerankPosition, RetrievalConfig, RewriteStrategy
+from milkie.config.config import ChunkAugmentType, GlobalConfig, RerankPosition, RetrievalConfig
 from milkie.context import Context
 from milkie.custom_refine_program import CustomProgramFactory
 from milkie.memory.memory_with_index import MemoryWithIndex
@@ -38,24 +37,14 @@ class RetrievalModule:
         self.retrievalConfig = retrievalConfig
         self.memoryWithIndex = memoryWithIndex
         self.context = context
-            
-        self.rewriteAgent = None
-        if retrievalConfig.rewriteStrategy == RewriteStrategy.HYDE:
-            self.rewriteAgent = LLMBlock(
-                context=self.context, 
-                prompt="hyde")
-        elif retrievalConfig.rewriteStrategy == RewriteStrategy.QUERY_REWRITE:
-            self.rewriteAgent = LLMBlock(
-                context=self.context, 
-                prompt="query_rewrite")
 
-        self.denseRetriever = memoryWithIndex.index.denseIndex.as_retriever(
+        self.denseRetriever = self.memoryWithIndex.getIndex().denseIndex.as_retriever(
             similarity_top_k=self.retrievalConfig.channelRecall)
 
         self.sparseRetriever = BM25Retriever.from_defaults(
-            docstore=memoryWithIndex.memory.storageContext.docstore,
+            docstore=self.memoryWithIndex.getMemory().storageContext.docstore,
             similarity_top_k=self.retrievalConfig.channelRecall,
-            tokenizer=chineseTokenizer,)
+            tokenizer=chineseTokenizer)
 
         self.hybridRetriever = HybridRetriever(
             self.denseRetriever, 
@@ -127,16 +116,7 @@ class RetrievalModule:
             response_synthesizer=responseSynthesizer)
         
         curQuery = context.getCurQuery().query
-        if self.rewriteAgent:
-            self.rewriteAgent.setContext(context)
-            rewriteResp = self.rewriteAgent.executeBatch(
-                query=None,
-                argsList=[{"query_str":curQuery}],
-                **kwargs)
-            curQuery = curQuery + "|" + rewriteResp[0].response
-
-        context.setCurQuery(curQuery)
-        result = self.engine.retrieve(QueryBundle(curQuery))
+        result = self.engine.retrieve(QueryBundle(query_str=curQuery))
         context.setRetrievalResult(result)
         return result
 

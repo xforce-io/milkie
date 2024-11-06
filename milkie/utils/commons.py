@@ -3,8 +3,11 @@ import subprocess
 from typing import (
     Any,
     Callable,
+    List,
     TypeVar,
 )
+
+from milkie.functions.openai_function import OpenAIFunction
 
 F = TypeVar('F', bound=Callable[..., Any])
 
@@ -26,3 +29,6 @@ def mergeDict(dict1 :dict, dict2 :dict):
         if key not in result:
             result[key] = value
     return result
+
+def getToolsSchemaForTools(tools: List[OpenAIFunction]) -> list:
+    return [tool.get_openai_tool_schema() for tool in tools]

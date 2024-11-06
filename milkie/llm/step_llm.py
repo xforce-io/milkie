@@ -3,6 +3,7 @@ from milkie.global_context import GlobalContext
 from milkie.response import Response
 from milkie.llm.inference import chat
 from milkie.trace import stdout
+from milkie.utils.commons import getToolsSchemaForTools
 
 class StepLLM(ABC):
     def __init__(
@@ -28,7 +29,7 @@ class StepLLM(ABC):
         completeOutput = ""
         for chunk in resp.respGen:
             completeOutput += chunk.delta.content
-            stdout(chunk.delta.content, args=args, end="", flush=True, **kwargs)
+            stdout(chunk.delta.content, end="", flush=True, **kwargs)
         return completeOutput
 
     def streamOutputAndFormat(self, args: dict = {}, **kwargs):
@@ -37,8 +38,14 @@ class StepLLM(ABC):
     def completionAndFormat(self, args: dict = {}, **kwargs):
         return self.formatResult(self.completion(args, **kwargs), **kwargs)
     
-    def makeSystemPrompt(self, **args) -> str:
-        return None
+    def makeSystemPrompt(self, args: dict, **kwargs) -> str:
+        systemPrompt = None
+        if "system_prompt" in args:
+            systemPrompt = args["system_prompt"]
+
+        if systemPrompt is None:
+            systemPrompt = self.globalContext.globalConfig.getLLMConfig().systemPrompt
+        return systemPrompt
     
     @abstractmethod
     def makePrompt(self, useTool: bool = False, args: dict = {}, **kwargs: dict) -> str:
@@ -47,17 +54,12 @@ class StepLLM(ABC):
     def llmCall(self, args: dict, stream: bool, **kwargs) -> Response:
         self.prompt = self.makePrompt(useTool="tools" in kwargs, args=args, **kwargs)
         llm = self.globalContext.settings.llmCode if self.codeModel else self.globalContext.settings.llm
+        systemPrompt = self.makeSystemPrompt(args=args, **kwargs)
 
-        if "system_prompt" in args:
-            systemPrompt = args["system_prompt"]
+        if "tools" in kwargs and kwargs["tools"] is not None and len(kwargs["tools"]) > 0:
+            kwargs["tools"] = getToolsSchemaForTools(kwargs["tools"])
         else:
-            systemPrompt = self.makeSystemPrompt(**args)
-
-        if systemPrompt is None:
-            systemPrompt = self.globalContext.globalConfig.getLLMConfig().systemPrompt
-
-        if "tools" in kwargs and kwargs["tools"] is not None:
-            kwargs["tools"] = kwargs["tools"].getToolsSchema()
+            kwargs.pop("tools", None)
 
         return chat(
             llm=llm, 

@@ -92,7 +92,7 @@ class ModelFactory:
                     max_new_tokens=256,
                     model_kwargs=config.modelArgs.toJson(),
                     generate_kwargs=config.generationArgs.toJson(),
-                    query_wrapper_prompt=PromptTemplate("{query_str}\n<|ASSISTANT|>\n"),
+                    query_wrapper_prompt=PromptTemplate("{query}\n<|ASSISTANT|>\n"),
                     tokenizer_name=config.model,
                     model_name=config.model,
                     system_prompt=config.systemPrompt,
