@@ -5,7 +5,10 @@ from milkie.response import Response
 
 class StepLLMToolCall(StepLLM):
     def __init__(self, globalContext: GlobalContext):
-        super().__init__(globalContext, None)
+        super().__init__(
+            globalContext=globalContext, 
+            promptMaker=None,
+            llm=globalContext.settings.getLLMCode())
 
     def makeSystemPrompt(self, args: dict, **kwargs) -> str:
         return "你是一个助手,需要判断是否需要使用工具来处理用户的输入"

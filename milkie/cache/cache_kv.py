@@ -65,7 +65,7 @@ class CacheKV:
 class CacheKVMgr:
     FilePrefix = "cache_"
     
-    def __init__(self, cacheDir: str, dumpInterval: int = 60, expireTimeByDay: float = 1):
+    def __init__(self, cacheDir: str, dumpInterval: int = 5, expireTimeByDay: float = 1):
         self.cacheDir = cacheDir
         self.dumpInterval = dumpInterval
         self.expireTimeByDay = expireTimeByDay

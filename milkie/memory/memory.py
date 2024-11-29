@@ -15,7 +15,7 @@ class Memory(object):
             serviceContext :ServiceContext):
         self.docSet = []
         for memoryTermConfig in memoryTermConfigs:
-            if memoryTermConfig.source == LongTermMemorySource.LOCAL.name:
+            if memoryTermConfig.source == LongTermMemorySource.LOCAL:
                 docs = self.__buildDocsFromLongTermLocal(memoryTermConfig)
                 self.docSet.append(docs)
             else:
@@ -49,8 +49,8 @@ class Memory(object):
 
 if __name__ == "__main__":
     memoryTermConfig = MemoryTermConfig(
-        MemoryType.LONG_TERM.name,
-        LongTermMemorySource.LOCAL.name,
+        MemoryType.LONG_TERM,
+        LongTermMemorySource.LOCAL,
         "data/santi/",
     )
 

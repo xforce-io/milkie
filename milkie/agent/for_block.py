@@ -1,3 +1,5 @@
+import json
+import logging
 import re
 from milkie.agent.base_block import BaseBlock
 from milkie.agent.llm_block.llm_block import LLMBlock
@@ -6,6 +8,8 @@ from milkie.config.constant import DefaultUsePrevResult, KeywordForStart, KeyRet
 from milkie.context import Context, VarDict
 from milkie.functions.toolkits.toolkit import Toolkit
 from milkie.response import Response
+
+logger = logging.getLogger(__name__)
 
 class ForBlock(BaseBlock):
     def __init__(
@@ -73,6 +77,28 @@ class ForBlock(BaseBlock):
             self.loopType = dict
         elif isinstance(iterableValue, (list, tuple)):
             self.loopType = list
+        elif isinstance(iterableValue, str):
+            try:
+                iterableValue = iterableValue.replace("'", '"')
+                iterableValue = json.loads(iterableValue)
+                if isinstance(iterableValue, dict):
+                    self.loopType = dict
+                elif isinstance(iterableValue, (list, tuple)):
+                    self.loopType = list
+                else:
+                    raise ValueError(f"Iterable '{self.iterable}' must be a list, tuple, or dict")
+            except json.JSONDecodeError:
+                import ast
+                try:
+                    iterableValue = ast.literal_eval(iterableValue)
+                    if isinstance(iterableValue, dict):
+                        self.loopType = dict
+                    elif isinstance(iterableValue, (list, tuple)):
+                        self.loopType = list
+                    else:
+                        raise ValueError(f"Iterable '{self.iterable}' must be a list, tuple, or dict")
+                except:
+                    raise ValueError(f"Cannot parse string value as iterable: {iterableValue}")
         else:
             raise ValueError(f"Iterable '{self.iterable}' must be a list, tuple, or dict")
         return iterableValue
@@ -106,16 +132,21 @@ class ForBlock(BaseBlock):
             else:
                 self.setVarDictGlobal(self.loopVar, value)
 
-            result = self.loopBlock.execute(
-                context=context,
-                query=query, 
-                prevBlock=prevBlock,
-                **kwargs)
-            if result.resp != KeyRet:
-               results.append(result.resp)
+            try:
+                result = self.loopBlock.execute(
+                    context=context,
+                    query=query, 
+                    args=args,
+                    prevBlock=prevBlock,
+                    **kwargs)
+                if result.resp != KeyRet:
+                    results.append(result.resp)
+            except Exception as e:
+                logger.warning(f"Error in loop block: {e}")
             prevBlock = None
 
-        self.setVarDictGlobal(self.retStorage, results)
+        if self.retStorage:
+            self.setVarDictGlobal(self.retStorage, results)
         return Response(respList=results)
 
     def __str__(self):
@@ -131,4 +162,13 @@ class ForBlock(BaseBlock):
             loopBlockClass=LLMBlock,
             retStorage=None,
             repoFuncs=None) -> 'ForBlock':
-        return ForBlock(forStatement, context, config, toolkit, usePrevResult, loopBlockClass, retStorage, repoFuncs)
+        return ForBlock(
+            forStatement=forStatement,
+            context=context,
+            config=config,
+            toolkit=toolkit,
+            usePrevResult=usePrevResult,
+            loopBlockClass=loopBlockClass,
+            retStorage=retStorage,
+            repoFuncs=repoFuncs
+        )

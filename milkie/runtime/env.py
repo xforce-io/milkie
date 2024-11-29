@@ -5,6 +5,7 @@ from milkie.config.config import GlobalConfig
 from milkie.context import Context
 from milkie.runtime.agent_program import AgentProgram
 from milkie.runtime.chatroom_program import ChatroomProgram
+from milkie.runtime.datasource import DataSource
 from milkie.runtime.global_toolkits import GlobalToolkits
 from milkie.response import Response
 from milkie.trace import stdout
@@ -21,6 +22,7 @@ class Env:
         self.context = context
         self.config = config
         self.context.getGlobalContext().setEnv(self)
+        self.dataSource = DataSource(self.context.globalContext.globalConfig)
 
         self.agents: dict[str, Agent] = {
             "stdin": FakeAgentStdin(
@@ -80,7 +82,7 @@ class Env:
 
         for chatroom in self.chatrooms.values():
             chatroom.compile()
-        
+
     def execute(
             self, 
             chatroomName: str=None,
@@ -106,3 +108,6 @@ class Env:
 
     def getGlobalToolkits(self) -> GlobalToolkits:
         return self.globalToolkits
+
+    def getDataSource(self) -> DataSource:
+        return self.dataSource

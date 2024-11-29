@@ -14,6 +14,9 @@ from llama_index.core.base.llms.generic_utils import (
     completion_response_to_chat_response,
     stream_completion_response_to_chat_response,
 )
+import uuid
+import time
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +60,8 @@ class EnhancedOpenAI(EnhancedLLM):
             client=OpenAI(api_key=api_key, base_url=endpoint))
         self._cacheMgr = CacheKVMgr("data/cache/", expireTimeByDay=7)
 
-    def _completion(self, messages: Sequence[ChatMessage], **kwargs: Any) -> ChatResponse:
+    def _createMessagesJson(self, messages: Sequence[ChatMessage]) -> list:
+        """创建 OpenAI API 所需的消息格式"""
         messagesJson = []
         for message in messages:
             if message.role == "system":
@@ -71,87 +75,119 @@ class EnhancedOpenAI(EnhancedLLM):
                     role=message.role,
                     content=content,
                 ))
+        return messagesJson
 
-        cached = self._cacheMgr.getValue(
-            modelName=self.model_name, 
-            key=messagesJson)
+    def _createApiArgs(self, messagesJson: list, stream: bool = False, **kwargs: Any) -> dict:
+        """创建 API 调用参数"""
+        theArgs = {
+            "model": self.model_name,
+            "messages": messagesJson,
+            "stream": stream,
+        }
+        if "tools" in kwargs:
+            theArgs["tools"] = kwargs["tools"]
+        return theArgs
+
+    def _createCacheResponse(self, content: str) -> dict:
+        """创建用于缓存的响应格式"""
+        return {
+            "id": "cached_" + str(uuid.uuid4()),
+            "object": "chat.completion",
+            "created": int(time.time()),
+            "model": self.model_name,
+            "choices": [{
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": content
+                },
+                "finish_reason": "stop"
+            }],
+            "usage": {
+                "completion_tokens": len(content.split()),
+                "prompt_tokens": 0,
+                "total_tokens": len(content.split())
+            }
+        }
+
+    def _setCacheValue(self, messagesJson: list, content: str, numTokens: int) -> None:
+        """设置缓存值"""
+        cacheResponse = self._createCacheResponse(content)
+        self._cacheMgr.setValue(
+            modelName=self.model_name,
+            key=messagesJson,
+            value={
+                "chatCompletion": json.dumps(cacheResponse),
+                "numTokens": numTokens
+            }
+        )
+
+    def _completion(self, messages: Sequence[ChatMessage], **kwargs: Any) -> ChatResponse:
+        messagesJson = self._createMessagesJson(messages)
+        cached = self._cacheMgr.getValue(modelName=self.model_name, key=messagesJson)
+        
         if cached:
             logger.debug("cache hit!")
             chatCompletion = ChatCompletion.model_validate_json(cached["chatCompletion"])
             numTokens = cached["numTokens"]
         else:
-            theArgs = {
-                "model": self.model_name,
-                "messages": messagesJson,
-                "stream": False,
-            }
-            if "tools" in kwargs:
-                theArgs["tools"] = kwargs["tools"]
-            
             try:
+                theArgs = self._createApiArgs(messagesJson, stream=False, **kwargs)
                 response = self._llm.getClient().chat.completions.create(**theArgs)
+                chatCompletion = response
+                numTokens = response.usage.completion_tokens
+                self._setCacheValue(messagesJson, chatCompletion.choices[0].message.content, numTokens)
             except Exception as e:
-                logger.error(f"Failed to complete request: {e}")
-                return ChatResponse(message=ChatMessage(role="assistant", content="Failed to generate response"))
+                return self._handleApiError(e)
 
-            chatCompletion = response
-            numTokens = response.usage.completion_tokens
-
-            self._cacheMgr.setValue(
-                modelName=self.model_name, 
-                key=messagesJson, 
-                value={
-                    "chatCompletion": response.model_dump_json(),
-                    "numTokens": numTokens,
-                })
-
-        completionResponse = CompletionResponse(
+        return completion_response_to_chat_response(CompletionResponse(
             text=chatCompletion.choices[0].message.content or "",
             raw={
                 "model_output": None,
                 "num_tokens": numTokens,
                 "chat_completion": chatCompletion
             }
-        )
-
-        return completion_response_to_chat_response(completionResponse)
+        ))
 
     def _stream(self, messages: Sequence[ChatMessage], **kwargs: Any) -> ChatResponseGen:
         return stream_completion_response_to_chat_response(self._streamImpl(messages, **kwargs))
 
     def _streamImpl(self, messages: Sequence[ChatMessage], **kwargs: Any) -> CompletionResponseGen:
-        messagesJson = []
-        for message in messages:
-            if message.role == "system":
-                messagesJson.append(ChatCompletionSystemMessageParam(
-                    role=message.role,
-                    content=message.content,
-                ))
-            else:
-                content = re.sub(r'[\uD800-\uDFFF]', '', message.content)
-                messagesJson.append(ChatCompletionUserMessageParam(
-                    role=message.role,
-                    content=content,
-                ))
-
-        theArgs = {
-            "model": self.model_name,
-            "messages": messagesJson,
-            "stream": True,
-        }
-        if "tools" in kwargs:
-            theArgs["tools"] = kwargs["tools"]
+        messagesJson = self._createMessagesJson(messages)
+        cached = self._cacheMgr.getValue(modelName=self.model_name, key=messagesJson)
+        
+        if cached:
+            logger.debug("cache hit in stream!")
+            chatCompletion = ChatCompletion.model_validate_json(cached["chatCompletion"])
+            content = chatCompletion.choices[0].message.content
+            yield from self._simulateStream(content)
+            return
         
         try:
+            theArgs = self._createApiArgs(messagesJson, stream=True, **kwargs)
             stream = self._llm.getClient().chat.completions.create(**theArgs)
+            full_content = []
+            
             for chunk in stream:
-                if chunk.choices[0].delta.content is not None:
-                    yield CompletionResponse(
-                        text=chunk.choices[0].delta.content,
-                        raw=chunk.choices[0].delta)
+                delta = chunk.choices[0].delta
+                if delta.content is not None:
+                    full_content.append(delta.content)
+                    yield CompletionResponse(text=delta.content, raw=delta)
+                elif delta.tool_calls:
+                    yield CompletionResponse(text="", raw=delta)
+
+            if full_content:
+                content = "".join(full_content)
+                self._setCacheValue(messagesJson, content, len(content.split()))
+
         except Exception as e:
-            logger.error(f"Failed to stream request: {e}")
-            raise RuntimeError(f"Failed to stream request: {e}")
+            self._handleApiError(e, isStream=True)
+
+    def _simulateStream(self, content: str, chunk_size: int = 1024) -> Generator[CompletionResponse, None, None]:
+        """模拟流式输出"""
+        for i in range(0, len(content), chunk_size):
+            chunk = content[i:i+chunk_size]
+            yield CompletionResponse(text=chunk, raw={"content": chunk})
 
     #deprecated
     def _inference(
@@ -166,19 +202,7 @@ class EnhancedOpenAI(EnhancedLLM):
                 break
             
             messages = request.prompt
-            messagesJson = []
-            for message in messages:
-                if message.role == "system":
-                    messagesJson.append(ChatCompletionSystemMessageParam(
-                        role=message.role,
-                        content=message.content,
-                    ))
-                else:
-                    content = re.sub(r'[\uD800-\uDFFF]', '', message.content)
-                    messagesJson.append(ChatCompletionUserMessageParam(
-                        role=message.role,
-                        content=content,
-                    ))
+            messagesJson = self._createMessagesJson(messages)
 
             cached = self._cacheMgr.getValue(
                 modelName=self.model_name, 
@@ -191,16 +215,8 @@ class EnhancedOpenAI(EnhancedLLM):
                     numTokens=cached["numTokens"]))
                 return
             
-            theArgs = ""
+            theArgs = self._createApiArgs(messagesJson, stream=False)
             try:
-                theArgs = {
-                    "model" : self.model_name,
-                    "messages" : messagesJson,
-                    "stream" : False,
-                }
-                if "tools" in genArgs:
-                    theArgs["tools"] = genArgs["tools"]
-                
                 response = self._llm.getClient().chat.completions.create(**theArgs)
             except Exception as e:
                 resQueue.put(QueueResponse(
@@ -225,3 +241,11 @@ class EnhancedOpenAI(EnhancedLLM):
 
     def _getSingleParameterSizeInBytes(self):
         return 0 
+
+    def _handleApiError(self, e: Exception, isStream: bool = False) -> Any:
+        """统一处理 API 错误"""
+        error_msg = f"Failed to {'stream' if isStream else 'complete'} request: {e} model: {self.model_name}"
+        logger.error(error_msg)
+        if isStream:
+            raise RuntimeError(error_msg)
+        return ChatResponse(message=ChatMessage(role="assistant", content="Failed to generate response"))

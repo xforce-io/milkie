@@ -1,5 +1,5 @@
 import unittest
-from milkie.agent.func_block import FuncBlock
+from milkie.agent.func_block.func_block import FuncBlock
 from milkie.context import Context
 from milkie.config.constant import KeywordForStart
 

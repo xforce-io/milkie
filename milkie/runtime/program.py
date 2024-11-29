@@ -87,7 +87,6 @@ class Program:
         parsedLines = []
         
         for line in lines:
-            line = line.strip()
             if not line or line.startswith('//'):
                 continue
 

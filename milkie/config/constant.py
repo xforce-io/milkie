@@ -2,7 +2,6 @@ MaxLenLog = 4096
 MaxLenLastStepResult = 768
 MaxLenThtTask = 128
 
-KeyResp = "_resp_"
 KeyLocal = "_local_"
 KeyRet = "_RET_"
 KeyNext = "_NEXT_"

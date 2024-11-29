@@ -16,14 +16,11 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from typing import Any, Callable, List, Optional, Tuple, Dict
-
-from openai.types.chat.chat_completion_message_tool_call import ChatCompletionMessageToolCall
 
 from milkie.config.constant import MaxLenLog
 from milkie.context import VarDict
-from milkie.utils.data_utils import restoreVariablesInDict
+from milkie.utils.data_utils import extractFromBlock, restoreVariablesInDict, unescape
 
 from ..openai_function import OpenAIFunction
 from milkie.functions.code_interpreter import CodeInterpreter
@@ -114,8 +111,7 @@ class Toolkit():
         if not msg.startswith("```json"):
             return None
 
-        msg = re.sub(r'```json\s*|\s*```', '', msg)
-        msg = msg.replace("{{", "{").replace("}}", "}")
+        msg = unescape(extractFromBlock("json", msg))
         try:
             data = json.loads(msg)
             funcName = data.get('name')
@@ -140,9 +136,7 @@ class Toolkit():
             needToParse :bool = False) -> List[FuncExecRecord]:
         records = []
         for toolCall in toolCalls:
-            arguments = toolCall[1]
-            arguments = arguments.replace("{{", "{").replace("}}", "}")
-            args = json.loads(arguments)
+            args = json.loads(unescape(toolCall[1]))
             record = self.execFromJson(
                 toolCall[0], 
                 args, 
@@ -178,7 +172,7 @@ class Toolkit():
         """
         return self.codeInterpreter.execute(instruction, varDict=varDict)
 
-    def runCode(self, code: str, varDict: Optional[Dict[str, Any]] = None) -> str:
+    def runCode(self, code: str, varDict: Optional[Dict[str, Any]] = None) -> Any:
         r"""直接执行代码解释器
 
         Args:

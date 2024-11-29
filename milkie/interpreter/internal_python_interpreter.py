@@ -17,12 +17,13 @@ import importlib
 import math
 import random
 import typing
+import logging
 from typing import Any, ClassVar, Dict, List, Optional
-import contextlib
 
 from milkie.interpreter.base import BaseInterpreter
 from milkie.interpreter.interpreter_error import InterpreterError
 
+logger = logging.getLogger(__name__)
 
 class InternalPythonInterpreter(BaseInterpreter):
     r"""A customized python interpreter to control the execution of
@@ -124,7 +125,7 @@ class InternalPythonInterpreter(BaseInterpreter):
         }
         self.state.update(builtins)
 
-    def run(self, code: str, code_type: str, varDict: Optional[Dict[str, Any]] = None) -> str:
+    def run(self, code: str, code_type: str, varDict: Optional[Dict[str, Any]] = None) -> Any:
         r"""Executes the given code with specified code type in the
         interpreter.
 
@@ -143,7 +144,7 @@ class InternalPythonInterpreter(BaseInterpreter):
 
 
         Returns:
-            str: The string representation of the output of the executed code.
+            Any: The output of the executed code.
 
         Raises:
             InterpreterError: If the `code_type` is not supported or if any
@@ -156,9 +157,9 @@ class InternalPythonInterpreter(BaseInterpreter):
                 f"{', '.join(self._CODE_TYPES)}."
             )
         if not self.unsafe_mode:
-            return str(self.execute(code, state=varDict))
+            return self.execute(code, state=varDict)
         else:
-            return str(eval(code, self.action_space, globals=varDict))
+            return eval(code, self.action_space, globals=varDict)
 
     def update_action_space(self, action_space: Dict[str, Any]) -> None:
         r"""Updates action space for *python* interpreter."""
@@ -206,6 +207,7 @@ class InternalPythonInterpreter(BaseInterpreter):
         try:
             expression = ast.parse(code)
         except SyntaxError as e:
+            import pdb; pdb.set_trace()
             if self.raise_error:
                 raise InterpreterError(f"Syntax error in code: {e}")
             else:
@@ -220,18 +222,8 @@ class InternalPythonInterpreter(BaseInterpreter):
             except InterpreterError as e:
                 if not keep_state:
                     self.clear_state()
-                msg = (
-                    f"Evaluation of the code stopped at node {idx}. "
-                    f"See:\n{e}"
-                )
-                # More information can be provided by `ast.unparse()`,
-                # which is new in python 3.9.
-                if self.raise_error:
-                    raise InterpreterError(msg)
-                else:
-                    import traceback
+                raise InterpreterError({e})
 
-                    return traceback.format_exc()
             if line_result is not None:
                 result = line_result
 
@@ -249,7 +241,11 @@ class InternalPythonInterpreter(BaseInterpreter):
     # but is still necessary for older versions.
     @typing.no_type_check
     def _execute_ast(self, expression: ast.AST) -> Any:
-        if isinstance(expression, ast.Assign):
+        if isinstance(expression, ast.Break):
+            raise StopIteration  # 使用 StopIteration 来处理 break
+        elif isinstance(expression, ast.Continue):
+            return None  # continue 语句返回 None
+        elif isinstance(expression, ast.Assign):
             # Assignment -> evaluate the assignment which should
             # update the state. We return the variable assigned as it may
             # be used to determine the final result.
@@ -333,6 +329,16 @@ class InternalPythonInterpreter(BaseInterpreter):
         elif isinstance(expression, ast.ListComp):
             # 列表推导式 -> 执行并返回结果列表
             return self._execute_listcomp(expression)
+        elif isinstance(expression, ast.BoolOp):
+            # 处理布尔运算符
+            values = [self._execute_ast(value) for value in expression.values]
+            if isinstance(expression.op, ast.And):
+                result = all(values)
+            elif isinstance(expression.op, ast.Or):
+                result = any(values)
+            else:
+                raise InterpreterError(f"Unsupported boolean operator: {expression.op}")
+            return result
         else:
             # For now we refuse anything else. Let's add things as we need
             # them.
@@ -393,26 +399,36 @@ class InternalPythonInterpreter(BaseInterpreter):
         return callable_func(*args, **kwargs)
 
     def _execute_subscript(self, subscript: ast.Subscript):
-        index = self._execute_ast(subscript.slice)
-        value = self._execute_ast(subscript.value)
-        if not isinstance(subscript.ctx, ast.Load):
-            raise InterpreterError(
-                f"{subscript.ctx.__class__.__name__} is not supported for "
-                "subscript."
-            )
-        if isinstance(value, (list, tuple)):
-            return value[int(index)]
-        if index in value:
-            return value[index]
-        if isinstance(index, str) and isinstance(value, dict):
-            close_matches = difflib.get_close_matches(
-                index,
-                [key for key in list(value.keys()) if isinstance(key, str)],
-            )
-            if len(close_matches) > 0:
-                return value[close_matches[0]]
+        """处理下标访问操作"""
+        if isinstance(subscript.slice, ast.Slice):
+            # 支持切片操作
+            value = self._execute_ast(subscript.value)
+            start = self._execute_ast(subscript.slice.lower) if subscript.slice.lower else None
+            stop = self._execute_ast(subscript.slice.upper) if subscript.slice.upper else None
+            step = self._execute_ast(subscript.slice.step) if subscript.slice.step else None
+            return value[start:stop:step]
+        else:
+            # 普通索引访问
+            index = self._execute_ast(subscript.slice)
+            value = self._execute_ast(subscript.value)
+            if not isinstance(subscript.ctx, ast.Load):
+                raise InterpreterError(
+                    f"{subscript.ctx.__class__.__name__} is not supported for "
+                    "subscript."
+                )
+            if isinstance(value, (list, tuple)):
+                return value[int(index)]
+            if index in value:
+                return value[index]
+            if isinstance(index, str) and isinstance(value, dict):
+                close_matches = difflib.get_close_matches(
+                    index,
+                    [key for key in list(value.keys()) if isinstance(key, str)],
+                )
+                if len(close_matches) > 0:
+                    return value[close_matches[0]]
 
-        raise InterpreterError(f"Could not index {value} with '{index}'.")
+            raise InterpreterError(f"Could not index {value} with '{index}'.")
 
     def _execute_name(self, name: ast.Name):
         if isinstance(name.ctx, ast.Store):
@@ -472,11 +488,24 @@ class InternalPythonInterpreter(BaseInterpreter):
                     result = line_result
         return result
 
-    def _execute_for(self, for_statement: ast.For):
+    def _execute_for(self, for_statement: ast.For) -> Any:
         result = None
-        for value in self._execute_ast(for_statement.iter):
-            self._assign(for_statement.target, value)
-            for line in for_statement.body:
+        try:
+            for value in self._execute_ast(for_statement.iter):
+                self._assign(for_statement.target, value)
+                for line in for_statement.body:
+                    try:
+                        line_result = self._execute_ast(line)
+                        if line_result is not None:
+                            result = line_result
+                    except StopIteration:
+                        return result  # break 语句触发时返回当前结果
+        except StopIteration:
+            pass  # 处理外层的 break
+
+        # 执行 else 子句（如果有的话）
+        if hasattr(for_statement, 'orelse') and for_statement.orelse:
+            for line in for_statement.orelse:
                 line_result = self._execute_ast(line)
                 if line_result is not None:
                     result = line_result
@@ -722,4 +751,27 @@ class InternalPythonInterpreter(BaseInterpreter):
                     execute_generators(generators, current_index + 1)
         
         execute_generators(generators)
+        return result
+
+    def _execute_while(self, while_statement: ast.While) -> Any:
+        result = None
+        try:
+            while self._execute_ast(while_statement.test):
+                for line in while_statement.body:
+                    try:
+                        line_result = self._execute_ast(line)
+                        if line_result is not None:
+                            result = line_result
+                    except StopIteration:
+                        return result  # break 语句触发时返回当前结果
+        except StopIteration:
+            pass  # 处理外层的 break
+
+        # 执行 else 子句（如果有的话）
+        if hasattr(while_statement, 'orelse') and while_statement.orelse:
+            for line in while_statement.orelse:
+                line_result = self._execute_ast(line)
+                if line_result is not None:
+                    result = line_result
+
         return result

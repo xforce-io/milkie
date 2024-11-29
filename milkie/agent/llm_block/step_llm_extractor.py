@@ -1,3 +1,4 @@
+from milkie.llm.enhanced_llm import EnhancedLLM
 from milkie.llm.step_llm import StepLLM
 from milkie.global_context import GlobalContext
 from milkie.response import Response
@@ -6,7 +7,10 @@ class StepLLMExtractor(StepLLM):
     def __init__(
             self, 
             globalContext: GlobalContext):
-        super().__init__(globalContext, None)
+        super().__init__(
+            globalContext=globalContext, 
+            promptMaker=None,
+            llm=globalContext.settings.getLLMCode())
 
     def makePrompt(self, useTool: bool = False, args: dict = {}, **kwargs) -> str:
         return f'''

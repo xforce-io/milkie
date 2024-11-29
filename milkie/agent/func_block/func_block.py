@@ -10,7 +10,7 @@ from milkie.config.constant import InstFlagFunc, KeywordForStart
 import logging
 
 from milkie.trace import stdout
-from milkie.utils.data_utils import restoreVariablesInStr
+from milkie.utils.data_utils import restoreVariablesInDict, restoreVariablesInStr
 
 logger = logging.getLogger(__name__)
 
@@ -116,8 +116,11 @@ class FuncBlock(BaseBlock):
         return '\n'.join(processedLines)
 
     def setParams(self, args :List[str]):
-        if len(args) != len(self.params):
+        if len(args) > len(self.params):
             raise ValueError(f"Expected arguments[{self.params}], but got[{args}]")
+
+        if len(args) < len(self.params):
+            args = args + [None] * (len(self.params) - len(args))
 
         for param, value in zip(self.params, args):
             self.setVarDictLocal(param, value)
@@ -136,7 +139,7 @@ class FuncBlock(BaseBlock):
             prevBlock=prevBlock, 
             **kwargs)
         
-        params = self._restoreParams(args)
+        params = self._restoreParams(args, self.params)
 
         stdout(f"called func start: {self.funcName}, params: {params}", **kwargs)
         response = self.flowBlock.execute(
@@ -147,13 +150,22 @@ class FuncBlock(BaseBlock):
             **kwargs)
         stdout(f"called func end: {self.funcName}", **kwargs)
 
-        self.clearVarDictLocal()
+        self.clearVarDictLocal(self.params)
         return response
 
-    def _restoreParams(self, args :dict) -> dict:
+    def _restoreParams(self, args :dict, params :List[str]) -> dict:
         replaced = {}
         for param, value in self.getVarDict().getLocalDict().items():
-            replaced[param] = restoreVariablesInStr(value, self.getVarDict().getGlobalDict())
+            if param not in params:
+                continue
+
+            if type(value) == str:
+                replaced[param] = restoreVariablesInStr(value, self.getVarDict().getGlobalDict())
+            elif type(value) == dict:
+                replaced[param] = restoreVariablesInDict(value, self.getVarDict().getGlobalDict())
+            else:
+                raise ValueError(f"Unsupported type: {type(value)}")
+
             if param in args: args[param] = replaced[param]
         
         for param, value in replaced.items():
@@ -170,23 +182,32 @@ class FuncBlock(BaseBlock):
             config: str | GlobalConfig = None,
             toolkit: Toolkit = None,
             repoFuncs=None) -> 'FuncBlock':
-        return FuncBlock(funcDefinition, context, config, toolkit, repoFuncs)
+        return FuncBlock(
+            funcDefinition=funcDefinition,
+            context=context,
+            config=config,
+            toolkit=toolkit,
+            repoFuncs=repoFuncs
+        )
 
 class RepoFuncs:
     def __init__(self):
-        self.funcs = {}
+        self.funcs = []
 
-    def add(self, name: str, func_block: FuncBlock):
-        self.funcs[name] = func_block
+    def add(self, name: str, funcBlock: FuncBlock):
+        self.funcs.append((name, funcBlock))
 
     def get(self, name: str) -> FuncBlock:
-        return self.funcs.get(name)
+        for funcName, funcBlock in self.funcs:
+            if funcName == name:
+                return funcBlock
+        return None
 
     def getAll(self) -> dict:
-        return self.funcs
+        return {name: funcBlock for name, funcBlock in self.funcs}
 
     def __len__(self):
         return len(self.funcs)
 
     def __iter__(self):
-        return iter(self.funcs.values())
+        return iter(self.funcs)

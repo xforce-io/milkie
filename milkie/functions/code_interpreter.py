@@ -6,7 +6,10 @@ from milkie.functions.import_white_list import WhiteListImport, addPreImport
 from milkie.global_context import GlobalContext
 from milkie.interpreter.internal_python_interpreter import InternalPythonInterpreter
 from milkie.llm.step_llm import StepLLM
+from milkie.log import DEBUG, ERROR, INFO, WARNING
 from milkie.response import Response
+from milkie.utils.data_utils import extractFromBlock, postRestoreVariablesInStr
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +20,10 @@ class StepLLMCode(StepLLM):
             instruction: str, 
             prevResult: str,
             errorContext: Optional[str] = None):
-        super().__init__(globalContext, None, codeModel=True)
+        super().__init__(
+            globalContext=globalContext, 
+            promptMaker=None,
+            llm=globalContext.settings.getLLMCode())
         self.instruction = instruction
         self.prevResult = prevResult
         self.errorContext = errorContext
@@ -26,7 +32,7 @@ class StepLLMCode(StepLLM):
         prompt = self.prevResult + f"""
         请根据指令生成Python代码，要求如下：
         （1）请不要调用'return'
-        （2）如果要调用'print(X)'，请使用'return_value = str(X)'替代
+        （2）如果要调用'print(X)'，请使用'return_value = X'替代
         
         指令: {self.instruction}
         """
@@ -52,7 +58,7 @@ class CodeInterpreter:
         self.maxAttempts = 2
         self.globalContext = globalContext
 
-    def execute(self, instruction: str, varDict: Optional[Dict[str, Any]] = None) -> str:
+    def execute(self, instruction: str, varDict: Optional[Dict[str, Any]] = None) -> Any:
         attempt = 0
         errorContext = ""
         while attempt < self.maxAttempts:
@@ -62,24 +68,47 @@ class CodeInterpreter:
                     instruction, 
                     errorContext)
                 code = stepLLMCode.completionAndFormat()
-                code = code.replace("```python", "").replace("```", "")
+                code = extractFromBlock("python", code)
+                code = postRestoreVariablesInStr(code, varDict)
                 code = addPreImport(code)
                 
                 codeRepr = code.replace('\n', '//')
-                logger.info(f"execute code [{codeRepr}]")
+                INFO(logger, f"execute code [{codeRepr}]")
                 result = self.interpreter.run(code, code_type="python3", varDict=varDict)
-                return str(result)
+                return result
 
             except Exception as e:
                 attempt += 1
                 errorContext = f"error[{str(e)}]\nstacktrace[{traceback.format_exc()}]"
-                logger.warning(f"failed to execute code[{errorContext}]")
+                WARNING(logger, f"failed to execute code[{errorContext}]")
                 
                 if attempt >= self.maxAttempts:
-                    return f"执行失败。最后一次错误: {errorContext}"
+                    raise RuntimeError()
     
-    def executeCode(self, code: str, varDict: Optional[Dict[str, Any]] = None) -> str:
-        return self.interpreter.run(code, code_type="python3", varDict=varDict)
+    def executeCode(self, code: str, varDict: Optional[Dict[str, Any]] = None) -> Any:
+        """执行代码，处理特殊字符和转义"""
+        try:
+            # 添加日志以便调试
+            DEBUG(logger, f"Executing code: {code}")
+            
+            # 执行代码
+            return self.interpreter.run(code.replace('\\"', ''), code_type="python", varDict=varDict)
+            
+        except Exception as e:
+            ERROR(logger, f"Failed to execute code: {code}")
+            ERROR(logger, f"Error type: {type(e)}")
+            ERROR(logger, f"Error message: {str(e)}")
+            
+            # 如果是 JSON 解析错误，打印相关位置的内容
+            if isinstance(e, json.JSONDecodeError):
+                error_pos = e.pos
+                context_start = max(0, error_pos - 50)
+                context_end = min(len(code), error_pos + 50)
+                context = code[context_start:context_end]
+                ERROR(logger, f"JSON error context: {context}")
+                ERROR(logger, f"Error position: {error_pos}")
+                
+            raise RuntimeError(f"Code execution failed: {str(e)}")
 
 if __name__ == "__main__":
     context = Context.create("config/global.yaml")

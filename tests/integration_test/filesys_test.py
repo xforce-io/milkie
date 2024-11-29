@@ -12,7 +12,7 @@ class FilesysIntegrationTest(BaseIntegrationTest):
     def setUp(self):
         super().setUp()
 
-        self.context = Context.create("config/global.yaml")
+        self.context = Context.create("config/global_test.yaml")
         self.scenarioDir = self.getScenarioDataDir('filesys')
         self.prepairScenarioDataDir(self.scenarioDir)
 
@@ -52,7 +52,7 @@ class FilesysIntegrationTest(BaseIntegrationTest):
             "sourceDir": self.scenarioDir,
             "destDir": self.kgDir
         }
-        flowBlock.execute(args=args)
+        flowBlock.execute(context=self.context, args=args)
         self._checkCopyKgFiles()
 
     def testCopyKgFilesThought(self):
@@ -68,7 +68,7 @@ class FilesysIntegrationTest(BaseIntegrationTest):
             "sourceDir": self.scenarioDir,
             "destDir": self.kgDir
         }
-        flowBlock.execute(args=args)
+        flowBlock.execute(context=self.context, args=args)
         self._checkCopyKgFiles()
 
     def testClassifyFiles(self):

@@ -56,6 +56,30 @@ def preprocessHtml(htmlContent):
     
     return html.strip()
 
+def isBlock(blockType: str, blockContent: str) -> bool:
+    if not blockContent or not blockType:
+        return False
+    normalized_content = blockContent.strip()
+    return normalized_content.startswith(f"```{blockType}") or normalized_content.startswith(blockType)
+
+def extractFromBlock(blockType: str, blockContent: str) -> str | None:
+    content = re.sub(f"^```{blockType}|^{blockType}", '', blockContent)
+    content = re.sub(r'```', '', content)
+    return content.strip()
+
+def extractBlock(blockType: str, blockContent: str) -> str | None:
+    pattern = r'```%s\s*(.*?)\s*```' % (blockType if blockType else "")
+    matches = re.findall(pattern, blockContent, re.DOTALL)
+    if len(matches) == 1:
+        return matches[0]
+    return None
+
+def escape(prompt :str) :
+    # to prevent 'format' exception in get_template_vars
+    return prompt.replace("{", "{{").replace("}", "}}")
+
+def unescape(prompt :str) :
+    return re.sub(r'\{{2,}', '{', re.sub(r'\}{2,}', '}', prompt))
 
 def restoreVariablesInDict(data :dict, allDict :dict) -> dict:
     newDict = {}
@@ -89,3 +113,11 @@ def restoreVariablesInStr(data :str, allDict :dict):
             return recursive_lookup(allDict, fieldName), fieldName
 
     return NestedFormatter().format(data)
+
+def postRestoreVariablesInStr(data :str, allDict :dict) -> str:
+    pattern = r'({{[\w\.]+}})'
+    matches = re.findall(pattern, data, re.DOTALL)
+    for match in matches:
+        slot = restoreVariablesInStr(match[1:-1], allDict).replace("\n", "//")
+        data = data.replace(match, slot)
+    return data

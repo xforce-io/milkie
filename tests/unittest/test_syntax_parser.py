@@ -6,7 +6,7 @@ from unittest.mock import Mock, patch
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 
 from milkie.agent.llm_block.syntax_parser import SyntaxParser, OutputSyntaxFormat
-from milkie.agent.func_block import RepoFuncs
+from milkie.agent.func_block.func_block import RepoFuncs
 from milkie.runtime.global_toolkits import GlobalToolkits
 from milkie.functions.toolkits.toolbox import Toolbox
 

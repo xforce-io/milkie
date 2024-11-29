@@ -2,12 +2,14 @@ from enum import Enum
 import json
 import logging
 import re
-from typing import Dict, List
-from milkie.agent.func_block import RepoFuncs
+from typing import Any, Dict, List
+from milkie.agent.func_block.func_block import RepoFuncs
 from milkie.agent.llm_block.step_llm_extractor import StepLLMExtractor
 from milkie.config.constant import *
 from milkie.context import VarDict
 from milkie.runtime.global_toolkits import GlobalToolkits
+from milkie.settings import Settings
+from milkie.utils.data_utils import extractBlock, isBlock, unescape
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +19,7 @@ class OutputSyntaxFormat(Enum):
     EXTRACT = 3
 
 class ResultOutputProcessSingle:
-    def __init__(self, storeVar: str, output: str=None, errmsg: str=None):
+    def __init__(self, storeVar: str, output: Any=None, errmsg: str=None):
         self.storeVar = storeVar
         self.output = output
         self.errmsg = errmsg
@@ -32,7 +34,7 @@ class ResultOutputProcess:
     def __init__(self):
         self._results: Dict[str, ResultOutputProcessSingle] = {}
         
-    def addSuccess(self, storeVar: str, output: str):
+    def addSuccess(self, storeVar: str, output: Any):
         self._results[storeVar] = ResultOutputProcessSingle(storeVar, output, None)
 
     def addError(self, storeVar: str, errmsg: str):
@@ -52,8 +54,11 @@ class ResultOutputProcess:
             if result.hasError():
                 continue
 
-            if result.output.startswith("```json") or result.output.startswith("json"):
-                jsonStr = result.output.replace("```json", '').replace("json", '').replace("```", '').replace("\n", '')
+            if type(result.output) == str and isBlock("json", result.output):
+                jsonStr = extractBlock("json", result.output).replace("\n", '')
+                if jsonStr.startswith("{{") and jsonStr.endswith("}}"):
+                    jsonStr = jsonStr[1:-1]
+
                 try:
                     varDict.setGlobal(storeVar, json.loads(jsonStr))
                 except Exception as e:
@@ -118,22 +123,22 @@ class OutputSyntax:
             self.extractPattern = pattern
 
     def getOutputSyntax(self):
-        return re.sub(r'\{{2,}', '{', re.sub(r'\}{2,}', '}', self.originalSyntax))
+        return unescape(self.originalSyntax)
 
     def processOutput(
             self, 
             stepLLMExtractor: StepLLMExtractor, 
-            output: str) -> str:
-        if self.format == OutputSyntaxFormat.REGEX:
-            return self.regExpr.search(output).group(1)
-        elif self.format == OutputSyntaxFormat.EXTRACT:
-            return stepLLMExtractor.completionAndFormat(
-                args={
-                    "toExtract": self.extractPattern,
-                    "text": output
-                })
-        else:
-            return output
+            output: Any) -> Any:
+        if type(output) == str:
+            if self.format == OutputSyntaxFormat.REGEX:
+                return self.regExpr.search(output).group(1)
+            elif self.format == OutputSyntaxFormat.EXTRACT:
+                return stepLLMExtractor.completionAndFormat(
+                    args={
+                        "toExtract": self.extractPattern,
+                        "text": output
+                    })
+        return output
 
     def __str__(self) -> str:
         return f"OutputSyntax(originalSyntax={self.originalSyntax}, format={self.format}, regExpr={self.regExpr}, extractPattern={self.extractPattern}, errorMessage={self.errorMessage})"
@@ -146,7 +151,7 @@ class OutputStruct:
     def processOutput(
             self, 
             stepLLMExtractor: StepLLMExtractor, 
-            output: str) -> str:
+            output: Any) -> Any:
         return self.outputSyntax.processOutput(stepLLMExtractor, output)
 
     def __str__(self) -> str:
@@ -155,6 +160,9 @@ class OutputStruct:
 class InstrOutput:
     def __init__(self):
         self.outputStructs: List[OutputStruct] = []
+        self.reset()
+
+    def reset(self):
         self._processed = False
         self._currentResult: ResultOutputProcess = None
 
@@ -177,7 +185,7 @@ class InstrOutput:
     def processOutputAndStore(
             self, 
             stepLLMExtractor: StepLLMExtractor, 
-            output: str,
+            output: Any,
             varDict: VarDict,
             retry: bool):
         if self._processed:
@@ -203,7 +211,7 @@ class InstrOutput:
     def _processOutput(
             self, 
             stepLLMExtractor: StepLLMExtractor, 
-            output: str):
+            output: Any):
         if self._currentResult is None:
             self._currentResult = ResultOutputProcess()
 
@@ -246,11 +254,15 @@ class SyntaxParser:
 
     def __init__(
             self, 
+            settings: Settings,
             instruction: str,
             repoFuncs: RepoFuncs,
             toolkits: GlobalToolkits) -> None:
+        self.settings = settings
+
         self.flag = SyntaxParser.Flag.NONE
         self.label = None
+        self.model = None
         self.instOutput = InstrOutput()
         self.returnVal = False 
         self.instruction = instruction.strip()
@@ -264,6 +276,9 @@ class SyntaxParser:
         self.callArg = None
 
         self.parseInstruction()
+
+    def reset(self):
+        self.instOutput.reset()
 
     def getInstruction(self):
         return self.instruction
@@ -286,6 +301,7 @@ class SyntaxParser:
     def parseInstruction(self):
         self._handleOutputAndStore()
         self._handleFlags()
+        self._handleModel() # model should be handled after flags
         self._handleFunctions()
         self._handleRespToolkit()
 
@@ -318,6 +334,17 @@ class SyntaxParser:
         if '->' in self.instruction:
             raise Exception("Invalid syntax: store variable in instruction")
 
+    def _handleModel(self):
+        if self.flag == SyntaxParser.Flag.CODE:
+            self.model = self.settings.getLLMCode()
+            return
+
+        for name in self.settings.getAllLLMs():
+            if f"[{name}]" in self.instruction:
+                self.model = self.settings.getLLM(name)
+                return
+        self.model = self.settings.getLLMDefault()
+
     def _handleFunctions(self):
         if self.repoFuncs is not None:
             for funcName, funcBlock in self.repoFuncs.getAll().items():
@@ -325,16 +352,15 @@ class SyntaxParser:
                 if pattern not in self.instruction:
                     continue
                 
-                paramsPattern = r'%s\(\s*([a-zA-Z0-9_,{}\s]+)\s*\)' % pattern
+                paramsPattern = r'%s\(\s*([a-zA-Z0-9_\-,{}\.\s]*)\s*\)' % pattern
                 paramsMatch = re.search(paramsPattern, self.instruction)
                 if paramsMatch:
                     params = paramsMatch.group(1).strip()
-                    params = params.replace(" ", "")
-                    params = params.split(",")
+                    params = [param.strip() for param in params.split(",") if len(param.strip()) > 0]
                     funcBlock.setParams(params)
                     funcBlock.compile()
                     self.funcsToCall.append(funcBlock)
-                    self.instruction = self.instruction.replace(paramsMatch.group(0), pattern)
+                    self.instruction = self.instruction.replace(paramsMatch.group(0), "")
                 else:
                     raise SyntaxError(f"function[{funcName}] params not found")
 

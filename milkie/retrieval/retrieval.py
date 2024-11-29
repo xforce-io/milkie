@@ -38,21 +38,9 @@ class RetrievalModule:
         self.memoryWithIndex = memoryWithIndex
         self.context = context
 
-        self.denseRetriever = self.memoryWithIndex.getIndex().denseIndex.as_retriever(
-            similarity_top_k=self.retrievalConfig.channelRecall)
-
-        self.sparseRetriever = BM25Retriever.from_defaults(
-            docstore=self.memoryWithIndex.getMemory().storageContext.docstore,
-            similarity_top_k=self.retrievalConfig.channelRecall,
-            tokenizer=chineseTokenizer)
-
-        self.hybridRetriever = HybridRetriever(
-            self.denseRetriever, 
-            self.sparseRetriever,
-            self.retrievalConfig.similarityTopK)
+        self._buildRetriever()
 
         self.nodePostProcessors = []
-
         reranker = Reranker(self.retrievalConfig.rerankerConfig) 
         if reranker.reranker:
             self.nodePostProcessors.append(reranker.reranker)
@@ -65,6 +53,10 @@ class RetrievalModule:
         if self.retrievalConfig.chunkAugmentType == ChunkAugmentType.SIMPLE:
             self.chunkAugment = ChunkAugment()
             self.nodePostProcessors.append(self.chunkAugment)
+        
+    def rebuildFromLocalDir(self, localDir :str):
+        self.memoryWithIndex.rebuildFromLocalDir(localDir)
+        self._buildRetriever()
         
     def retrieve(self, context :Context, **kwargs) -> List[NodeWithScore]:
         if self.chunkAugment:
@@ -97,11 +89,11 @@ class RetrievalModule:
         responseSynthesizer = get_response_synthesizer(
             service_context=self.memoryWithIndex.serviceContext,
             program_factory=CustomProgramFactory(
-                self.memoryWithIndex.settings.llm, 
+                self.memoryWithIndex.settings.llmDefault, 
                 **kwargs),
             structured_answer_filtering=True,
             text_qa_template=candidateTextQAPromptSel(
-                self.globalConfig.getLLMConfig().systemPrompt,
+                self.globalConfig.getLLMBasicConfig().systemPrompt,
                 "qa_init"),
             refine_template=candidateRefinePromptSel("qa_refine"),
         )
@@ -119,6 +111,20 @@ class RetrievalModule:
         result = self.engine.retrieve(QueryBundle(query_str=curQuery))
         context.setRetrievalResult(result)
         return result
+
+    def _buildRetriever(self):
+        self.denseRetriever = self.memoryWithIndex.getIndex().denseIndex.as_retriever(
+            similarity_top_k=self.retrievalConfig.channelRecall)
+
+        self.sparseRetriever = BM25Retriever.from_defaults(
+            docstore=self.memoryWithIndex.getMemory().storageContext.docstore,
+            similarity_top_k=self.retrievalConfig.channelRecall,
+            tokenizer=chineseTokenizer)
+
+        self.hybridRetriever = HybridRetriever(
+            self.denseRetriever, 
+            self.sparseRetriever,
+            self.retrievalConfig.similarityTopK)
 
     @staticmethod
     def _getTxtFileContent(filePath :str) -> str:

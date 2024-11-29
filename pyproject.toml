@@ -31,8 +31,13 @@ optimum = "*"
 auto-gptq = "*"
 autoawq = "*"
 jieba = "*"
-openai = "*"
 
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.pytest]
+testpaths = ["tests"]
+python_files = "test_*.py"
+python_classes = "Test*"
+python_functions = "test*"

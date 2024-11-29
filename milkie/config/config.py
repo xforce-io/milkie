@@ -91,8 +91,8 @@ class MemoryTermConfig(BaseConfig):
         if config["type"] == MemoryType.LONG_TERM.name:
             if config["source"] == LongTermMemorySource.LOCAL.name:
                 return MemoryTermConfig(
-                    type=config["type"],
-                    source=config["source"],
+                    type=MemoryType.LONG_TERM,
+                    source=LongTermMemorySource.LOCAL,
                     path=config["path"])
             else:
                 raise Exception(f"Long term memory source not supported[{config['source']}]")
@@ -112,6 +112,25 @@ class MemoryConfig(BaseConfig):
             memoryTermConfig = MemoryTermConfig.fromArgs(singleConfig)
             configs.append(memoryTermConfig)
         return MemoryConfig(memoryConfig=configs)
+
+class LLMBasicConfig(BaseConfig):
+    def __init__(
+            self, 
+            systemPrompt :str,
+            defaultModel :str, 
+            codeModel :str, 
+            ctxLen :int):
+        self.systemPrompt = systemPrompt
+        self.defaultModel = defaultModel
+        self.codeModel = codeModel
+        self.ctxLen = ctxLen
+
+    def fromArgs(config :dict):
+        return LLMBasicConfig(
+            systemPrompt=config["system_prompt"],
+            defaultModel=config["default_model"],
+            codeModel=config["code_model"],
+            ctxLen=config["ctx_len"])
 
 class LLMModelArgs(BaseConfig):
     def __init__(
@@ -219,10 +238,11 @@ class LLMGenerationArgs(BaseConfig):
         return result
 
 @dataclass
-class LLMConfig(BaseConfig):
+class SingleLLMConfig(BaseConfig):
     def __init__(
             self, 
             type :LLMType, 
+            name :str,
             model :str, 
             systemPrompt :str,
             ctxLen :int = 0,
@@ -238,6 +258,7 @@ class LLMConfig(BaseConfig):
             modelArgs :LLMModelArgs = None,
             generationArgs :LLMGenerationArgs = None):
         self.type = type
+        self.name = name if name else model
         self.model = model
         self.systemPrompt = systemPrompt
         self.ctxLen = ctxLen
@@ -253,13 +274,15 @@ class LLMConfig(BaseConfig):
         self.modelArgs = modelArgs
         self.generationArgs = generationArgs
     
-    def fromArgs(config :dict):
-        framework = FRAMEWORK.HUGGINGFACE
+    def fromArgs(basicConfig :LLMBasicConfig, config :dict):
+        framework = FRAMEWORK.NONE
         if "framework" in config.keys():
             if config["framework"] == FRAMEWORK.VLLM.name:
                 framework = FRAMEWORK.VLLM
             elif config["framework"] == FRAMEWORK.LMDEPLOY.name:
                 framework = FRAMEWORK.LMDEPLOY
+            elif config["framework"] == FRAMEWORK.HUGGINGFACE.name:
+                framework = FRAMEWORK.HUGGINGFACE
 
         device = None
         if "device" in config.keys():
@@ -278,13 +301,16 @@ class LLMConfig(BaseConfig):
         if "generation_args" in config.keys():
             generationArgs = LLMGenerationArgs.fromArgs(config["generation_args"])
 
-        systemPrompt = Loader.load(config["system_prompt"]) if "system_prompt" in config else None
+        promptName = config["system_prompt"] if "system_prompt" in config else basicConfig.systemPrompt
+        ctxLen = config["ctx_len"] if "ctx_len" in config else basicConfig.ctxLen
+        
+        systemPrompt = Loader.load(promptName)
         if config["type"] == LLMType.HUGGINGFACE.name:
-            return LLMConfig(
+            return SingleLLMConfig(
                 type=LLMType.HUGGINGFACE, 
                 model=config["model"],
                 systemPrompt=systemPrompt,
-                ctxLen=config["ctx_len"],
+                ctxLen=ctxLen,
                 batchSize=config["batch_size"],
                 tensorParallelSize=config["tensor_parallel_size"],
                 framework=framework,
@@ -293,18 +319,20 @@ class LLMConfig(BaseConfig):
                 modelArgs=modelArgs,
                 generationArgs=generationArgs)
         elif config["type"] == LLMType.GEN_OPENAI.name:
-            return LLMConfig(
+            return SingleLLMConfig(
                 type=LLMType.GEN_OPENAI,
+                name=config["name"] if "name" in config else None,
                 model=config["model"],
                 systemPrompt=systemPrompt,
-                ctxLen=config["ctx_len"],
+                ctxLen=ctxLen,
                 apiKey=config["api_key"],
                 endpoint=config["endpoint"],
                 generationArgs=generationArgs,)
         elif config["type"] == LLMType.AZURE_OPENAI.name:
-            return LLMConfig(
+            return SingleLLMConfig(
                 type=LLMType.AZURE_OPENAI,
                 model=config["model"],
+                name=config["name"] if "name" in config else None,
                 batchSize=config["batch_size"],
                 deploymentName=config["deployment_name"],
                 apiKey=config["api_key"],
@@ -314,6 +342,29 @@ class LLMConfig(BaseConfig):
                 generationArgs=generationArgs)
         else:
             raise Exception("LLM type not supported")
+
+class LLMConfig(BaseConfig):
+
+    def __init__(self, llmConfigs :List[SingleLLMConfig]):
+        self.llmConfigs = llmConfigs
+        self.llmMap = {}
+        for llmConfig in llmConfigs:
+            self.llmMap[llmConfig.model] = llmConfig
+    
+    def fromArgs(basicConfig :LLMBasicConfig, config :dict):
+        configs = []
+        modelNames = []
+        for singleConfig in config:
+            llmConfig = SingleLLMConfig.fromArgs(basicConfig, singleConfig)
+            if llmConfig.name not in modelNames:
+                modelNames.append(llmConfig.name)
+            else:
+                raise Exception(f"LLM name {llmConfig.name} duplicated")
+            configs.append(llmConfig)
+        return LLMConfig(configs)
+
+    def getConfig(self, model :str) -> SingleLLMConfig:
+        return self.llmMap.get(model)
 
 class EmbeddingConfig(BaseConfig):
     def __init__(
@@ -526,14 +577,14 @@ class GlobalConfig(BaseConfig):
         self.initFromDict(config)
 
     def initFromDict(self, config: dict):
-        self.llmConfig = LLMConfig.fromArgs(config["llm"])
-        self.llmCodeConfig = LLMConfig.fromArgs(config["llm_code"])
-        self.embeddingConfig = EmbeddingConfig.fromArgs(config["embedding"]) if "embedding" in config.keys() else None
+        self.llmBasicConfig :LLMBasicConfig = LLMBasicConfig.fromArgs(config["llm_basic"])
+        self.llmConfig :LLMConfig = LLMConfig.fromArgs(self.llmBasicConfig, config["llm"])
+        self.embeddingConfig :EmbeddingConfig = EmbeddingConfig.fromArgs(config["embedding"]) if "embedding" in config.keys() else None
         self.agentsConfig: AgentsConfig = AgentsConfig.fromArgs(config["agents"])
-        self.memoryConfig = MemoryConfig.fromArgs(config["memory"])
-        self.indexConfig = IndexConfig.fromArgs(config["index"])
-        self.retrievalConfig = RetrievalConfig.fromArgs(config["retrieval"]) if "retrieval" in config.keys() else None
-        self.toolsConfig = ToolsConfig.fromArgs(config.get("tools", {}))
+        self.memoryConfig :MemoryConfig = MemoryConfig.fromArgs(config["memory"])
+        self.indexConfig :IndexConfig = IndexConfig.fromArgs(config["index"])
+        self.retrievalConfig :RetrievalConfig = RetrievalConfig.fromArgs(config["retrieval"]) if "retrieval" in config.keys() else None
+        self.toolsConfig :ToolsConfig = ToolsConfig.fromArgs(config.get("tools", {}))
 
         for agentConfig in self.agentsConfig.agentConfigs:
             if agentConfig.type == AgentType.QA:
@@ -546,12 +597,21 @@ class GlobalConfig(BaseConfig):
                 if agentConfig.retrievalConfig is None:
                     agentConfig.retrievalConfig = self.retrievalConfig
 
+    def getLLMBasicConfig(self) -> LLMBasicConfig:
+        return self.llmBasicConfig
+
     def getLLMConfig(self) -> LLMConfig:
         return self.llmConfig
 
-    def getLLMCodeConfig(self) -> LLMConfig:
-        return self.llmCodeConfig
-    
+    def getSingleLLMConfig(self, model :str) -> SingleLLMConfig:
+        return self.llmConfig.getConfig(model)
+
+    def getDefaultLLMConfig(self) -> SingleLLMConfig:
+        return self.getSingleLLMConfig(self.llmBasicConfig.defaultModel)
+
+    def getCodeLLMConfig(self) -> SingleLLMConfig:
+        return self.getSingleLLMConfig(self.llmBasicConfig.codeModel)
+
     def getEmbeddingConfig(self) -> EmbeddingConfig:
         return self.embeddingConfig
     

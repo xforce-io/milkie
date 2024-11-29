@@ -144,7 +144,14 @@ class FlowBlock(BaseBlock):
             toolkit: Toolkit = None,
             usePrevResult=DefaultUsePrevResult,
             repoFuncs=None) -> 'FlowBlock':
-        return FlowBlock(flowCode, context, config, toolkit, usePrevResult, repoFuncs)
+        return FlowBlock(
+            flowCode=flowCode,
+            context=context,
+            config=config,
+            toolkit=toolkit,
+            usePrevResult=usePrevResult,
+            repoFuncs=repoFuncs
+        )
 
 if __name__ == "__main__":
     flowCode = """

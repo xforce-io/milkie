@@ -1,12 +1,12 @@
 from llama_index.core.schema import TextNode
 
 from milkie.agent.base_block import BaseBlock
-from milkie.agent.func_block import FuncBlock
+from milkie.agent.func_block.func_block import FuncBlock
 from milkie.context import Context
 from milkie.memory.memory_with_index import MemoryWithIndex
 from milkie.response import Response
 from milkie.retrieval.retrieval import RetrievalModule
-
+from milkie.runtime.datasource import DataSource
 
 class RetrievalBlock(FuncBlock):
 
@@ -32,17 +32,17 @@ class RetrievalBlock(FuncBlock):
         else:
             self.memoryWithIndex = context.getGlobalContext().memoryWithIndex
 
-        self.retrievalModule = None
+        self.dataSource :DataSource = context.getEnv().getDataSource()
 
     def compile(self):
         if self.isCompiled:
             return
 
-        self.retrievalModule = RetrievalModule(
+        self.dataSource.setMainRetriever(RetrievalModule(
             globalConfig=self.context.globalContext.globalConfig,
             retrievalConfig=self.config.retrievalConfig,
             memoryWithIndex=self.memoryWithIndex,
-            context=self.context)
+            context=self.context))
 
         self.isCompiled = True
 
@@ -55,11 +55,12 @@ class RetrievalBlock(FuncBlock):
             **kwargs) -> Response:
         BaseBlock.execute(self, context, query, args, prevBlock, **kwargs)
 
+        self._restoreParams(args, self.params)
         return self._retrieve(query if query else args["query"], args)
 
     def _retrieve(self, query :str, args :dict) -> Response:
         self.context.setCurQuery(query)
-        self.retrievalModule.retrieve(self.context)
+        self.dataSource.getMainRetriever().retrieve(self.context)
         retrievalResult = self.context.retrievalResult
         if retrievalResult is None:
             return None

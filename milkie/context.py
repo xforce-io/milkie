@@ -5,14 +5,13 @@ from llama_index.core.base.response.schema import NodeWithScore
 from llama_index.core.base.llms.types import ChatMessage, MessageRole
 
 from milkie.agent.query_structure import QueryStructure, parseQuery
-from milkie.config.constant import KeyResp
 from milkie.response import Response
 from milkie.utils.req_tracer import ReqTracer
 
 class VarDict:
     """变量字典类，管理全局和局部变量"""
     def __init__(self):
-        self.globalDict: Dict[str, Any] = {KeyResp: {}}
+        self.globalDict: Dict[str, Any] = {}
         self.localDict: Dict[str, Any] = {}
 
     def get(self, key: str) -> Any:
@@ -46,17 +45,16 @@ class VarDict:
     def setResp(self, key: str, value: Any) -> None:
         """设置响应变量"""
         if value is None:
-            self.globalDict[KeyResp].pop(key, None)
+            self.globalDict.pop(key, None)
         else:
-            self.globalDict[KeyResp][key] = value
+            self.globalDict[key] = value
 
     def update(self, newDict: VarDict) -> None:
         """更新字典内容"""
         self.globalDict.update(newDict.globalDict)
         self.localDict.update(newDict.localDict)
 
-    def updateFromDict(self, newDict: dict) -> None:
-        """从普通字典更新全局字典"""
+    def updateFromDict(self, newDict :dict) -> None:
         self.globalDict.update(newDict)
 
     def copy(self) -> VarDict:
@@ -66,11 +64,17 @@ class VarDict:
         """清空所有字典"""
         self.localDict.clear()
         self.globalDict.clear()
-        self.globalDict[KeyResp] = {}
 
-    def clearLocal(self) -> None:
+    def clearLocal(self, params :List[str]) -> None:
         """只清空局部字典"""
-        self.localDict.clear()
+        for param in params:
+            self.localDict.pop(param, None)
+
+    def __str__(self):
+        return str(self.getAllDict())
+
+    def __iter__(self):
+        return iter(self.globalDict)
 
 class History:
     """对话历史管理类"""

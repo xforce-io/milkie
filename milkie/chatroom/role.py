@@ -18,6 +18,9 @@ class Role(BaseBlock):
         self.desc = desc
         self.agent = agent
 
+    def compile(self):
+        pass
+
     def execute(
             self, 
             query: str, 

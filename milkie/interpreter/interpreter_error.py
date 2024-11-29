@@ -14,6 +14,17 @@
 
 # TODO: Do we need a file to store this error class?
 class InterpreterError(Exception):
-    r"""Exception raised for errors that can be solved by regenerating code"""
+    """解释器错误类"""
+    def __init__(self, message: str):
+        self.message = message
+        super().__init__(self.message)
 
-    pass
+    def __str__(self) -> str:
+        return f"Interpreter Error: {self.message}"
+
+    def to_dict(self) -> dict:
+        """将错误转换为字典格式"""
+        return {
+            "error": "InterpreterError",
+            "message": self.message
+        }

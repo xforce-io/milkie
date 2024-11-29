@@ -6,6 +6,7 @@ from milkie.global_context import GlobalContext
 from milkie.llm.inference import chat
 from milkie.model_factory import ModelFactory
 from milkie.response import Response
+from milkie.utils.data_utils import extractBlock
 
 logger = logging.getLogger(__name__)
 
@@ -127,11 +128,7 @@ class Coder(Tool):
             promptArgs={})
 
         #extract code part in response, assign to `code`
-        import re
-        pattern = r'```python\s*(.*?)\s*```'
-        matches = re.findall(pattern, response.response, re.DOTALL)
-        if len(matches) == 1:
-            code = matches[0]
+        code = extractBlock("python", response.response)
 
         #execute `code` in virtual environment
         outputCapture = io.StringIO()

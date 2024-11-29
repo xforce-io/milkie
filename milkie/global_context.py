@@ -25,14 +25,17 @@ def getNodeParser(
         paragraph_separator="\n",
     )
 
-from milkie.config.config import LLMConfig
+from milkie.config.config import SingleLLMConfig, LLMBasicConfig
 
 class CustomizedPromptHelper(PromptHelper):
 
-    def __init__(self, llmConfig :LLMConfig):
+    def __init__(
+            self, 
+            llmBasicConfig :LLMBasicConfig):
+        ctxLen = llmBasicConfig.ctxLen
         super().__init__(
-            context_window=llmConfig.ctxLen,
-            chunk_size_limit=llmConfig.ctxLen*3/4)
+            context_window=ctxLen,
+            chunk_size_limit=ctxLen*3/4)
     
     def repack(
             self, 
@@ -57,15 +60,14 @@ class GlobalContext():
         self.modelFactory = modelFactory
         self.settings = Settings(globalConfig, modelFactory)
         promptHelper = CustomizedPromptHelper(
-            llmConfig=globalConfig.getLLMConfig()
-        )
+            llmBasicConfig=self.settings.llmBasicConfig)
 
         self.serviceContext = ServiceContext.from_defaults(
             embed_model=self.settings.embedding,
             chunk_size=globalConfig.indexConfig.chunkSize,
             chunk_overlap=globalConfig.indexConfig.chunkOverlap,
             prompt_helper=promptHelper,
-            llm=self.settings.llm.getLLM(),
+            llm=self.settings.llmDefault.getLLM(),
             node_parser=getNodeParser(
                 chunk_size=globalConfig.indexConfig.chunkSize,
                 chunk_overlap=globalConfig.indexConfig.chunkOverlap,
@@ -79,6 +81,8 @@ class GlobalContext():
                 serviceContext=self.serviceContext)
         else:
             self.memoryWithIndex = None
+
+        self.env = None
 
     def setEnv(self, env):
         self.env = env

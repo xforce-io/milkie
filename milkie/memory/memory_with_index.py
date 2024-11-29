@@ -1,7 +1,7 @@
 from llama_index.core.service_context import ServiceContext
 from llama_index.core.indices.vector_store.base import VectorStoreIndex
 
-from milkie.config.config import IndexConfig, MemoryConfig
+from milkie.config.config import IndexConfig, LongTermMemorySource, MemoryConfig, MemoryTermConfig, MemoryType
 from milkie.index.index import Index
 from milkie.memory.memory import Memory
 from milkie.settings import Settings
@@ -17,17 +17,17 @@ class MemoryWithIndex():
         self.settings = settings
         self.memoryConfig = memoryConfig
         self.indexConfig = indexConfig
-
-        if serviceContext:
-            self.serviceContext = serviceContext
-        else:
-            self.serviceContext = ServiceContext.from_defaults(
-                embed_model=settings.embedding,
-                chunk_size=indexConfig.chunkSize,
-                chunk_overlap=indexConfig.chunkOverlap,
-                llm=settings.llm)
-        
+        self.serviceContext = serviceContext
         self.index = None
+        self.memory = None
+
+    def rebuildFromLocalDir(self, localDir :str):
+        self.memoryConfig = MemoryConfig([
+            MemoryTermConfig(
+                type=MemoryType.LONG_TERM,
+                source=LongTermMemorySource.LOCAL,
+                path=localDir)
+        ])
         self.memory = None
 
     def getIndex(self):
@@ -50,4 +50,3 @@ class MemoryWithIndex():
                 service_context=self.serviceContext)
             
             self.index = Index(denseIndex)
-

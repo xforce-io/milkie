@@ -1,11 +1,11 @@
 from __future__ import annotations
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, List, Optional
 
 from milkie.config.config import GlobalConfig
 from milkie.config.constant import DefaultUsePrevResult
 from milkie.context import Context, VarDict
-from milkie.functions.toolkits.toolkit import Toolkit
+from milkie.functions.toolkits.toolkit import EmptyToolkit, Toolkit
 from milkie.response import Response
 
 class BaseBlock(ABC):
@@ -14,12 +14,15 @@ class BaseBlock(ABC):
             self, 
             context: Context = None, 
             config: str | GlobalConfig = None,
-            toolkit: Toolkit = None,
+            toolkit: Optional[Toolkit] = None,
             usePrevResult=DefaultUsePrevResult,
             repoFuncs=None):
         self.context = context or Context.create()
-        self.config = config
+        self.config = config if config else self.context.globalContext.globalConfig
         self.toolkit = toolkit
+        if self.toolkit is None:
+            self.toolkit = EmptyToolkit(self.context.globalContext)
+            
         self.usePrevResult = usePrevResult
         self.repoFuncs = repoFuncs
         self.isCompiled = False
@@ -64,6 +67,7 @@ class BaseBlock(ABC):
 
     def setVarDictGlobal(self, key: str, val):
         self.context.varDict.setGlobal(key, val)
+        self.context.varDict.setLocal(key, val)
 
     def setVarDictLocal(self, key: str, val):
         self.context.varDict.setLocal(key, val)
@@ -83,5 +87,5 @@ class BaseBlock(ABC):
     def clearVarDict(self):
         self.context.varDict.clear()
 
-    def clearVarDictLocal(self):
-        self.context.varDict.clearLocal()
+    def clearVarDictLocal(self, params :List[str]):
+        self.context.varDict.clearLocal(params)

@@ -3,8 +3,12 @@ from sys import stdin
 from typing import List
 from milkie.agent.base_block import BaseBlock
 from milkie.agent.flow_block import FlowBlock
-from milkie.agent.func_block import FuncBlock, RepoFuncs
-from milkie.agent.retrieval_block import RetrievalBlock
+from milkie.agent.func_block.func_block import FuncBlock, RepoFuncs
+from milkie.agent.func_block.reindex_from_local_block import ReindexFromLocalBlock
+from milkie.agent.func_block.retrieval_block import RetrievalBlock
+from milkie.agent.func_block.set_model import SetModel
+from milkie.agent.func_block.set_reasoning_self_consistency import SetReasoningSelfConsistency
+from milkie.agent.func_block.set_reasoning_self_critique import SetReasoningSelfCritique
 from milkie.config.constant import KeywordFuncStart, KeywordFuncEnd
 from milkie.context import Context
 from milkie.config.config import GlobalConfig
@@ -37,7 +41,31 @@ class Agent(BaseBlock):
         self.systemPrompt = systemPrompt
         self.funcBlocks: List[FuncBlock] = []
         self.flowBlocks: List[FlowBlock] = []
-        self.repoFuncs.add("Retrieval", RetrievalBlock(self.context, self.config, self.repoFuncs))
+        self.repoFuncs.add("Retrieval", RetrievalBlock(
+            context=self.context,
+            config=self.config,
+            repoFuncs=self.repoFuncs
+        ))
+        self.repoFuncs.add("ReindexFromLocal", ReindexFromLocalBlock(
+            context=self.context,
+            config=self.config,
+            repoFuncs=self.repoFuncs
+        ))
+        self.repoFuncs.add("LLM", SetModel(
+            context=self.context,
+            config=self.config,
+            repoFuncs=self.repoFuncs
+        ))
+        self.repoFuncs.add("ReasoningSelfConsistency", SetReasoningSelfConsistency(
+            context=self.context,
+            config=self.config,
+            repoFuncs=self.repoFuncs
+        ))
+        self.repoFuncs.add("ReasoningSelfCritique", SetReasoningSelfCritique(
+            context=self.context,
+            config=self.config,
+            repoFuncs=self.repoFuncs
+        ))
 
     def assignExpert(self, expert: Agent):
         self.experts[expert.name] = expert

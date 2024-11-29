@@ -1,42 +1,99 @@
 from abc import ABC, abstractmethod
+from typing import Optional
 from milkie.global_context import GlobalContext
+from milkie.llm.enhanced_llm import EnhancedLLM
 from milkie.response import Response
 from milkie.llm.inference import chat
 from milkie.trace import stdout
 from milkie.utils.commons import getToolsSchemaForTools
+from milkie.llm.reasoning.reasoning import Reasoning
+from milkie.llm.reasoning.reasoning_naive import ReasoningNaive
 
 class StepLLM(ABC):
     def __init__(
             self, 
             globalContext: GlobalContext, 
-            promptMaker, 
-            codeModel: bool = False):
+            promptMaker,
+            llm :EnhancedLLM,
+            reasoning: Reasoning = ReasoningNaive()):
         self.globalContext = globalContext
         self.promptMaker = promptMaker
-        self.codeModel = codeModel
+        self.llm = llm
+        self.reasoning = reasoning
     
-    def completion(self, args: dict = {}, **kwargs):
-        return self.llmCall(args, stream=False, **kwargs)
+    def completion(
+            self, 
+            llm :Optional[EnhancedLLM] = None, 
+            reasoning: Optional[Reasoning] = None,
+            args: dict = {}, 
+            **kwargs) -> Response:
+        return self.llmCall(
+            llm=llm if llm else self.llm, 
+            reasoning=reasoning if reasoning else self.reasoning,
+            args=args, 
+            stream=False, 
+            **kwargs)
     
-    def stream(self, args: dict = {}, **kwargs):
-        return self.llmCall(args, stream=True, **kwargs)
+    def stream(
+            self, 
+            llm :Optional[EnhancedLLM] = None, 
+            reasoning: Optional[Reasoning] = None,
+            args: dict = {}, 
+            **kwargs) -> Response:
+        return self.llmCall(
+            llm=llm if llm else self.llm, 
+            reasoning=reasoning if reasoning else self.reasoning,
+            args=args, 
+            stream=True, 
+            **kwargs)
 
-    def streamAndFormat(self, args: dict = {}, **kwargs):
-        return self.formatResult(self.stream(args, **kwargs), **kwargs)
+    def streamAndFormat(
+            self, 
+            llm :Optional[EnhancedLLM] = None, 
+            reasoning: Optional[Reasoning] = None,
+            args: dict = {}, 
+            **kwargs) -> Response:
+        return self.formatResult(
+            self.stream(llm, reasoning, args, **kwargs), 
+            **kwargs)
 
-    def streamOutputAndReturn(self, args: dict = {}, **kwargs):
-        resp = self.llmCall(args, stream=True, **kwargs)
+    def streamOutputAndReturn(
+            self, 
+            llm :Optional[EnhancedLLM] = None, 
+            reasoning: Optional[Reasoning] = None,
+            args: dict = {}, 
+            **kwargs) -> str:
+        resp = self.llmCall(
+            llm=llm if llm else self.llm, 
+            reasoning=reasoning if reasoning else self.reasoning,
+            args=args, 
+            stream=True, 
+            **kwargs)
         completeOutput = ""
         for chunk in resp.respGen:
             completeOutput += chunk.delta.content
             stdout(chunk.delta.content, end="", flush=True, **kwargs)
         return completeOutput
 
-    def streamOutputAndFormat(self, args: dict = {}, **kwargs):
-        return self.formatResult(self.streamOutputAndReturn(args, **kwargs), **kwargs)
+    def streamOutputAndFormat(
+            self, 
+            llm :Optional[EnhancedLLM] = None, 
+            reasoning: Optional[Reasoning] = None,
+            args: dict = {}, 
+            **kwargs) -> Response:
+        return self.formatResult(
+            self.streamOutputAndReturn(llm, reasoning, args, **kwargs), 
+            **kwargs)
     
-    def completionAndFormat(self, args: dict = {}, **kwargs):
-        return self.formatResult(self.completion(args, **kwargs), **kwargs)
+    def completionAndFormat(
+            self, 
+            llm :Optional[EnhancedLLM] = None, 
+            reasoning: Optional[Reasoning] = None,
+            args: dict = {}, 
+            **kwargs) -> Response:
+        return self.formatResult(
+            self.completion(llm, reasoning, args, **kwargs), 
+            **kwargs)
     
     def makeSystemPrompt(self, args: dict, **kwargs) -> str:
         systemPrompt = None
@@ -44,16 +101,21 @@ class StepLLM(ABC):
             systemPrompt = args["system_prompt"]
 
         if systemPrompt is None:
-            systemPrompt = self.globalContext.globalConfig.getLLMConfig().systemPrompt
+            systemPrompt = self.globalContext.settings.llmBasicConfig.systemPrompt
         return systemPrompt
     
     @abstractmethod
     def makePrompt(self, useTool: bool = False, args: dict = {}, **kwargs: dict) -> str:
         pass
 
-    def llmCall(self, args: dict, stream: bool, **kwargs) -> Response:
+    def llmCall(
+            self, 
+            llm :EnhancedLLM, 
+            reasoning: Optional[Reasoning] = None,
+            args: dict = {}, 
+            stream: bool = False, 
+            **kwargs) -> Response:
         self.prompt = self.makePrompt(useTool="tools" in kwargs, args=args, **kwargs)
-        llm = self.globalContext.settings.llmCode if self.codeModel else self.globalContext.settings.llm
         systemPrompt = self.makeSystemPrompt(args=args, **kwargs)
 
         if "tools" in kwargs and kwargs["tools"] is not None and len(kwargs["tools"]) > 0:
@@ -61,7 +123,10 @@ class StepLLM(ABC):
         else:
             kwargs.pop("tools", None)
 
-        return chat(
+        if reasoning is None:
+            reasoning = self.reasoning
+
+        return reasoning.reason(
             llm=llm, 
             systemPrompt=systemPrompt,
             prompt=self.prompt, 
@@ -69,6 +134,5 @@ class StepLLM(ABC):
             stream=stream,
             **kwargs)
 
-    @abstractmethod
     def formatResult(self, result: Response, **kwargs):
         return result

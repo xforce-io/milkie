@@ -6,6 +6,7 @@ from milkie.context import History
 from milkie.llm.enhanced_llm import EnhancedLLM
 from milkie.log import DEBUG
 from milkie.response import Response
+from milkie.utils.data_utils import escape
 
 logger = logging.getLogger(__name__)
 
@@ -16,10 +17,21 @@ def chat(
         promptArgs :dict, 
         stream :bool = False,
         **kwargs) -> Response:
+    chatArgs = {k : v for k, v in kwargs.items() if k == "tools"}
     if stream:
-        return chatStream(llm, systemPrompt, prompt, promptArgs, **kwargs)
+        return chatStream(
+            llm=llm, 
+            systemPrompt=systemPrompt, 
+            prompt=prompt, 
+            promptArgs=promptArgs, 
+            **chatArgs)
     else:
-        return chatCompletion(llm, systemPrompt, prompt, promptArgs, **kwargs)
+        return chatCompletion(
+            llm=llm, 
+            systemPrompt=systemPrompt, 
+            prompt=prompt, 
+            promptArgs=promptArgs, 
+            **chatArgs)
 
 def chatCompletion(
         llm :EnhancedLLM, 
@@ -27,7 +39,7 @@ def chatCompletion(
         prompt :str, 
         promptArgs :dict, 
         **kwargs) -> Response:
-    prompt = preprocessPrompt(prompt)
+    prompt = escape(prompt)
     chatPromptTmpl = makeMessageTemplates(
         systemPrompt, 
         kwargs["history"] if "history" in kwargs else None, 
@@ -47,10 +59,6 @@ def chatCompletion(
     DEBUG(logger, f"chat prompt[{chatPromptTmpl.get_template()}] answer[{answer}] ({t1-t0:.2f}s)")
     return response
 
-def preprocessPrompt(prompt :str) :
-    # to prevent 'format' exception in get_template_vars
-    return prompt.replace("{", "{{").replace("}", "}}")
-
 def chatStream(
         llm: EnhancedLLM,
         systemPrompt: str,
@@ -58,9 +66,9 @@ def chatStream(
         promptArgs: Dict[str, Any],
         **kwargs
 ) -> Response:
-    prompt = preprocessPrompt(prompt)
+    prompt = escape(prompt)
     chatPromptTmpl = makeMessageTemplates(
-        systemPrompt, 
+        systemPrompt if systemPrompt else None, 
         kwargs["history"] if "history" in kwargs else None, 
         prompt)
     response = Response(respGen=None, source_nodes=None, metadata={})

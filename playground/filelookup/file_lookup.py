@@ -1,7 +1,7 @@
 import logging
 from milkie.agent.agents.base_agent import BaseAgent
 from milkie.agent.llm_block.llm_block import LLMBlock
-from milkie.agent.retrieval_block import RetrievalBlock
+from milkie.agent.func_block.retrieval_block import RetrievalBlock
 from milkie.context import Context
 from milkie.response import Response
 

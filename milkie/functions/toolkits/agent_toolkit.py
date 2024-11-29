@@ -9,7 +9,10 @@ class AgentToolkit(Toolkit):
 
     def execute(self, query :str, args :dict = {}, **kwargs):
         kwargs["top"] = False
-        return str(self.agent.execute(query, args, **kwargs))
+        return str(self.agent.execute(
+            query=query, 
+            args=args, 
+            **kwargs))
 
     def _createAgentFunction(self):
         agentSchema = {
