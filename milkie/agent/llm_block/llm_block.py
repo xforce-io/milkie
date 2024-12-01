@@ -261,7 +261,7 @@ class StepLLMInstrAnalysis(StepLLMBlock):
         """从生成器中读取响应"""
         currentContent = []
         currentSentence = []
-        toolUsed = None
+        expertResp = None
 
         def processDeltaContent(deltaContent: str) -> str:
             """处理增量内容"""
@@ -299,8 +299,8 @@ class StepLLMInstrAnalysis(StepLLMBlock):
             currentContent.append(sentence)
             
             if respToolbox and sentence.startswith("@"):
-                toolUsed = respToolbox.queryExpert(sentence, context=context)
-                return toolUsed
+                expertsResp = respToolbox.queryExpert(sentence, context=context)
+                return expertsResp
             return ""
 
         try:
@@ -323,8 +323,6 @@ class StepLLMInstrAnalysis(StepLLMBlock):
 
                 if content:
                     expertsResp = processDeltaContent(content)
-                    if expertsResp:
-                        toolUsed = expertsResp
 
             stdout("", info=True, flush=True, **kwargs)
 
@@ -333,13 +331,13 @@ class StepLLMInstrAnalysis(StepLLMBlock):
                 lastSentence = "".join(currentSentence)
                 currentContent.append(lastSentence)
                 if respToolbox and lastSentence.startswith("@"):
-                    toolUsed = respToolbox.queryExpert(lastSentence, context=context)
+                    expertsResp = respToolbox.queryExpert(lastSentence, context=context)
 
         except Exception as e:
             logger.error(f"Error in readFromGen: {e}", exc_info=True)
             raise
 
-        return toolUsed, "".join(currentContent)
+        return expertsResp, "".join(currentContent)
 
 class StepLLMSynthsisInstructionRecord(StepLLMBlock):
     def __init__(self, promptMaker, llmBlock, instructionRecord: InstructionRecord) -> None:
@@ -389,6 +387,7 @@ class Instruction:
             prev = None) -> None:
         self.llmBlock = llmBlock
         self.syntaxParser = SyntaxParser(
+            label=label,
             settings=llmBlock.context.globalContext.settings,
             instruction=curInstruct, 
             repoFuncs=llmBlock.repoFuncs, 
@@ -480,6 +479,7 @@ class Instruction:
             MaxRetry = 2
             for i in range(MaxRetry):
                 stdout(f"execute call {self.syntaxParser.callObj} with query {query} ==> ", args=args, **kwargs)
+                    
                 resp = self.llmBlock.context.getEnv().execute(
                     agentName=self.syntaxParser.callObj,
                     query=query,
@@ -490,7 +490,8 @@ class Instruction:
                     stepLLMExtractor=self.llmBlock.stepLLMExtractor,
                     output=resp.resp,
                     varDict=self.varDict,
-                    retry=True)
+                    retry=True,
+                    contextLen=self.syntaxParser.model.getContextWindow())
                 if not instrOutput.hasError():
                     stdout(f"==> {resp.resp}", args=args, **kwargs)
                     return self._createResult(
@@ -765,7 +766,6 @@ class TaskEngine:
             stdout(f"\n{label} -> ", **kwargs)
 
             instructResult = self._step(instruction, args=taskArgs, **kwargs)
-            self.llmBlock.setResp(label, instructResult.response.resp)
             if instructResult.isRet():
                 logger.info("end of the task")
                 break
@@ -781,7 +781,8 @@ class TaskEngine:
                 stepLLMExtractor=self.llmBlock.stepLLMExtractor,
                 output=instructResult.response.resp,
                 varDict=instruction.varDict,
-                retry=False)
+                retry=False,
+                contextLen=instruction.syntaxParser.model.getContextWindow())
             if instruction.syntaxParser.getInstrOutput().hasError():
                 raise RuntimeError(f"fail process output[{instructResult.response}]")
 

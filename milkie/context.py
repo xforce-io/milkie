@@ -156,6 +156,9 @@ class Context:
     def setSystemPrompt(self, systemPrompt: str) -> None:
         self.history.setSystemPrompt(systemPrompt)
 
+    def getVarDict(self) -> VarDict:
+        return self.varDict
+
     def addHistoryUserPrompt(self, userPrompt: str) -> None:
         self.history.addHistoryUserPrompt(userPrompt)
         

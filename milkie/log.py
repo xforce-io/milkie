@@ -3,7 +3,7 @@ import logging, sys
 MaxLenLog = 4096
 
 logging.basicConfig(
-    level=logging.DEBUG, 
+    level=logging.INFO, 
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[logging.FileHandler('log/milkie.log')])
 

@@ -16,6 +16,7 @@ WhiteListImport = [
 
 PreImport = [
     "datetime",
+    "json",
 ]
 
 def addPreImport(code :str):

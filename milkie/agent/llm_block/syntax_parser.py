@@ -49,7 +49,7 @@ class ResultOutputProcess:
     def getErrMsgs(self) -> List[str]:
         return [self._results[storeVar].errmsg for storeVar in self._results if self._results[storeVar].hasError()]
 
-    def setVarDict(self, varDict: VarDict):
+    def setStoreVarDict(self, varDict: VarDict, contextLen: int=None):
         for storeVar, result in self._results.items():
             if result.hasError():
                 continue
@@ -65,6 +65,11 @@ class ResultOutputProcess:
                     logger.error(f"Error parsing JSON: {e}")
                     varDict.setGlobal(storeVar, jsonStr)
             else:
+                if type(result.output) == str and \
+                        contextLen is not None and \
+                        len(result.output) > contextLen:
+                    result.output = result.output[:contextLen]
+                    logger.warning(f"output[{result.output}] is too long, actualLen={len(result.output)}, contextLen={contextLen}")
                 varDict.setGlobal(storeVar, result.output)
     
     def __str__(self) -> str:
@@ -178,23 +183,24 @@ class InstrOutput:
     def getCurrentResult(self):
         return self._currentResult
 
-    def storeResultToVarDict(self, varDict: VarDict):
+    def storeResultToVarDict(self, varDict: VarDict, contextLen: int):
         if self._currentResult:
-            self._currentResult.setVarDict(varDict)
+            self._currentResult.setStoreVarDict(varDict, contextLen)
     
     def processOutputAndStore(
             self, 
             stepLLMExtractor: StepLLMExtractor, 
             output: Any,
             varDict: VarDict,
-            retry: bool):
+            retry: bool,
+            contextLen: int):
         if self._processed:
             return
 
-        self._processOutput(stepLLMExtractor, output)
+        self._processOutput(stepLLMExtractor, output, contextLen)
         if not self._currentResult.hasError():
             self._processed = True
-            self.storeResultToVarDict(varDict)
+            self.storeResultToVarDict(varDict, contextLen)
         else:
             if not retry:
                 raise RuntimeError(f"fail process output[{output}]")
@@ -211,7 +217,8 @@ class InstrOutput:
     def _processOutput(
             self, 
             stepLLMExtractor: StepLLMExtractor, 
-            output: Any):
+            output: Any,
+            contextLen: int=None):
         if self._currentResult is None:
             self._currentResult = ResultOutputProcess()
 
@@ -255,13 +262,14 @@ class SyntaxParser:
     def __init__(
             self, 
             settings: Settings,
+            label: str,
             instruction: str,
             repoFuncs: RepoFuncs,
             toolkits: GlobalToolkits) -> None:
         self.settings = settings
 
         self.flag = SyntaxParser.Flag.NONE
-        self.label = None
+        self.label = label
         self.model = None
         self.instOutput = InstrOutput()
         self.returnVal = False 
@@ -306,6 +314,9 @@ class SyntaxParser:
         self._handleRespToolkit()
 
     def _handleOutputAndStore(self):
+        if self.label:
+            self.instOutput.addOutputStruct(OutputStruct(None, self.label))
+        
         parts = re.split(r'(=>|->)', self.instruction)
         self.instruction = parts[0].strip()
         

@@ -1,5 +1,7 @@
 from __future__ import annotations
 from typing import List, Optional
+from milkie.context import Context
+from milkie.functions.toolkits.agent_toolkit import AgentToolkit
 from milkie.functions.toolkits.toolkit import Toolkit
 from milkie.runtime.global_toolkits import GlobalToolkits
 
@@ -27,3 +29,11 @@ class Toolbox(Toolkit):
         for toolkit in toolkits:
             toolbox.addToolkit(globalToolkits.getToolkit(toolkit))
         return toolbox
+
+    def queryExpert(self, query: str, context: Optional[Context] = None) -> str:
+        for toolkit in self.toolkits:
+            if isinstance(toolkit, AgentToolkit) and query[1:].startswith(toolkit.agent.name):
+                return toolkit.agent.execute(
+                    query=query, 
+                    args=context.getVarDict().getGlobalDict())
+        return ""

@@ -129,6 +129,9 @@ class EnhancedLLM(object):
     def getLLM(self) -> LLM:
         return self._llm
 
+    def getContextWindow(self) -> int:
+        return self.context_window
+
     def getMem(self) -> float:
         return -1
 

@@ -207,7 +207,6 @@ class InternalPythonInterpreter(BaseInterpreter):
         try:
             expression = ast.parse(code)
         except SyntaxError as e:
-            import pdb; pdb.set_trace()
             if self.raise_error:
                 raise InterpreterError(f"Syntax error in code: {e}")
             else:

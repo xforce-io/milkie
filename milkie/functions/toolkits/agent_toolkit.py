@@ -1,5 +1,6 @@
 from milkie.functions.openai_function import OpenAIFunction
 from milkie.functions.toolkits.toolkit import Toolkit
+from milkie.trace import stdout
 
 class AgentToolkit(Toolkit):
     def __init__(self, agent):
@@ -9,6 +10,7 @@ class AgentToolkit(Toolkit):
 
     def execute(self, query :str, args :dict = {}, **kwargs):
         kwargs["top"] = False
+        stdout(f"\n", info=True)
         return str(self.agent.execute(
             query=query, 
             args=args, 
