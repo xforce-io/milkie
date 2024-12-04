@@ -1,0 +1,57 @@
+#!/Users/xupeng/miniconda3/bin/python
+
+import os
+import sys
+import argparse
+
+projectRoot = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, projectRoot)
+
+from milkie.trace import stdout
+from milkie.config.constant import KeywordMute
+from milkie.runtime.engine import Engine
+
+def parseKeyValuePairs(args):
+    kvPairs = {}
+    for arg in args:
+        if '=' in arg:
+            key, value = arg.split('=', 1)
+            kvPairs[key] = value
+    return kvPairs
+
+def main():
+    parser = argparse.ArgumentParser(description="运行 talkto 程序")
+    parser.add_argument("--programFolder", help="程序文件夹路径", default=None)
+    parser.add_argument("--programFilepath", help="程序文件路径", default=None)
+    parser.add_argument("--configPath", help="配置文件路径", default=None)
+    parser.add_argument("--agent", help="指定运行的 agent", required=True)
+
+    args, unknown = parser.parse_known_args()
+
+    engine = Engine(
+        programFolder=args.programFolder, 
+        programFilepath=args.programFilepath,
+        configPath=args.configPath
+    )
+
+    extraConfigs = parseKeyValuePairs(unknown)
+
+    engine.env.context.varDict.updateFromDict(extraConfigs)
+
+    while True:
+        query= input("-> ")
+        while query.strip() == "":
+            query = input("")
+        
+        stdout("<- ", info=True, end="")
+        engine.run(
+            agent=args.agent, 
+            args={
+                "query": query.strip()
+            },
+            **{KeywordMute: True}
+        )
+        stdout("\n", info=True, end="")
+
+if __name__ == "__main__":
+    main()

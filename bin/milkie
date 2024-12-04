@@ -1,0 +1,97 @@
+#!/Users/xupeng/miniconda3/bin/python
+
+import os
+import sys
+import argparse
+from dataclasses import dataclass
+from typing import Any
+
+projectRoot = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, projectRoot)
+
+from milkie.runtime.engine import Engine
+
+@dataclass
+class ArgInfo:
+    help: str
+    default: Any = None
+    excludeFromArgs: bool = False
+
+def parseArgs():
+    # 定义所有参数及其属性
+    argDefinitions = {
+        "query": ArgInfo(help="查询字符串"),
+        "programFolder": ArgInfo(help="程序文件夹路径", excludeFromArgs=True),
+        "programFilepath": ArgInfo(help="程序文件路径", excludeFromArgs=True),
+        "agent": ArgInfo(help="指定运行的 agent", excludeFromArgs=True),
+        "chatroom": ArgInfo(help="指定运行的 chatroom", excludeFromArgs=True),
+        "configPath": ArgInfo(help="配置文件路径", excludeFromArgs=True),
+    }
+
+    parser = argparse.ArgumentParser(description="运行 Milkie 程序")
+    for argName, argInfo in argDefinitions.items():
+        parser.add_argument(f"--{argName}", help=argInfo.help, default=argInfo.default)
+    
+    args, unknownArgs = parser.parse_known_args()
+    
+    # 验证必要参数
+    if not args.programFolder and not args.programFilepath:
+        raise Exception("programFolder or programFilepath must be provided")
+
+    if args.chatroom and args.agent:
+        raise Exception("agent and chatroom cannot be both provided")
+    elif not args.chatroom and not args.agent:
+        raise Exception("agent or chatroom must be provided")
+
+    # 解析所有参数为字典
+    allArgs = {}
+    
+    # 添加已定义的参数（排除指定参数和None值）
+    for argName, argInfo in argDefinitions.items():
+        argValue = getattr(args, argName)
+        if not argInfo.excludeFromArgs and argValue is not None:
+            allArgs[argName] = argValue
+
+    # 添加未定义的参数
+    i = 0
+    while i < len(unknownArgs):
+        arg = unknownArgs[i]
+        if arg.startswith('--'):
+            argKey = arg[2:]  # 移除 '--' 前缀
+            if '=' in argKey:
+                # 处理 --key=value 形式
+                argKey, argValue = argKey.split('=', 1)
+                allArgs[argKey] = argValue
+            elif i + 1 < len(unknownArgs) and not unknownArgs[i + 1].startswith('--'):
+                # 处理 --key value 形式
+                argValue = unknownArgs[i + 1]
+                allArgs[argKey] = argValue
+                i += 1  # 跳过下一个参数，因为它是值
+            else:
+                # 处理 --flag 形式
+                allArgs[argKey] = True
+        i += 1
+
+    return args, allArgs
+
+def main():
+    args, runArgs = parseArgs()
+
+    engine = Engine(
+        programFolder=args.programFolder, 
+        programFilepath=args.programFilepath,
+        configPath=args.configPath
+    )
+
+    verbose = False
+    if "verbose" in runArgs:
+        verbose = runArgs.pop("verbose")
+    
+    engine.env.context.varDict.updateFromDict(runArgs)
+    if args.chatroom:
+        engine.run(chatroom=args.chatroom, args=runArgs, verbose=verbose)
+    else:
+        engine.run(agent=args.agent, args=runArgs, verbose=verbose)
+
+if __name__ == "__main__":
+    main()
