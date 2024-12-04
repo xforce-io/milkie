@@ -219,9 +219,12 @@ class StepLLMInstrAnalysis(StepLLMBlock):
     def formatResult(self, result :Response, **kwargs) -> InstAnalysisResult:
         allDict = self.llmBlock.getVarDict().getAllDict()
         needToParse = self.instruction.formattedInstruct.find("{") >= 0
-        toolUsed, result = StepLLMInstrAnalysis.readFromGen(
+
+        streamingProcessor = StreamingProcessor(
+            respToolbox=self.llmBlock.toolkit,
+            context=self.llmBlock.context)
+        toolUsed, result = streamingProcessor.readFromGen(
             response=result,
-            context=self.llmBlock.context,
             **kwargs)
         if toolUsed:
             funcExecRecords = self.llmBlock.toolkit.exec(
@@ -252,56 +255,21 @@ class StepLLMInstrAnalysis(StepLLMBlock):
             funcExecRecords=None,
             response=result)
 
-    @staticmethod
+class StreamingProcessor:
+    def __init__(self,
+                 respToolbox: Toolbox,
+                 context: Context):
+        self.respToolbox = respToolbox
+        self.context = context
+        self.currentContent = []
+        self.currentSentence = []
+        self.currentTools = []
+
     def readFromGen(
+            self,
             response: Response, 
-            respToolbox: Optional[Toolbox] = None,
-            context: Optional[Context] = None,
             **kwargs) -> Tuple[Optional[str], str]:
-        """从生成器中读取响应"""
-        currentContent = []
-        currentSentence = []
-        expertResp = None
-
-        def processDeltaContent(deltaContent: str) -> str:
-            """处理增量内容"""
-            nonlocal currentSentence
-            
-            # 查找第一个句子结束符
-            endIndex = -1
-            for i, char in enumerate(deltaContent):
-                if char in SymbolEndSentence:
-                    endIndex = i
-                    break
-            
-            # 如果找到句子结束符
-            expertsResp = ""
-            if endIndex >= 0:
-                currentPart = deltaContent[:endIndex]
-                currentSentence.append(currentPart)
-                stdout(currentPart, info=True, end="", flush=True, **kwargs)
-                
-                # 处理完整句子
-                expertsResp = processExpertQuery(currentContent, currentPart)
-                
-                # 开始新句子
-                currentSentence = [deltaContent[endIndex+1:]]
-                stdout(deltaContent[endIndex+1:], info=True, end="", flush=True, **kwargs)
-            else:
-                currentSentence.append(deltaContent)
-                stdout(deltaContent, info=True, end="", flush=True, **kwargs)
-            
-            return expertsResp
-
-        def processExpertQuery(currentContent: List[str], currentPart: str) -> str:
-            """处理专家查询"""
-            sentence = "".join(currentSentence)
-            currentContent.append(sentence)
-            
-            if respToolbox and sentence.startswith("@"):
-                expertsResp = respToolbox.queryExpert(sentence, context=context)
-                return expertsResp
-            return ""
+        expertsResp = None
 
         try:
             if not response.respGen:
@@ -309,35 +277,85 @@ class StepLLMInstrAnalysis(StepLLMBlock):
                 return None, ""
 
             for chunk in response.respGen:
-                # 处理缓存和直接流式请求的不同格式
                 content = None
                 if isinstance(chunk.raw, dict) and "content" in chunk.raw:
-                    # 来自缓存的格式
                     content = chunk.raw["content"]
-                elif hasattr(chunk.raw, "content"):
-                    # 直接流式请求的格式
+                elif hasattr(chunk.raw, "content") and chunk.raw.content is not None:
                     content = chunk.raw.content
                 elif hasattr(chunk.raw, "delta") and hasattr(chunk.raw.delta, "content"):
-                    # OpenAI API 的格式
                     content = chunk.raw.delta.content
+                elif hasattr(chunk.raw, "tool_calls") and len(chunk.raw.tool_calls) > 0:
+                    toolCalls = chunk.raw.tool_calls
+                    if len(self.currentTools) == 0:
+                        self.currentTools = [{
+                            "name": "",
+                            "args": ""
+                        }] * len(toolCalls)
+                    
+                    for i, toolCall in enumerate(toolCalls):
+                        if toolCall.function.name:
+                            self.currentTools[i]["name"] = toolCall.function.name
+                        if toolCall.function.arguments:
+                            self.currentTools[i]["args"] += toolCall.function.arguments
 
                 if content:
-                    expertsResp = processDeltaContent(content)
+                    expertsResp = self.processDeltaContent(
+                        deltaContent=content,
+                        **kwargs)
 
             stdout("", info=True, flush=True, **kwargs)
 
-            # 处理最后一个句子
-            if currentSentence:
-                lastSentence = "".join(currentSentence)
-                currentContent.append(lastSentence)
-                if respToolbox and lastSentence.startswith("@"):
-                    expertsResp = respToolbox.queryExpert(lastSentence, context=context)
+            if self.currentSentence:
+                lastSentence = "".join(self.currentSentence)
+                self.currentContent.append(lastSentence)
+                if self.respToolbox and lastSentence.startswith("@"):
+                    expertsResp = self.respToolbox.queryExpert(lastSentence, context=self.context)
+                    self.currentContent.append(expertsResp)
 
         except Exception as e:
             logger.error(f"Error in readFromGen: {e}", exc_info=True)
             raise
 
-        return expertsResp, "".join(currentContent)
+        if len(self.currentTools) > 0:
+            return self.currentTools[0]["name"], self.currentTools[0]["args"]
+        else:
+            return None, "".join(self.currentContent)
+
+    def processDeltaContent(
+            self,
+            deltaContent: str,
+            **kwargs) -> str:
+        endIndex = -1
+        for i, char in enumerate(deltaContent):
+            if char in SymbolEndSentence:
+                endIndex = i
+                break
+        
+        expertsResp = ""
+        if endIndex >= 0:
+            currentPart = deltaContent[:endIndex+1]
+            self.currentSentence.append(currentPart)
+            stdout(currentPart, info=True, end="", flush=True, **kwargs)
+            
+            expertsResp = self.processExpertQuery()
+            self.currentContent.append(expertsResp)
+            
+            self.currentSentence = [deltaContent[endIndex+1:]]
+            stdout(deltaContent[endIndex+1:], info=True, end="", flush=True, **kwargs)
+        else:
+            self.currentSentence.append(deltaContent)
+            stdout(deltaContent, info=True, end="", flush=True, **kwargs)
+        
+        return expertsResp
+
+    def processExpertQuery(self) -> str:
+        sentence = "".join(self.currentSentence)
+        self.currentContent.append(sentence)
+        
+        if self.respToolbox and sentence.startswith("@"):
+            expertsResp = self.respToolbox.queryExpert(sentence, context=self.context)
+            return expertsResp
+        return ""
 
 class StepLLMSynthsisInstructionRecord(StepLLMBlock):
     def __init__(self, promptMaker, llmBlock, instructionRecord: InstructionRecord) -> None:
@@ -664,7 +682,7 @@ class Instruction:
                     context=self.llmBlock.context, 
                     query=None, 
                     args=allArgs,
-                    instruction=self)
+                    curInstruction=self)
                 if curInstruct.strip() == funcBlock.getFuncPattern().strip():
                     self.onlyFuncCall = True
                     self.formattedInstruct = resp
@@ -758,48 +776,48 @@ class TaskEngine:
         curIdx = 0
         instructResult :InstructResult = None  # 初始化 instructResult
         while curIdx < len(self.instructions):
-            label, instruction = self.instructions[curIdx]
-            if len(instruction.curInstruct.strip()) == 0 and \
-                    instruction.syntaxParser.flag == SyntaxParser.Flag.RET:
+            curLabel, curInstruction = self.instructions[curIdx]
+            if len(curInstruction.curInstruct.strip()) == 0 and \
+                    curInstruction.syntaxParser.flag == SyntaxParser.Flag.RET:
                 break
             
-            stdout(f"\n{label} -> ", **kwargs)
+            stdout(f"\n{curLabel} -> ", **kwargs)
 
-            instructResult = self._step(instruction, args=taskArgs, **kwargs)
+            instructResult = self._step(instruction=curInstruction, args=taskArgs, **kwargs)
             if instructResult.isRet():
                 logger.info("end of the task")
                 break
 
             #set variables
-            if instruction.syntaxParser.flag == SyntaxParser.Flag.THOUGHT:
-                self.llmBlock.setVarDictGlobal(KeyVarDictThtTask, instruction.formattedInstruct[:MaxLenThtTask])
+            if curInstruction.syntaxParser.flag == SyntaxParser.Flag.THOUGHT:
+                self.llmBlock.setVarDictGlobal(KeyVarDictThtTask, curInstruction.formattedInstruct[:MaxLenThtTask])
                 self.llmBlock.setVarDictGlobal(KeyVarDictThought, instructResult.response.resp)
             
             #process output
-            instruction.syntaxParser.reset()
-            instruction.syntaxParser.getInstrOutput().processOutputAndStore(
+            curInstruction.syntaxParser.reset()
+            curInstruction.syntaxParser.getInstrOutput().processOutputAndStore(
                 stepLLMExtractor=self.llmBlock.stepLLMExtractor,
                 output=instructResult.response.resp,
-                varDict=instruction.varDict,
+                varDict=curInstruction.varDict,
                 retry=False,
-                contextLen=instruction.syntaxParser.model.getContextWindow())
-            if instruction.syntaxParser.getInstrOutput().hasError():
+                contextLen=curInstruction.syntaxParser.model.getContextWindow())
+            if curInstruction.syntaxParser.getInstrOutput().hasError():
                 raise RuntimeError(f"fail process output[{instructResult.response}]")
 
             #append instruction record
             self.instructionRecords.append(
                 InstructionRecord(
-                    instruction=instruction, 
+                    instruction=curInstruction, 
                     result=instructResult))
 
-            if instruction.syntaxParser.flag == SyntaxParser.Flag.RET:
+            if curInstruction.syntaxParser.flag == SyntaxParser.Flag.RET:
                 break
 
             # adjust instructions and curIdx
-            if instruction.syntaxParser.flag == SyntaxParser.Flag.DECOMPOSE:
+            if curInstruction.syntaxParser.flag == SyntaxParser.Flag.DECOMPOSE:
                 newInstructions = self.llmBlock._decomposeTask(instructResult.response.resp)
-                for i, (label, instruction) in enumerate(newInstructions):
-                    self.instructions.insert(curIdx + i + 1, (label, instruction))  
+                for i, (curLabel, curInstruction) in enumerate(newInstructions):
+                    self.instructions.insert(curIdx + i + 1, (curLabel, curInstruction))  
                 curIdx += 1
                 continue
 
@@ -808,9 +826,9 @@ class TaskEngine:
                 curIdx += 1
             elif instructResult.goto:
                 curIdx = self.getInstrLabels().index(instructResult.goto)
-            elif instruction.syntaxParser.flag == SyntaxParser.Flag.GOTO:
-                curIdx = self.getInstrLabels().index(instruction.syntaxParser.label)
-            elif instruction.syntaxParser.flag == SyntaxParser.Flag.IF:
+            elif curInstruction.syntaxParser.flag == SyntaxParser.Flag.GOTO:
+                curIdx = self.getInstrLabels().index(curInstruction.syntaxParser.label)
+            elif curInstruction.syntaxParser.flag == SyntaxParser.Flag.IF:
                 curIdx = self.getInstrLabels().index(instructResult.response.resp)
             else:
                 curIdx += 1

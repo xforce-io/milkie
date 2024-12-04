@@ -26,14 +26,14 @@ class SetReasoningSelfConsistency(FuncBlock):
         self._restoreParams(args, self.params)
         amateur = args.get("amateur")
         if not amateur:
-            amateur = kwargs["instruction"].llm
+            amateur = kwargs["curInstruction"].llm
         else:
             amateur = self.context.globalContext.settings.getLLM(amateur)
 
         if not amateur:
             raise ValueError(f"LLM {amateur} not found")
         
-        kwargs["instruction"].reasoning = ReasoningSelfConsistency(
+        kwargs["curInstruction"].reasoning = ReasoningSelfConsistency(
             self.context.globalContext,
             amateur)
         return Response(respStr="set reasoning self consistency")

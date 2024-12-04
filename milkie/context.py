@@ -29,14 +29,16 @@ class VarDict:
         return self.localDict
     
     def setGlobal(self, key: str, value: Any) -> None:
-        """设置全局变量"""
+        assert key is not None
+            
         if value is None:
             self.globalDict.pop(key, None)
         else:
             self.globalDict[key] = value
 
     def setLocal(self, key: str, value: Any) -> None:
-        """设置局部变量"""
+        assert key is not None
+            
         if value is None:
             self.localDict.pop(key, None)
         else:

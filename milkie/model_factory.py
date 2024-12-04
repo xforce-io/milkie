@@ -114,12 +114,12 @@ class ModelFactory:
                     is_chat_model=True,
                 )
 
-        logging.info(f"Building HuggingFaceLLM with model[{config.model}] framework[{config.framework}] model_args[{repr(config.modelArgs)}] memory[{self.localLlm.getMem()}GB]")
+        logging.info(f"Building LLM with model[{config.model}] framework[{config.framework}] model_args[{repr(config.modelArgs)}] memory[{self.localLlm.getMem()}GB]")
         return self.localLlm
     
     def _getSignatureModel(self, config :SingleLLMConfig):
         if config.framework == FRAMEWORK.NONE:
-            return config.model
+            return config.name
 
         if config.modelArgs is None:
             return "%s-%s" % (config.model, config.framework)

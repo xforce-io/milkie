@@ -25,5 +25,5 @@ class SetModel(FuncBlock):
         if llm is None:
             raise RuntimeError(f"model[{name}] not found")
         
-        kwargs["instruction"].llm = llm
+        kwargs["curInstruction"].llm = llm
         return Response(respStr="set model to " + name)

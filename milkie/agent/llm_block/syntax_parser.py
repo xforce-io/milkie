@@ -2,7 +2,7 @@ from enum import Enum
 import json
 import logging
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from milkie.agent.func_block.func_block import RepoFuncs
 from milkie.agent.llm_block.step_llm_extractor import StepLLMExtractor
 from milkie.config.constant import *
@@ -34,10 +34,16 @@ class ResultOutputProcess:
     def __init__(self):
         self._results: Dict[str, ResultOutputProcessSingle] = {}
         
-    def addSuccess(self, storeVar: str, output: Any):
+    def addSuccess(self, storeVar: Optional[str], output: Any):
+        if storeVar is None:
+            return 
+        
         self._results[storeVar] = ResultOutputProcessSingle(storeVar, output, None)
 
-    def addError(self, storeVar: str, errmsg: str):
+    def addError(self, storeVar: Optional[str], errmsg: str):
+        if storeVar is None:
+            return 
+        
         self._results[storeVar] = ResultOutputProcessSingle(storeVar, None, errmsg)
 
     def isSuccess(self, storeVar: str):
@@ -197,7 +203,7 @@ class InstrOutput:
         if self._processed:
             return
 
-        self._processOutput(stepLLMExtractor, output, contextLen)
+        self._processOutput(stepLLMExtractor, output)
         if not self._currentResult.hasError():
             self._processed = True
             self.storeResultToVarDict(varDict, contextLen)
@@ -217,8 +223,7 @@ class InstrOutput:
     def _processOutput(
             self, 
             stepLLMExtractor: StepLLMExtractor, 
-            output: Any,
-            contextLen: int=None):
+            output: Any):
         if self._currentResult is None:
             self._currentResult = ResultOutputProcess()
 
@@ -315,7 +320,7 @@ class SyntaxParser:
 
     def _handleOutputAndStore(self):
         if self.label:
-            self.instOutput.addOutputStruct(OutputStruct(None, self.label))
+            self.instOutput.addOutputStruct(OutputStruct(outputSyntax=None, storeVar=self.label))
         
         parts = re.split(r'(=>|->)', self.instruction)
         self.instruction = parts[0].strip()
@@ -333,13 +338,13 @@ class SyntaxParser:
                 if lastSeparator == "->" and outputSyntax is None:
                     raise Exception("Invalid syntax: consecutive store variables without output syntax")
                 storeVar = content
-                self.instOutput.addOutputStruct(OutputStruct(outputSyntax, storeVar))
+                self.instOutput.addOutputStruct(OutputStruct(outputSyntax=outputSyntax, storeVar=storeVar))
                 outputSyntax = None
                 lastSeparator = separator
         
         # Handle the case where there's an outputSyntax without a following storeVar
         if outputSyntax:
-            self.instOutput.addOutputStruct(OutputStruct(outputSyntax, None))
+            self.instOutput.addOutputStruct(OutputStruct(outputSyntax=outputSyntax, storeVar=None))
 
         # Check for invalid syntax
         if '->' in self.instruction:
