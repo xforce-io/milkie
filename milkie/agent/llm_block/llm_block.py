@@ -278,9 +278,7 @@ class StreamingProcessor:
 
             for chunk in response.respGen:
                 content = None
-                if isinstance(chunk.raw, dict) and "content" in chunk.raw:
-                    content = chunk.raw["content"]
-                elif hasattr(chunk.raw, "content") and chunk.raw.content is not None:
+                if hasattr(chunk.raw, "content") and chunk.raw.content is not None:
                     content = chunk.raw.content
                 elif hasattr(chunk.raw, "delta") and hasattr(chunk.raw.delta, "content"):
                     content = chunk.raw.delta.content

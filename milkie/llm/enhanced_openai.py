@@ -2,18 +2,22 @@ import logging
 import re
 from queue import Queue
 from typing import Any, Sequence, Generator
+from llama_index_client import ChatMessage
 from openai import OpenAI
 from openai.types.chat import ChatCompletion
+from openai.types.chat.chat_completion_chunk import ChoiceDelta, ChoiceDeltaToolCall, ChoiceDeltaToolCallFunction
 from openai.types.chat.chat_completion_user_message_param import ChatCompletionUserMessageParam
 from openai.types.chat.chat_completion_system_message_param import ChatCompletionSystemMessageParam
-from llama_index_client import ChatMessage
-from llama_index.core.base.llms.types import ChatResponse, ChatResponseGen, CompletionResponse, CompletionResponseGen
+from openai.types.chat.chat_completion_message_tool_call import ChatCompletionMessageToolCall
+from openai.types.chat.chat_completion_message_tool_call import Function
+from llama_index.core.base.llms.types import ChatResponseGen, CompletionResponse, CompletionResponseGen, ChatResponse
 from milkie.cache.cache_kv import CacheKVMgr
 from milkie.llm.enhanced_llm import EnhancedLLM, LLMApi, QueueRequest, QueueResponse
 from llama_index.core.base.llms.generic_utils import (
     completion_response_to_chat_response,
     stream_completion_response_to_chat_response,
 )
+
 import uuid
 import time
 import json
@@ -88,8 +92,22 @@ class EnhancedOpenAI(EnhancedLLM):
             theArgs["tools"] = kwargs["tools"]
         return theArgs
 
-    def _createCacheResponse(self, content: str) -> dict:
+    def _createCacheResponse(self, content: str, toolCalls: list) -> dict:
         """创建用于缓存的响应格式"""
+        # 将 toolCalls 转换为可序列化的字典格式
+        serializableToolCalls = []
+        if toolCalls:
+            for toolCall in toolCalls:
+                if toolCall:
+                    serializableToolCalls.append({
+                        "id": toolCall.id,
+                        "type": toolCall.type,
+                        "function": {
+                            "name": toolCall.function.name,
+                            "arguments": toolCall.function.arguments
+                        }
+                    })
+
         return {
             "id": "cached_" + str(uuid.uuid4()),
             "object": "chat.completion",
@@ -99,7 +117,8 @@ class EnhancedOpenAI(EnhancedLLM):
                 "index": 0,
                 "message": {
                     "role": "assistant",
-                    "content": content
+                    "content": content,
+                    "tool_calls": serializableToolCalls
                 },
                 "finish_reason": "stop"
             }],
@@ -110,9 +129,14 @@ class EnhancedOpenAI(EnhancedLLM):
             }
         }
 
-    def _setCacheValue(self, messagesJson: list, content: str, numTokens: int) -> None:
+    def _setCacheValue(
+            self, 
+            messagesJson: list, 
+            content: str, 
+            toolCalls: list | None,
+            numTokens: int) -> None:
         """设置缓存值"""
-        cacheResponse = self._createCacheResponse(content)
+        cacheResponse = self._createCacheResponse(content, toolCalls)
         self._cacheMgr.setValue(
             modelName=self.model_name,
             key=messagesJson,
@@ -136,7 +160,11 @@ class EnhancedOpenAI(EnhancedLLM):
                 response = self._llm.getClient().chat.completions.create(**theArgs)
                 chatCompletion = response
                 numTokens = response.usage.completion_tokens
-                self._setCacheValue(messagesJson, chatCompletion.choices[0].message.content, numTokens)
+                self._setCacheValue(
+                    messagesJson=messagesJson, 
+                    content=chatCompletion.choices[0].message.content, 
+                    toolCalls=chatCompletion.choices[0].message.tool_calls,
+                    numTokens=numTokens)
             except Exception as e:
                 return self._handleApiError(e)
 
@@ -159,35 +187,77 @@ class EnhancedOpenAI(EnhancedLLM):
         if cached:
             logger.debug("cache hit in stream!")
             chatCompletion = ChatCompletion.model_validate_json(cached["chatCompletion"])
-            content = chatCompletion.choices[0].message.content
-            yield from self._simulateStream(content)
+            yield from self._simulateStream(
+                content=chatCompletion.choices[0].message.content, 
+                toolCalls=chatCompletion.choices[0].message.tool_calls)
             return
         
         try:
             theArgs = self._createApiArgs(messagesJson, stream=True, **kwargs)
             stream = self._llm.getClient().chat.completions.create(**theArgs)
-            full_content = []
+            fullContent = []
+            funcName = None
+            funcArgs = []
             
             for chunk in stream:
                 delta = chunk.choices[0].delta
                 if delta.content is not None:
-                    full_content.append(delta.content)
+                    fullContent.append(delta.content)
                     yield CompletionResponse(text=delta.content, raw=delta)
                 elif delta.tool_calls:
+                    if delta.tool_calls[0].function.name is not None:
+                        funcName = delta.tool_calls[0].function.name
+                    if delta.tool_calls[0].function.arguments is not None:
+                        funcArgs.append(delta.tool_calls[0].function.arguments)
                     yield CompletionResponse(text="", raw=delta)
 
-            if full_content:
-                content = "".join(full_content)
-                self._setCacheValue(messagesJson, content, len(content.split()))
+            content = "".join(fullContent)
+            arguments = "".join(funcArgs) if funcArgs else ""
+            self._setCacheValue(
+                messagesJson=messagesJson, 
+                content=content, 
+                toolCalls=[
+                    ChatCompletionMessageToolCall(
+                        id=str(uuid.uuid4()),
+                        type="function",
+                        function=Function(
+                            name=funcName, 
+                            arguments=arguments
+                        )
+                    )
+                ] if funcName is not None else None,
+                numTokens=len(content.split()))
 
         except Exception as e:
             self._handleApiError(e, isStream=True)
 
-    def _simulateStream(self, content: str, chunk_size: int = 1024) -> Generator[CompletionResponse, None, None]:
+    def _simulateStream(
+            self, 
+            content: str, 
+            toolCalls: list | None, 
+            chunk_size: int = 1024) -> Generator[CompletionResponse, None, None]:
         """模拟流式输出"""
-        for i in range(0, len(content), chunk_size):
-            chunk = content[i:i+chunk_size]
-            yield CompletionResponse(text=chunk, raw={"content": chunk})
+        if toolCalls is None or len(toolCalls) == 0:
+            for i in range(0, len(content), chunk_size):
+                chunk = content[i:i+chunk_size]
+                yield CompletionResponse(text=chunk, raw=ChoiceDelta(
+                    content=chunk
+                ))
+        else:
+            yield CompletionResponse(text="", raw=ChoiceDelta(
+                content=None,
+                tool_calls=[
+                    ChoiceDeltaToolCall(
+                        index=0,
+                        id=str(uuid.uuid4()),
+                        type="function", 
+                        function=ChoiceDeltaToolCallFunction( 
+                            name=toolCalls[0].function.name,   
+                            arguments=toolCalls[0].function.arguments
+                        )
+                    )
+                ]
+            ))
 
     #deprecated
     def _inference(
