@@ -564,20 +564,6 @@ class ToolsConfig(BaseConfig):
         email_config = EmailConfig.fromArgs(config.get("email", {}))
         return cls(email_config=email_config)
 
-class NLTKConfig(BaseConfig):
-    def __init__(self, dataDir: str, download: bool = False):
-        self.dataDir = dataDir
-        self.download = download
-
-    @classmethod
-    def fromArgs(cls, config: dict):
-        if not config:
-            return None
-        return cls(
-            dataDir=config.get("data_dir"),
-            download=config.get("download", False)
-        )
-
 class GlobalConfig(BaseConfig):
     instanceCnt = 0
     
@@ -600,7 +586,6 @@ class GlobalConfig(BaseConfig):
         self.indexConfig :IndexConfig = IndexConfig.fromArgs(config["index"])
         self.retrievalConfig :RetrievalConfig = RetrievalConfig.fromArgs(config["retrieval"]) if "retrieval" in config.keys() else None
         self.toolsConfig :ToolsConfig = ToolsConfig.fromArgs(config.get("tools", {}))
-        self.nltkConfig = NLTKConfig.fromArgs(config.get("nltk"))
 
         for agentConfig in self.agentsConfig.agentConfigs:
             if agentConfig.type == AgentType.QA:

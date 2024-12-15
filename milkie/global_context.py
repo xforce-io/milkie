@@ -56,18 +56,6 @@ class GlobalContext():
             self, 
             globalConfig :GlobalConfig, 
             modelFactory :ModelFactory):
-        # 设置 NLTK 数据目录
-        import nltk
-        import os
-        
-        # 从配置中获取 NLTK 数据目录
-        nltk_data_dir = globalConfig.nltkConfig.dataDir
-        if nltk_data_dir:
-            # 展开环境变量
-            nltk_data_dir = os.path.expandvars(nltk_data_dir)
-            os.makedirs(nltk_data_dir, exist_ok=True)
-            nltk.data.path.append(nltk_data_dir)
-        
         self.globalConfig = globalConfig
         self.modelFactory = modelFactory
         self.settings = Settings(globalConfig, modelFactory)
