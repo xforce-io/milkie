@@ -23,6 +23,25 @@ class Response:
     source_nodes: List[NodeWithScore] = field(default_factory=list)
     metadata: Optional[Dict[str, Any]] = None   
 
+    @staticmethod
+    def buildFrom(resp: Any) -> "Response":
+        if isinstance(resp, str):
+            return Response(respStr=resp)
+        elif isinstance(resp, int):
+            return Response(respInt=resp)
+        elif isinstance(resp, float):
+            return Response(respFloat=resp)
+        elif isinstance(resp, bool):
+            return Response(respBool=resp)
+        elif isinstance(resp, dict):
+            return Response(respDict=resp)
+        elif isinstance(resp, list):
+            return Response(respList=resp)
+        elif isinstance(resp, Generator):
+            return Response(respGen=resp)
+        else:
+            raise ValueError(f"Unsupported response type: {type(resp)}")
+
     def getChoice0Message(self) -> ChatCompletionMessage:
         return self.metadata["chatCompletion"].choices[0].message
     

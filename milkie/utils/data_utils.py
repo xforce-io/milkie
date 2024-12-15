@@ -88,7 +88,7 @@ def restoreVariablesInDict(data :dict, allDict :dict) -> dict:
         if isinstance(argValue, str):
             newDict[key] = restoreVariablesInStr(argValue, allDict)
     return newDict
- 
+
 def restoreVariablesInStr(data :str, allDict :dict):
     def recursive_lookup(data, key):
         keys = key.split('.')

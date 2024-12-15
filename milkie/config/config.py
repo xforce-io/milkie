@@ -2,7 +2,6 @@ from abc import ABC
 from dataclasses import dataclass
 import json
 from typing import List
-from transformers import BitsAndBytesConfig
 
 import torch
 
@@ -118,7 +117,7 @@ class LLMBasicConfig(BaseConfig):
             self, 
             systemPrompt :str,
             defaultModel :str, 
-            codeModel :str, 
+            codeModel :list[str], 
             ctxLen :int):
         self.systemPrompt = systemPrompt
         self.defaultModel = defaultModel
@@ -168,8 +167,10 @@ class LLMModelArgs(BaseConfig):
 
         quantizationConfig = None
         if self.quantizationType == QuantType.INT8:
+            from transformers import BitsAndBytesConfig
             quantizationConfig = BitsAndBytesConfig(load_in_8bit=True)
         elif self.quantizationType == QuantType.INT4:
+            from transformers import BitsAndBytesConfig
             quantizationConfig = BitsAndBytesConfig(load_in_4bit=True)
         
         if quantizationConfig:
@@ -608,9 +609,6 @@ class GlobalConfig(BaseConfig):
 
     def getDefaultLLMConfig(self) -> SingleLLMConfig:
         return self.getSingleLLMConfig(self.llmBasicConfig.defaultModel)
-
-    def getCodeLLMConfig(self) -> SingleLLMConfig:
-        return self.getSingleLLMConfig(self.llmBasicConfig.codeModel)
 
     def getEmbeddingConfig(self) -> EmbeddingConfig:
         return self.embeddingConfig

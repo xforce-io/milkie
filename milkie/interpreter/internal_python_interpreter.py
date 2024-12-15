@@ -121,6 +121,7 @@ class InternalPythonInterpreter(BaseInterpreter):
             'print': print,
             "open": open,
             "abs": abs,
+            "type": type,
             # 可以根据需要添加更多内置函数
         }
         self.state.update(builtins)
@@ -244,6 +245,8 @@ class InternalPythonInterpreter(BaseInterpreter):
             raise StopIteration  # 使用 StopIteration 来处理 break
         elif isinstance(expression, ast.Continue):
             return None  # continue 语句返回 None
+        elif isinstance(expression, ast.Pass):
+            return None  # 添加对 pass 语句的支持
         elif isinstance(expression, ast.Assign):
             # Assignment -> evaluate the assignment which should
             # update the state. We return the variable assigned as it may
@@ -410,24 +413,36 @@ class InternalPythonInterpreter(BaseInterpreter):
             # 普通索引访问
             index = self._execute_ast(subscript.slice)
             value = self._execute_ast(subscript.value)
+            
             if not isinstance(subscript.ctx, ast.Load):
                 raise InterpreterError(
                     f"{subscript.ctx.__class__.__name__} is not supported for "
                     "subscript."
                 )
+            
+            # 处理不同类型的容器
             if isinstance(value, (list, tuple)):
+                # 对于列表和元组，直接使用整数索引
                 return value[int(index)]
-            if index in value:
-                return value[index]
-            if isinstance(index, str) and isinstance(value, dict):
-                close_matches = difflib.get_close_matches(
-                    index,
-                    [key for key in list(value.keys()) if isinstance(key, str)],
-                )
-                if len(close_matches) > 0:
-                    return value[close_matches[0]]
+            elif isinstance(value, dict):
+                # 对于字典，先检查键是否存在
+                if index in value:
+                    return value[index]
+                # 如果键是字符串，尝试模糊匹配
+                if isinstance(index, str):
+                    close_matches = difflib.get_close_matches(
+                        index,
+                        [key for key in list(value.keys()) if isinstance(key, str)],
+                    )
+                    if close_matches:
+                        return value[close_matches[0]]
+            elif isinstance(value, str):
+                # 对于字符串，确保索引是整数
+                if isinstance(index, int):
+                    return value[index]
+                raise InterpreterError(f"String indices must be integers, not {type(index).__name__}")
 
-            raise InterpreterError(f"Could not index {value} with '{index}'.")
+            raise InterpreterError(f"Could not index {type(value).__name__} with '{index}'")
 
     def _execute_name(self, name: ast.Name):
         if isinstance(name.ctx, ast.Store):

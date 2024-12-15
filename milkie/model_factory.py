@@ -1,7 +1,5 @@
 import logging
 from llama_index.core.prompts.base import PromptTemplate
-from llama_index.embeddings.huggingface import HuggingFaceEmbedding
-
 from milkie.config.config import FRAMEWORK, EmbeddingConfig, SingleLLMConfig, LLMType
 
 logger = logging.getLogger(__name__)
@@ -35,6 +33,7 @@ class ModelFactory:
     def getEmbedding(self, config :EmbeddingConfig):
         logging.info(f"Building HuggingFaceEmbedding with model {config.model} from_cache[{config.model in self.embedModel}]")
         if config.model not in self.embedModel:
+            from llama_index.embeddings.huggingface import HuggingFaceEmbedding
             self.embedModel[config.model] = HuggingFaceEmbedding(
                 model_name=config.model,
                 device=config.device)

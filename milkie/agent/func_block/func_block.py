@@ -163,6 +163,8 @@ class FuncBlock(BaseBlock):
                 replaced[param] = restoreVariablesInStr(value, self.getVarDict().getGlobalDict())
             elif type(value) == dict:
                 replaced[param] = restoreVariablesInDict(value, self.getVarDict().getGlobalDict())
+            elif type(value) == list:
+                replaced[param] = value
             else:
                 raise ValueError(f"Unsupported type: {type(value)}")
 

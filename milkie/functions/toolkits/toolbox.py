@@ -33,7 +33,8 @@ class Toolbox(Toolkit):
     def queryExpert(self, query: str, context: Optional[Context] = None) -> str:
         for toolkit in self.toolkits:
             if isinstance(toolkit, AgentToolkit) and query[1:].startswith(toolkit.agent.name):
-                return toolkit.agent.execute(
+                responce = toolkit.agent.execute(
                     query=query, 
                     args=context.getVarDict().getGlobalDict())
+                return responce.respStr
         return ""

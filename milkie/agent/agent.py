@@ -147,7 +147,7 @@ class Agent(BaseBlock):
             prevBlock=prevBlock, 
             **kwargs)
         
-        result = Response()
+        result = None
         lastBlock = prevBlock
 
         args["system_prompt"] = self.systemPrompt

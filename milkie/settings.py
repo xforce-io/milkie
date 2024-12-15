@@ -1,4 +1,5 @@
 import logging
+import random
 
 from llama_index.legacy.llms import AzureOpenAI
 
@@ -15,7 +16,7 @@ class Settings(object):
         self.llmBasicConfig = config.getLLMBasicConfig()
         self.llms = self._buildLLMs(config.getLLMConfig())
         self.llmDefault = self.getLLM(self.llmBasicConfig.defaultModel)
-        self.llmCode = self.getLLM(self.llmBasicConfig.codeModel)
+        self.llmCodes = [self.getLLM(model) for model in self.llmBasicConfig.codeModel]
         if config.embeddingConfig:
             self._buildEmbedding(config.embeddingConfig)
         else:
@@ -27,8 +28,8 @@ class Settings(object):
     def getLLM(self, name :str):
         return self.llms[name]
     
-    def getLLMCode(self):
-        return self.llmCode
+    def getLLMCode(self, noCache :bool = True):
+        return random.choice(self.llmCodes) if noCache else self.llmCodes[0]
     
     def getLLMDefault(self):
         return self.llmDefault

@@ -123,7 +123,7 @@ class FlowBlock(BaseBlock):
             **kwargs) -> Response:
         super().execute(context, query, args, prevBlock, **kwargs)
         
-        result = Response()
+        result = None
         lastBlock = prevBlock
         for block in self.blocks:
             result = block.execute(

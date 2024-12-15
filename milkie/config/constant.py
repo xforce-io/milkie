@@ -31,6 +31,7 @@ KeywordFuncEnd = "END"
 
 KeywordMute = "__mute__"
 
+KeywordCurrent = "_CUR_"
 KeywordExpertWholeDialog = "_WHOLE_DIALOG_"
 KeywordEnd = "_END_"
 

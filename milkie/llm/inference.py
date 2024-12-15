@@ -17,7 +17,7 @@ def chat(
         promptArgs :dict, 
         stream :bool = False,
         **kwargs) -> Response:
-    chatArgs = {k : v for k, v in kwargs.items() if k == "tools"}
+    chatArgs = {k : v for k, v in kwargs.items() if k == "tools" or k == "no_cache"}
     if stream:
         return chatStream(
             llm=llm, 

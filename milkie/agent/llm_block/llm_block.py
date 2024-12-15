@@ -4,7 +4,7 @@ from enum import Enum
 import json
 import logging
 import re
-from typing import Any, List, Optional, Tuple
+from typing import Any, Callable, List, Optional, Tuple
 
 from milkie.agent.base_block import BaseBlock
 from milkie.agent.llm_block.step_llm_toolcall import StepLLMToolCall
@@ -221,7 +221,7 @@ class StepLLMInstrAnalysis(StepLLMBlock):
         needToParse = self.instruction.formattedInstruct.find("{") >= 0
 
         streamingProcessor = StreamingProcessor(
-            respToolbox=self.llmBlock.toolkit,
+            respToolbox=self.llmBlock.respToolbox,
             context=self.llmBlock.context)
         toolUsed, result = streamingProcessor.readFromGen(
             response=result,
@@ -439,95 +439,20 @@ class Instruction:
 
         if self.onlyFuncCall or self.isNaiveType:
             # in this case, the response is the result of the only function call, or a naive type
-            stdout(self.formattedInstruct, args=args, **kwargs)
-            return self._createResult(
-                self.formattedInstruct,
-                useTool=False,
-                goto=None,
-                analysis=self.curInstruct,
-                logType="naive")
+            return self._processNaiveType(args, **kwargs)
 
         useTool = (self.llmBlock.toolkit != None)
         logTypes = []
         if self.syntaxParser.flag == SyntaxParser.Flag.CODE:
-            result = self.llmBlock.toolkit.genCodeAndRun(self.formattedInstruct, self.varDict.getAllDict())
-            stdout(result, args=args, **kwargs)
-            return self._createResult(
-                result,
-                useTool=True,
-                goto=None,
-                analysis=self.curInstruct,
-                logType="code")
-
+            return self._processGenCode(logType="code", args=args, **kwargs)
         elif self.syntaxParser.flag == SyntaxParser.Flag.IF:
-            result = self.llmBlock.toolkit.genCodeAndRun(self.formattedInstruct, self.varDict.getAllDict())
-            stdout(result, args=args, **kwargs)
-            return self._createResult(
-                result,
-                useTool=True,
-                goto=result,
-                analysis=self.curInstruct,
-                logType="if")
-
+            return self._processGenCode(logType="if", args=args, **kwargs)
         elif self.syntaxParser.flag == SyntaxParser.Flag.PY:
-            def preprocessPyInstruct(instruct: str):
-                instruct = instruct.replace("$varDict", "self.varDict")
-                instruct = instruct.replace(KeyNext, f'"{KeyNext}"')
-                instruct = instruct.replace(KeyRet, f'"{KeyRet}"')
-                return instruct
-
-            result = self.llmBlock.toolkit.runCode(
-                preprocessPyInstruct(self.formattedInstruct),
-                self.varDict.getAllDict())
-            if result == None:
-                result = ""
-                
-            stdout(result, args=args, **kwargs)
-            return self._createResult(
-                result,
-                useTool=False,
-                goto=None,
-                analysis=self.curInstruct,
-                logType="py")
-
+            return self._processPyCode(args=args, **kwargs)
         elif self.syntaxParser.flag == SyntaxParser.Flag.CALL:
-            query = self.syntaxParser.callArg
-            MaxRetry = 2
-            for i in range(MaxRetry):
-                stdout(f"execute call {self.syntaxParser.callObj} with query {query} ==> ", args=args, **kwargs)
-                    
-                resp = self.llmBlock.context.getEnv().execute(
-                    agentName=self.syntaxParser.callObj,
-                    query=query,
-                    args=args)
-
-                instrOutput = self.syntaxParser.getInstrOutput()
-                instrOutput.processOutputAndStore(
-                    stepLLMExtractor=self.llmBlock.stepLLMExtractor,
-                    output=resp.resp,
-                    varDict=self.varDict,
-                    retry=True,
-                    contextLen=self.syntaxParser.model.getContextWindow())
-                if not instrOutput.hasError():
-                    stdout(f"==> {resp.resp}", args=args, **kwargs)
-                    return self._createResult(
-                        resp,
-                        useTool=False,
-                        goto=None,
-                        analysis=self.curInstruct,
-                        logType="call")
-                
-                query = "\n".join(instrOutput.getErrMsgs() + [query])
-            raise RuntimeError(f"fail execute instruction[{self.curInstruct}] error[{instrOutput.getErrMsgs()}]")
-
+            return self._processCall(args=args, **kwargs)
         elif self.syntaxParser.flag == SyntaxParser.Flag.RET and self.syntaxParser.returnVal:
-            stdout(self.formattedInstruct, args=args, **kwargs)
-            return self._createResult(
-                self.formattedInstruct,
-                useTool=False,
-                goto=None,
-                analysis=self.curInstruct,
-                logType="ret")
+            return self._processRet(args=args, **kwargs)
 
         if self.syntaxParser.flag == SyntaxParser.Flag.THOUGHT:
             self.promptMaker.promptForThought(self.llmBlock)
@@ -568,14 +493,14 @@ class Instruction:
         if instAnalysisResult.result == InstAnalysisResult.Result.ANSWER:
             logTypes.append("ans")
             return self._createResult(
-                instAnalysisResult.response, 
+                response=instAnalysisResult.response, 
                 useTool=False,
                 goto=None,
                 analysis=instAnalysisResult.response,
                 logType="/".join(logTypes))
 
         return self._createResult(
-            instAnalysisResult.funcExecRecords[0].result,
+            response=instAnalysisResult.funcExecRecords[0].result,
             useTool=True,
             goto=None,
             analysis=instAnalysisResult.response,
@@ -586,6 +511,104 @@ class Instruction:
     def __str__(self) -> str:
         return f"Instruction({self.label}): {self.formattedInstruct}"
         
+    def _processNaiveType(self, args: dict, **kwargs):
+        stdout(self.formattedInstruct, args=args, **kwargs)
+        return self._createResult(
+            response=self.formattedInstruct,
+            useTool=False,
+            goto=None,
+            analysis=self.curInstruct,
+            logType="naive")
+
+    def _processGenCode(self, logType: str, args: dict, **kwargs):
+
+        def genCodeAndRun(instruction: Instruction, theArgs: dict):
+            result = instruction.llmBlock.toolkit.genCodeAndRun(
+                instruction=instruction.formattedInstruct,
+                varDict=instruction.varDict.getAllDict(),
+                no_cache=theArgs["no_cache"],
+                **kwargs)
+            instruction.varDict.setLocal(KeywordCurrent, result)
+            return Response.buildFrom(result if result else "")
+
+        return self._processWithRetry(genCodeAndRun, args=args, logType=logType)
+
+    def _processPyCode(self, args: dict, **kwargs):
+
+        def preprocessPyInstruct(instruct: str):
+            instruct = instruct.replace("$varDict", "self.varDict")
+            instruct = instruct.replace(KeyNext, f'"{KeyNext}"')
+            instruct = instruct.replace(KeyRet, f'"{KeyRet}"')
+            return instruct
+
+        result = self.llmBlock.toolkit.runCode(
+            preprocessPyInstruct(self.formattedInstruct),
+            self.varDict.getAllDict())
+        if result == None:
+            result = ""
+
+        stdout(result, args=args, **kwargs)
+        return self._createResult(
+            result,
+            useTool=False,
+            goto=None,
+            analysis=self.curInstruct,
+            logType="py")
+    
+    def _processCall(self, args: dict, **kwargs):
+        def callFunc(instruction: Instruction, theArgs: dict):
+            return instruction.llmBlock.context.getEnv().execute(
+                agentName=instruction.syntaxParser.callObj,
+                query=theArgs["query"],
+                args=theArgs["args"])
+        return self._processWithRetry(lambdaFunc=callFunc, args=args, logType="call")
+
+    def _processRet(self, args: dict, **kwargs):
+        stdout(self.formattedInstruct, args=args, **kwargs)
+        return self._createResult(
+            response=self.formattedInstruct,
+            useTool=False,
+            goto=None,
+            analysis=self.curInstruct,
+            logType="ret")
+
+    def _processWithRetry(
+            self, 
+            lambdaFunc: Callable[[Instruction, dict], Any],
+            args: dict, 
+            logType: str,
+            **kwargs):
+        query = self.syntaxParser.callArg
+        MaxRetry = 3
+        for i in range(MaxRetry):
+            stdout(f"execute call {self.syntaxParser.callObj} with query {query} ==> ", args=args, **kwargs)
+                
+            resp = lambdaFunc(self, {
+                "query": query,
+                "args": args,
+                "no_cache": i != 0
+            })
+
+            instrOutput = self.syntaxParser.getInstrOutput()
+            instrOutput.processOutputAndStore(
+                output=resp.resp,
+                stepLLMExtractor=self.llmBlock.stepLLMExtractor,
+                varDict=self.varDict,
+                toolkit=self.llmBlock.toolkit,
+                retry=True,
+                contextLen=self.syntaxParser.model.getContextWindow())
+            if not instrOutput.hasError():
+                stdout(f"==> {resp.resp}", args=args, **kwargs)
+                return self._createResult(
+                    response=resp,
+                    useTool=False,
+                    goto=None,
+                    analysis=self.curInstruct,
+                    logType=logType)
+            
+            query = "\n".join(instrOutput.getErrMsgs() + [query] if query else [])
+        raise RuntimeError(f"fail execute instruction[{self.curInstruct}] error[{instrOutput.getErrMsgs()}]")
+
     def _createResult(
             self, 
             response: Any, 
@@ -781,6 +804,8 @@ class TaskEngine:
             
             stdout(f"\n{curLabel} -> ", **kwargs)
 
+            curInstruction.syntaxParser.reset()
+
             instructResult = self._step(instruction=curInstruction, args=taskArgs, **kwargs)
             if instructResult.isRet():
                 logger.info("end of the task")
@@ -792,11 +817,11 @@ class TaskEngine:
                 self.llmBlock.setVarDictGlobal(KeyVarDictThought, instructResult.response.resp)
             
             #process output
-            curInstruction.syntaxParser.reset()
             curInstruction.syntaxParser.getInstrOutput().processOutputAndStore(
-                stepLLMExtractor=self.llmBlock.stepLLMExtractor,
                 output=instructResult.response.resp,
+                stepLLMExtractor=self.llmBlock.stepLLMExtractor,
                 varDict=curInstruction.varDict,
+                toolkit=self.llmBlock.toolkit,
                 retry=False,
                 contextLen=curInstruction.syntaxParser.model.getContextWindow())
             if curInstruction.syntaxParser.getInstrOutput().hasError():
@@ -837,8 +862,7 @@ class TaskEngine:
         return [label for label, _ in self.instructions]
 
     def _step(self, instruction: Instruction, args: dict, **kwargs) -> InstructResult:
-        instructResult = instruction.execute(args, **kwargs)
-        return instructResult
+        return instruction.execute(args, **kwargs)
 
 class LLMBlock(BaseBlock):
 
@@ -913,7 +937,8 @@ class LLMBlock(BaseBlock):
 
         if self.getEnv():
             self.respToolbox = Toolbox.createToolbox(
-                globalToolkits=self.getEnv().globalToolkits)
+                globalToolkits=self.getEnv().globalToolkits,
+                toolkits=[agent.name for agent in self.getEnv().agents.values() if agent.name != "stdin"])
 
         _, result = self.taskEngine.execute(
             context=context,

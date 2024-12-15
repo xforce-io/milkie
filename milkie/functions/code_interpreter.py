@@ -19,20 +19,25 @@ class StepLLMCode(StepLLM):
             globalContext: GlobalContext, 
             instruction: str, 
             prevResult: str,
+            noCache: bool,
             errorContext: Optional[str] = None):
         super().__init__(
             globalContext=globalContext, 
             promptMaker=None,
-            llm=globalContext.settings.getLLMCode())
+            llm=globalContext.settings.getLLMCode(noCache=noCache))
         self.instruction = instruction
         self.prevResult = prevResult
         self.errorContext = errorContext
 
-    def makePrompt(self, useTool: bool = False, args: dict = {}, **kwargs) -> str:
+    def makePrompt(
+            self, 
+            useTool: bool = False, 
+            args: dict = {}, 
+            **kwargs) -> str:
         prompt = self.prevResult + f"""
         请根据指令生成Python代码，要求如下：
-        （1）请不要调用'return'
-        （2）如果要调用'print(X)'，请使用'return_value = X'替代
+        (1)如果要调用'print(X)'或'return X'，请使用'return_value = X'替代
+        (2)生成实际执行的代码，而不只是定义函数
         
         指令: {self.instruction}
         """
@@ -48,7 +53,7 @@ class StepLLMCode(StepLLM):
         """
         return prompt
 
-    def formatResult(self, result: Response) -> str:
+    def formatResult(self, result: Response, **kwargs) -> str:
         return result.respStr.strip()
 
 class CodeInterpreter:
@@ -58,16 +63,22 @@ class CodeInterpreter:
         self.maxAttempts = 2
         self.globalContext = globalContext
 
-    def execute(self, instruction: str, varDict: Optional[Dict[str, Any]] = None) -> Any:
+    def execute(
+            self, 
+            instruction: str, 
+            varDict: Optional[Dict[str, Any]] = None, 
+            **kwargs) -> Any:
         attempt = 0
         errorContext = ""
         while attempt < self.maxAttempts:
             try:
                 stepLLMCode = StepLLMCode(
-                    self.globalContext, 
-                    instruction, 
-                    errorContext)
-                code = stepLLMCode.completionAndFormat()
+                    globalContext=self.globalContext, 
+                    instruction=instruction, 
+                    prevResult="",
+                    errorContext=errorContext,
+                    noCache=kwargs.get("no_cache", False))
+                code = stepLLMCode.completionAndFormat(**kwargs)
                 code = extractFromBlock("python", code)
                 code = postRestoreVariablesInStr(code, varDict)
                 code = addPreImport(code)

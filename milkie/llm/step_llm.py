@@ -92,7 +92,7 @@ class StepLLM(ABC):
             args: dict = {}, 
             **kwargs) -> Response:
         return self.formatResult(
-            self.completion(llm, reasoning, args, **kwargs), 
+            self.completion(llm=llm, reasoning=reasoning, args=args, **kwargs), 
             **kwargs)
     
     def makeSystemPrompt(self, args: dict, **kwargs) -> str:

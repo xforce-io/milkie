@@ -150,12 +150,13 @@ class EnhancedOpenAI(EnhancedLLM):
         messagesJson = self._createMessagesJson(messages)
         cached = self._cacheMgr.getValue(modelName=self.model_name, key=messagesJson)
         
-        if cached:
+        if cached and ("no_cache" not in kwargs or kwargs["no_cache"] is False):
             logger.debug("cache hit!")
             chatCompletion = ChatCompletion.model_validate_json(cached["chatCompletion"])
             numTokens = cached["numTokens"]
         else:
             try:
+                self._addDisturbance(messagesJson, **kwargs)
                 theArgs = self._createApiArgs(messagesJson, stream=False, **kwargs)
                 response = self._llm.getClient().chat.completions.create(**theArgs)
                 chatCompletion = response
@@ -184,7 +185,7 @@ class EnhancedOpenAI(EnhancedLLM):
         messagesJson = self._createMessagesJson(messages)
         cached = self._cacheMgr.getValue(modelName=self.model_name, key=messagesJson)
         
-        if cached:
+        if cached and ("no_cache" not in kwargs or kwargs["no_cache"] is False):
             logger.debug("cache hit in stream!")
             chatCompletion = ChatCompletion.model_validate_json(cached["chatCompletion"])
             yield from self._simulateStream(
@@ -193,6 +194,7 @@ class EnhancedOpenAI(EnhancedLLM):
             return
         
         try:
+            self._addDisturbance(messagesJson, **kwargs)
             theArgs = self._createApiArgs(messagesJson, stream=True, **kwargs)
             stream = self._llm.getClient().chat.completions.create(**theArgs)
             fullContent = []
@@ -258,6 +260,12 @@ class EnhancedOpenAI(EnhancedLLM):
                     )
                 ]
             ))
+
+    def _addDisturbance(self, messagesJson: list, **kwargs) -> None:
+        if "no_cache" in kwargs:
+            import random
+            import string
+            messagesJson[0]["content"] = random.choice(string.ascii_letters) + messagesJson[0]["content"]
 
     #deprecated
     def _inference(

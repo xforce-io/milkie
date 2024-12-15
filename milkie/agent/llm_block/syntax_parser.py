@@ -7,6 +7,7 @@ from milkie.agent.func_block.func_block import RepoFuncs
 from milkie.agent.llm_block.step_llm_extractor import StepLLMExtractor
 from milkie.config.constant import *
 from milkie.context import VarDict
+from milkie.functions.toolkits.toolkit import Toolkit
 from milkie.runtime.global_toolkits import GlobalToolkits
 from milkie.settings import Settings
 from milkie.utils.data_utils import extractBlock, isBlock, unescape
@@ -17,6 +18,7 @@ class OutputSyntaxFormat(Enum):
     NORMAL = 1
     REGEX = 2
     EXTRACT = 3
+    CHECK = 4
 
 class ResultOutputProcessSingle:
     def __init__(self, storeVar: str, output: Any=None, errmsg: str=None):
@@ -44,6 +46,8 @@ class ResultOutputProcess:
         if storeVar is None:
             return 
         
+        if not errmsg:
+            errmsg = "unknown error"
         self._results[storeVar] = ResultOutputProcessSingle(storeVar, None, errmsg)
 
     def isSuccess(self, storeVar: str):
@@ -87,6 +91,7 @@ class OutputSyntax:
         self.format = self._determineFormat()
         self.regExpr = None
         self.extractPattern = None
+        self.checkPattern = None
         self.errorMessage = None
         self._parse()
     
@@ -98,6 +103,8 @@ class OutputSyntax:
             return OutputSyntaxFormat.REGEX
         elif self.originalSyntax.startswith("e'") or self.originalSyntax.startswith('e"'):
             return OutputSyntaxFormat.EXTRACT
+        elif self.originalSyntax.startswith("c```"):
+            return OutputSyntaxFormat.CHECK
         else:
             return OutputSyntaxFormat.NORMAL
 
@@ -105,23 +112,24 @@ class OutputSyntax:
         if self.format == OutputSyntaxFormat.NORMAL:
             return
 
-        # 移除开头的 'r' 或 'e'
         content = self.originalSyntax[1:]
-
-        # 查找最后一个未转义的引号
-        quote_char = content[0]
-        last_quote_index = -1
+        if self.format == OutputSyntaxFormat.CHECK:
+            quoteStr = content[:3]
+        else:
+            quoteStr = content[0]
+            
+        lastQuoteIndex = -1
         i = 1
         while i < len(content):
-            if content[i] == quote_char and content[i-1] != '\\':
-                last_quote_index = i
+            if content[i:i+len(quoteStr)] == quoteStr and content[i-1] != '\\':
+                lastQuoteIndex = i
             i += 1
 
-        if last_quote_index == -1:
+        if lastQuoteIndex == -1:
             raise ValueError("Invalid syntax: missing closing quote")
 
-        pattern = content[1:last_quote_index]
-        remaining = content[last_quote_index+1:].strip()
+        pattern = content[len(quoteStr):lastQuoteIndex]
+        remaining = content[lastQuoteIndex+len(quoteStr):].strip()
 
         if remaining.startswith('/'):
             self.errorMessage = remaining[1:].strip().strip('"\'')
@@ -130,8 +138,12 @@ class OutputSyntax:
 
         if self.format == OutputSyntaxFormat.REGEX:
             self.regExpr = re.compile(pattern)
-        else:  # EXTRACT
+        elif self.format == OutputSyntaxFormat.EXTRACT:
             self.extractPattern = pattern
+        elif self.format == OutputSyntaxFormat.CHECK:
+            self.checkPattern = pattern
+        else:
+            raise ValueError(f"Invalid format: {self.format}")
 
     def getOutputSyntax(self):
         return unescape(self.originalSyntax)
@@ -139,7 +151,9 @@ class OutputSyntax:
     def processOutput(
             self, 
             stepLLMExtractor: StepLLMExtractor, 
-            output: Any) -> Any:
+            output: Any,
+            varDict: VarDict,
+            toolkit: Toolkit) -> Any:
         if type(output) == str:
             if self.format == OutputSyntaxFormat.REGEX:
                 return self.regExpr.search(output).group(1)
@@ -149,6 +163,11 @@ class OutputSyntax:
                         "toExtract": self.extractPattern,
                         "text": output
                     })
+
+        if self.format == OutputSyntaxFormat.CHECK:
+            return toolkit.runCode(
+                code=self.checkPattern, 
+                varDict=varDict.getAllDict())
         return output
 
     def __str__(self) -> str:
@@ -162,8 +181,17 @@ class OutputStruct:
     def processOutput(
             self, 
             stepLLMExtractor: StepLLMExtractor, 
-            output: Any) -> Any:
-        return self.outputSyntax.processOutput(stepLLMExtractor, output)
+            output: Any,
+            varDict: VarDict,
+            toolkit: Toolkit) -> Any:
+        return self.outputSyntax.processOutput(
+            stepLLMExtractor=stepLLMExtractor, 
+            output=output, 
+            varDict=varDict,
+            toolkit=toolkit)
+
+    def getOutputSyntaxFormat(self):
+        return self.outputSyntax.format if self.outputSyntax else None
 
     def __str__(self) -> str:
         return f"OutputStruct(outputSyntax={self.outputSyntax}, storeVar={self.storeVar})"
@@ -195,15 +223,20 @@ class InstrOutput:
     
     def processOutputAndStore(
             self, 
-            stepLLMExtractor: StepLLMExtractor, 
             output: Any,
+            stepLLMExtractor: StepLLMExtractor, 
             varDict: VarDict,
+            toolkit: Toolkit,
             retry: bool,
             contextLen: int):
         if self._processed:
             return
 
-        self._processOutput(stepLLMExtractor, output)
+        self._processOutput(
+            output=output,
+            stepLLMExtractor=stepLLMExtractor, 
+            varDict=varDict,
+            toolkit=toolkit)
         if not self._currentResult.hasError():
             self._processed = True
             self.storeResultToVarDict(varDict, contextLen)
@@ -220,10 +253,15 @@ class InstrOutput:
     def getErrMsgs(self):
         return self._currentResult.getErrMsgs()
 
+    def len(self):
+        return len(self.outputStructs)
+
     def _processOutput(
             self, 
+            output: Any,
             stepLLMExtractor: StepLLMExtractor, 
-            output: Any):
+            varDict: VarDict,
+            toolkit: Toolkit):
         if self._currentResult is None:
             self._currentResult = ResultOutputProcess()
 
@@ -232,18 +270,26 @@ class InstrOutput:
                 continue
 
             if outputStruct.outputSyntax:
-                processedOutput = outputStruct.processOutput(stepLLMExtractor, output)
-                if processedOutput is None or processedOutput.strip() == ExprNoInfoToExtract:
+                processedOutput = outputStruct.processOutput(
+                    output=output, 
+                    stepLLMExtractor=stepLLMExtractor, 
+                    varDict=varDict,
+                    toolkit=toolkit)
+                if not processedOutput or \
+                        (type(processedOutput) == str and processedOutput.strip() == ExprNoInfoToExtract):
                     self._currentResult.addError(
-                        outputStruct.storeVar,
-                        outputStruct.outputSyntax.errorMessage)
+                        storeVar=outputStruct.storeVar,
+                        errmsg=outputStruct.outputSyntax.errorMessage)
                 else:
+                    if outputStruct.getOutputSyntaxFormat() != OutputSyntaxFormat.CHECK:
+                        output = processedOutput
+                        
                     self._currentResult.addSuccess(
-                        outputStruct.storeVar,
-                        processedOutput)
+                        storeVar=outputStruct.storeVar,
+                        output=output)
             else:
                 self._currentResult.addSuccess(
-                    outputStruct.storeVar,
+                    storeVar=outputStruct.storeVar,
                     output=output)
 
 from milkie.functions.toolkits.toolbox import Toolbox
@@ -319,9 +365,6 @@ class SyntaxParser:
         self._handleRespToolkit()
 
     def _handleOutputAndStore(self):
-        if self.label:
-            self.instOutput.addOutputStruct(OutputStruct(outputSyntax=None, storeVar=self.label))
-        
         parts = re.split(r'(=>|->)', self.instruction)
         self.instruction = parts[0].strip()
         
@@ -342,9 +385,7 @@ class SyntaxParser:
                 outputSyntax = None
                 lastSeparator = separator
         
-        # Handle the case where there's an outputSyntax without a following storeVar
-        if outputSyntax:
-            self.instOutput.addOutputStruct(OutputStruct(outputSyntax=outputSyntax, storeVar=None))
+        self.instOutput.addOutputStruct(OutputStruct(outputSyntax=outputSyntax, storeVar=self.label))
 
         # Check for invalid syntax
         if '->' in self.instruction:

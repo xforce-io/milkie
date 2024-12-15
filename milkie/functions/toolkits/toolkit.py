@@ -162,7 +162,7 @@ class Toolkit():
         logger.info(info)
         return FuncExecRecord((funcName, args), tool, result)
 
-    def genCodeAndRun(self, instruction: str, varDict: Optional[Dict[str, Any]] = None) -> str:
+    def genCodeAndRun(self, instruction: str, varDict: Optional[Dict[str, Any]] = None, **kwargs) -> str:
         r"""根据指令生成代码，并且用代码解释器执行代码。
 
         Args:
@@ -170,7 +170,7 @@ class Toolkit():
 
         Returns: 执行结果
         """
-        return self.codeInterpreter.execute(instruction, varDict=varDict)
+        return self.codeInterpreter.execute(instruction, varDict=varDict, **kwargs)
 
     def runCode(self, code: str, varDict: Optional[Dict[str, Any]] = None) -> Any:
         r"""直接执行代码解释器
