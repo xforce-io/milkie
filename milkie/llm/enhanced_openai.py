@@ -262,7 +262,7 @@ class EnhancedOpenAI(EnhancedLLM):
             ))
 
     def _addDisturbance(self, messagesJson: list, **kwargs) -> None:
-        if "no_cache" in kwargs:
+        if "no_cache" in kwargs and kwargs["no_cache"] is True:
             import random
             import string
             messagesJson[0]["content"] = random.choice(string.ascii_letters) + messagesJson[0]["content"]

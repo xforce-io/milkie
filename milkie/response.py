@@ -70,6 +70,15 @@ class Response:
     def isEnd(self) -> bool:
         return KeywordEnd in self.respStr
 
+    @staticmethod
+    def isNaivePyType(resp: Any) -> bool:
+        return isinstance(resp, str) or \
+            isinstance(resp, int) or \
+            isinstance(resp, float) or \
+            isinstance(resp, bool) or \
+            isinstance(resp, list) or \
+            isinstance(resp, dict)
+
     def __str__(self) -> str:
         if self.respInt:
             return str(self.respInt)

@@ -544,7 +544,7 @@ class Instruction:
         result = self.llmBlock.toolkit.runCode(
             preprocessPyInstruct(self.formattedInstruct),
             self.varDict.getAllDict())
-        if result == None:
+        if result == None or not Response.isNaivePyType(result):
             result = ""
 
         stdout(result, args=args, **kwargs)

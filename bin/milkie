@@ -6,6 +6,11 @@ import argparse
 from dataclasses import dataclass
 from typing import Any
 
+# 设置环境变量
+os.environ['NLTK_DATA'] = os.path.join(os.path.expanduser("~"), ".cache", "nltk_data")
+# 设置更高的日志级别来抑制下载信息
+os.environ['NLTK_VERBOSITY'] = '0'
+
 projectRoot = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, projectRoot)
 
