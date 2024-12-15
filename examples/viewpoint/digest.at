@@ -1,0 +1,33 @@
+@name digest 
+
+@desc
+为新闻集合生成摘要
+@desc
+
+viewpoint. "{root}/dev/github/milkie/data/viewpoint"
+sourceDir. "{root}/lab/crawlers/data/news_articles/"
+viewpointDir. "{viewpoint}/{date}/viewpoint"
+briefsFilepath. "{viewpoint}/{date}/briefs.txt"
+hotnewsFilepath. "{viewpoint}/{date}/hotnews.txt"
+
+mkdir. #PY ```import os;os.makedirs("{viewpointDir}", exist_ok=True)```
+filelinksJson. #CODE 
+    (0) 定义 list 类型的变量 result
+    (1) 获取 {{sourceDir}} 下所有的一级格式为"年-月-日"的folder，筛选距离{date}绝对值不超过 2 天的路径名称，得到路径列表 filepaths
+    (2) 遍历 filepaths，对每个 filepath 进行以下操作
+        [A] 获取 filepath 二级目录下'.txt'文件
+        [B] 输出文件内: 文件标题作为title(不含后缀); 文件绝对路径作为path
+        [C] 将上一步结果的 dict 放到变量 result 里面
+    (3) 输出 result，请注意冒号可能是全角 => c```type(_CUR_) == list and len(_CUR_) > 0```
+FOR filelink in filelinksJson
+    content. #CODE 读取文件{{filelink.path}}文件内容
+    digest. 对下面内容进行投资和财经角度的解读，然后总结内容摘要，不超过 50 字： ``` {content} ``` 请给出内容摘要：
+    viewpoint. 对下面内容进行投资和财经角度的解读，然后总结核心观点，不超过 50 字： ``` {content} ``` 请给出观点：
+    last. #PY ```
+    open('{viewpointDir}/{filelink.title}', "w").write(f'''路径：\t{filelink.path}\n摘要：\t{digest}\n观点：\t{viewpoint}''')
+    ```
+
+    ret. #RET {{"title": "{{filelink.title}}", "link": "{{filelink.path}}", "digest": "{{digest}}", "viewpoint": "{{viewpoint}}"}}
+END -> briefs
+
+writeBriefs. #PY ```import json;open("{briefsFilepath}", "w").write(json.dumps({briefs}));len({briefs})```

@@ -200,6 +200,21 @@ class EnhancedLLM(object):
             messages = [self._llm._get_messages(prompt, **{})]
         return self._predictBatch(messages, **kwargs)
 
+    def fail(
+            self, 
+            prompt :BasePromptTemplate, 
+            promptArgs :dict, 
+            **kwargs: Any):
+        if len(promptArgs) > 0:
+            messages = self._llm._get_messages(prompt, **promptArgs)
+        else:
+            messages = prompt.message_templates
+        self._fail(messages, **kwargs)
+
+    @abstractmethod
+    def _fail(self, messages :Sequence[ChatMessage], **kwargs: Any):
+        pass
+
     @abstractmethod
     def _getModel(self):
         pass

@@ -60,7 +60,7 @@ class CodeInterpreter:
 
     def __init__(self, globalContext: GlobalContext):
         self.interpreter = InternalPythonInterpreter(import_white_list=WhiteListImport)
-        self.maxAttempts = 2
+        self.maxAttempts = 1
         self.globalContext = globalContext
 
     def execute(
@@ -71,13 +71,14 @@ class CodeInterpreter:
         attempt = 0
         errorContext = ""
         while attempt < self.maxAttempts:
+            stepLLMCode = StepLLMCode(
+                globalContext=self.globalContext, 
+                instruction=instruction, 
+                prevResult="",
+                errorContext=errorContext,
+                noCache=kwargs.get("no_cache", False) if attempt == 0 else True)
+ 
             try:
-                stepLLMCode = StepLLMCode(
-                    globalContext=self.globalContext, 
-                    instruction=instruction, 
-                    prevResult="",
-                    errorContext=errorContext,
-                    noCache=kwargs.get("no_cache", False))
                 code = stepLLMCode.completionAndFormat(**kwargs)
                 code = extractFromBlock("python", code)
                 code = postRestoreVariablesInStr(code, varDict)
@@ -90,11 +91,12 @@ class CodeInterpreter:
 
             except Exception as e:
                 attempt += 1
+                stepLLMCode.fail()
                 errorContext = f"error[{str(e)}]\nstacktrace[{traceback.format_exc()}]"
                 WARNING(logger, f"failed to execute code[{errorContext}]")
                 
                 if attempt >= self.maxAttempts:
-                    raise RuntimeError()
+                    return None
     
     def executeCode(self, code: str, varDict: Optional[Dict[str, Any]] = None) -> Any:
         """执行代码，处理特殊字符和转义"""

@@ -3,7 +3,7 @@ from typing import Optional
 from milkie.global_context import GlobalContext
 from milkie.llm.enhanced_llm import EnhancedLLM
 from milkie.response import Response
-from milkie.llm.inference import chat
+from milkie.llm.inference import chat, failChat
 from milkie.trace import stdout
 from milkie.utils.commons import getToolsSchemaForTools
 from milkie.llm.reasoning.reasoning import Reasoning
@@ -116,7 +116,7 @@ class StepLLM(ABC):
             stream: bool = False, 
             **kwargs) -> Response:
         self.prompt = self.makePrompt(useTool="tools" in kwargs, args=args, **kwargs)
-        systemPrompt = self.makeSystemPrompt(args=args, **kwargs)
+        self.systemPrompt = self.makeSystemPrompt(args=args, **kwargs)
 
         if "tools" in kwargs and kwargs["tools"] is not None and len(kwargs["tools"]) > 0:
             kwargs["tools"] = getToolsSchemaForTools(kwargs["tools"])
@@ -128,7 +128,7 @@ class StepLLM(ABC):
 
         return reasoning.reason(
             llm=llm, 
-            systemPrompt=systemPrompt,
+            systemPrompt=self.systemPrompt,
             prompt=self.prompt, 
             promptArgs={},
             stream=stream,
@@ -136,3 +136,14 @@ class StepLLM(ABC):
 
     def formatResult(self, result: Response, **kwargs):
         return result
+
+    def fail(
+            self, 
+            llm :Optional[EnhancedLLM] = None, 
+            **kwargs):
+        failChat(
+            llm=llm if llm else self.llm, 
+            systemPrompt=self.systemPrompt,
+            prompt=self.prompt, 
+            promptArgs={},
+            **kwargs)

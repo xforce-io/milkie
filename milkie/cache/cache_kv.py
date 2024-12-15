@@ -62,6 +62,13 @@ class CacheKV:
             self.cache[keyStr] = {'value': value, 'timestamp': time.time()}
         self.dumpCache()
 
+    def remove(self, key: List[Dict]):
+        keyStr = self._keyToStr(key)
+        with self.lock:
+            if keyStr in self.cache:
+                del self.cache[keyStr]
+        self.dumpCache()
+
 class CacheKVMgr:
     FilePrefix = "cache_"
     
@@ -101,6 +108,11 @@ class CacheKVMgr:
             cache = CacheKV(filePath, self.dumpInterval, self.expireTimeByDay)
             self.caches[modelName] = cache
         cache.set(key, value)
+
+    def removeValue(self, modelName: str, key: List[Dict]):
+        cache = self.getCache(modelName)
+        if cache:
+            cache.remove(key)
 
 if __name__ == "__main__":
     cacheMgr = CacheKVMgr('data/cache', dumpInterval=10)

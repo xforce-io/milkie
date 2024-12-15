@@ -1,0 +1,36 @@
+@name hotest
+
+@desc
+为新闻集合生成最热事件
+@desc
+
+viewpoint. "{root}/dev/github/milkie/data/viewpoint"
+viewpointDir. "{viewpoint}/{date}/viewpoint"
+briefsFilepath. "{viewpoint}/{date}/briefs.txt"
+hotnewsFilepath. "{viewpoint}/{date}/hotnews.txt"
+
+allBriefs. #PY ```import json;infos=json.loads(open("{briefsFilepath}", "r").read()); "".join([news["title"] for news in infos])```
+eventsStr. @LLM(Doubao-pro-32k) @ReasoningSelfCritique()
+    任务:
+    从新闻内容中总结并整合关键的事件
+
+    新闻内容:
+    {allBriefs}
+
+    输出要求:
+    0 重点关注中央银行等关键金融机构的动作()
+    1 严格遵守输出格式，单行输出“/”分割
+    2 要具体到特定的组织、人或市场等。不能太泛，比如“企业并购重组”。
+    3 需要适度抽象，不能太过于具体，比如“亨特·拜登就9项联邦税务指控认罪，涉及未缴税款及虚假申报，总额超140万美元”
+    4 重复\相似事件\主语相同事件需合并（例：
+    - "地方政府推出房产新政"和"各地出台房地产支持政策"合并为一个事件"地方政府房地产政策"
+    - "证监会原法律部副主任吴国舫被调查"和"证监会发行部官员被调查"合并为“证监会官员被调查”
+    - "特朗普提名财政部长"和"特朗普提名贝森特为财政部长"合并为“特朗普提名财政部长”）
+    5 数量30-50个，总结多次提到事件
+
+    示例输出：
+    央行货币政策调整/地方债务化解/A股市场表现/.../杉杉集团人事变动/END
+
+    请总结事件并按要求格式输出：
+
+last. #CODE 把下面内容写到文件{{hotnewsFilepath}}中，过滤“END” : {{eventsStr}}

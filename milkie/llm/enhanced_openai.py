@@ -64,6 +64,11 @@ class EnhancedOpenAI(EnhancedLLM):
             client=OpenAI(api_key=api_key, base_url=endpoint))
         self._cacheMgr = CacheKVMgr("data/cache/", expireTimeByDay=7)
 
+    def _fail(self, messages :Sequence[ChatMessage], **kwargs: Any):
+        self._cacheMgr.removeValue(
+            modelName=self.model_name, 
+            key=self._createMessagesJson(messages))
+
     def _createMessagesJson(self, messages: Sequence[ChatMessage]) -> list:
         """创建 OpenAI API 所需的消息格式"""
         messagesJson = []

@@ -1,0 +1,11 @@
+@name viewpoint
+
+@desc
+阅读财经新闻，生成热门事件、观点合集和建议
+@desc
+
+digest. #CALL @digest ""
+hotest. #CALL @hotest ""
+event2file. #CALL @event2file ""
+process. #PY ```import os;os.system("python examples/viewpoint/process.py {date}")```
+analysis. #CALL @analysis ""

@@ -165,9 +165,13 @@ class OutputSyntax:
                     })
 
         if self.format == OutputSyntaxFormat.CHECK:
-            return toolkit.runCode(
-                code=self.checkPattern, 
-                varDict=varDict.getAllDict())
+            try:
+                return toolkit.runCode(
+                    code=self.checkPattern, 
+                    varDict=varDict.getAllDict())
+            except Exception as e:
+                logger.warning(f"Error running code: {e}")
+                return None
         return output
 
     def __str__(self) -> str:

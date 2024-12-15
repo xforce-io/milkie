@@ -1,0 +1,41 @@
+@name event2file
+
+@desc
+根据新闻摘要生成观点分析
+@desc
+
+
+viewpoint. "{root}/dev/github/milkie/data/viewpoint"
+viewpointDir. "{viewpoint}/{date}/viewpoint"
+hotnewsFilepath. "{viewpoint}/{date}/hotnews.txt"
+eventToFilepath. "{viewpoint}/{date}/event2filepath.txt"
+
+hotnews. #CODE 读取{{hotnewsFilepath}}中的内容
+filepaths. #CODE 读取{{viewpointDir}}下的所有的文档，把这些文档的路径写到一个 list 中
+emptyFile. #CODE 清空文件{{eventToFilepath}}
+FOR filepath in filepaths
+    content. #CODE 读取{{filepath}}的文件内容
+    event. @LLM(qwen-plus-as) 
+        任务：精确匹配文件内容与事件列表
+
+        输入：
+        1 事件列表：
+        {hotnews}
+
+        2 待匹配文件内容：
+        {content}
+
+        规则：
+        1 严格匹配：文件内容必须与事件实质相符
+        2 单一输出：
+        - 若匹配成功：仅输出匹配到的事件原文，最多输出一个事件
+        - 若无匹配：仅输出 None
+        3 禁止输出任何解释、分析或额外内容
+
+        请按规则输出结果(不用加引号，不要输出换行符)：
+    event2file. #CODE 将下述字符串append到文件{{eventToFilepath}} 
+            "{{event}} >> {{filepath}}"
+            请注意：
+            （1）"{{event}}"需要 strip
+            （2）如果"{{event}}"有斜杠分割的多个字符串请按格式输出多条
+END

@@ -685,11 +685,34 @@ class InternalPythonInterpreter(BaseInterpreter):
             return None
 
     def _get_value_from_state(self, key: str) -> Any:
+        """从状态中获取值，包括内置异常类型"""
         if key in self.state:
             return self.state[key]
         elif key in self.fuzz_state:
             return self.fuzz_state[key]
         else:
+            # 检查是否是内置异常类型
+            builtin_exceptions = {
+                'Exception': Exception,
+                'ValueError': ValueError,
+                'TypeError': TypeError,
+                'RuntimeError': RuntimeError,
+                'FileNotFoundError': FileNotFoundError,
+                'IOError': IOError,
+                'OSError': OSError,
+                'KeyError': KeyError,
+                'IndexError': IndexError,
+                'AttributeError': AttributeError,
+                'ImportError': ImportError,
+                'SyntaxError': SyntaxError,
+                'NameError': NameError,
+                'ZeroDivisionError': ZeroDivisionError,
+                'AssertionError': AssertionError,
+            }
+            
+            if key in builtin_exceptions:
+                return builtin_exceptions[key]
+            
             # 尝试从 Python 内置函数中获取
             builtin_value = getattr(__builtins__, key, None)
             if builtin_value is not None:

@@ -68,7 +68,7 @@ def chatStream(
 ) -> Response:
     prompt = escape(prompt)
     chatPromptTmpl = makeMessageTemplates(
-        systemPrompt if systemPrompt else None, 
+        systemPrompt, 
         kwargs["history"] if "history" in kwargs else None, 
         prompt)
     response = Response(respGen=None, source_nodes=None, metadata={})
@@ -80,6 +80,19 @@ def chatStream(
 
     DEBUG(logger, f"stream chat prompt[{chatPromptTmpl.get_template()}] ({t1-t0:.2f}s)")
     return response
+
+def failChat(
+        llm :EnhancedLLM, 
+        systemPrompt :str,
+        prompt :str, 
+        promptArgs :dict, 
+        **kwargs):
+    prompt = escape(prompt)
+    chatPromptTmpl = makeMessageTemplates(
+        systemPrompt, 
+        kwargs["history"] if "history" in kwargs else None, 
+        prompt)
+    llm.fail(chatPromptTmpl, promptArgs, **kwargs)
 
 def makeMessageTemplates(systemPrompt :str, history :Optional[History], prompt :str) -> ChatPromptTemplate:
     messageTemplates = []
