@@ -37,5 +37,6 @@ FOR filepath in filepaths
             "{{event}} >> {{filepath}}"
             请注意：
             （1）"{{event}}"需要 strip
-            （2）如果"{{event}}"有斜杠分割的多个字符串请按格式输出多条
+            （2）如果"{{event}}"有斜杠分割的多个字符串请按格式输出多条 
+            => c```len(open(eventToFilepath, "r").read().strip().split("\n")) > 1```
 END

@@ -3,7 +3,7 @@ from typing import Optional
 from milkie.global_context import GlobalContext
 from milkie.llm.enhanced_llm import EnhancedLLM
 from milkie.response import Response
-from milkie.llm.inference import chat, failChat
+from milkie.llm.inference import failChat
 from milkie.trace import stdout
 from milkie.utils.commons import getToolsSchemaForTools
 from milkie.llm.reasoning.reasoning import Reasoning
@@ -130,7 +130,7 @@ class StepLLM(ABC):
             llm=llm, 
             systemPrompt=self.systemPrompt,
             prompt=self.prompt, 
-            promptArgs={},
+            promptArgs=args,
             stream=stream,
             **kwargs)
 
@@ -140,10 +140,11 @@ class StepLLM(ABC):
     def fail(
             self, 
             llm :Optional[EnhancedLLM] = None, 
+            args: dict = {},
             **kwargs):
         failChat(
             llm=llm if llm else self.llm, 
             systemPrompt=self.systemPrompt,
             prompt=self.prompt, 
-            promptArgs={},
+            promptArgs=args,
             **kwargs)

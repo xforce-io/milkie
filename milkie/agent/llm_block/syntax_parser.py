@@ -158,11 +158,11 @@ class OutputSyntax:
             if self.format == OutputSyntaxFormat.REGEX:
                 return self.regExpr.search(output).group(1)
             elif self.format == OutputSyntaxFormat.EXTRACT:
+                allArgs = varDict.getAllDict()
+                allArgs["toExtract"] = self.extractPattern
+                allArgs["text"] = output
                 return stepLLMExtractor.completionAndFormat(
-                    args={
-                        "toExtract": self.extractPattern,
-                        "text": output
-                    })
+                    args=allArgs)
 
         if self.format == OutputSyntaxFormat.CHECK:
             try:

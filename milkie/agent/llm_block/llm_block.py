@@ -197,9 +197,9 @@ class StepLLMInstrAnalysis(StepLLMBlock):
         return systemPrompt
         
     def makePrompt(self, useTool: bool = False, **args) -> str:
-        if args.get("prompt", None) == InstFlagDecompose:
+        if args.get("prompt_flag", None) == InstFlagDecompose:
             return self.promptMaker.promptForDecompose(self.llmBlock)
-        elif args.get("prompt", None) == InstFlagThought:
+        elif args.get("prompt_flag", None) == InstFlagThought:
             return self.promptMaker.promptForThought(self.llmBlock)
 
         result = self.promptMaker.promptForInstruction(
@@ -456,18 +456,18 @@ class Instruction:
 
         if self.syntaxParser.flag == SyntaxParser.Flag.THOUGHT:
             self.promptMaker.promptForThought(self.llmBlock)
-            args["prompt"] = InstFlagThought
+            args["prompt_flag"] = InstFlagThought
             useTool = False
             logTypes.append("thought")
 
         elif self.syntaxParser.flag == SyntaxParser.Flag.DECOMPOSE:
             self.promptMaker.promptForDecompose(self.llmBlock)
-            args["prompt"] = InstFlagDecompose
+            args["prompt_flag"] = InstFlagDecompose
             useTool = False
             logTypes.append("decompose")
 
         else:
-            args["prompt"] = None
+            args["prompt_flag"] = None
 
         if useTool:
             kwargs["tools"] = self.llmBlock.toolkit.getTools()

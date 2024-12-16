@@ -115,9 +115,18 @@ def restoreVariablesInStr(data :str, allDict :dict):
     return NestedFormatter().format(data)
 
 def postRestoreVariablesInStr(data :str, allDict :dict) -> str:
-    pattern = r'({{[\w\.]+}})'
+    pattern = r'({[\w\.]+})'
     matches = re.findall(pattern, data, re.DOTALL)
     for match in matches:
-        slot = restoreVariablesInStr(match[1:-1], allDict).replace("\n", "//")
+        slot = restoreVariablesInStr(match, allDict).replace("\n", "//")
         data = data.replace(match, slot)
+    return data
+
+def wrapVariablesInStr(data: str) -> str:
+    replacements = []
+    pattern = r'({[\w\.]+})'
+    for match in re.finditer(pattern, data):
+        replacements.append((match.start(), match.end(), match.group()))
+    for start, end, match_text in reversed(replacements):
+        data = data[:start] + f"'{match_text}'" + data[end:]
     return data

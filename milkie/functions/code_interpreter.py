@@ -8,7 +8,7 @@ from milkie.interpreter.internal_python_interpreter import InternalPythonInterpr
 from milkie.llm.step_llm import StepLLM
 from milkie.log import DEBUG, ERROR, INFO, WARNING
 from milkie.response import Response
-from milkie.utils.data_utils import extractFromBlock, postRestoreVariablesInStr
+from milkie.utils.data_utils import extractFromBlock, postRestoreVariablesInStr, wrapVariablesInStr
 import json
 
 logger = logging.getLogger(__name__)
@@ -25,10 +25,10 @@ class StepLLMCode(StepLLM):
             globalContext=globalContext, 
             promptMaker=None,
             llm=globalContext.settings.getLLMCode(noCache=noCache))
-        self.instruction = instruction
+        self.instruction = wrapVariablesInStr(instruction)
         self.prevResult = prevResult
         self.errorContext = errorContext
-
+        
     def makePrompt(
             self, 
             useTool: bool = False, 
@@ -79,19 +79,21 @@ class CodeInterpreter:
                 noCache=kwargs.get("no_cache", False) if attempt == 0 else True)
  
             try:
-                code = stepLLMCode.completionAndFormat(**kwargs)
+                code = stepLLMCode.completionAndFormat(
+                    args=varDict,
+                    **kwargs)
                 code = extractFromBlock("python", code)
                 code = postRestoreVariablesInStr(code, varDict)
                 code = addPreImport(code)
                 
                 codeRepr = code.replace('\n', '//')
-                INFO(logger, f"execute code [{codeRepr}]")
+                INFO(logger, f"execute code [{codeRepr}] model[{stepLLMCode.llm.model_name}]")
                 result = self.interpreter.run(code, code_type="python3", varDict=varDict)
                 return result
 
             except Exception as e:
                 attempt += 1
-                stepLLMCode.fail()
+                stepLLMCode.fail(args=varDict, **kwargs)
                 errorContext = f"error[{str(e)}]\nstacktrace[{traceback.format_exc()}]"
                 WARNING(logger, f"failed to execute code[{errorContext}]")
                 
