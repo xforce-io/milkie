@@ -1,0 +1,10 @@
+@name paper_report
+
+@desc
+对论文进行阅读和总结
+@desc
+
+download. #PY ```import os;os.system("python examples/paper_report/download.py {date} {root}")```
+digest. #CALL @digest ""
+topic_inverted. #PY ```import os;os.system("python examples/paper_report/topic_inverted.py {date} {root}")```
+topic2paper. #CALL @topic2paper ""

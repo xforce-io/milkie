@@ -4,7 +4,7 @@
 为论文集合生成摘要
 @desc
 
-paperReport. "/Users/xupeng/dev/github/milkie/data/paper_report"
+paperReport. "{root}/dev/github/milkie/data/paper_report"
 rawDir. "{paperReport}/raw"
 
 mkdir. #PY ```import os;os.makedirs("{rawDir}", exist_ok=True)```
@@ -17,11 +17,13 @@ filelinks. #CODE
     (3) 输出 result，请注意冒号可能是全角 => c```type(_CUR_) == list and len(_CUR_) > 0```
 FOR filelink in filelinks
     content. #CODE 读取文件"{{filelink}}.txt"文件内容，最多 10k 个字符
-    team.      [deepseek-chat] 对下面论文内容，然后提取论文团队，不超过 20 字： ``` {content} ``` 请给出：
-    problem.   [deepseek-chat] 对下面论文内容，然后总结文章试图解决的问题，不超过 50 字： ``` {content} ``` 请给出：
-    idea.      [deepseek-chat] 对下面论文内容，然后总结文章的解决问题思路，不超过 100 字： ``` {content} ``` 请给出：
-    experiment. [deepseek-chat] 对下面论文内容，然后总结文章的实验效果，不超过 50 字： ``` {content} ``` 请给出：
+    title. #CODE 获取并返回第一行的 title
+    url.   #CODE 获取并返回第二行的 url
+    team.      对下面论文内容，然后提取论文团队，不超过 20 字： ``` {content} ``` 请直接给出：
+    problem.   对下面论文内容，然后总结文章试图解决的问题，不超过 50 字： ``` {content} ``` 请直接给出：
+    idea.      对下面论文内容，然后总结文章的解决问题思路，不超过 100 字： ``` {content} ``` 请直接给出：
+    experiment. 对下面论文内容，然后总结文章的实验效果，不超过 50 字： ``` {content} ``` 请直接给出：
     last. #PY ```
-    open('{filelink}.digest', "w").write(f'''路径：\t{filelink}\n团队：\t{team}\n问题：\t{problem}\n思路：\t{idea}\n实验：\t{experiment}\n''')
+    open('{filelink}.digest', "w").write(f'''标题：\t{title}\n下载地址：\t{url}\n团队：\t{team}\n问题：\t{problem}\n思路：\t{idea}\n实验：\t{experiment}\n''')
     ```
 END -> briefs

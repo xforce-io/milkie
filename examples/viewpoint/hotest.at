@@ -33,4 +33,4 @@ eventsStr. @LLM(Doubao-pro-32k) @ReasoningSelfCritique()
 
     请总结事件并按要求格式输出：
 
-last. #CODE 把下面内容写到文件{{hotnewsFilepath}}中，过滤“END” : {{eventsStr}}
+last. #PY ```open("{hotnewsFilepath}", "w").write("{eventsStr}".replace("/END", ""))```

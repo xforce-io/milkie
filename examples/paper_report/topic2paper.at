@@ -5,8 +5,8 @@
 @desc
 
 
-instrested. "o1 model/test-time computing/openai/anthropic"
-paperinfoDir. "/Users/xupeng/dev/github/milkie/data/paper_report"
+instrested. "o1-model/test-time-computing/openai/anthropic"
+paperinfoDir. "{root}/dev/github/milkie/data/paper_report"
 rawDir. "{paperinfoDir}/raw"
 topicToPaper. "{paperinfoDir}/{date}/topic2paper.txt"
 
@@ -23,16 +23,16 @@ FOR filepath in filepaths
         任务：精确匹配文件内容与兴趣主题
 
         输入：
-        1 兴趣主题列表：
+        1 兴趣主题列表(“/”分割)：
         {instrested}
 
         2 待匹配文件内容：
         {content}
 
         规则：
-        1 严格匹配：文件内容必须与事件实质相符
+        1 严格匹配：文件内容必须与兴趣主题实质相符
         2 单一输出：
-        - 若匹配成功：仅输出匹配到的事件原文，最多输出一个事件
+        - 若匹配成功：仅输出匹配到的兴趣主题原文，最多输出一个兴趣主题
         - 若无匹配：仅输出 None
         3 禁止输出任何解释、分析或额外内容
 

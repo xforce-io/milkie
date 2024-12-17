@@ -1,13 +1,19 @@
 import os
-import json
 import requests
 import PyPDF2
 from datetime import datetime
 
-DIR_WEBPAGES = "/Users/xupeng/lab/crawlers/data/paper/"
-DIR_RAWFILES = "/Users/xupeng/dev/github/milkie/data/paper_report/"
+# 路径常量
+CRAWLERS_DATA_DIR = "lab/crawlers/data/paper/"
+PAPER_REPORT_DIR = "dev/github/milkie/data/paper_report/"
+RAW_DIR = "raw"
+IMGS_DIR = "imgs"
 
-def get_paper_filepaths(date):
+def get_paper_filepaths(date, root):
+    # 构建绝对路径
+    DIR_WEBPAGES = os.path.join(root, CRAWLERS_DATA_DIR)
+    DIR_RAWFILES = os.path.join(root, PAPER_REPORT_DIR)
+    
     filepaths = []
     target_date = datetime.strptime(date, '%Y-%m-%d')
     
@@ -26,7 +32,7 @@ def get_paper_filepaths(date):
                             filepaths.append(file_path)
         except ValueError:
             continue
-    return filepaths
+    return filepaths, DIR_RAWFILES
 
 def get_pdf_url(url):
     """将arxiv网页URL转换为PDF下载链接"""
@@ -38,12 +44,13 @@ def get_pdf_url(url):
         return pdf_url
     return url
 
-def process_papers(date):
-    # 确保输出目录存在
-    raw_dir = os.path.join(DIR_RAWFILES, 'raw')
-    os.makedirs(raw_dir, exist_ok=True)
+def process_papers(date, root):
+    # 获取文件路径和输出目录
+    filepaths, raw_dir_base = get_paper_filepaths(date, root)
     
-    filepaths = get_paper_filepaths(date)
+    # 确保输出目录存在
+    raw_dir = os.path.join(raw_dir_base, RAW_DIR)
+    os.makedirs(raw_dir, exist_ok=True)
     
     for filepath in filepaths:
         try:
@@ -79,56 +86,63 @@ def process_papers(date):
             date_dir = os.path.join(raw_dir, date_match)
             os.makedirs(date_dir, exist_ok=True)
                 
-            # 检查PDF是否已存在
+            # 检查PDF路径和元信息路径
             pdf_path = os.path.join(date_dir, f'{title}.pdf')
-            if os.path.exists(pdf_path):
-                continue
-                
-            # 获取PDF下载链接
-            pdf_url = get_pdf_url(url)
+            txt_path = os.path.join(date_dir, f'{title}.txt')
             
-            # 下载PDF
-            try:
-                headers = {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-                }
-                response = requests.get(pdf_url, headers=headers, timeout=30)
-                response.raise_for_status()
+            # PDF不存在时下载
+            if not os.path.exists(pdf_path):
+                # 获取PDF下载链接
+                pdf_url = get_pdf_url(url)
                 
-                with open(pdf_path, 'wb') as pdf_file:
-                    pdf_file.write(response.content)
+                try:
+                    headers = {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                    }
+                    response = requests.get(pdf_url, headers=headers, timeout=30)
+                    response.raise_for_status()
                     
-                # 检查文件大小
-                if os.path.getsize(pdf_path) < 10000:
-                    raise RuntimeError(f"下载的PDF文件可能不完整: {pdf_url}")
-                    
-                # 提取文本
-                with open(pdf_path, 'rb') as pdf_file:
-                    reader = PyPDF2.PdfReader(pdf_file)
-                    text = ''
-                    for page in reader.pages:
-                        text += page.extract_text()
+                    with open(pdf_path, 'wb') as pdf_file:
+                        pdf_file.write(response.content)
                         
-                # 保存文本到对应日期目录
-                txt_path = os.path.join(date_dir, f'{title}.txt')
-                with open(txt_path, 'w', encoding='utf-8') as txt_file:
-                    txt_file.write(text)
+                    # 检查文件大小
+                    if os.path.getsize(pdf_path) < 10000:
+                        raise RuntimeError(f"下载的PDF文件可能不完整: {pdf_url}")
+                        
+                except Exception as e:
+                    print(f"下载PDF文件 {title} 时出错: {str(e)}")
+                    if os.path.exists(pdf_path):
+                        os.remove(pdf_path)
+                    continue
+            
+            # 如果PDF存在但文本不存在，提取文本
+            if os.path.exists(pdf_path) and not os.path.exists(txt_path):
+                try:
+                    # 提取文本
+                    with open(pdf_path, 'rb') as pdf_file:
+                        reader = PyPDF2.PdfReader(pdf_file)
+                        text = title + '\n' + url + '\n'
+                        for page in reader.pages:
+                            text += page.extract_text()
+                            
+                    # 保存文本到对应日期目录
+                    with open(txt_path, 'w', encoding='utf-8') as txt_file:
+                        txt_file.write(text)
+                except Exception as e:
+                    print(f"提取文本时出错 {title}: {str(e)}")
 
-                print(f"成功下载并保存文件: {title}")
-                    
-            except Exception as e:
-                print(f"处理文件 {title} 时出错: {str(e)}")
-                if os.path.exists(pdf_path):
-                    os.remove(pdf_path)
+            print(f"成功处理文件: {title}")
                     
         except Exception as e:
             print(f"读取文件 {filepath} 时出错: {str(e)}")
 
 if __name__ == '__main__':
     import sys
-    if len(sys.argv) != 2:
-        print("请提供日期参数，格式为 YYYY-MM-DD")
+    if len(sys.argv) != 3:
+        print("Usage: python download.py <date> <root>")
+        print("Example: python download.py 2024-11-20 /path/to/root")
         sys.exit(1)
     
     date = sys.argv[1]
-    process_papers(date)
+    root = sys.argv[2]
+    process_papers(date, root)
