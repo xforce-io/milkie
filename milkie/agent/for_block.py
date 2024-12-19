@@ -8,6 +8,7 @@ from milkie.config.constant import DefaultUsePrevResult, KeywordForStart, KeyRet
 from milkie.context import Context, VarDict
 from milkie.functions.toolkits.toolkit import Toolkit
 from milkie.response import Response
+from milkie.utils.data_utils import codeToLines
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +35,7 @@ class ForBlock(BaseBlock):
         self.parseForStatement()
 
     def parseForStatement(self):
-        lines = self.forStatement.split('\n')
+        lines = codeToLines(self.forStatement)
         for_line = lines[0].strip()
         
         pattern = r'%s\s+(\w+)\s+in\s+(.+)\s*' % KeywordForStart

@@ -23,7 +23,7 @@ from milkie.log import INFO, DEBUG
 from milkie.response import Response
 from milkie.trace import stdout
 from milkie.utils.commons import mergeDict
-from milkie.utils.data_utils import restoreVariablesInDict, restoreVariablesInStr
+from milkie.utils.data_utils import codeToLines, restoreVariablesInDict, restoreVariablesInStr
 
 logger = logging.getLogger(__name__)
 
@@ -536,9 +536,10 @@ class Instruction:
     def _processPyCode(self, args: dict, **kwargs):
 
         def preprocessPyInstruct(instruct: str):
-            instruct = instruct.replace("$varDict", "self.varDict")
-            instruct = instruct.replace(KeyNext, f'"{KeyNext}"')
-            instruct = instruct.replace(KeyRet, f'"{KeyRet}"')
+            instruct = instruct.lstrip() \
+                .replace("$varDict", "self.varDict") \
+                .replace(KeyNext, f'"{KeyNext}"') \
+                .replace(KeyRet, f'"{KeyRet}"')
             return instruct
 
         result = self.llmBlock.toolkit.runCode(
@@ -954,7 +955,7 @@ class LLMBlock(BaseBlock):
     def _decomposeTask(self, task: str) -> list[tuple[str, Instruction]]:
         labelPattern = r'\s*([\w\u4e00-\u9fff]+[.、])\s+'
         
-        lines = task.split('\n')
+        lines = codeToLines(task)
         instructions = []
         currentLabel = None
         currentContent = []

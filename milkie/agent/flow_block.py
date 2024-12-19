@@ -7,6 +7,7 @@ from milkie.context import Context
 from milkie.config.config import GlobalConfig
 from milkie.functions.toolkits.toolkit import Toolkit
 from milkie.response import Response
+from milkie.utils.data_utils import codeToLines
 
 class FlowBlock(BaseBlock):
     def __init__(
@@ -25,7 +26,7 @@ class FlowBlock(BaseBlock):
         if self.isCompiled:
             return
 
-        lines = self.flowCode.split('\n')
+        lines = codeToLines(self.flowCode)
         self.processBlocks(lines)
 
         for block in self.blocks:

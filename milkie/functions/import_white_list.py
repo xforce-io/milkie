@@ -12,6 +12,7 @@ WhiteListImport = [
     "datetime.datetime",
     "csv",
     "json",
+    "re",
 ]
 
 PreImport = [

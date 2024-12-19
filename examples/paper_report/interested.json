@@ -1,0 +1,9 @@
+{
+    "agent" : ["agentic"],
+    "reasoning" : [],
+    "test-time compute" : [],
+    "tree search" : [],
+    "o1 model" : [],
+    "openai" : [],
+    "anthropic" : []
+}

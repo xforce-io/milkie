@@ -8,3 +8,4 @@ download. #PY ```import os;os.system("python examples/paper_report/download.py {
 digest. #CALL @digest ""
 topic_inverted. #PY ```import os;os.system("python examples/paper_report/topic_inverted.py {date} {root}")```
 topic2paper. #CALL @topic2paper ""
+details. #CALL @details ""

@@ -10,7 +10,7 @@ from milkie.context import VarDict
 from milkie.functions.toolkits.toolkit import Toolkit
 from milkie.runtime.global_toolkits import GlobalToolkits
 from milkie.settings import Settings
-from milkie.utils.data_utils import extractBlock, isBlock, unescape
+from milkie.utils.data_utils import codeToLines, extractBlock, isBlock, unescape
 
 logger = logging.getLogger(__name__)
 
@@ -529,7 +529,7 @@ class SyntaxParser:
         
         code = _extractCode(self.instruction)
         if code:
-            lines = code.split('\n')
+            lines = codeToLines(code)
             minSpaces = min(len(line) - len(line.lstrip(' ')) for line in lines if line.strip())
             cleanedLines = [line[minSpaces:] for line in lines]
             return '\n'.join(cleanedLines)

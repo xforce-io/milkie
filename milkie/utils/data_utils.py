@@ -1,3 +1,4 @@
+from typing import List
 import yaml
 import logging
 
@@ -130,3 +131,30 @@ def wrapVariablesInStr(data: str) -> str:
     for start, end, match_text in reversed(replacements):
         data = data[:start] + f"'{match_text}'" + data[end:]
     return data
+
+def codeToLines(code: str) -> List[str]:
+    import re
+    
+    # 先找出所有的三引号和双引号字符串
+    triple_quotes = re.finditer(r'"""[\s\S]*?"""|\'\'\'[\s\S]*?\'\'\'', code)
+    
+    # 临时替换这些字符串中的换行符
+    temp_code = code
+    replacements = []
+    for match in triple_quotes:
+        quoted_str = match.group()
+        # 临时替换换行符为特殊标记
+        replaced_str = quoted_str.replace('\n', '<<NEWLINE>>')
+        temp_code = temp_code.replace(quoted_str, replaced_str)
+        replacements.append((replaced_str, quoted_str))
+        
+    # 按换行符分割
+    lines = temp_code.split('\n')
+    
+    # 还原所有临时替换的换行符
+    for i in range(len(lines)):
+        for temp, original in replacements:
+            if temp in lines[i]:
+                lines[i] = lines[i].replace(temp, original)
+                
+    return lines

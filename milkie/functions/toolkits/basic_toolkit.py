@@ -116,7 +116,7 @@ class BasicToolkit(Toolkit):
 
         return "\n\n".join(cleanTexts)
 
-    def sendEmail(self, to_email: str, subject: str, body: str, content_type: str = "plain") -> str:
+    def sendEmail(self, to_email: str, subject: str, body: str, content_type: str = "markdown") -> str:
         """
         发送电子邮件给指定邮箱
 
@@ -124,7 +124,7 @@ class BasicToolkit(Toolkit):
             to_email (str): 收件人邮箱地址
             subject (str): 邮件主题
             body (str): 邮件正文
-            content_type (str): 内容类型，可选值为 "plain"、"html" 或 "markdown"，默认为 "plain"
+            content_type (str): 内容类型，默认为 "markdown"
 
         Returns:
             str: 发送结果描述
@@ -143,13 +143,8 @@ class BasicToolkit(Toolkit):
             msg['Subject'] = subject
 
             # 处理不同类型的内容
-            if content_type == "html":
-                msg.attach(MIMEText(body, 'html'))
-            elif content_type == "markdown":
-                html_content = markdown2.markdown(body)
-                msg.attach(MIMEText(html_content, 'html'))
-            else:  # 默认为纯文本
-                msg.attach(MIMEText(body, 'plain'))
+            html_content = markdown2.markdown(body)
+            msg.attach(MIMEText(html_content, 'html'))
 
             # 连接到SMTP服务器并发送邮件
             with smtplib.SMTP(emailConfig.smtp_server, emailConfig.smtp_port) as server:

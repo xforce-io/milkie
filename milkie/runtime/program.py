@@ -3,6 +3,7 @@ from typing import Dict, Optional
 import logging
 from milkie.global_context import GlobalContext
 from milkie.runtime.global_toolkits import GlobalToolkits
+from milkie.utils.data_utils import codeToLines
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +84,7 @@ class Program:
             raise IOError(f"Unable to read program file: {e}")
 
     def parse(self) -> None:
-        lines = self.program.split('\n')
+        lines = codeToLines(self.program)
         parsedLines = []
         
         for line in lines:

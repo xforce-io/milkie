@@ -1,0 +1,63 @@
+@name details
+
+@import BasicToolKit
+
+@desc
+为论文集合生成分析报告
+@desc
+
+paperReport. "{root}/dev/github/milkie/data/paper_report"
+rawDir. "{paperReport}/raw"
+topic2paper. "{paperReport}/{date}/topic2paper.txt"
+reportFile. "{paperReport}/{date}/report.md"
+emailAddr. "freeman.xu@aishu.cn"
+
+interestedFiles. #PY ```
+lines = open("{topic2paper}").readlines()
+[line.split(">>")[1].strip().replace(".digest", ".txt") for line in lines if line[0].strip() != "None" and line.strip() != ""]
+```
+
+clear. #PY```open("{reportFile}", "w")```
+FOR filelink in interestedFiles
+    content. #PY ```open("{filelink}").read()[:10 * 1000]```
+    title. #PY ```content.split("\n")[0]```
+    url.   #PY ```content.split("\n")[1].replace("/pdf/", "/html/")```
+    team.      对下面论文内容，然后提取论文涉及到的团队和组织，不超过 20 字： ``` {content} ``` 请直接给出：
+    digest.    对下面论文内容总结摘要，不超过 100 字： ``` {content} ``` 请直接给出：
+    problem.   对下面论文内容，然后总结文章试图解决的问题，不超过 100 字： ``` {content} ``` 请直接给出：
+    idea.      对下面论文内容，然后总结文章的关键发现和解决思路，不超过 100 字： ``` {content} ``` 请直接给出：
+    experiment. 对下面论文内容，然后总结文章的实验效果，不超过 100 字： ``` {content} ``` 请直接给出：
+    last. #PY ```
+    open('{reportFile}', "a").write(f'''
+# {title}
+
+[{title}]({url})
+
+## 📊 基本信息
+
+**研究团队**：{team}
+
+## 📝 论文解读
+
+### 摘要
+{digest}
+
+### 研究问题
+{problem}
+
+### 核心思路
+{idea}
+
+### 实验结果
+{experiment}
+
+---------------
+
+''')```
+END
+
+report. #PY```open("{reportFile}", "r").read()```
+mail. 根据下面信息发一份邮件
+    收件人:{{emailAddr}}
+    标题: 论文-{{date}}
+    正文: {{report}}

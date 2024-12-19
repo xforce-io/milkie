@@ -2,12 +2,20 @@ import os
 import requests
 import PyPDF2
 from datetime import datetime
-
+import json
 # 路径常量
-CRAWLERS_DATA_DIR = "lab/crawlers/data/paper/"
+INTERESTED_FILE = "examples/paper_report/interested.json"
+CRAWLERS_DATA_DIR = "dev/github/crawlers/data/papers/"
 PAPER_REPORT_DIR = "dev/github/milkie/data/paper_report/"
 RAW_DIR = "raw"
 IMGS_DIR = "imgs"
+
+# 关键词列表（不区分大小写）
+interested_keywords = json.load(open(INTERESTED_FILE))
+KEYWORDS = set(
+        [keyword for keywords in interested_keywords.values() for keyword in keywords] +
+        list(interested_keywords.keys())
+)
 
 def get_paper_filepaths(date, root):
     # 构建绝对路径
@@ -17,21 +25,23 @@ def get_paper_filepaths(date, root):
     filepaths = []
     target_date = datetime.strptime(date, '%Y-%m-%d')
     
-    # 遍历DIR_WEBPAGES下的时间目录
-    for time_dir in os.listdir(DIR_WEBPAGES):
-        try:
-            dir_date = datetime.strptime(time_dir, '%Y-%m-%d')
-            if dir_date >= target_date:
-                time_path = os.path.join(DIR_WEBPAGES, time_dir)
-                # 遍历domain目录
-                for domain in os.listdir(time_path):
-                    domain_path = os.path.join(time_path, domain)
-                    for root, dirs, files in os.walk(domain_path):
-                        for file in files:
-                            file_path = os.path.join(root, file)
-                            filepaths.append(file_path)
-        except ValueError:
-            continue
+    # 首先获取所有domain目录
+    for domain in os.listdir(DIR_WEBPAGES):
+        domain_path = os.path.join(DIR_WEBPAGES, domain)
+        for time_dir in os.listdir(domain_path):
+            try:
+                dir_date = datetime.strptime(time_dir, '%Y-%m-%d')
+                if dir_date >= target_date:
+                    time_path = os.path.join(domain_path, time_dir)
+                    if os.path.exists(time_path):
+                        for root, dirs, files in os.walk(time_path):
+                            for file in files:
+                                if file.endswith('.txt'):
+                                    file_path = os.path.join(root, file)
+                                    filepaths.append(file_path)
+            except ValueError:
+                continue
+    
     return filepaths, DIR_RAWFILES
 
 def get_pdf_url(url):
@@ -43,6 +53,11 @@ def get_pdf_url(url):
             pdf_url = pdf_url + '.pdf'
         return pdf_url
     return url
+
+def contains_keywords(text: str) -> bool:
+    """检查文本是否包含关键词（不区分大小写）"""
+    text = text.lower()
+    return any(keyword.lower() in text for keyword in KEYWORDS)
 
 def process_papers(date, root):
     # 获取文件路径和输出目录
@@ -61,13 +76,18 @@ def process_papers(date, root):
             title = ''
             url = ''
             date_match = ''
+            summary = ''
+            arxiv_id = os.path.splitext(os.path.basename(filepath))[0]  # 从文件名获取arxiv_id
             
             # 提取标题
-            title_match = content.split('标题：')
-            if len(title_match) > 1:
-                title = title_match[1].split('\n')[0].strip()
-                if title.startswith('Paper page -'):
-                    title = title.replace('Paper page -', '').strip()
+            title_parts = content.split('标题：')
+            if len(title_parts) > 1:
+                title = title_parts[1].split('\n')[0].strip()
+            
+            # 提取摘要
+            summary_parts = content.split('摘要：')
+            if len(summary_parts) > 1:
+                summary = summary_parts[1].split('\n')[0].strip()
             
             # 提取发布日期
             date_parts = content.split('发布日期：')
@@ -75,11 +95,15 @@ def process_papers(date, root):
                 date_match = date_parts[1].split('\n')[0].strip()
                 
             # 提取下载地址
-            url_match = content.split('下载地址：')
-            if len(url_match) > 1:
-                url = url_match[1].split('\n')[0].strip()
+            url_parts = content.split('下载地址：')
+            if len(url_parts) > 1:
+                url = url_parts[1].split('\n')[0].strip()
                 
             if not url or not title or not date_match:
+                continue
+
+            # 检查标题和摘要是否包含关键词
+            if not (contains_keywords(title) or contains_keywords(summary)):
                 continue
                 
             # 创建日期目录
@@ -87,8 +111,8 @@ def process_papers(date, root):
             os.makedirs(date_dir, exist_ok=True)
                 
             # 检查PDF路径和元信息路径
-            pdf_path = os.path.join(date_dir, f'{title}.pdf')
-            txt_path = os.path.join(date_dir, f'{title}.txt')
+            pdf_path = os.path.join(date_dir, f'{arxiv_id}.pdf')  # 使用arxiv_id作为文件名
+            txt_path = os.path.join(date_dir, f'{arxiv_id}.txt')
             
             # PDF不存在时下载
             if not os.path.exists(pdf_path):
@@ -110,7 +134,7 @@ def process_papers(date, root):
                         raise RuntimeError(f"下载的PDF文件可能不完整: {pdf_url}")
                         
                 except Exception as e:
-                    print(f"下载PDF文件 {title} 时出错: {str(e)}")
+                    print(f"下载PDF文件 {arxiv_id} 时出错: {str(e)}")
                     if os.path.exists(pdf_path):
                         os.remove(pdf_path)
                     continue
@@ -129,9 +153,9 @@ def process_papers(date, root):
                     with open(txt_path, 'w', encoding='utf-8') as txt_file:
                         txt_file.write(text)
                 except Exception as e:
-                    print(f"提取文本时出错 {title}: {str(e)}")
+                    print(f"提取文本时出错 {arxiv_id}: {str(e)}")
 
-            print(f"成功处理文件: {title}")
+            print(f"成功处理文件: {arxiv_id}/{title}")
                     
         except Exception as e:
             print(f"读取文件 {filepath} 时出错: {str(e)}")

@@ -5,7 +5,8 @@
 @desc
 
 
-instrested. "o1-model/test-time-computing/openai/anthropic"
+interestedFile. "{root}/dev/github/milkie/examples/paper_report/interested.json"
+interested. #PY ```import json;"/".join(json.load(open("{interestedFile}")).keys())```
 paperinfoDir. "{root}/dev/github/milkie/data/paper_report"
 rawDir. "{paperinfoDir}/raw"
 topicToPaper. "{paperinfoDir}/{date}/topic2paper.txt"
@@ -24,7 +25,7 @@ FOR filepath in filepaths
 
         输入：
         1 兴趣主题列表(“/”分割)：
-        {instrested}
+        {interested}
 
         2 待匹配文件内容：
         {content}

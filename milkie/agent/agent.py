@@ -16,6 +16,8 @@ from milkie.functions.toolkits.toolkit import Toolkit
 from milkie.response import Response
 import logging
 
+from milkie.utils.data_utils import codeToLines
+
 logger = logging.getLogger(__name__)
 
 class Agent(BaseBlock):
@@ -74,7 +76,7 @@ class Agent(BaseBlock):
         if self.isCompiled:
             return
         
-        lines = self.code.split('\n')
+        lines = codeToLines(self.code)
         currentBlock = []
         inFuncBlock = False
         funcBlockCount = 0
