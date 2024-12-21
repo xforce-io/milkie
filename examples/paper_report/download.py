@@ -1,7 +1,7 @@
 import os
 import requests
 import PyPDF2
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
 # 路径常量
 INTERESTED_FILE = "examples/paper_report/interested.json"
@@ -17,21 +17,22 @@ KEYWORDS = set(
         list(interested_keywords.keys())
 )
 
-def get_paper_filepaths(date, root):
+def get_paper_filepaths(date, days, root):
     # 构建绝对路径
     DIR_WEBPAGES = os.path.join(root, CRAWLERS_DATA_DIR)
     DIR_RAWFILES = os.path.join(root, PAPER_REPORT_DIR)
     
     filepaths = []
     target_date = datetime.strptime(date, '%Y-%m-%d')
-    
+    target_date_start = target_date - timedelta(days=days)
+
     # 首先获取所有domain目录
     for domain in os.listdir(DIR_WEBPAGES):
         domain_path = os.path.join(DIR_WEBPAGES, domain)
         for time_dir in os.listdir(domain_path):
             try:
                 dir_date = datetime.strptime(time_dir, '%Y-%m-%d')
-                if dir_date >= target_date:
+                if dir_date >= target_date_start:
                     time_path = os.path.join(domain_path, time_dir)
                     if os.path.exists(time_path):
                         for root, dirs, files in os.walk(time_path):
@@ -59,9 +60,9 @@ def contains_keywords(text: str) -> bool:
     text = text.lower()
     return any(keyword.lower() in text for keyword in KEYWORDS)
 
-def process_papers(date, root):
+def process_papers(date, days, root):
     # 获取文件路径和输出目录
-    filepaths, raw_dir_base = get_paper_filepaths(date, root)
+    filepaths, raw_dir_base = get_paper_filepaths(date, days, root)
     
     # 确保输出目录存在
     raw_dir = os.path.join(raw_dir_base, RAW_DIR)
@@ -162,11 +163,12 @@ def process_papers(date, root):
 
 if __name__ == '__main__':
     import sys
-    if len(sys.argv) != 3:
-        print("Usage: python download.py <date> <root>")
-        print("Example: python download.py 2024-11-20 /path/to/root")
+    if len(sys.argv) != 4:
+        print("Usage: python download.py <date> <days> <root>")
+        print("Example: python download.py 2024-11-20 3 /path/to/root")
         sys.exit(1)
     
     date = sys.argv[1]
-    root = sys.argv[2]
-    process_papers(date, root)
+    days = int(sys.argv[2])
+    root = sys.argv[3]
+    process_papers(date, days, root)

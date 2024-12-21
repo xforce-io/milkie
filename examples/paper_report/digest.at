@@ -10,17 +10,17 @@ rawDir. "{paperReport}/raw"
 mkdir. #PY ```import os;os.makedirs("{rawDir}", exist_ok=True)```
 filelinks. #CODE 
     (0) 定义 list 类型的变量 result
-    (1) 获取 {{rawDir}} 下所有的一级格式为"年-月-日"的folder，筛选晚于{date}的路径名称，得到路径列表 filepaths
+    (1) 获取 {{rawDir}} 下所有的一级格式为"年-月-日"的folder，筛选出和{date}时间相差绝对值不超过{days}天的路径名称，得到路径列表 filepaths
     (2) 遍历 filepaths，对每个 filepath 进行以下操作
         [A] 获取 filepath 目录下'.txt'文件, 如果同名‘.digest’后缀文件存在，则 continue
         [B] 将上一步‘.txt’文件绝对路径添加到变量 result 里面(不包含.txt后缀)
     (3) 输出 result，请注意冒号可能是全角 => c```type(_CUR_) == list and len(_CUR_) > 0```
 FOR filelink in filelinks
-    content. #CODE 读取文件"{{filelink}}.txt"文件内容，最多 10k 个字符
+    content. #CODE 读取文件"{{filelink}}.txt"文件内容，最多 20k 个字符
     title. #PY ```content.split("\n")[0]```
     url.   #PY ```content.split("\n")[1]```
     team.      对下面论文内容，然后提取论文涉及到的团队和组织，不超过 20 字： ``` {content} ``` 请直接给出：
-    digest.    对下面论文内容总结摘要，不超过 100 字： ``` {content} ``` 请直接给出：
+    digest.    对下面论文内容总结摘要，不超过 200 字： ``` {content} ``` 请直接给出：
     last. #PY ```
     open('{filelink}.digest', "w").write(f'''标题：\t{title}\n下载地址：\t{url}\n团队：\t{team}\n摘要：\t{digest}\n''')
     ```

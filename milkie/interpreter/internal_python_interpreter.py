@@ -212,7 +212,7 @@ class InternalPythonInterpreter(BaseInterpreter):
                 raise InterpreterError(f"Syntax error in code: {e}")
             else:
                 import traceback
-
+                import pdb; pdb.set_trace()
                 return traceback.format_exc()
 
         result = None

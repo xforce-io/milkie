@@ -14,7 +14,8 @@ emailAddr. "freeman.xu@aishu.cn"
 
 interestedFiles. #PY ```
 lines = open("{topic2paper}").readlines()
-[line.split(">>")[1].strip().replace(".digest", ".txt") for line in lines if line[0].strip() != "None" and line.strip() != ""]
+
+[line.split(">>")[1].strip().replace(".digest", ".txt") for line in lines if line.split(">>")[0].strip() != "None"]
 ```
 
 clear. #PY```open("{reportFile}", "w")```
@@ -22,11 +23,12 @@ FOR filelink in interestedFiles
     content. #PY ```open("{filelink}").read()[:10 * 1000]```
     title. #PY ```content.split("\n")[0]```
     url.   #PY ```content.split("\n")[1].replace("/pdf/", "/html/")```
-    team.      对下面论文内容，然后提取论文涉及到的团队和组织，不超过 20 字： ``` {content} ``` 请直接给出：
-    digest.    对下面论文内容总结摘要，不超过 100 字： ``` {content} ``` 请直接给出：
-    problem.   对下面论文内容，然后总结文章试图解决的问题，不超过 100 字： ``` {content} ``` 请直接给出：
-    idea.      对下面论文内容，然后总结文章的关键发现和解决思路，不超过 100 字： ``` {content} ``` 请直接给出：
-    experiment. 对下面论文内容，然后总结文章的实验效果，不超过 100 字： ``` {content} ``` 请直接给出：
+    team.    [glm4-chat]  对下面论文内容，然后提取论文涉及到的团队和组织，不超过 20 字： ``` {content} ``` 请直接给出：
+    digest.  对下面论文内容总结摘要，不超过 100 字： ``` {content} ``` 请直接给出：
+    problem. 阅读下面论文内容，然后总结文章试图解决的问题，不超过 100 字： ``` {content} ``` 请直接给出：
+    idea.    [qwen-plus] 阅读下面论文内容，然后总结文章的关键发现和解决思路，不超过 100 字： ``` {content} ``` 请直接给出：
+    example. 阅读下面论文内容，然后用一个例子说明论文思路，不超过 100 字： ``` {content} ``` 请直接给出：
+    experiment. 阅读下面论文内容，然后总结文章的实验效果，不超过 100 字： ``` {content} ``` 请直接给出：
     last. #PY ```
     open('{reportFile}', "a").write(f'''
 # {title}
@@ -48,6 +50,9 @@ FOR filelink in interestedFiles
 ### 核心思路
 {idea}
 
+### 举例说明
+{example}
+
 ### 实验结果
 {experiment}
 
@@ -57,7 +62,7 @@ FOR filelink in interestedFiles
 END
 
 report. #PY```open("{reportFile}", "r").read()```
-mail. 根据下面信息发一份邮件
+mail. [deepseek-chat] 根据下面信息发一份邮件
     收件人:{{emailAddr}}
     标题: 论文-{{date}}
     正文: {{report}}

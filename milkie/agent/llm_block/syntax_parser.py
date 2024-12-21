@@ -80,7 +80,9 @@ class ResultOutputProcess:
                         len(result.output) > contextLen:
                     result.output = result.output[:contextLen]
                     logger.warning(f"output[{result.output}] is too long, actualLen={len(result.output)}, contextLen={contextLen}")
-                varDict.setGlobal(storeVar, result.output)
+                varDict.setGlobal(
+                    storeVar, 
+                    result.output.strip() if type(result.output) == str else result.output)
     
     def __str__(self) -> str:
         return f"ResultOutputProcess(results={self._results})"

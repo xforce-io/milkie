@@ -38,6 +38,8 @@ class CacheKV:
             return
         
         with self.lock:
+            # 确保目录存在
+            os.makedirs(os.path.dirname(self.filePath), exist_ok=True)
             with open(self.filePath, 'w', encoding="utf-8") as f:
                 json.dump(self.cache, f, ensure_ascii=False)
             self.lastDumpSec = curTime

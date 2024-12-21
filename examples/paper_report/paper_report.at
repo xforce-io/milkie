@@ -4,8 +4,8 @@
 对论文进行阅读和总结
 @desc
 
-download. #PY ```import os;os.system("python examples/paper_report/download.py {date} {root}")```
+download. #PY ```import os;os.system("python examples/paper_report/download.py {date} {days} {root}")```
 digest. #CALL @digest ""
-topic_inverted. #PY ```import os;os.system("python examples/paper_report/topic_inverted.py {date} {root}")```
 topic2paper. #CALL @topic2paper ""
+topic_inverted. #PY ```import os;os.system("python examples/paper_report/topic_inverted.py {date} {root}")```
 details. #CALL @details ""
