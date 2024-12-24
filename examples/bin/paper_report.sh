@@ -1,7 +1,7 @@
 #!/bin/bash
 
 ./bin/milkie \
-    --programFolder examples/paper_report/ \
+    --folder examples/paper_report/ \
     --agent paper_report \
     --verbose \
     --date `date +%Y-%m-%d` \

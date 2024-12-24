@@ -38,3 +38,6 @@ class Toolbox(Toolkit):
                     args=context.getVarDict().getGlobalDict())
                 return responce.respStr
         return ""
+
+    def isEmpty(self) -> bool:
+        return super().isEmpty()    

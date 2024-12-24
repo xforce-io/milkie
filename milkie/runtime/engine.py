@@ -12,18 +12,18 @@ logger = logging.getLogger(__name__)
 class Engine:
     def __init__(
             self,
-            programFolder: str = None,
-            programFilepath: str = None,
-            configPath: str = None) -> None:
-        self.globalContext = GlobalContext.create(configPath)
+            folder: str = None,
+            file: str = None,
+            config: str = None) -> None:
+        self.globalContext = GlobalContext.create(config)
         self.globalToolkits = GlobalToolkits(self.globalContext)
 
         self.agentPrograms = []
         self.chatroomPrograms = []
-        if programFolder:
-            for filename in os.listdir(programFolder):
+        if folder:
+            for filename in os.listdir(folder):
                 if filename.endswith('.at'):
-                    programFilepath = os.path.join(programFolder, filename)
+                    programFilepath = os.path.join(folder, filename)
                     program = AgentProgram(
                         programFilepath=programFilepath,
                         globalToolkits=self.globalToolkits,
@@ -32,7 +32,7 @@ class Engine:
                     program.parse()
                     self.agentPrograms.append(program)
                 elif filename.endswith('.cr'):
-                    programFilepath = os.path.join(programFolder, filename)
+                    programFilepath = os.path.join(folder, filename)
                     program = ChatroomProgram(
                         programFilepath=programFilepath,
                         globalToolkits=self.globalToolkits,
@@ -41,18 +41,18 @@ class Engine:
                     program.parse()
                     self.chatroomPrograms.append(program)
         
-        if programFilepath:
-            if programFilepath.endswith('.at'):
+        if file:
+            if file.endswith('.at'):
                 program = AgentProgram(
-                    programFilepath=programFilepath,
+                    programFilepath=file,
                     globalToolkits=self.globalToolkits,
                     globalContext=self.globalContext
                 )
                 program.parse()
                 self.agentPrograms.append(program)
-            elif programFilepath.endswith('.cr'):
+            elif file.endswith('.cr'):
                 program = ChatroomProgram(
-                    programFilepath=programFilepath,
+                    programFilepath=file,
                     globalToolkits=self.globalToolkits,
                     globalContext=self.globalContext
                 )
@@ -68,15 +68,19 @@ class Engine:
         )
 
     def run(self, chatroom: str = None, agent: str = None, args: dict = {}, **kwargs):
-        if chatroom:
-            return self.env.execute(
-                chatroomName=chatroom,
-                query=args["query"] if "query" in args else None, 
-                args=args, 
-                **kwargs)
-        elif agent:
-            return self.env.execute(
-                agentName=agent,
-                query=args["query"] if "query" in args else None, 
-                args=args, 
-                **kwargs)
+        try:
+            if chatroom:
+                return self.env.execute(
+                    chatroomName=chatroom,
+                    query=args["query"] if "query" in args else None, 
+                    args=args, 
+                    **kwargs)
+            elif agent:
+                return self.env.execute(
+                    agentName=agent,
+                    query=args["query"] if "query" in args else None, 
+                    args=args, 
+                    **kwargs)
+        except Exception as e:
+            print(f"Engine run error: {str(e)}", flush=True)
+            raise

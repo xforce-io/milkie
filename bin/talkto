@@ -21,9 +21,9 @@ def parseKeyValuePairs(args):
 
 def main():
     parser = argparse.ArgumentParser(description="运行 talkto 程序")
-    parser.add_argument("--programFolder", help="程序文件夹路径", default=None)
-    parser.add_argument("--programFilepath", help="程序文件路径", default=None)
-    parser.add_argument("--configPath", help="配置文件路径", default=None)
+    parser.add_argument("--folder", help="程序文件夹路径", default=None)
+    parser.add_argument("--file", help="程序文件路径", default=None)
+    parser.add_argument("--config", help="配置文件路径", default=None)
     parser.add_argument("--agent", help="指定运行的 agent", required=True)
 
     args, unknown = parser.parse_known_args()

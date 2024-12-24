@@ -1,3 +1,6 @@
 #!/bin/bash
 
-./bin/talkto --programFolder examples/expert_group --verbose --agent leader
+./bin/talkto \
+    --folder examples/expert_group \
+    --verbose \
+    --agent leader
