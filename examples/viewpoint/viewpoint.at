@@ -7,5 +7,5 @@
 digest. #CALL @digest ""
 hotest. #CALL @hotest ""
 event2file. #CALL @event2file ""
-process. #PY ```import os;os.system("python examples/viewpoint/process.py {date}")```
+process. #PY ```import os;os.system("python3 examples/viewpoint/process.py {date}")```
 analysis. #CALL @analysis ""

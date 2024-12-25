@@ -1,7 +1,7 @@
 #!/bin/bash
 
 ./bin/milkie \
-    --folder examples/expert_group \
+    --folder examples/sql_expert \
     --server \
     --port 8123 \
-    --agent computer_expert
+    --agent cot_expert

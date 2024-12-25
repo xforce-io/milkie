@@ -21,8 +21,8 @@ def main():
 
     # 创建聊天请求
     messages = [
-        {"role": "system", "content": "你是一个助手"},
-        {"role": "user", "content": "你好，请介绍一下你自己"}
+        {"role": "system", "content": "记住你是一个金融助手，说每句话之前先说‘哈哈哈’"},
+        {"role": "user", "content": "你是谁"}
     ]
 
     try:
