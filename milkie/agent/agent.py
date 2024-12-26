@@ -72,6 +72,10 @@ class Agent(BaseBlock):
     def assignExpert(self, expert: Agent):
         self.experts[expert.name] = expert
 
+    def setCode(self, code: str):
+        self.isCompiled = False
+        self.code = code
+
     def compile(self):
         if self.isCompiled:
             return

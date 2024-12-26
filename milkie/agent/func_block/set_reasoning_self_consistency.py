@@ -18,7 +18,7 @@ class SetReasoningSelfConsistency(FuncBlock):
             repoFuncs=repoFuncs)
 
         self.funcName = "ReasoningSelfConsistency"
-        self.params = ["amateur", "expert"]
+        self.params = ["amateur"]
 
     def execute(self, context: Context, query: str, args: dict, **kwargs):
         BaseBlock.execute(self, context, query, args, **kwargs)

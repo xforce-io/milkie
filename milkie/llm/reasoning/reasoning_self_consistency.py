@@ -66,7 +66,7 @@ class ReasoningSelfConsistency(Reasoning):
         cnt = 0 
         for resp in resps:
             stdout(f"\ntrial {cnt}", info=True, **kwargs)
-            candidates.append(self._makeResp(resp, **kwargs))
+            candidates.append(self._makeResp(resp, stream=stream, **kwargs))
             cnt += 1
         candidates = "\n".join(candidates)
 

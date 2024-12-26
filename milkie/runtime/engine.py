@@ -84,3 +84,13 @@ class Engine:
         except Exception as e:
             print(f"Engine run error: {str(e)}", flush=True)
             raise
+
+    def executeAgent(
+            self, 
+            agentName: str, 
+            code: str, 
+            args: dict={}, 
+            **kwargs):
+        agent = self.env.agents[agentName]
+        agent.setCode(code)
+        return self.env.execute(agentName=agentName, args=args, **kwargs)

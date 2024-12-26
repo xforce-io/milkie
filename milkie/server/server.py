@@ -36,7 +36,17 @@ class ChatCompletionResponse(BaseModel):
     choices: List[Dict[str, Any]]
     usage: Dict[str, int]
 
-class OpenAIServer:
+class AgentCompletionRequest(BaseModel):
+    agent: str
+    code: str
+    args: dict
+    
+class AgentCompletionResponse(BaseModel):
+    errno: int
+    errmsg: str
+    resp: str
+
+class Server:
     def __init__(self, engine: Engine, agent_name: str):
         self.engine = engine
         self.agent_name = agent_name
@@ -51,59 +61,8 @@ class OpenAIServer:
         )
         
         self.app.post("/v1/chat/completions")(self.chat_completion)
-        
-    def create_stream_response(self, response_id: str, content_gen: Generator) -> Generator:
-        """创建流式响应"""
-        try:
-            for chunk in content_gen:
-                # 确保 chunk 是字符串
-                chunk_str = str(chunk)
-                if not chunk_str:
-                    continue
-                    
-                chunk_data = {
-                    "id": response_id,
-                    "object": "chat.completion.chunk",
-                    "created": int(time.time()),
-                    "model": self.agent_name,
-                    "choices": [{
-                        "index": 0,
-                        "delta": {
-                            "role": "assistant",
-                            "content": chunk_str
-                        },
-                        "finish_reason": None
-                    }]
-                }
-                # 添加调试日志
-                print(f"Sending chunk: {chunk_str}", flush=True)
-                yield f"data: {json.dumps(chunk_data)}\n\n"
-                
-            # 发送结束标记
-            end_chunk = {
-                "id": response_id,
-                "object": "chat.completion.chunk",
-                "created": int(time.time()),
-                "model": self.agent_name,
-                "choices": [{
-                    "index": 0,
-                    "delta": {},
-                    "finish_reason": "stop"
-                }]
-            }
-            yield f"data: {json.dumps(end_chunk)}\n\n"
-            yield "data: [DONE]\n\n"
-            
-        except Exception as e:
-            print(f"Stream error: {str(e)}", flush=True)
-            error_chunk = {
-                "error": {
-                    "message": str(e),
-                    "type": "server_error"
-                }
-            }
-            yield f"data: {json.dumps(error_chunk)}\n\n"
-        
+        self.app.post("/v1/agent")(self.execute_agent)
+       
     async def chat_completion(self, request: ChatCompletionRequest):
         try:
             # 提取 system prompt 和用户查询
@@ -159,6 +118,73 @@ class OpenAIServer:
             
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
+
+    async def execute_agent(self, request: AgentCompletionRequest):
+        try:
+            response = self.engine.executeAgent(agent=self.agent_name, code=request.code, args=request.args)
+            return AgentCompletionResponse(
+                errno=0,
+                errmsg="",
+                resp=str(response)
+            )
+        except Exception as e:
+            return AgentCompletionResponse(
+                errno=1,
+                errmsg=str(e),
+                resp=""
+            )
+
+    def create_stream_response(self, response_id: str, content_gen: Generator) -> Generator:
+        """创建流式响应"""
+        try:
+            for chunk in content_gen:
+                # 确保 chunk 是字符串
+                chunk_str = str(chunk)
+                if not chunk_str:
+                    continue
+                    
+                chunk_data = {
+                    "id": response_id,
+                    "object": "chat.completion.chunk",
+                    "created": int(time.time()),
+                    "model": self.agent_name,
+                    "choices": [{
+                        "index": 0,
+                        "delta": {
+                            "role": "assistant",
+                            "content": chunk_str
+                        },
+                        "finish_reason": None
+                    }]
+                }
+                # 添加调试日志
+                print(f"Sending chunk: {chunk_str}", flush=True)
+                yield f"data: {json.dumps(chunk_data)}\n\n"
+                
+            # 发送结束标记
+            end_chunk = {
+                "id": response_id,
+                "object": "chat.completion.chunk",
+                "created": int(time.time()),
+                "model": self.agent_name,
+                "choices": [{
+                    "index": 0,
+                    "delta": {},
+                    "finish_reason": "stop"
+                }]
+            }
+            yield f"data: {json.dumps(end_chunk)}\n\n"
+            yield "data: [DONE]\n\n"
+            
+        except Exception as e:
+            print(f"Stream error: {str(e)}", flush=True)
+            error_chunk = {
+                "error": {
+                    "message": str(e),
+                    "type": "server_error"
+                }
+            }
+            yield f"data: {json.dumps(error_chunk)}\n\n"
     
     def run(self, host: str = "0.0.0.0", port: int = 8000):
         uvicorn.run(self.app, host=host, port=port) 
