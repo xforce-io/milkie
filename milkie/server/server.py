@@ -120,8 +120,14 @@ class Server:
             raise HTTPException(status_code=500, detail=str(e))
 
     async def execute_agent(self, request: AgentCompletionRequest):
+        if request.agent != self.agent_name:
+            raise HTTPException(status_code=400, detail="No suitable agent found")
+        
         try:
-            response = self.engine.executeAgent(agent=self.agent_name, code=request.code, args=request.args)
+            response = self.engine.executeAgent(
+                agentName=request.agent, 
+                code=request.code, 
+                args=request.args)
             return AgentCompletionResponse(
                 errno=0,
                 errmsg="",

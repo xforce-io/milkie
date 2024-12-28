@@ -92,5 +92,5 @@ class Engine:
             args: dict={}, 
             **kwargs):
         agent = self.env.agents[agentName]
-        agent.setCode(code)
+        agent.setCodeAndCompile(code)
         return self.env.execute(agentName=agentName, args=args, **kwargs)

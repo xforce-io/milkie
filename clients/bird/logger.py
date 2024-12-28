@@ -25,7 +25,7 @@ def setup_logger(name: str = "bird") -> logging.Logger:
     
     # 格式化器
     formatter = logging.Formatter(
-        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        '%(asctime)s - %(name)s - %(levelname)s - %(pathname)s:%(lineno)d - %(message)s'
     )
     file_handler.setFormatter(formatter)
     console_handler.setFormatter(formatter)
@@ -38,3 +38,11 @@ def setup_logger(name: str = "bird") -> logging.Logger:
 
 # 创建全局日志对象
 logger = setup_logger() 
+
+MaxLogLen = 1000
+
+def INFO(msg: str):
+    logger.info(msg[:MaxLogLen])
+
+def ERROR(msg: str):
+    logger.error(msg[:MaxLogLen])

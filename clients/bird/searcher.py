@@ -1,33 +1,11 @@
-from dataclasses import dataclass
-from enum import Enum
-from typing import Optional, List, Dict, Any
-from collections import deque
-
+from typing import Optional
 from milkie.sdk.agent_client import AgentClient
 from milkie.sdk.config_server import ConfigServer
 from clients.bird.config import Config
 from clients.bird.database import Database
-from clients.bird.logger import logger
-
-class NodeType(Enum):
-    ROOT = "root"
-    THOUGHT = "thought"
-    SQL = "sql"
-    RESULT = "result"
-
-@dataclass
-class Node:
-    type: NodeType
-    parent: Optional['Node']
-    children: List['Node']
-    depth: int
-    success: bool = True
-    
-    # 不同类型节点的特定属性
-    query: Optional[str] = None  # ROOT
-    thought: Optional[str] = None  # THOUGHT
-    sql: Optional[str] = None  # SQL
-    result: Optional[str] = None  # RESULT
+from clients.bird.logger import INFO, ERROR
+from clients.bird.tree import SearchTree, Node, NodeType
+from milkie.utils.data_utils import escape
 
 class Searcher:
     def __init__(self, config: Optional[Config] = None):
@@ -39,151 +17,180 @@ class Searcher:
         self._client = AgentClient(ConfigServer(config.agent.addr))
         self.agent_name = config.agent.name
         
-    def thought(self, query: str) -> str:
-        return f"""
-Given the query: {query}
-Think about how to solve this query step by step.
-Output your thought process in a clear and structured way.
-"""
+    def thought(self, query: str, error_patterns: set, trial: int) -> str:
+        error_hints = ""
+        if error_patterns:
+            error_hints = "\n已有的错误模式：\n" + "\n".join(f"- {e}" for e in error_patterns)
+            
+        return escape(f"""
+    [deepseek-coder] (trial: {trial}) 请根据请求中包括的 schema、问题做分析，给出问题的解决思路
+    schema及问题 ```{query}```
+    {error_hints}
 
-    def sql(self, query: str, thought: str) -> str:
-        return f"""
-Given the query: {query}
-And the thought process: {thought}
-Generate a SQL query that can help answer this question.
-The SQL should be executable and return meaningful results.
-"""
+    请思考清楚需要使用哪些 table 进行问题解决，仅使用必要的表，并注意：
+    1. 分析需要用到的表和字段
+    2. 考虑表之间的关联关系
+    3. 如果有错误模式，思考如何避免这些错误
+    
+    现在请输出你的分析和思考，请不要直接输出 sql：
+""")
+
+    def sql(self, query: str, thought: str, error_patterns: set, trial: int) -> str:
+        error_hints = ""
+        if error_patterns:
+            error_hints = "\n已有的错误模式：\n" + "\n".join(f"- {e}" for e in error_patterns)
+            
+        return escape(f"""
+    [deepseek-coder] (trial: {trial}) 请结合原始问题和分析思考结果，给出最终的 sql 
+    请注意以下规则：
+    1. 仔细检查 tables 的 schema，不要使用不存在的 column
+    2. SQL 中不允许直接在 MAX/MIN 中嵌套 SUM 函数
+    3. 如果有错误模式，必须避免这些错误，确保表的连接条件正确
+    4. 输出的 SQL 必须是完整的、可执行的
+    5. 请看清楚问题所需要问的信息，回答且仅回答必要的信息
+
+    schema及问题 ```{query}```
+    分析思考结果 ```{thought}```
+    {error_hints}
+    
+    现在请输出最终 sql：
+""")
+
+    def forward_step(self, tree: SearchTree):
+        """执行一次前向扩展，采用广度优先策略"""
+        # 当前层级的所有节点
+        current_level = []
+        next_level = []
+        
+        # 如果栈为空，说明是初始状态，从根节点开始
+        if not tree.stack:
+            if not tree.root.is_completed():
+                current_level.append(tree.root)
+        else:
+            current_level = tree.stack[:]
+            
+        tree.stack = []  # 清空栈，准备收集下一层级的节点
+        
+        # 处理当前层级的所有节点
+        for node in current_level:
+            if node.is_completed():
+                continue
+                
+            if node.type == NodeType.ROOT:
+                # ROOT节点只产生THOUGHT节点
+                if node.should_continue_thought(self.config.search.max_thoughts):
+                    try:
+                        trial = node.increment_thought_count()
+                        code = self.thought(
+                            node.expa.query,
+                            node.expa.error_patterns,
+                            trial - 1
+                        )
+                        thought = self._client.execute(code, self.agent_name)
+                        
+                        thought_node = Node(
+                            type=NodeType.THOUGHT,
+                            parent=node,
+                            children=[],
+                            depth=node.depth + 1
+                        )
+                        thought_node.expa.query = node.expa.query
+                        thought_node.expa.thought = thought
+                        thought_node.expa.error_patterns = set()
+                        
+                        node.children.append(thought_node)
+                        next_level.append(thought_node)
+                        INFO(f"Node[{node.id}] expanded to THOUGHT node[{thought_node.id}|{self._unnewline(thought)}]")
+                    except Exception as e:
+                        ERROR(f"Node[{node.id}] failed to expand to THOUGHT: {str(e)}")
+                    
+            elif node.type == NodeType.THOUGHT:
+                # THOUGHT节点产生SQL节点
+                if node.should_continue_sql(self.config.search.min_sqls, self.config.search.max_sqls):
+                    try:
+                        trial = node.increment_sql_count()
+                        code = self.sql(
+                            node.expa.query,
+                            node.expa.thought,
+                            node.expa.error_patterns,
+                            trial - 1
+                        )
+                        sql = self._client.execute(code, self.agent_name)
+                        sql = self._preprocess_sql(sql)
+                        result, error = self._db.execsql(sql)
+                        success = result is not None
+                        
+                        sql_node = Node(
+                            type=NodeType.SQL,
+                            parent=node,
+                            children=[],
+                            depth=node.depth + 1
+                        )
+                        sql_node.other.sql = sql
+                        sql_node.other.result = result
+                        sql_node.other.success = success
+                        
+                        if not success:
+                            sql_node.other.error = error
+                            node.add_error_pattern(error)
+                        else:
+                            node.increment_success_count()
+                        
+                        node.children.append(sql_node)
+                        tree.leaf_nodes.append(sql_node)
+                        
+                        if success:
+                            INFO(f"Node[{node.id}] expanded to successful SQL node[{sql_node.id}|{self._unnewline(sql)}] with result: {result}")
+                        else:
+                            INFO(f"Node[{node.id}] expanded to failed SQL node[{sql_node.id}|{self._unnewline(sql)}]")
+                            
+                    except Exception as e:
+                        error_msg = str(e)
+                        ERROR(f"Node[{node.id}] failed to expand to SQL: {error_msg}")
+                        node.add_error_pattern(error_msg)
+                        
+            elif node.type == NodeType.SQL:
+                # SQL 节点是叶子节点，不需要扩展
+                if node not in tree.leaf_nodes:
+                    tree.leaf_nodes.append(node)
+                    
+        # 检查当前层级节点是否需要继续探索
+        for node in current_level:
+            if node.should_mark_completed(
+                self.config.search.min_sqls,
+                self.config.search.max_sqls,
+                self.config.search.max_thoughts
+            ):
+                node.mark_completed()
+            elif not node.is_completed():
+                next_level.append(node)
+                    
+        # 更新下一轮要处理的节点
+        tree.stack = next_level
 
     def inference(self, query: str) -> str:
         try:
-            # 创建根节点
-            root = Node(
-                type=NodeType.ROOT,
-                parent=None,
-                children=[],
-                depth=0,
-                query=query
-            )
+            # 创建搜索树
+            tree = SearchTree(query, self.config.search.max_iters)
             
-            # 使用队列进行广度优先搜索
-            queue = deque([root])
-            leaf_nodes = []
+            # 执行前向扩展直到完成
+            while not tree.is_completed():
+                self.forward_step(tree)
+                tree.iteration += 1
             
-            while queue:
-                node = queue.popleft()
-                
-                # 根据节点类型进行扩展
-                if node.type == NodeType.ROOT:
-                    # 扩展为 Thought 节点
-                    for _ in range(self.config.search.max_thoughts):
-                        try:
-                            code = self.thought(node.query)
-                            thought = self._client.execute(code, self.agent_name)
-                            
-                            thought_node = Node(
-                                type=NodeType.THOUGHT,
-                                parent=node,
-                                children=[],
-                                depth=node.depth + 1,
-                                thought=thought
-                            )
-                            node.children.append(thought_node)
-                            queue.append(thought_node)
-                        except Exception as e:
-                            logger.error(f"Error generating thought: {str(e)}")
-                            # 如果生成失败，创建一个失败的节点
-                            failed_node = Node(
-                                type=NodeType.THOUGHT,
-                                parent=node,
-                                children=[],
-                                depth=node.depth + 1,
-                                success=False,
-                                thought=str(e)
-                            )
-                            node.children.append(failed_node)
-                            leaf_nodes.append(failed_node)
-                            
-                elif node.type == NodeType.THOUGHT:
-                    # 扩展为 SQL 节点
-                    for _ in range(self.config.search.max_sqls):
-                        try:
-                            code = self.sql(node.parent.query, node.thought)
-                            sql = self._client.execute(code, self.agent_name)
-                            
-                            sql_node = Node(
-                                type=NodeType.SQL,
-                                parent=node,
-                                children=[],
-                                depth=node.depth + 1,
-                                sql=sql
-                            )
-                            node.children.append(sql_node)
-                            queue.append(sql_node)
-                        except Exception as e:
-                            logger.error(f"Error generating SQL: {str(e)}")
-                            failed_node = Node(
-                                type=NodeType.SQL,
-                                parent=node,
-                                children=[],
-                                depth=node.depth + 1,
-                                success=False,
-                                sql=str(e)
-                            )
-                            node.children.append(failed_node)
-                            leaf_nodes.append(failed_node)
-                            
-                elif node.type == NodeType.SQL:
-                    # 扩展为 Result 节点
-                    result = self._db.execsql(node.sql)
-                    if result is None:
-                        # SQL执行错误
-                        failed_node = Node(
-                            type=NodeType.RESULT,
-                            parent=node,
-                            children=[],
-                            depth=node.depth + 1,
-                            success=False,
-                            result="SQL execution failed"
-                        )
-                        node.children.append(failed_node)
-                        leaf_nodes.append(failed_node)
-                    else:
-                        result_node = Node(
-                            type=NodeType.RESULT,
-                            parent=node,
-                            children=[],
-                            depth=node.depth + 1,
-                            result=result
-                        )
-                        node.children.append(result_node)
-                        leaf_nodes.append(result_node)
-                
-                elif node.type == NodeType.RESULT:
-                    # Result 节点是叶子节点，不需要扩展
-                    if node not in leaf_nodes:
-                        leaf_nodes.append(node)
-            
-            # 对叶子节点进行排序
-            def node_priority(node: Node) -> tuple:
-                has_result = node.type == NodeType.RESULT
-                result_not_empty = has_result and node.result and node.result != "[]"
-                return (has_result, result_not_empty, node.success)
-            
-            leaf_nodes.sort(key=node_priority, reverse=True)
-            
-            # 找到优先级最高的叶子节点
-            if not leaf_nodes:
-                return None
-                
-            best_node = leaf_nodes[0]
-            
-            # 回溯找到对应的 SQL 节点
-            current = best_node
-            while current and current.type != NodeType.SQL:
-                current = current.parent
-                
-            return current.sql if current else None
+            # 选择最佳 SQL
+            return tree.get_best_sql()
             
         except Exception as e:
-            logger.error(f"Error in inference: {str(e)}")
+            ERROR(f"Error in inference: {str(e)}")
             raise
+
+    def _preprocess_sql(self, sql: str) -> str:
+        if sql.startswith("```sql") and sql.endswith("```"):
+            return sql[6:-3]
+        elif sql.startswith("```mysql") and sql.endswith("```"):
+            return sql[8:-3]
+        return sql
+
+    def _unnewline(self, sql: str) -> str:
+        return sql.replace(chr(10), "|")

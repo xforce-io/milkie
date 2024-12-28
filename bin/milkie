@@ -10,7 +10,7 @@ projectRoot = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, projectRoot)
 
 from milkie.runtime.engine import Engine
-from milkie.server.openai_server import OpenAIServer
+from milkie.server.server import Server
 
 @dataclass
 class Args:
@@ -76,7 +76,7 @@ def main():
             print("Error: --agent is required when running in server mode")
             sys.exit(1)
         
-        server = OpenAIServer(engine=engine, agent_name=args.agent)
+        server = Server(engine=engine, agent_name=args.agent)
         server.run(port=args.port)
         return
     

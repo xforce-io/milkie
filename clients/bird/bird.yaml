@@ -3,15 +3,17 @@ server:
   
 agent:
   addr: "http://localhost:8123"
-  name: "sql_expert"
+  name: "cot_expert"
 
 database:
   host: "localhost"
   port: 3306
   user: "root"
-  password: "password"
-  database: "test"
+  password: "root123"
+  database: "BIRD"
   
 search:
-  max_thoughts: 3
-  max_sqls: 2
+  max_thoughts: 2
+  min_sqls: 2
+  max_sqls: 3
+  max_iters: 10

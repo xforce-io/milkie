@@ -19,7 +19,7 @@ FOR filelink in filelinks
     content. #CODE 读取文件"{{filelink}}.txt"文件内容，最多 20k 个字符
     title. #PY ```content.split("\n")[0]```
     url.   #PY ```content.split("\n")[1]```
-    team.      对下面论文内容，然后提取论文涉及到的团队和组织，不超过 20 字： ``` {content} ``` 请直接给出：
+    team.    [glm4-chat]  对下面论文内容，然后提取论文涉及到的团队和组织，不超过 20 字： ``` {content} ``` 请直接给出：
     digest.    对下面论文内容总结摘要，不超过 200 字： ``` {content} ``` 请直接给出：
     last. #PY ```
     open('{filelink}.digest', "w").write(f'''标题：\t{title}\n下载地址：\t{url}\n团队：\t{team}\n摘要：\t{digest}\n''')

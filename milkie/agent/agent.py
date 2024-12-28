@@ -9,6 +9,7 @@ from milkie.agent.func_block.retrieval_block import RetrievalBlock
 from milkie.agent.func_block.set_model import SetModel
 from milkie.agent.func_block.set_reasoning_self_consistency import SetReasoningSelfConsistency
 from milkie.agent.func_block.set_reasoning_self_critique import SetReasoningSelfCritique
+from milkie.agent.llm_block.llm_block import LLMBlock
 from milkie.config.constant import KeywordFuncStart, KeywordFuncEnd
 from milkie.context import Context
 from milkie.config.config import GlobalConfig
@@ -42,7 +43,7 @@ class Agent(BaseBlock):
         self.code = code
         self.systemPrompt = systemPrompt
         self.funcBlocks: List[FuncBlock] = []
-        self.flowBlocks: List[FlowBlock] = []
+        self.topBlocks: List[FlowBlock] = []
         self.repoFuncs.add("Retrieval", RetrievalBlock(
             context=self.context,
             config=self.config,
@@ -72,9 +73,10 @@ class Agent(BaseBlock):
     def assignExpert(self, expert: Agent):
         self.experts[expert.name] = expert
 
-    def setCode(self, code: str):
+    def setCodeAndCompile(self, code: str):
         self.isCompiled = False
         self.code = code
+        self.compileAsSingleLLMBlock()
 
     def compile(self):
         if self.isCompiled:
@@ -116,8 +118,27 @@ class Agent(BaseBlock):
             self.repoFuncs.add(funcName, funcBlock)
             logger.debug(f"Added function block: {funcName}")
 
-        for block in self.flowBlocks:
+        for block in self.topBlocks:
             block.compile()
+
+        self.isCompiled = True
+
+    def compileAsSingleLLMBlock(self):
+        if self.isCompiled:
+            return
+        
+        self.topBlocks = [LLMBlock.create(
+            context=self.context,
+            config=self.config,
+            taskExpr=self.code,
+            toolkit=self.toolkit,
+            usePrevResult=self.usePrevResult,
+            decomposeTask=False,
+            repoFuncs=self.repoFuncs
+        )]
+        self.topBlocks[0].compile()
+
+        self.isCompiled = True
 
     def _addFuncBlock(self, lines):
         funcBlock = FuncBlock.create(
@@ -130,7 +151,7 @@ class Agent(BaseBlock):
         self.funcBlocks.append(funcBlock)
 
     def _addFlowBlock(self, lines):
-        self.flowBlocks.append(FlowBlock.create(
+        self.topBlocks.append(FlowBlock.create(
             '\n'.join(lines),
             context=self.context,
             config=self.config,
@@ -169,7 +190,7 @@ class Agent(BaseBlock):
             history.resetUse()
             kwargs["history"] = history
 
-        for block in self.flowBlocks:
+        for block in self.topBlocks:
             result = block.execute(
                 context=context,
                 query=query,

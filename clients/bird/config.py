@@ -23,7 +23,9 @@ class DatabaseConfig:
 @dataclass
 class SearchConfig:
     max_thoughts: int
+    min_sqls: int
     max_sqls: int
+    max_iters: int
 
 @dataclass
 class Config:
