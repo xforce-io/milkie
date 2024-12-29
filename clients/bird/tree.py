@@ -113,7 +113,8 @@ class Node:
                 for child in self.children
             )
             return (has_valid_result and self.stats.sql_count >= min_sqls) or \
-                   self.stats.sql_count >= max_sqls
+                   self.stats.sql_count >= max_sqls or \
+                   (self.stats.sql_count >= min_sqls and self.stats.success_count > 0)
                    
         return False
 

@@ -22,15 +22,18 @@ class Searcher:
         if error_patterns:
             error_hints = "\n已有的错误模式：\n" + "\n".join(f"- {e}" for e in error_patterns)
             
+        #model = "deepseek-coder" if trial == 0 else "qwen-coder-plus"
+        model = "deepseek-coder"
         return escape(f"""
-    [deepseek-coder] (trial: {trial}) 请根据请求中包括的 schema、问题做分析，给出问题的解决思路
+    [{model}] (trial: {trial}) 请根据请求中包括的 schema、问题做分析，一步一步思考，给出问题的解决思路
     schema及问题 ```{query}```
     {error_hints}
 
-    请思考清楚需要使用哪些 table 进行问题解决，仅使用必要的表，并注意：
-    1. 分析需要用到的表和字段
-    2. 考虑表之间的关联关系
-    3. 如果有错误模式，思考如何避免这些错误
+    请注意：
+    1. 首先明确 query 中的问题问的 metric，不需要回答多余的信息，例如问“人口最多的城市是哪个”，只需要回答满足要求的城市，而不需要返回人口数量
+    2. 分析需要用到的表和字段，仅使用必要的表和字段
+    3. 考虑表之间的关联关系
+    4. 如果有错误模式，思考如何避免这些错误
     
     现在请输出你的分析和思考，请不要直接输出 sql：
 """)

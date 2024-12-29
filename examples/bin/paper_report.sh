@@ -5,5 +5,5 @@
     --agent paper_report \
     --verbose \
     --date `date +%Y-%m-%d` \
-    --days 3 \
+    --days 7 \
     --root "/Users/xupeng"

@@ -5,7 +5,7 @@
 @desc
 
 viewpoint. "{root}/dev/github/milkie/data/viewpoint"
-sourceDir. "{root}/lab/crawlers/data/news_articles/"
+sourceDir. "{root}/dev/github/crawlers/data/news_articles/"
 viewpointDir. "{viewpoint}/{date}/viewpoint"
 briefsFilepath. "{viewpoint}/{date}/briefs.txt"
 hotnewsFilepath. "{viewpoint}/{date}/hotnews.txt"
