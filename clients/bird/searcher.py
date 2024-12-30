@@ -90,7 +90,7 @@ class Searcher:
                             trial - 1
                         )
                         thought = self._client.execute(code, self.agent_name)
-                        
+                                                
                         thought_node = Node(
                             type=NodeType.THOUGHT,
                             parent=node,
