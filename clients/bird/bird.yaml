@@ -20,5 +20,4 @@ search:
 
 model:
   thought_model: "deepseek-chat"
-  second_chance_thought_model: "deepseek-chat"
   sql_model: "deepseek-chat"

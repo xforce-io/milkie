@@ -9,8 +9,7 @@ from milkie.utils.data_utils import escape
 
 class Searcher:
     def __init__(self, 
-            config: Optional[Config] = None,
-            second_chance: bool = False):
+            config: Optional[Config] = None):
         if config is None:
             config = Config.load()
             
@@ -18,7 +17,6 @@ class Searcher:
         self._db = Database(config.database)
         self._client = AgentClient(ConfigServer(config.agent.addr))
         self.agent_name = config.agent.name
-        self.second_chance = second_chance
 
     def thought(self, query: str, error_patterns: set, trial: int) -> str:
         error_hints = ""
@@ -26,9 +24,21 @@ class Searcher:
             error_hints = "\n已有的错误模式：\n" + "\n".join(f"- {e}" for e in error_patterns)
             
         return escape(f"""
-    [{self._get_thought_model(self.second_chance)}] (trial: {trial}) 请根据请求中包括的 schema、问题做分析，一步一步思考，给出问题的解决思路
+    [{self._get_thought_model()}] (trial: {trial}) 请按照下面格式要求，一步一步思考，给出问题的解决思路
     schema及问题 ```{query}```
     {error_hints}
+
+    输出格式如下
+    ```
+    对问题的理解：
+    <对问题的理解>
+    
+    可能用到的表\字段\关联关系：
+    <可能用到的表\字段\关联关系>
+    
+    分析及思考结果：
+    <分析及思考结果>
+    ```
 
     请注意：
     1. 首先明确 query 中的问题问的 metric，不需要回答多余的信息，例如问"人口最多的城市是哪个"，只需要回答满足要求的城市，而不需要返回人口数量
@@ -36,7 +46,7 @@ class Searcher:
     3. 考虑表之间的关联关系
     4. 如果有错误模式，思考如何避免这些错误
     
-    现在请输出你的分析和思考，请不要直接输出 sql：
+    现在请按照格式要求输出你的分析和思考：
 """)
 
     def sql(self, query: str, thought: str, error_patterns: set, trial: int) -> str:
@@ -82,7 +92,7 @@ class Searcher:
                 
             if node.type == NodeType.ROOT:
                 # ROOT节点只产生THOUGHT节点
-                if node.should_continue_thought(self._get_max_thoughts(self.second_chance)):
+                if node.should_continue_thought(self._get_max_thoughts()):
                     try:
                         trial = node.increment_thought_count()
                         code = self.thought(
@@ -163,7 +173,7 @@ class Searcher:
             if node.should_mark_completed(
                 self.config.search.min_sqls,
                 self.config.search.max_sqls,
-                self._get_max_thoughts(self.second_chance)
+                self._get_max_thoughts()
             ):
                 node.mark_completed()
             elif not node.is_completed():
@@ -189,11 +199,11 @@ class Searcher:
             ERROR(f"Error in inference: {str(e)}")
             raise
 
-    def _get_thought_model(self, second_chance: bool) -> str:
-        return self.config.model.thought_model if not second_chance else self.config.model.second_chance_thought_model
+    def _get_thought_model(self) -> str:
+        return self.config.model.thought_model
 
-    def _get_max_thoughts(self, second_chance: bool) -> int:
-        return self.config.search.max_thoughts if not second_chance else 1
+    def _get_max_thoughts(self) -> int:
+        return self.config.search.max_thoughts
 
     def _preprocess_sql(self, sql: str) -> str:
         if sql.startswith("```sql") and sql.endswith("```"):

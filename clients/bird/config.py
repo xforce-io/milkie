@@ -30,7 +30,6 @@ class SearchConfig:
 @dataclass
 class ModelConfig:
     thought_model: str  # 用于生成思考的模型
-    second_chance_thought_model: str  # 用于生成思考的模型
     sql_model: str      # 用于生成SQL的模型
 
 @dataclass
