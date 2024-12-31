@@ -9,6 +9,7 @@ import json
 
 from milkie.runtime.engine import Engine
 from milkie.response import Response
+from milkie.log import ERROR
 
 class Message(BaseModel):
     role: str
@@ -121,6 +122,7 @@ class Server:
 
     async def execute_agent(self, request: AgentCompletionRequest):
         if request.agent != self.agent_name:
+            ERROR(f"No suitable agent found for request: {request.agent}")
             raise HTTPException(status_code=400, detail="No suitable agent found")
         
         try:

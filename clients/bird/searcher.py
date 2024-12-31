@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Any, Optional
 from milkie.sdk.agent_client import AgentClient
 from milkie.sdk.config_server import ConfigServer
 from clients.bird.config import Config
@@ -8,7 +8,9 @@ from clients.bird.tree import SearchTree, Node, NodeType
 from milkie.utils.data_utils import escape
 
 class Searcher:
-    def __init__(self, config: Optional[Config] = None):
+    def __init__(self, 
+            config: Optional[Config] = None,
+            second_chance: bool = False):
         if config is None:
             config = Config.load()
             
@@ -16,21 +18,20 @@ class Searcher:
         self._db = Database(config.database)
         self._client = AgentClient(ConfigServer(config.agent.addr))
         self.agent_name = config.agent.name
-        
+        self.second_chance = second_chance
+
     def thought(self, query: str, error_patterns: set, trial: int) -> str:
         error_hints = ""
         if error_patterns:
             error_hints = "\n已有的错误模式：\n" + "\n".join(f"- {e}" for e in error_patterns)
             
-        #model = "deepseek-coder" if trial == 0 else "qwen-coder-plus"
-        model = "deepseek-coder"
         return escape(f"""
-    [{model}] (trial: {trial}) 请根据请求中包括的 schema、问题做分析，一步一步思考，给出问题的解决思路
+    [{self._get_thought_model(self.second_chance)}] (trial: {trial}) 请根据请求中包括的 schema、问题做分析，一步一步思考，给出问题的解决思路
     schema及问题 ```{query}```
     {error_hints}
 
     请注意：
-    1. 首先明确 query 中的问题问的 metric，不需要回答多余的信息，例如问“人口最多的城市是哪个”，只需要回答满足要求的城市，而不需要返回人口数量
+    1. 首先明确 query 中的问题问的 metric，不需要回答多余的信息，例如问"人口最多的城市是哪个"，只需要回答满足要求的城市，而不需要返回人口数量
     2. 分析需要用到的表和字段，仅使用必要的表和字段
     3. 考虑表之间的关联关系
     4. 如果有错误模式，思考如何避免这些错误
@@ -44,7 +45,7 @@ class Searcher:
             error_hints = "\n已有的错误模式：\n" + "\n".join(f"- {e}" for e in error_patterns)
             
         return escape(f"""
-    [deepseek-coder] (trial: {trial}) 请结合原始问题和分析思考结果，给出最终的 sql 
+    [{self.config.model.sql_model}] (trial: {trial}) 请结合原始问题和分析思考结果，给出最终的 sql 
     请注意以下规则：
     1. 仔细检查 tables 的 schema，不要使用不存在的 column
     2. SQL 中不允许直接在 MAX/MIN 中嵌套 SUM 函数
@@ -81,7 +82,7 @@ class Searcher:
                 
             if node.type == NodeType.ROOT:
                 # ROOT节点只产生THOUGHT节点
-                if node.should_continue_thought(self.config.search.max_thoughts):
+                if node.should_continue_thought(self._get_max_thoughts(self.second_chance)):
                     try:
                         trial = node.increment_thought_count()
                         code = self.thought(
@@ -162,7 +163,7 @@ class Searcher:
             if node.should_mark_completed(
                 self.config.search.min_sqls,
                 self.config.search.max_sqls,
-                self.config.search.max_thoughts
+                self._get_max_thoughts(self.second_chance)
             ):
                 node.mark_completed()
             elif not node.is_completed():
@@ -171,7 +172,7 @@ class Searcher:
         # 更新下一轮要处理的节点
         tree.stack = next_level
 
-    def inference(self, query: str) -> str:
+    def inference(self, query: str) -> tuple[str, Any]:
         try:
             # 创建搜索树
             tree = SearchTree(query, self.config.search.max_iters)
@@ -187,6 +188,12 @@ class Searcher:
         except Exception as e:
             ERROR(f"Error in inference: {str(e)}")
             raise
+
+    def _get_thought_model(self, second_chance: bool) -> str:
+        return self.config.model.thought_model if not second_chance else self.config.model.second_chance_thought_model
+
+    def _get_max_thoughts(self, second_chance: bool) -> int:
+        return self.config.search.max_thoughts if not second_chance else 1
 
     def _preprocess_sql(self, sql: str) -> str:
         if sql.startswith("```sql") and sql.endswith("```"):

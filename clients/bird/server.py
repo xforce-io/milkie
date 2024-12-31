@@ -7,7 +7,7 @@ import uvicorn
 
 from clients.bird.config import Config
 from clients.bird.searcher import Searcher
-from clients.bird.logger import logger
+from clients.bird.logger import ERROR, INFO, logger
 
 class Message(BaseModel):
     role: str
@@ -42,6 +42,7 @@ class Server:
             
         self.config = config
         self.searcher = Searcher(config)
+        self.searcher_second_chance = Searcher(config, second_chance=True)
         self.app = FastAPI()
         
         # 添加 CORS 中间件
@@ -69,12 +70,14 @@ class Server:
                 query = ""
                 
             # 执行搜索
-            result = self.searcher.inference(query)
+            sql, result = self.searcher.inference(query)
             
             # 如果结果为 None，抛出异常
-            if result is None:
-                logger.error("Inference returned None")
-                raise HTTPException(status_code=400, detail="Failed to generate valid SQL query")
+            if sql is None or not result:
+                sql, result = self.searcher_second_chance.inference(query)
+                if sql is None:
+                    ERROR(logger, "Inference returned None")
+                    raise HTTPException(status_code=400, detail="Failed to generate valid SQL query")
             
             # 构建响应
             return ChatCompletionResponse(
@@ -99,11 +102,11 @@ class Server:
         except HTTPException:
             raise
         except Exception as e:
-            logger.error(f"Error processing request: {str(e)}")
+            ERROR(f"Error processing request: {str(e)}")
             raise HTTPException(status_code=400, detail=str(e))
     
     def run(self):
-        logger.info(f"Starting server on port {self.config.server.port}")
+        INFO(f"Starting server on port {self.config.server.port}")
         uvicorn.run(
             self.app,
             host="0.0.0.0",
@@ -115,7 +118,7 @@ def main():
         server = Server()
         server.run()
     except Exception as e:
-        logger.error(f"Server failed to start: {str(e)}")
+        ERROR(f"Server failed to start: {str(e)}")
         raise
 
 if __name__ == "__main__":

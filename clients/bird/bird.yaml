@@ -17,3 +17,8 @@ search:
   min_sqls: 2
   max_sqls: 3
   max_iters: 10
+
+model:
+  thought_model: "deepseek-chat"
+  second_chance_thought_model: "deepseek-chat"
+  sql_model: "deepseek-chat"

@@ -174,7 +174,7 @@ class SearchTree:
             
         return result
     
-    def get_best_sql(self) -> Optional[str]:
+    def get_best_sql(self) -> tuple[str, Any]:
         """根据排序规则选择最佳的 SQL"""
         # 对叶子节点进行排序
         def node_priority(node: Node) -> tuple:
@@ -186,7 +186,7 @@ class SearchTree:
         
         if not self.leaf_nodes:
             INFO("No leaf nodes found")
-            return None
+            return None, None
         
         # 获取所有有非空结果的节点
         valid_nodes = [
@@ -209,10 +209,10 @@ class SearchTree:
             if empty_nodes:
                 selected_node = empty_nodes[0]
                 INFO(f"No non-empty results found, selected SQL node[{selected_node.id}] with empty result")
-                return selected_node.other.sql
+                return selected_node.other.sql, selected_node.other.result
                 
             ERROR("No valid results found")
-            return None
+            return None, None
         
         # 统计结果出现次数
         result_counts = {}
@@ -230,8 +230,8 @@ class SearchTree:
         for node in valid_nodes:
             if node.other.result in most_common_results:
                 INFO(f"Selected SQL node[{node.id}] with most common result (count: {max_count})")
-                return node.other.sql
+                return node.other.sql, node.other.result
         
         # 这种情况理论上不会发生
         ERROR("Failed to find SQL for most common result")
-        return None 
+        return None, None
