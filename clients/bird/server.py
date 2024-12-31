@@ -42,7 +42,6 @@ class Server:
             
         self.config = config
         self.searcher = Searcher(config)
-        self.searcher_second_chance = Searcher(config, second_chance=True)
         self.app = FastAPI()
         
         # 添加 CORS 中间件
@@ -70,14 +69,12 @@ class Server:
                 query = ""
                 
             # 执行搜索
-            sql, result = self.searcher.inference(query)
+            sql = self.searcher.inference(query)
             
             # 如果结果为 None，抛出异常
-            if sql is None or not result:
-                sql, result = self.searcher_second_chance.inference(query)
-                if sql is None:
-                    ERROR("Inference returned None")
-                    raise HTTPException(status_code=400, detail="Failed to generate valid SQL query")
+            if sql is None:
+                ERROR("Inference returned None")
+                raise HTTPException(status_code=400, detail="Failed to generate valid SQL query")
             
             # 构建响应
             return ChatCompletionResponse(

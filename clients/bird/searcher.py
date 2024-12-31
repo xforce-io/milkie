@@ -182,7 +182,7 @@ class Searcher:
         # 更新下一轮要处理的节点
         tree.stack = next_level
 
-    def inference(self, query: str) -> tuple[str, Any]:
+    def inference(self, query: str) -> str:
         try:
             # 创建搜索树
             tree = SearchTree(query, self.config.search.max_iters)
