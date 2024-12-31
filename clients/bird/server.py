@@ -70,8 +70,6 @@ class Server:
                 
             # 执行搜索
             sql = self.searcher.inference(query)
-            
-            # 如果结果为 None，抛出异常
             if sql is None:
                 ERROR("Inference returned None")
                 raise HTTPException(status_code=400, detail="Failed to generate valid SQL query")

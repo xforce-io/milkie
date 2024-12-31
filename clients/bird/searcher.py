@@ -14,8 +14,11 @@ class Searcher:
             config = Config.load()
             
         self.config = config
-        self._db = Database(config.database)
         self._client = AgentClient(ConfigServer(config.agent.addr))
+        self._db = Database(
+            config.database,
+            self._client
+        )
         self.agent_name = config.agent.name
 
     def thought(self, query: str, error_patterns: set, trial: int) -> str:
