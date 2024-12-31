@@ -24,53 +24,53 @@ class Searcher:
     def thought(self, query: str, error_patterns: set, trial: int) -> str:
         error_hints = ""
         if error_patterns:
-            error_hints = "\n已有的错误模式：\n" + "\n".join(f"- {e}" for e in error_patterns)
+            error_hints = "\nPrevious error patterns:\n" + "\n".join(f"- {e}" for e in error_patterns)
             
         return escape(f"""
-    [{self._get_thought_model()}] (trial: {trial}) 请按照下面格式要求，一步一步思考，给出问题的解决思路
-    schema及问题 ```{query}```
+    [{self._get_thought_model()}] (trial: {trial}) Please analyze the problem step by step according to the format below and provide your solution approach.
+    Schema and Question ```{query}```
     {error_hints}
 
-    输出格式如下
+    Please output in the following format:
     ```
-    对问题的理解：
-    <对问题的理解>
+    Understanding of the Question:
+    <Explain your understanding of the question>
     
-    可能用到的表\字段\关联关系：
-    <可能用到的表\字段\关联关系>
+    Potential Tables/Fields/Relationships:
+    <List the tables, fields, and relationships that might be needed>
     
-    分析及思考结果：
-    <分析及思考结果>
+    Analysis and Reasoning:
+    <Provide your detailed analysis and reasoning>
     ```
 
-    请注意：
-    1. 首先明确 query 中的问题问的 metric，不需要回答多余的信息，例如问"人口最多的城市是哪个"，只需要回答满足要求的城市，而不需要返回人口数量
-    2. 分析需要用到的表和字段，仅使用必要的表和字段
-    3. 考虑表之间的关联关系
-    4. 如果有错误模式，思考如何避免这些错误
+    Please note:
+    1. First, clearly identify the metric asked in the query. Only answer what's necessary - for example, if asked "Which city has the largest population?", only return the city name, not the population count
+    2. Analyze the required tables and fields, using only what's necessary
+    3. Consider the relationships between tables
+    4. If there are error patterns, think about how to avoid these errors
     
-    现在请按照格式要求输出你的分析和思考：
+    Now please provide your analysis and reasoning according to the format:
 """)
 
     def sql(self, query: str, thought: str, error_patterns: set, trial: int) -> str:
         error_hints = ""
         if error_patterns:
-            error_hints = "\n已有的错误模式：\n" + "\n".join(f"- {e}" for e in error_patterns)
+            error_hints = "\nPrevious error patterns:\n" + "\n".join(f"- {e}" for e in error_patterns)
             
         return escape(f"""
-    [{self.config.model.sql_model}] (trial: {trial}) 请结合原始问题和分析思考结果，给出最终的 sql 
-    请注意以下规则：
-    1. 仔细检查 tables 的 schema，不要使用不存在的 column
-    2. SQL 中不允许直接在 MAX/MIN 中嵌套 SUM 函数
-    3. 如果有错误模式，必须避免这些错误，确保表的连接条件正确
-    4. 输出的 SQL 必须是完整的、可执行的
-    5. 请看清楚问题所需要问的信息，回答且仅回答必要的信息
+    [{self.config.model.sql_model}] (trial: {trial}) Please provide the final SQL based on the original question and analysis results.
+    Please follow these rules:
+    1. Carefully check the table schemas, don't use non-existent columns
+    2. SQL does not allow direct nesting of SUM function within MAX/MIN
+    3. If there are error patterns, you must avoid these errors and ensure correct table join conditions
+    4. The output SQL must be complete and executable
+    5. Look carefully at what information the question requires, answer only what's necessary
 
-    schema及问题 ```{query}```
-    分析思考结果 ```{thought}```
+    Schema and Question ```{query}```
+    Analysis Results ```{thought}```
     {error_hints}
     
-    现在请输出最终 sql：
+    Now please output the final SQL:
 """)
 
     def forward_step(self, tree: SearchTree):
