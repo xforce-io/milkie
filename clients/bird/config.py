@@ -33,11 +33,6 @@ class ModelConfig:
     second_chance_thought_model: str  # 用于生成思考的模型
     sql_model: str      # 用于生成SQL的模型
 
-    def __init__(self, config: dict):
-        self.thought_model = config.get('thought_model')
-        self.second_chance_thought_model = config.get('second_chance_thought_model', self.thought_model)
-        self.sql_model = config.get('sql_model')
-
 @dataclass
 class Config:
     server: ServerConfig

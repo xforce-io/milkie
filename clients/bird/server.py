@@ -76,7 +76,7 @@ class Server:
             if sql is None or not result:
                 sql, result = self.searcher_second_chance.inference(query)
                 if sql is None:
-                    ERROR(logger, "Inference returned None")
+                    ERROR("Inference returned None")
                     raise HTTPException(status_code=400, detail="Failed to generate valid SQL query")
             
             # 构建响应
@@ -89,7 +89,7 @@ class Server:
                     "index": 0,
                     "message": {
                         "role": "assistant",
-                        "content": result
+                        "content": sql 
                     },
                     "finish_reason": "stop"
                 }],
