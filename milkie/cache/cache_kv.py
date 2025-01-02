@@ -30,7 +30,7 @@ class CacheKV:
                             self.cache[key] = {'value': value, 'timestamp': time.time()}
             except (json.JSONDecodeError, IOError) as e:
                 logger.error(f"Error loading cache file {self.filePath}: {e}")
-                self.cache = {}
+                raise Exception(f"Error loading cache file {self.filePath}: {e}")
 
     def dumpCache(self):
         curTime = time.time()
@@ -93,6 +93,7 @@ class CacheKVMgr:
                     self.caches[modelName] = CacheKV(filePath, self.dumpInterval, self.expireTimeByDay)
                 except Exception as e:
                     logger.error(f"Error initializing cache for {modelName}: {e}")
+                    raise Exception(f"Error initializing cache for {modelName}: {e}")
 
     def getCache(self, modelName: str) -> CacheKV:
         return self.caches.get(modelName)

@@ -405,6 +405,7 @@ class SyntaxParser:
         for name in self.settings.getAllLLMs():
             if f"[{name}]" in self.instruction:
                 self.model = self.settings.getLLM(name)
+                self.instruction = self.instruction.replace(f"[{name}]", "")
                 return
         self.model = self.settings.getLLMDefault()
 

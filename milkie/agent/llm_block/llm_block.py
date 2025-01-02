@@ -278,11 +278,9 @@ class StreamingProcessor:
 
             for chunk in response.respGen:
                 content = None
-                if hasattr(chunk.raw, "content") and chunk.raw.content is not None:
-                    content = chunk.raw.content
-                elif hasattr(chunk.raw, "delta") and hasattr(chunk.raw.delta, "content"):
-                    content = chunk.raw.delta.content
-                elif hasattr(chunk.raw, "tool_calls") and len(chunk.raw.tool_calls) > 0:
+                if hasattr(chunk.raw, "tool_calls") and \
+                        isinstance(chunk.raw.tool_calls, list) and \
+                        len(chunk.raw.tool_calls) > 0:
                     toolCalls = chunk.raw.tool_calls
                     if len(self.currentTools) == 0:
                         self.currentTools = [{
@@ -295,6 +293,10 @@ class StreamingProcessor:
                             self.currentTools[i]["name"] = toolCall.function.name
                         if toolCall.function.arguments:
                             self.currentTools[i]["args"] += toolCall.function.arguments
+                elif hasattr(chunk.raw, "content") and chunk.raw.content is not None:
+                    content = chunk.raw.content
+                elif hasattr(chunk.raw, "delta") and hasattr(chunk.raw.delta, "content"):
+                    content = chunk.raw.delta.content
 
                 if content:
                     expertsResp = self.processDeltaContent(
@@ -881,7 +883,7 @@ class LLMBlock(BaseBlock):
         super().__init__(context, config, toolkit, usePrevResult, repoFuncs)
 
         self.usePrevResult = usePrevResult
-        self.systemPrompt = self.context.globalContext.settings.llmBasicConfig.systemPrompt
+        self.systemPrompt = Loader.load(self.context.globalContext.settings.llmBasicConfig.systemPrompt)
 
         if taskExpr:
             self.task = taskExpr    

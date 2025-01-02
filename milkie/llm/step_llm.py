@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from typing import Optional
 from milkie.global_context import GlobalContext
 from milkie.llm.enhanced_llm import EnhancedLLM
+from milkie.prompt.prompt import Loader
 from milkie.response import Response
 from milkie.llm.inference import failChat
 from milkie.trace import stdout
@@ -101,7 +102,7 @@ class StepLLM(ABC):
             systemPrompt = args["system_prompt"]
 
         if systemPrompt is None:
-            systemPrompt = self.globalContext.settings.llmBasicConfig.systemPrompt
+            systemPrompt = Loader.load(self.globalContext.settings.llmBasicConfig.systemPrompt)
         return systemPrompt
     
     @abstractmethod

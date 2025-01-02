@@ -116,7 +116,7 @@ class BasicToolkit(Toolkit):
 
         return "\n\n".join(cleanTexts)
 
-    def sendEmail(self, to_email: str, subject: str, body: str, content_type: str = "markdown") -> str:
+    def sendEmail(self, to_email: str, subject: str, body: str) -> str:
         """
         发送电子邮件给指定邮箱
 
@@ -124,7 +124,6 @@ class BasicToolkit(Toolkit):
             to_email (str): 收件人邮箱地址
             subject (str): 邮件主题
             body (str): 邮件正文
-            content_type (str): 内容类型，默认为 "markdown"
 
         Returns:
             str: 发送结果描述

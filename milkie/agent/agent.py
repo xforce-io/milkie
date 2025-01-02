@@ -177,7 +177,9 @@ class Agent(BaseBlock):
         result = None
         lastBlock = prevBlock
 
-        if "system_prompt" not in args or args["system_prompt"] is None:
+        if ("system_prompt" not in args or \
+                args["system_prompt"] is None) and \
+                self.systemPrompt:
             args["system_prompt"] = self.systemPrompt
 
         if len(self.experts) > 0:
