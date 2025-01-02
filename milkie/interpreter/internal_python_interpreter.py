@@ -330,6 +330,9 @@ class InternalPythonInterpreter(BaseInterpreter):
         elif isinstance(expression, ast.ListComp):
             # 列表推导式 -> 执行并返回结果列表
             return self._execute_listcomp(expression)
+        elif isinstance(expression, ast.SetComp):
+            # 集合推导式 -> 执行并返回结果集合
+            return self._execute_setcomp(expression)
         elif isinstance(expression, ast.BoolOp):
             # 处理布尔运算符
             values = [self._execute_ast(value) for value in expression.values]
@@ -810,4 +813,26 @@ class InternalPythonInterpreter(BaseInterpreter):
                 if line_result is not None:
                     result = line_result
 
+        return result
+
+    def _execute_setcomp(self, setcomp: ast.SetComp) -> set:
+        """执行集合推导式"""
+        result = set()
+        generators = setcomp.generators
+        
+        def execute_generators(generators, current_index=0):
+            if current_index == len(generators):
+                result.add(self._execute_ast(setcomp.elt))
+                return
+
+            gen = generators[current_index]
+            iterable = self._execute_ast(gen.iter)
+            
+            for item in iterable:
+                self._assign(gen.target, item)
+                
+                if all(self._execute_ast(if_expr) for if_expr in gen.ifs):
+                    execute_generators(generators, current_index + 1)
+        
+        execute_generators(generators)
         return result
