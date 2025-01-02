@@ -368,3 +368,102 @@ class Database:
     def __del__(self):
         if hasattr(self, '_db'):
             self._db.close()
+
+    def _get_table_desc_prompt(self, table_name: str, schema_info: List[str], example_records: List[Dict]) -> str:
+        """生成表描述的prompt"""
+        return escape(f"""
+请分析下面这张数据库表的结构和示例数据，给出完整的表描述。
+
+表名：{table_name}
+
+表结构：
+{chr(10).join(schema_info)}
+
+示例数据：
+{str(example_records)}
+
+请按照以下格式输出分析结果：
+1. 简述：
+<描述这张表的主要用途和存储的数据类型>
+
+2. 关键字段说明：
+<针对每个关键字段：
+- 用途
+- 取值
+- 他表关联（如果有）>
+""")
+
+    def _descTable(self, table_name: str) -> str:
+        """
+        获取表的描述信息，包括schema和示例数据的分析
+        
+        Args:
+            table_name: 表名
+            
+        Returns:
+            str: 表的描述信息，包括用途和关键字段说明
+        """
+        # 1. 先检查缓存
+        cache_key = [{"table": table_name}]
+        cached_desc = self._cache_mgr.getValue("tableschema", cache_key)
+        if cached_desc:
+            INFO(f"Cache hit for table {table_name}")
+            return cached_desc
+            
+        try:
+            cursor = None
+            cursor = self._db.cursor()
+            
+            # 2. 获取表结构
+            cursor.execute(f"SHOW FULL COLUMNS FROM {table_name}")
+            columns = cursor.fetchall()
+            
+            # 构建schema信息
+            schema_info = []
+            for col in columns:
+                field_name = col[0]
+                field_type = col[1]
+                is_nullable = col[2]
+                key_type = col[3]
+                field_comment = col[8] if len(col) > 8 else ''
+                
+                # 添加更多字段信息
+                info_parts = [
+                    f"{field_name} {field_type}",
+                    "NOT NULL" if is_nullable == "NO" else "NULL",
+                    key_type if key_type else "",
+                    f"-- {field_comment}" if field_comment else ""
+                ]
+                schema_info.append(" ".join(part for part in info_parts if part))
+                
+            # 3. 获取示例数据（最多5条）
+            cursor.execute(f"SELECT * FROM {table_name} LIMIT 5")
+            records = cursor.fetchall()
+            field_names = [col[0] for col in columns]
+            
+            # 格式化示例数据
+            example_records = []
+            for record in records:
+                record_dict = dict(zip(field_names, record))
+                example_records.append(record_dict)
+                
+            # 4. 生成描述
+            if self._client:
+                prompt = self._get_table_desc_prompt(table_name, schema_info, example_records)
+                table_desc = self._client.execute(prompt, "cot_expert")
+                
+                # 5. 存入缓存
+                self._cache_mgr.setValue("tableschema", cache_key, table_desc)
+                
+                INFO(f"Generated and cached description for table {table_name}")
+                return table_desc
+            else:
+                ERROR("AgentClient not initialized")
+                return ""
+                
+        except Exception as e:
+            ERROR(f"Error describing table {table_name}: {str(e)}")
+            return ""
+        finally:
+            if cursor:
+                cursor.close()
