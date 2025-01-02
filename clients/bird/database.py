@@ -372,7 +372,7 @@ class Database:
     def _get_table_desc_prompt(self, table_name: str, schema_info: List[str], example_records: List[Dict]) -> str:
         """生成表描述的prompt"""
         return escape(f"""
-请分析下面这张数据库表的结构和示例数据，给出完整的表描述。
+请分析下面这张数据库表的结构和示例数据，给出精炼且完备的表描述。
 
 表名：{table_name}
 
@@ -439,7 +439,7 @@ class Database:
                 schema_info.append(" ".join(part for part in info_parts if part))
                 
             # 3. 获取示例数据（最多5条）
-            cursor.execute(f"SELECT * FROM `{table_name}` LIMIT 5")
+            cursor.execute(f"SELECT * FROM `{table_name}` LIMIT 10")
             records = cursor.fetchall()
             field_names = [col[0] for col in columns]
             

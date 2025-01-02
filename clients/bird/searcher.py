@@ -28,7 +28,7 @@ class Searcher:
             
         return escape(f"""
     [{self._get_thought_model()}] (trial: {trial}) 请根据请求中包括的 schema、问题做分析，一步一步思考，给出问题的解决思路
-    schema及问题 ```{query[query.index("--")+2:]}```
+    schema及问题 ```{query}```
     可用schema解释 ```{self._db.descTablesFromQuery(query)}```
     已有错误模式 ```{error_hints}```
 
