@@ -293,10 +293,10 @@ class StreamingProcessor:
                             self.currentTools[i]["name"] = toolCall.function.name
                         if toolCall.function.arguments:
                             self.currentTools[i]["args"] += toolCall.function.arguments
-                elif hasattr(chunk.raw, "content") and chunk.raw.content is not None:
-                    content = chunk.raw.content
                 elif hasattr(chunk.raw, "delta") and hasattr(chunk.raw.delta, "content"):
                     content = chunk.raw.delta.content
+                elif hasattr(chunk.raw, "content") and chunk.raw.content is not None:
+                    content = chunk.raw.content
 
                 if content:
                     expertsResp = self.processDeltaContent(
