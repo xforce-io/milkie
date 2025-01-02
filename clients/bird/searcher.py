@@ -30,9 +30,9 @@ class Searcher:
     [{self._get_thought_model()}] (trial: {trial}) 请根据请求中包括的 schema、问题做分析，一步一步思考，给出问题的解决思路
     schema及问题 ```{query}```
     可用schema解释 ```{self._db.descTablesFromQuery(query)}```
-    {error_hints}
+    已有错误模式 ```{error_hints}```
 
-    请注意：
+    请注意以下规则：
     1. 首先明确 query 中的问题问的 metric，不需要回答多余的信息，例如问"人口最多的城市是哪个"，只需要回答满足要求的城市，而不需要返回人口数量
     2. 分析需要用到的表和字段，仅使用必要的表和字段
     3. 考虑表之间的关联关系
@@ -48,18 +48,17 @@ class Searcher:
             
         return escape(f"""
     [{self.config.model.sql_model}] (trial: {trial}) 请结合原始问题和分析思考结果，给出最终的 sql 
-    请注意以下规则：
-    1. 仔细检查 tables 的 schema，不要使用不存在的 column
-    2. SQL 中不允许直接在 MAX/MIN 中嵌套 SUM 函数
-    3. 如果有错误模式，必须避免这些错误，确保表的连接条件正确
-    4. 输出的 SQL 必须是完整的、可执行的
-    5. 请看清楚问题所需要问的信息，回答且仅回答必要的信息
-
     schema及问题 ```{query}```
     分析思考结果 ```{thought}```
-    {error_hints}
+    已有错误模式 ```{error_hints}```
     
-    现在请输出最终 sql：
+    请注意以下规则：
+    1. 仅输出单条 SQL，请保证输出的 SQL 必须是完整的、可执行的
+    2. 仔细检查 tables 的 schema，不要使用不存在的 column
+    3. SQL 中不允许直接在 MAX/MIN 中嵌套 SUM 函数
+    4. 如果有错误模式，必须避免这些错误，确保表的连接条件正确
+
+    现在请输出最终这条 sql：
 """)
 
     def forward_step(self, tree: SearchTree):

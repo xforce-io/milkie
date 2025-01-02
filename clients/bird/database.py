@@ -389,8 +389,10 @@ class Database:
 2. 关键字段说明：
 <针对每个关键字段：
 - 用途
-- 取值
+- 示例取值
 - 他表关联（如果有）>
+
+现在请开始输出:
 """)
 
     def _descTable(self, table_name: str) -> str:
@@ -415,7 +417,7 @@ class Database:
             cursor = self._db.cursor()
             
             # 2. 获取表结构
-            cursor.execute(f"SHOW FULL COLUMNS FROM {table_name}")
+            cursor.execute(f"SHOW FULL COLUMNS FROM `{table_name}`")
             columns = cursor.fetchall()
             
             # 构建schema信息
@@ -437,7 +439,7 @@ class Database:
                 schema_info.append(" ".join(part for part in info_parts if part))
                 
             # 3. 获取示例数据（最多5条）
-            cursor.execute(f"SELECT * FROM {table_name} LIMIT 5")
+            cursor.execute(f"SELECT * FROM `{table_name}` LIMIT 5")
             records = cursor.fetchall()
             field_names = [col[0] for col in columns]
             
