@@ -54,7 +54,7 @@ class Searcher:
     
     请注意以下规则：
     1. 仅输出单条 SQL，请保证输出的 SQL 必须是完整的、可执行的
-    2. 仔细检查 tables 的 schema，不要使用不存在的 column
+    2. 仔细检查 tables 的 schema，不要使用不存在的 column，和 mysql 关键词冲突的 field 请进行转义
     3. SQL 中不允许直接在 MAX/MIN 中嵌套 SUM 函数
     4. 如果有错误模式，必须避免这些错误，确保表的连接条件正确
 
