@@ -33,5 +33,5 @@ class SetReasoningSelfCritique(FuncBlock):
         
         kwargs["curInstruction"].reasoning = ReasoningSelfCritique(
             globalContext=self.context.globalContext,
-            llm=critiqueLLM)
+            critiqueLLM=critiqueLLM)
         return Response(respStr="set reasoning self critique") 
