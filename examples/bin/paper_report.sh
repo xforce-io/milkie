@@ -6,4 +6,4 @@
     --verbose \
     --date `date +%Y-%m-%d` \
     --days 7 \
-    --root "/Users/xupeng"
+    --root "/home/ari"

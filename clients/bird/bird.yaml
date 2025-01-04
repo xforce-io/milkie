@@ -12,6 +12,7 @@ database:
   password: "root123"
   database: "BIRD"
   
+  
 search:
   max_thoughts: 2
   min_sqls: 2

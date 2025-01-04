@@ -1,4 +1,4 @@
-#!/Users/xupeng/miniconda3/bin/python
+#!/home/ari/miniconda3/envs/xfc/bin/python
 
 import os
 import sys
@@ -95,5 +95,5 @@ def main():
         args=queryArgs
     )
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
