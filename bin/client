@@ -1,0 +1,60 @@
+#!/Users/xupeng/miniconda3/bin/python
+
+from openai import OpenAI
+import argparse
+
+LOCAL_HOST = "http://localhost:8123"
+
+def main():
+    parser = argparse.ArgumentParser(description='OpenAI API client for Milkie server')
+    parser.add_argument('--host', type=str, default=LOCAL_HOST,
+                       help=f'Server host (default: {LOCAL_HOST})')
+    parser.add_argument('--stream', action='store_true',
+                       help='Enable streaming mode')
+    args = parser.parse_args()
+
+    # 配置 OpenAI 客户端
+    client = OpenAI(
+        api_key="dummy",  # 任意值
+        base_url=f"{args.host}/v1"
+    )
+
+    # 创建聊天请求
+    messages = [
+        {"role": "system", "content": "记住你是一个金融助手，说每句话之前先说‘哈哈哈’"},
+        {"role": "user", "content": "你是谁"}
+    ]
+
+    try:
+        # 发送请求
+        if args.stream:
+            print("Using streaming mode...", flush=True)
+            # 流式响应
+            response = client.chat.completions.create(
+                model="default",
+                messages=messages,
+                stream=True
+            )
+            
+            # 处理流式响应
+            for chunk in response:
+                try:
+                    if hasattr(chunk.choices[0].delta, 'content') and chunk.choices[0].delta.content:
+                        content = chunk.choices[0].delta.content
+                        print(content, end='', flush=True)
+                except Exception as e:
+                    print(f"\nError processing chunk: {str(e)}", flush=True)
+            print()  # 最后打印换行
+        else:
+            # 普通响应
+            response = client.chat.completions.create(
+                model="default",
+                messages=messages
+            )
+            print(response.choices[0].message.content)
+
+    except Exception as e:
+        print(f"Error: {str(e)}")
+
+if __name__ == '__main__':
+    main() 

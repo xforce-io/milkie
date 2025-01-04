@@ -1,0 +1,13 @@
+ROBOTS_WHITELIST:
+  "www.arxiv.org/pdf":
+    allowed: true
+    delay: 15
+  "huggingface.co":
+    allowed: true
+    delay: 0
+  "paperswithcode.com":
+    allowed: true
+    delay: 0
+  DEFAULT:
+    allowed: true
+    delay: 3600

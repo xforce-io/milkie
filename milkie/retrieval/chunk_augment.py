@@ -5,13 +5,13 @@ from pydantic import PrivateAttr
 
 class ChunkAugment(BaseNodePostprocessor):
 
-    context: Any = PrivateAttr()
+    _context: Any = PrivateAttr()
 
     def class_name(cls) -> str:
         return "ChunkAugment"
 
     def set_context(self, context):
-        self.context = context
+        self._context = context
 
     def _postprocess_nodes(
             self, 
@@ -23,7 +23,7 @@ class ChunkAugment(BaseNodePostprocessor):
             if node not in newList: 
                 newList.append(node)
 
-            nextNode = self.context.getGlobalMemory().getNextNode(node.node)
+            nextNode = self._context.getGlobalMemory().getNextNode(node.node)
             if nextNode and nextNode not in newList: 
                 newList.append(NodeWithScore(node=nextNode))
         return newList

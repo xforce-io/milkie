@@ -1,0 +1,43 @@
+@name topic2paper
+
+@desc
+根据论文内容打标签
+@desc
+
+
+interestedFile. "{root}/dev/github/milkie/examples/paper_report/interested.json"
+interested. #PY ```import json;"/".join(json.load(open("{interestedFile}")).keys())```
+paperinfoDir. "{root}/dev/github/milkie/data/paper_report"
+rawDir. "{paperinfoDir}/raw"
+topicToPaper. "{paperinfoDir}/{date}/topic2paper.txt"
+
+mkdir. #PY ```import os;os.makedirs("{paperinfoDir}/{date}", exist_ok=True)```
+filepaths. #CODE 
+    (0) 定义 list 类型的变量 result
+    (1) 获取 {{rawDir}} 下所有的一级格式为"年-月-日"的folder，筛选出和{date}时间相差绝对值不超过{days}天的路径名称，得到路径列表 filepaths
+    (2) 遍历 filepaths，对每个 filepath 进行以下操作
+        [A] 获取 filepath 目录下后缀为'.digest'文件，将绝对路径添加到变量 result 里面
+    (3) 输出 result，请注意冒号可能是全角 => c```type(_CUR_) == list and len(_CUR_) > 0```
+emptyFile. #CODE 清空文件{{topicToPaper}}
+FOR filepath in filepaths
+    content. #CODE 读取{{filepath}}的文件内容,并返回内容 => c```type(_CUR_) == str and len(_CUR_) > 0```
+    topic. [deepseek-chat]
+        任务：精确匹配文件内容与兴趣主题
+
+        输入：
+        1 兴趣主题列表(“/”分割)：
+        {interested}
+
+        2 待匹配文件内容：
+        {content}
+
+        规则：
+        1 严格匹配：文件内容必须与兴趣主题实质相符
+        2 单一输出：
+        - 若匹配成功：仅输出匹配到的兴趣主题原文，最多输出一个兴趣主题
+        - 若无匹配：仅输出 None
+        3 禁止输出任何解释、分析或额外内容
+
+        请按规则输出结果(不用加引号，不要输出换行符)：
+    topic2file. #PY ```open("{topicToPaper}", "a").write("{topic}".strip() + " >> {filepath}\n")```
+END

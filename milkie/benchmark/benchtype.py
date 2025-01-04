@@ -5,8 +5,9 @@ import threading
 import time
 from typing import Callable
 from sacred import Experiment
-from llama_index.core import Response
 from llama_index.core.utils import truncate_text
+
+from milkie.response import Response
 
 logger = logging.getLogger(__name__)
 
@@ -35,13 +36,14 @@ class KeywordFilter:
             self.filters = [KeywordFilter(cond) for cond in config['$or']]
             self.isOr = True
         elif isinstance(config, str):
-            self.filters = config
+            self.filters = config.replace(" ", "")
         elif isinstance(config, dict):
             self.filters = None
         else:
             raise ValueError("Unknown filter format")
     
     def match(self, text) -> bool:
+        text = text.replace(" ", "")
         if self.isOr == None:
             if self.filters == None:
                 return any(keyword in text for keyword in KeywordFilter.RefuseKeywords)
@@ -134,7 +136,7 @@ class BenchTypeKeyword(BenchType):
             batchSize :int):
         for i in range(0, len(self.testcases), batchSize):
             batch = self.testcases[i:i+batchSize]
-            argsList = [{"query_str": testcase.input, "context_str": testcase.context} for testcase in batch]
+            argsList = [{"query": testcase.input, "context": testcase.context} for testcase in batch]
             responses = agent(prompt=prompt, argsList=argsList)
             for j, response in enumerate(responses):
                 status = f'Testcase[{batch[j].input[:35]}] Ans[{truncate_text(response.response, 500)}] Keypoints[{batch[j].keypoints}]'.replace("\n", "//")
@@ -187,7 +189,7 @@ class BenchTypeKeyword(BenchType):
             prompt :str,
             batch: list[TestcaseKeyword],
             statistics: Statistics):
-        argsList = [{"query_str": testcase.input, "context_str": testcase.context} for testcase in batch]
+        argsList = [{"query": testcase.input, "context": testcase.context} for testcase in batch]
         responses = agent(prompt=prompt, argsList=argsList)
         for j, response in enumerate(responses):
             status = f'Testcase[{batch[j].input[:30]}] Ans[{truncate_text(response.response, 500)}] Keypoints[{batch[j].keypoints}]'.replace("\n", "//")

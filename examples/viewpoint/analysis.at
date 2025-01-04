@@ -1,0 +1,54 @@
+@name analysis
+
+@desc
+为新闻热点事件生成分析
+@desc
+
+viewpoint. "{root}/dev/github/milkie/data/viewpoint"
+viewpointResultFilepath. "{viewpoint}/{date}/viewpoint_result.txt"
+suggestionFilepath. "{viewpoint}/{date}/suggestion.txt"
+
+viewpoints. #PY ```
+filtered = [item.strip() for item in open("{viewpointResultFilepath}", "r").read().split("===") if len(item.strip()) > 0 ]
+viewpoints = [item.split("---") for item in filtered]
+```
+FOR viewpoint in viewpoints
+
+    analysis. [qwen-plus] 
+    新闻标题：{viewpoint.0}
+
+    相关观点：
+    {viewpoint.1}
+
+    请从以下两个维度进行简要分析（总字数控制在150字以内）：
+
+    1 政策/市场风向：
+    - 这一变化反映了什么趋势？
+    - 对市场将产生什么影响(黄金、股市、债市、企业等)？
+
+    2 投资建议：
+    - 具体可操作的投资策略
+    - 需要注意的风险点
+
+    请保持分析的客观性和可操作性。尽量保持在150字以内，现在请输出:
+
+    summary. [qwen-plus]
+     新闻标题：{viewpoint.0}
+
+    相关观点：
+    {viewpoint.1}
+
+    请对新闻内容进行客观总结，保持在 150 字以内，请现在输出:
+   
+    ret. #RET {{"title": "{{viewpoint.0}}", "summary":"{{summary}}", "viewpoints": "{{viewpoint.1}}", "suggestion": "{{analysis}}"}}
+END -> suggestions
+
+last. #PY ```
+fp = open('{suggestionFilepath}', 'w')
+for theMap in {suggestions}:
+    fp.write(f"【{{theMap['title'].strip()}}】\n")
+    fp.write(f"新闻总结:\n{{theMap['summary']}}\n\n")
+    fp.write(f"各方观点:\n{{theMap['viewpoints']}}\n\n")
+    fp.write(f"投资建议:\n{{theMap['suggestion']}}\n\n")
+fp.close()
+```

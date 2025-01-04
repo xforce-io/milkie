@@ -13,6 +13,6 @@ class DecisionModule():
             context :Context, 
             **kwargs):
         decisionResult = self.engine.synthesize(
-            context.getCurQuery(),
+            context.getCurQuery().query,
             context.retrievalResult)
         context.setDecisionResult(decisionResult)

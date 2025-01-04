@@ -2,12 +2,11 @@ from abc import ABC
 from dataclasses import dataclass
 import json
 from typing import List
-from transformers import BitsAndBytesConfig
 
 import torch
 
+from milkie.prompt.prompt import Loader
 from milkie.utils.data_utils import loadFromYaml
-
 
 @dataclass
 class BaseConfig(ABC):
@@ -91,8 +90,8 @@ class MemoryTermConfig(BaseConfig):
         if config["type"] == MemoryType.LONG_TERM.name:
             if config["source"] == LongTermMemorySource.LOCAL.name:
                 return MemoryTermConfig(
-                    type=config["type"],
-                    source=config["source"],
+                    type=MemoryType.LONG_TERM,
+                    source=LongTermMemorySource.LOCAL,
                     path=config["path"])
             else:
                 raise Exception(f"Long term memory source not supported[{config['source']}]")
@@ -112,6 +111,25 @@ class MemoryConfig(BaseConfig):
             memoryTermConfig = MemoryTermConfig.fromArgs(singleConfig)
             configs.append(memoryTermConfig)
         return MemoryConfig(memoryConfig=configs)
+
+class LLMBasicConfig(BaseConfig):
+    def __init__(
+            self, 
+            systemPrompt :str,
+            defaultModel :str, 
+            codeModel :list[str], 
+            ctxLen :int):
+        self.systemPrompt = systemPrompt
+        self.defaultModel = defaultModel
+        self.codeModel = codeModel
+        self.ctxLen = ctxLen
+
+    def fromArgs(config :dict):
+        return LLMBasicConfig(
+            systemPrompt=config["system_prompt"],
+            defaultModel=config["default_model"],
+            codeModel=config["code_model"],
+            ctxLen=config["ctx_len"])
 
 class LLMModelArgs(BaseConfig):
     def __init__(
@@ -149,8 +167,10 @@ class LLMModelArgs(BaseConfig):
 
         quantizationConfig = None
         if self.quantizationType == QuantType.INT8:
+            from transformers import BitsAndBytesConfig
             quantizationConfig = BitsAndBytesConfig(load_in_8bit=True)
         elif self.quantizationType == QuantType.INT4:
+            from transformers import BitsAndBytesConfig
             quantizationConfig = BitsAndBytesConfig(load_in_4bit=True)
         
         if quantizationConfig:
@@ -219,10 +239,11 @@ class LLMGenerationArgs(BaseConfig):
         return result
 
 @dataclass
-class LLMConfig(BaseConfig):
+class SingleLLMConfig(BaseConfig):
     def __init__(
             self, 
             type :LLMType, 
+            name :str,
             model :str, 
             systemPrompt :str,
             ctxLen :int = 0,
@@ -238,6 +259,7 @@ class LLMConfig(BaseConfig):
             modelArgs :LLMModelArgs = None,
             generationArgs :LLMGenerationArgs = None):
         self.type = type
+        self.name = name if name else model
         self.model = model
         self.systemPrompt = systemPrompt
         self.ctxLen = ctxLen
@@ -253,12 +275,15 @@ class LLMConfig(BaseConfig):
         self.modelArgs = modelArgs
         self.generationArgs = generationArgs
     
-    def fromArgs(config :dict):
-        framework = FRAMEWORK.HUGGINGFACE
-        if config["framework"] == FRAMEWORK.VLLM.name:
-            framework = FRAMEWORK.VLLM
-        elif config["framework"] == FRAMEWORK.LMDEPLOY.name:
-            framework = FRAMEWORK.LMDEPLOY
+    def fromArgs(basicConfig :LLMBasicConfig, config :dict):
+        framework = FRAMEWORK.NONE
+        if "framework" in config.keys():
+            if config["framework"] == FRAMEWORK.VLLM.name:
+                framework = FRAMEWORK.VLLM
+            elif config["framework"] == FRAMEWORK.LMDEPLOY.name:
+                framework = FRAMEWORK.LMDEPLOY
+            elif config["framework"] == FRAMEWORK.HUGGINGFACE.name:
+                framework = FRAMEWORK.HUGGINGFACE
 
         device = None
         if "device" in config.keys():
@@ -269,14 +294,24 @@ class LLMConfig(BaseConfig):
         if "port" in config.keys():
             port = config["port"]
         
-        modelArgs = LLMModelArgs.fromArgs(config["model_args"])
-        generationArgs = LLMGenerationArgs.fromArgs(config["generation_args"])
+        modelArgs = None
+        if "model_args" in config.keys():
+            modelArgs = LLMModelArgs.fromArgs(config["model_args"])
+        
+        generationArgs = None
+        if "generation_args" in config.keys():
+            generationArgs = LLMGenerationArgs.fromArgs(config["generation_args"])
+
+        promptName = config["system_prompt"] if "system_prompt" in config else basicConfig.systemPrompt
+        ctxLen = config["ctx_len"] if "ctx_len" in config else basicConfig.ctxLen
+        
+        systemPrompt = Loader.load(promptName)
         if config["type"] == LLMType.HUGGINGFACE.name:
-            return LLMConfig(
+            return SingleLLMConfig(
                 type=LLMType.HUGGINGFACE, 
                 model=config["model"],
-                systemPrompt=config["system_prompt"] if "system_prompt" in config else None,
-                ctxLen=config["ctx_len"],
+                systemPrompt=systemPrompt,
+                ctxLen=ctxLen,
                 batchSize=config["batch_size"],
                 tensorParallelSize=config["tensor_parallel_size"],
                 framework=framework,
@@ -285,18 +320,20 @@ class LLMConfig(BaseConfig):
                 modelArgs=modelArgs,
                 generationArgs=generationArgs)
         elif config["type"] == LLMType.GEN_OPENAI.name:
-            return LLMConfig(
+            return SingleLLMConfig(
                 type=LLMType.GEN_OPENAI,
+                name=config["name"] if "name" in config else None,
                 model=config["model"],
-                systemPrompt=config["system_prompt"] if "system_prompt" in config else None,
-                ctxLen=config["ctx_len"],
+                systemPrompt=systemPrompt,
+                ctxLen=ctxLen,
                 apiKey=config["api_key"],
                 endpoint=config["endpoint"],
                 generationArgs=generationArgs,)
         elif config["type"] == LLMType.AZURE_OPENAI.name:
-            return LLMConfig(
+            return SingleLLMConfig(
                 type=LLMType.AZURE_OPENAI,
                 model=config["model"],
+                name=config["name"] if "name" in config else None,
                 batchSize=config["batch_size"],
                 deploymentName=config["deployment_name"],
                 apiKey=config["api_key"],
@@ -306,6 +343,29 @@ class LLMConfig(BaseConfig):
                 generationArgs=generationArgs)
         else:
             raise Exception("LLM type not supported")
+
+class LLMConfig(BaseConfig):
+
+    def __init__(self, llmConfigs :List[SingleLLMConfig]):
+        self.llmConfigs = llmConfigs
+        self.llmMap = {}
+        for llmConfig in llmConfigs:
+            self.llmMap[llmConfig.model] = llmConfig
+    
+    def fromArgs(basicConfig :LLMBasicConfig, config :dict):
+        configs = []
+        modelNames = []
+        for singleConfig in config:
+            llmConfig = SingleLLMConfig.fromArgs(basicConfig, singleConfig)
+            if llmConfig.name not in modelNames:
+                modelNames.append(llmConfig.name)
+            else:
+                raise Exception(f"LLM name {llmConfig.name} duplicated")
+            configs.append(llmConfig)
+        return LLMConfig(configs)
+
+    def getConfig(self, model :str) -> SingleLLMConfig:
+        return self.llmMap.get(model)
 
 class EmbeddingConfig(BaseConfig):
     def __init__(
@@ -357,17 +417,19 @@ class RetrievalConfig(BaseConfig):
             rewriteStrategy :RewriteStrategy,
             channelRecall :int,
             similarityTopK :int,
+            blockSize :int,
             chunkAugmentType :ChunkAugmentType,
             rerankerConfig :RerankConfig):
         self.rewriteStrategy = rewriteStrategy
         self.channelRecall = channelRecall
         self.similarityTopK = similarityTopK 
+        self.blockSize = blockSize
         self.chunkAugmentType = chunkAugmentType
         self.rerankerConfig = rerankerConfig
 
     def fromArgs(config :dict):
         chunkAugmentType = ChunkAugmentType.NONE
-        if config["chunk_augment"] == ChunkAugmentType.SIMPLE.name:
+        if "chunk_augment" in config.keys() and config["chunk_augment"] == ChunkAugmentType.SIMPLE.name:
             chunkAugmentType = ChunkAugmentType.SIMPLE
         
         rerankerType = RerankerType.NONE
@@ -394,6 +456,7 @@ class RetrievalConfig(BaseConfig):
             rewriteStrategy=rewriteStrategy,
             channelRecall=config["channel_recall"],
             similarityTopK=config["similarity_top_k"],
+            blockSize=config["block_size"],
             chunkAugmentType=chunkAugmentType,
             rerankerConfig=reranker)
 
@@ -405,20 +468,24 @@ class SingleAgentConfig(BaseConfig):
     def __init__(
             self, 
             config :str, 
-            type :AgentType):
+            type :AgentType,
+            prompt :str):
         self.config = config
         self.type = type
+        self.prompt = prompt
 
 class PromptAgentConfig(SingleAgentConfig):
     def __init__(
             self, 
             config: str, 
-            type: AgentType):
-        super().__init__(config, type)
+            type: AgentType,
+            prompt :str):
+        super().__init__(config, type, prompt)
 
     def fromArgs(config :dict):
         return PromptAgentConfig(
             config=config["config"],
+            prompt=config["prompt"] if "prompt" in config else None,
             type=AgentType.PROMPT)
 
 class QAAgentConfig(SingleAgentConfig):
@@ -426,10 +493,11 @@ class QAAgentConfig(SingleAgentConfig):
             self, 
             config :str,
             type :AgentType,
+            prompt :str,
             memoryConfig :MemoryConfig,
             indexConfig :IndexConfig,
             retrievalConfig :RetrievalConfig):
-        super().__init__(config, type)
+        super().__init__(config, type, prompt)
         self.memoryConfig = memoryConfig
         self.indexConfig = indexConfig
         self.retrievalConfig = retrievalConfig
@@ -438,9 +506,10 @@ class QAAgentConfig(SingleAgentConfig):
         return QAAgentConfig(
             config=config["config"],
             type=AgentType.QA,
+            prompt=config["prompt"] if "prompt" in config else None,
             memoryConfig=MemoryConfig.fromArgs(config["memory"]) if "memory" in config else None,
             indexConfig=IndexConfig.fromArgs(config["index"]) if "index" in config else None,
-            retrievalConfig=RetrievalConfig.fromArgs(config["retrieval"]))
+            retrievalConfig=RetrievalConfig.fromArgs(config["retrieval"]) if "retrieval" in config else None)
 
 def createAgentConfig(config :dict):
     if config["type"] == AgentType.QA.name:
@@ -467,21 +536,80 @@ class AgentsConfig(BaseConfig):
     def getConfig(self, config :str) -> SingleAgentConfig:
         return self.agentMap.get(config)
 
-class GlobalConfig(BaseConfig):
-    def __init__(self, configPath :str):
-        config = loadFromYaml(configPath)
-        self.__init__(config)
+class EmailConfig(BaseConfig):
+    def __init__(self, smtp_server: str, smtp_port: int, username: str, password: str):
+        self.smtp_server = smtp_server
+        self.smtp_port = smtp_port
+        self.username = username
+        self.password = password
 
-    def __init__(self, config :dict):
-        self.llmConfig = LLMConfig.fromArgs(config["llm"])
-        self.embeddingConfig = EmbeddingConfig.fromArgs(config["embedding"])
-        self.agentsConfig :AgentsConfig = AgentsConfig.fromArgs(config["agents"])
-        self.memoryConfig = MemoryConfig.fromArgs(config["memory"])
-        self.indexConfig = IndexConfig.fromArgs(config["index"])
+    @classmethod
+    def fromArgs(cls, config: dict):
+        return cls(
+            smtp_server=config["smtp_server"],
+            smtp_port=config["smtp_port"],
+            username=config["username"],
+            password=config["password"]
+        )
+
+class ToolsConfig(BaseConfig):
+    def __init__(self, email_config: EmailConfig):
+        self.email_config = email_config
+
+    def getEmailConfig(self) -> EmailConfig:
+        return self.email_config
+
+    @classmethod
+    def fromArgs(cls, config: dict):
+        email_config = EmailConfig.fromArgs(config.get("email", {}))
+        return cls(email_config=email_config)
+
+class GlobalConfig(BaseConfig):
+    instanceCnt = 0
+    
+    def __init__(self, config):
+        if GlobalConfig.instanceCnt == 0:
+            GlobalConfig.instanceCnt = 1
+        elif GlobalConfig.instanceCnt >= 0:
+            raise Exception("GlobalConfig can only be initialized once")
+        
+        if type(config) == str:
+            config = loadFromYaml(config)
+        self.initFromDict(config)
+
+    def initFromDict(self, config: dict):
+        self.llmBasicConfig :LLMBasicConfig = LLMBasicConfig.fromArgs(config["llm_basic"])
+        self.llmConfig :LLMConfig = LLMConfig.fromArgs(self.llmBasicConfig, config["llm"])
+        self.embeddingConfig :EmbeddingConfig = EmbeddingConfig.fromArgs(config["embedding"]) if "embedding" in config.keys() else None
+        self.agentsConfig: AgentsConfig = AgentsConfig.fromArgs(config["agents"])
+        self.memoryConfig :MemoryConfig = MemoryConfig.fromArgs(config["memory"])
+        self.indexConfig :IndexConfig = IndexConfig.fromArgs(config["index"])
+        self.retrievalConfig :RetrievalConfig = RetrievalConfig.fromArgs(config["retrieval"]) if "retrieval" in config.keys() else None
+        self.toolsConfig :ToolsConfig = ToolsConfig.fromArgs(config.get("tools", {}))
+
+        for agentConfig in self.agentsConfig.agentConfigs:
+            if agentConfig.type == AgentType.QA:
+                if agentConfig.memoryConfig is None:
+                    agentConfig.memoryConfig = self.memoryConfig
+
+                if agentConfig.indexConfig is None:
+                    agentConfig.indexConfig = self.indexConfig
+
+                if agentConfig.retrievalConfig is None:
+                    agentConfig.retrievalConfig = self.retrievalConfig
+
+    def getLLMBasicConfig(self) -> LLMBasicConfig:
+        return self.llmBasicConfig
 
     def getLLMConfig(self) -> LLMConfig:
         return self.llmConfig
-    
+
+    def getSingleLLMConfig(self, model :str) -> SingleLLMConfig:
+        return self.llmConfig.getConfig(model)
+
+    def getDefaultLLMConfig(self) -> SingleLLMConfig:
+        return self.getSingleLLMConfig(self.llmBasicConfig.defaultModel)
+
     def getEmbeddingConfig(self) -> EmbeddingConfig:
         return self.embeddingConfig
     
@@ -493,3 +621,12 @@ class GlobalConfig(BaseConfig):
 
     def getIndexConfig(self) -> IndexConfig:
         return self.indexConfig
+
+    def getRetrievalConfig(self) -> RetrievalConfig:
+        return self.retrievalConfig
+
+    def getToolsConfig(self) -> ToolsConfig:
+        return self.toolsConfig
+    
+    def getEmailConfig(self) -> EmailConfig:
+        return self.toolsConfig.getEmailConfig()

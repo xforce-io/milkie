@@ -1,0 +1,8 @@
+@name record_csv
+
+@desc 
+记录对话内容到 csv 文件
+@desc
+
+1. 把下面对话记录中的【问题】【考生回答】【参考答案】【得分】【评价】抽取出来，形成markdown表格 ``` {query} ``` -> content
+2. #CODE 把下面内容逐行记录到 csv 文件中，文件名为当前日期时间，文件路径为 ./log/ ```{content}```

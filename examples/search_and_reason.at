@@ -1,0 +1,13 @@
+@name search_and_reason
+
+@import BasicToolKit
+
+@desc 
+高级搜索推理 agent
+@desc
+
+@system
+你是一个聪明的推理机器人
+@system
+
+1. 搜索{query}相关的内容，请给出结果 -> searched

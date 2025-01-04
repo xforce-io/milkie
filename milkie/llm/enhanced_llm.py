@@ -1,5 +1,5 @@
 from abc import abstractmethod
-from typing import Any, Optional, Sequence
+from typing import Any, Optional, Sequence, Generator
 from threading import Thread
 import random, uuid
 from queue import Queue
@@ -26,7 +26,6 @@ from llama_index.core.base.llms.types import LLMMetadata
 from llama_index.core.base.llms.types import CompletionResponseGen
 
 from milkie.config.config import QuantMethod
-from milkie.prompt.prompt import Loader
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +37,7 @@ class LLMApi(CustomLLM):
         default=8192,
     )
 
-    client: Any = PrivateAttr()
+    _client: PrivateAttr()
 
     def __init__(self, 
             context_window :int,
@@ -48,10 +47,10 @@ class LLMApi(CustomLLM):
 
         self.context_window = context_window
         self.model = model_name
-        self.client = client
+        object.__setattr__(self, "_client", client) 
 
     def getClient(self):
-        return self.client
+        return self._client
 
     @property
     def metadata(self) -> LLMMetadata:
@@ -75,7 +74,7 @@ class QueueRequest:
     def __init__(
             self, 
             requestId :str,
-            prompt: str, 
+            prompt: Any, 
             tokenized: list[int],
             **kwargs: Any) -> None:
         self.requestId = str(uuid.uuid4()) if requestId is None else requestId
@@ -87,10 +86,10 @@ class QueueRequest:
 class QueueResponse:
     def __init__(self,
             requestId :int,
-            output :Any,
+            chatCompletion :Any,
             numTokens: int=0) -> None:
         self.requestId = requestId
-        self.output = output
+        self.chatCompletion = chatCompletion
         self.numTokens = numTokens
         
 class EnhancedLLM(object):
@@ -119,7 +118,7 @@ class EnhancedLLM(object):
         else:
             self._tokenizer = None
 
-        self._systemPrompt = Loader.load(system_prompt) if system_prompt is not None else None
+        self._systemPrompt = system_prompt
 
     @property
     def metadata(self) -> LLMMetadata:
@@ -129,6 +128,9 @@ class EnhancedLLM(object):
 
     def getLLM(self) -> LLM:
         return self._llm
+
+    def getContextWindow(self) -> int:
+        return self.context_window
 
     def getMem(self) -> float:
         return -1
@@ -152,12 +154,40 @@ class EnhancedLLM(object):
     def predict(
             self, 
             prompt: BasePromptTemplate, 
-            **prompt_args: Any):
-        messages = self._llm._get_messages(prompt, **prompt_args)
-        response = self._chat(messages)
-        output = response.message.content or ""
-        return (self._llm._parse_output(output), len(response.raw["model_output"]))
+            promptArgs: dict,
+            **kwargs: Any):
+        if len(promptArgs) > 0:
+            messages = self._llm._get_messages(prompt, **promptArgs)
+        else :
+            messages = prompt.message_templates
 
+        response = self._completion(messages, **kwargs)
+        output = response.message.content or ""
+        numTokens = response.raw["num_tokens"]
+        if numTokens == 0:
+            numTokens = len(response.raw["model_output"])
+        return (self._llm._parse_output(output), numTokens, response.raw["chat_completion"])
+
+    @torch.inference_mode()
+    def stream(
+            self, 
+            prompt: BasePromptTemplate, 
+            promptArgs: dict,
+            **kwargs: Any
+    ) -> Generator[ChatResponse, None, None]:
+        if len(promptArgs) > 0:
+            messages = self._llm._get_messages(prompt, **promptArgs)
+        else:
+            messages = prompt.message_templates
+        return self._stream(messages, **kwargs)
+
+    def filterGenArgs(kwargs :dict):
+        return EnhancedLLM.filterArgs(kwargs, ["repetition_penalty", "temperature", "top_k", "top_p"])
+
+    def filterArgs(kwargs :dict, keysLeft :list[str]):
+        return {k: v for k, v in kwargs.items() if k in keysLeft} 
+
+    #deprecated
     @torch.inference_mode()
     def predictBatch(
             self, 
@@ -170,11 +200,20 @@ class EnhancedLLM(object):
             messages = [self._llm._get_messages(prompt, **{})]
         return self._predictBatch(messages, **kwargs)
 
-    def filterGenArgs(kwargs :dict):
-        return EnhancedLLM.filterArgs(kwargs, ["repetition_penalty", "temperature", "top_k", "top_p"])
+    def fail(
+            self, 
+            prompt :BasePromptTemplate, 
+            promptArgs :dict, 
+            **kwargs: Any):
+        if len(promptArgs) > 0:
+            messages = self._llm._get_messages(prompt, **promptArgs)
+        else:
+            messages = prompt.message_templates
+        self._fail(messages, **kwargs)
 
-    def filterArgs(kwargs :dict, keysLeft :list[str]):
-        return {k: v for k, v in kwargs.items() if k in keysLeft} 
+    @abstractmethod
+    def _fail(self, messages :Sequence[ChatMessage], **kwargs: Any):
+        pass
 
     @abstractmethod
     def _getModel(self):
@@ -212,16 +251,16 @@ class EnhancedLLM(object):
         if self._systemPrompt is not None:
             for msgs in messages:
                 msgs.insert(0, ChatMessage(role="system", content=self._systemPrompt))
-        responses = self._chatBatch(messages, **kwargs)
-        for response in responses:
-            output = response.message.content or ""
-            numTokens = response.raw["num_tokens"]
-            result += [(
-                self._llm._parse_output(output), 
-                numTokens if numTokens != 0 else len(response.raw["model_output"]))]
+        chatResponses = self._chatBatch(messages, **kwargs)
+        for chatResponse in chatResponses:
+            output = chatResponse.message.content or ""
+            numTokens = chatResponse.raw["num_tokens"]
+            if numTokens == 0:
+                numTokens = len(chatResponse.raw["model_output"])
+            result += [(self._llm._parse_output(output), numTokens, chatResponse.raw["chat_completion"])]
         return result
 
-    def _chat(self, messages: Sequence[ChatMessage], **kwargs: Any) -> ChatResponse:
+    def _completion(self, messages: Sequence[ChatMessage], **kwargs: Any) -> ChatResponse:
         prompt = self._llm.messages_to_prompt(messages)
         completion_response = self._complete(prompt, formatted=True, **kwargs)
         return completion_response_to_chat_response(completion_response)
@@ -244,12 +283,11 @@ class EnhancedLLM(object):
 
         return [completion_response_to_chat_response(completionResponse) for completionResponse in completionResponses]
 
-    @abstractmethod
-    def _complete(self, prompt: str, formatted: bool = False, **kwargs: Any) -> Any:
-        pass
+    def _complete(self, prompt: str, formatted: bool = False, **kwargs: Any) -> list[CompletionResponse]:
+        return self._completeBatch([prompt], **kwargs)[0]
 
     @abstractmethod
-    def _completeBatch(self, prompts: list[str], **kwargs: Any) -> Any:
+    def _completeBatch(self, prompts: list[str], **kwargs: Any) -> list[CompletionResponse]:
         pass
 
     @abstractmethod
@@ -297,32 +335,35 @@ class EnhancedLLM(object):
         for t in threads:
             t.join()
 
-        resps :list[QueueResponse] = []
+        queueResponses :list[QueueResponse] = []
         while not resQueue.empty():
-            resps.append(resQueue.get())
-        resps.sort(key=lambda x: order[x.requestId])
+            queueResponses.append(resQueue.get())
+        queueResponses.sort(key=lambda x: order[x.requestId])
 
-        assert len(resps) == len(prompts)
+        assert len(queueResponses) == len(prompts)
 
         completionTokens = []
-        for resp in resps:
-            completionTokens += [tokenIdExtractor(resp.output)]
+        for queueResponse in queueResponses:
+            completionTokens += [tokenIdExtractor(queueResponse.chatCompletion)]
         completion = self._tokenizer.batch_decode(completionTokens, skip_special_tokens=True)
 
         completionResponses = []
-        for i, resp in enumerate(resps):
+        for i, queueResponse in enumerate(queueResponses):
             completionResponses += [CompletionResponse(
                 text=completion[i], 
-                raw={"model_output": tokenIdExtractor(resp.output), "num_tokens": 0})]
+                raw={
+                    "model_output": tokenIdExtractor(queueResponse.chatCompletion.choices[0].message.content), 
+                    "num_tokens": 0,
+                    "chat_completion": queueResponse.chatCompletion})]
         return completionResponses
 
     def _completeBatchNoTokenizationAsync(
             self, 
-            prompts: list[str], 
+            prompts: list, 
             numThreads: int,
             inference: Callable[[object, Queue[QueueRequest], Queue[QueueResponse], dict, dict], Any],
             **genArgs: Any
-    ) -> CompletionResponse:
+    ) -> list[CompletionResponse]:
 
         reqQueue = Queue[QueueRequest]()
         resQueue = Queue[QueueResponse]()
@@ -352,16 +393,24 @@ class EnhancedLLM(object):
         for t in threads:
             t.join()
 
-        resps :list[QueueResponse] = []
+        queueResponses :list[QueueResponse] = []
         while not resQueue.empty():
-            resps.append(resQueue.get())
-        resps.sort(key=lambda x: order[x.requestId])
+            queueResponses.append(resQueue.get())
+        queueResponses.sort(key=lambda x: order[x.requestId])
 
-        assert len(resps) == len(prompts)
+        assert len(queueResponses) == len(prompts)
 
         completionResponses = []
-        for i, resp in enumerate(resps):
+        for i, queueResponse in enumerate(queueResponses):
+            textContent = queueResponse.chatCompletion.choices[0].message.content
             completionResponses += [CompletionResponse(
-                text=resp.output,
-                raw={"model_output": None, "num_tokens": resp.numTokens})]
+                text=textContent if textContent is not None else "",
+                raw={
+                    "model_output": None, 
+                    "num_tokens": queueResponse.numTokens,
+                    "chat_completion": queueResponse.chatCompletion})]
         return completionResponses
+
+    @abstractmethod
+    def _stream(self, messages: Sequence[ChatMessage], **kwargs: Any) -> Generator[ChatResponse, None, None]:
+        pass

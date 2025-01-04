@@ -26,7 +26,7 @@ def candidateTextQAPromptSel(
             ChatPromptTemplate(
                 message_templates=[
                     ChatMessage(
-                        content=(Loader.load(promptSystem)),
+                        content=(promptSystem),
                         role=MessageRole.SYSTEM,
                     ),
                     ChatMessage(

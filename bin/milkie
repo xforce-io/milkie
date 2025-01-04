@@ -1,0 +1,99 @@
+#!/Users/xupeng/miniconda3/bin/python
+
+import os
+import sys
+import argparse
+from dataclasses import dataclass
+from typing import Any, Dict
+
+projectRoot = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, projectRoot)
+
+from milkie.runtime.engine import Engine
+from milkie.server.server import Server
+
+@dataclass
+class Args:
+    agent: str
+    chatroom: str
+    config: str
+    file: str
+    folder: str
+    query: str
+    server: bool
+    port: int
+    runArgs: Dict[str, Any]
+
+def parseArgs() -> Args:
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--agent', type=str, help='agent name')
+    parser.add_argument('--chatroom', type=str, help='chatroom name')
+    parser.add_argument('--config', type=str, help='config file path')
+    parser.add_argument('--file', type=str, help='program file path')
+    parser.add_argument('--folder', type=str, help='program folder path')
+    parser.add_argument('--query', type=str, help='query')
+    parser.add_argument('--server', action='store_true', help='run as OpenAI compatible server')
+    parser.add_argument('--port', type=int, default=8000, help='server port')
+    
+    # 解析已知参数，忽略未知参数
+    known_args, unknown_args = parser.parse_known_args()
+    args_dict = vars(known_args)
+    
+    # 处理未知参数
+    runArgs = {}
+    i = 0
+    while i < len(unknown_args):
+        if unknown_args[i].startswith('--'):
+            key = unknown_args[i][2:]  # 去掉 '--' 前缀
+            if i + 1 < len(unknown_args) and not unknown_args[i + 1].startswith('--'):
+                # 如果下一个参数不是以 -- 开头，则认为是值
+                value = unknown_args[i + 1]
+                i += 2
+            else:
+                # 如果下一个参数是以 -- 开头或没有下一个参数，则认为是布尔标志
+                value = True
+                i += 1
+            runArgs[key] = value
+        else:
+            i += 1
+    
+    args_dict['runArgs'] = runArgs
+    return Args(**args_dict)
+
+def main():
+    args = parseArgs()
+    
+    # 创建 engine
+    engine = Engine(
+        folder=args.folder,
+        file=args.file,
+        config=args.config
+    )
+    
+    # 如果是服务器模式
+    if args.server:
+        if not args.agent:
+            print("Error: --agent is required when running in server mode")
+            sys.exit(1)
+        
+        server = Server(engine=engine, agent_name=args.agent)
+        server.run(port=args.port)
+        return
+    
+    # 普通模式
+    if args.query:
+        queryArgs = {"query": args.query}
+    else:
+        queryArgs = {}
+    
+    # 将 runArgs 合并到 queryArgs
+    engine.env.context.varDict.updateFromDict(args.runArgs)
+        
+    engine.run(
+        chatroom=args.chatroom,
+        agent=args.agent,
+        args=queryArgs
+    )
+
+if __name__ == '__main__':
+    main()

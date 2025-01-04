@@ -12,9 +12,11 @@ class HybridRetriever(BaseRetriever):
     def __init__(
             self, 
             denseRetriever :VectorStoreIndex, 
-            sparseRetriever :BM25Retriever):
+            sparseRetriever :BM25Retriever,
+            similarityTopK :int):
         self.denseRetriever = denseRetriever
         self.sparseRetriever = sparseRetriever
+        self.similarityTopK = similarityTopK
 
     def _retrieve(self, query_bundle: QueryBundle) -> List[NodeWithScore]:
         #combine two nodes, and record the score in the metadata
@@ -24,6 +26,9 @@ class HybridRetriever(BaseRetriever):
             vectorNodes = self.denseRetriever._retrieve(query_bundle)
             logger.debug(f"dense_retriever_recall_num[{len(vectorNodes)}]")
             for node in vectorNodes:
+                if node.score < 0.4:
+                    continue
+
                 fmtText = truncate_text(node.node.text, 100).replace("\n", "//")
                 logger.debug(f"score[{node.score:.2f}] content[{fmtText}]")
             
@@ -46,12 +51,18 @@ class HybridRetriever(BaseRetriever):
             bm25Nodes = self.sparseRetriever._retrieve(query_bundle)
             logger.debug(f"sparse_retriever_recall_num[{len(bm25Nodes)}]")
             for node in bm25Nodes:
+                if node.score < 1.0:
+                    continue
+
                 fmtText = truncate_text(node.node.text, 100).replace("\n", "//")
                 logger.debug(f"score[{node.score:.2f}] content[{fmtText}]")
 
             bm25Nodes.sort(key=lambda x: x.score, reverse=True)
             rank = 1
             for bm25Node in bm25Nodes:
+                if bm25Node.score < 1.0:
+                    continue
+                
                 theNode = nodeIdToNode.get(bm25Node.node_id)
                 if theNode is None:
                     nodes.append(bm25Node)
@@ -69,6 +80,7 @@ class HybridRetriever(BaseRetriever):
                 node.score = HybridRetriever.__calcRRF(node.score, 50)
 
         nodes.sort(key=lambda x: x.score, reverse=True)
+        nodes = nodes[:self.similarityTopK]
         logger.debug(f"final_recall[{len(nodes)}]")
         for node in nodes:
             fmtText = truncate_text(node.node.text, 100).replace("\n", "//")

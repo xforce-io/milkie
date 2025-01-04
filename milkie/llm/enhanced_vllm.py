@@ -206,15 +206,12 @@ class EnhancedVLLM(EnhancedLLM):
             prompt: BasePromptTemplate, 
             **prompt_args: Any):
         messages = self._llm._get_messages(prompt, **prompt_args)
-        response = self._chat(messages)
+        response = self._completion(messages)
         output = response.message.content or ""
         return (self._llm._parse_output(output), len(response.raw["model_output"]))
 
     def _getModel(self):
         return self._llm._engine
-
-    def _complete(self, prompt: str, formatted: bool = False, **kwargs: Any) -> Any:
-        return self._completeBatch([prompt], **kwargs)[0]
 
     def _completeBatch(
             self, 
@@ -254,7 +251,7 @@ class EnhancedVLLM(EnhancedLLM):
                 result = response.json()
                 resQueue.put(QueueResponse(
                     requestId=request.requestId, 
-                    output=result["raw"]["model_output"]))
+                    chatCompletion=result["raw"]["model_output"]))
             else:
                 raise ValueError("Failed to complete request, status code: %d" % response.status_code)
 

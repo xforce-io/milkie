@@ -67,9 +67,8 @@ def experiment(
         numBatches += 1
         return resps 
 
-    benchmarks.evalAndReport(agent=agentTaskBatch, prompt="{query_str}")
+    benchmarks.evalAndReport(agent=agentTaskBatch, prompt="{query}")
     tokensPerSec = float(totalTokens)/totalTime
-
 
     #TODO: 1.412 is observered from the A800 GPU, need to remove this hard code
     ex.log_scalar("total", numQueries)
