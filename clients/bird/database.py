@@ -438,8 +438,8 @@ class Database:
                 ]
                 schema_info.append(" ".join(part for part in info_parts if part))
                 
-            # 3. 获取示例数据（最多2条）
-            cursor.execute(f"SELECT * FROM `{table_name}` LIMIT 2")
+            # 3. 获取示例数据（最多3条）
+            cursor.execute(f"SELECT * FROM `{table_name}` LIMIT 3")
             records = cursor.fetchall()
             field_names = [col[0] for col in columns]
             
