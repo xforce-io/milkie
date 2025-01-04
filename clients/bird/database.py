@@ -369,7 +369,7 @@ class Database:
         if hasattr(self, '_db'):
             self._db.close()
 
-    def _get_table_desc_prompt(self, table_name: str, schema_info: List[str], example_records: List[Dict]) -> str:
+    def _get_table_desc(self, table_name: str, schema_info: List[str], example_records: List[Dict]) -> str:
         """生成表描述的prompt"""
         return escape(f"""
 请分析下面这张数据库表的结构和示例数据，给出精炼且完备的表描述。
@@ -451,8 +451,7 @@ class Database:
                 
             # 4. 生成描述
             if self._client:
-                prompt = self._get_table_desc_prompt(table_name, schema_info, example_records)
-                table_desc = self._client.execute(prompt, "cot_expert")
+                table_desc = self._get_table_desc(table_name, schema_info, example_records)
                 
                 # 5. 存入缓存
                 self._cache_mgr.setValue("tableschema", cache_key, table_desc)
