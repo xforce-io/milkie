@@ -25,6 +25,9 @@ import json
 logger = logging.getLogger(__name__)
 
 class EnhancedOpenAI(EnhancedLLM):
+    # 类级别常量
+    MAX_RETRIES = 1  # 最大重试次数
+    
     def __init__(self, 
             model_name :str,
             system_prompt :str,
@@ -152,19 +155,25 @@ class EnhancedOpenAI(EnhancedLLM):
             chatCompletion = ChatCompletion.model_validate_json(cached["chatCompletion"])
             numTokens = cached["numTokens"]
         else:
-            try:
-                self._addDisturbance(messagesJson, **kwargs)
-                theArgs = self._createApiArgs(messagesJson, stream=False, **kwargs)
-                response = self._llm.getClient().chat.completions.create(**theArgs)
-                chatCompletion = response
-                numTokens = response.usage.completion_tokens
-                self._setCacheValue(
-                    messagesJson=messagesJson, 
-                    content=chatCompletion.choices[0].message.content, 
-                    toolCalls=chatCompletion.choices[0].message.tool_calls,
-                    numTokens=numTokens)
-            except Exception as e:
-                return self._handleApiError(e)
+            retry_count = 0
+            while retry_count <= self.MAX_RETRIES:
+                try:
+                    self._addDisturbance(messagesJson, **kwargs)
+                    theArgs = self._createApiArgs(messagesJson, stream=False, **kwargs)
+                    response = self._llm.getClient().chat.completions.create(**theArgs)
+                    chatCompletion = response
+                    numTokens = response.usage.completion_tokens
+                    self._setCacheValue(
+                        messagesJson=messagesJson, 
+                        content=chatCompletion.choices[0].message.content, 
+                        toolCalls=chatCompletion.choices[0].message.tool_calls,
+                        numTokens=numTokens)
+                    break
+                except Exception as e:
+                    retry_count += 1
+                    if retry_count > self.MAX_RETRIES:
+                        return self._handleApiError(e)
+                    logger.warning(f"Retry {retry_count}/{self.MAX_RETRIES} after error: {str(e)}")
 
         return completion_response_to_chat_response(CompletionResponse(
             text=chatCompletion.choices[0].message.content or "",
@@ -190,45 +199,50 @@ class EnhancedOpenAI(EnhancedLLM):
                 toolCalls=chatCompletion.choices[0].message.tool_calls)
             return
         
-        try:
-            self._addDisturbance(messagesJson, **kwargs)
-            theArgs = self._createApiArgs(messagesJson, stream=True, **kwargs)
-            stream = self._llm.getClient().chat.completions.create(**theArgs)
-            fullContent = []
-            funcName = None
-            funcArgs = []
-            
-            for chunk in stream:
-                delta = chunk.choices[0].delta
-                if delta.content is not None:
-                    fullContent.append(delta.content)
-                    yield CompletionResponse(text=delta.content, raw=delta)
-                elif delta.tool_calls:
-                    if delta.tool_calls[0].function.name is not None:
-                        funcName = delta.tool_calls[0].function.name
-                    if delta.tool_calls[0].function.arguments is not None:
-                        funcArgs.append(delta.tool_calls[0].function.arguments)
-                    yield CompletionResponse(text="", raw=delta)
+        retry_count = 0
+        while retry_count <= self.MAX_RETRIES:
+            try:
+                self._addDisturbance(messagesJson, **kwargs)
+                theArgs = self._createApiArgs(messagesJson, stream=True, **kwargs)
+                stream = self._llm.getClient().chat.completions.create(**theArgs)
+                fullContent = []
+                funcName = None
+                funcArgs = []
+                
+                for chunk in stream:
+                    delta = chunk.choices[0].delta
+                    if delta.content is not None:
+                        fullContent.append(delta.content)
+                        yield CompletionResponse(text=delta.content, raw=delta)
+                    elif delta.tool_calls:
+                        if delta.tool_calls[0].function.name is not None:
+                            funcName = delta.tool_calls[0].function.name
+                        if delta.tool_calls[0].function.arguments is not None:
+                            funcArgs.append(delta.tool_calls[0].function.arguments)
+                        yield CompletionResponse(text="", raw=delta)
 
-            content = "".join(fullContent)
-            arguments = "".join(funcArgs) if funcArgs else ""
-            self._setCacheValue(
-                messagesJson=messagesJson, 
-                content=content, 
-                toolCalls=[
-                    ChatCompletionMessageToolCall(
-                        id=str(uuid.uuid4()),
-                        type="function",
-                        function=Function(
-                            name=funcName, 
-                            arguments=arguments
+                content = "".join(fullContent)
+                arguments = "".join(funcArgs) if funcArgs else ""
+                self._setCacheValue(
+                    messagesJson=messagesJson, 
+                    content=content, 
+                    toolCalls=[
+                        ChatCompletionMessageToolCall(
+                            id=str(uuid.uuid4()),
+                            type="function",
+                            function=Function(
+                                name=funcName, 
+                                arguments=arguments
+                            )
                         )
-                    )
-                ] if funcName is not None else None,
-                numTokens=len(content.split()))
-
-        except Exception as e:
-            self._handleApiError(e, isStream=True)
+                    ] if funcName is not None else None,
+                    numTokens=len(content.split()))
+                break
+            except Exception as e:
+                retry_count += 1
+                if retry_count > self.MAX_RETRIES:
+                    self._handleApiError(e, isStream=True)
+                logger.warning(f"Retry {retry_count}/{self.MAX_RETRIES} after error: {str(e)}")
 
     def _simulateStream(
             self, 
