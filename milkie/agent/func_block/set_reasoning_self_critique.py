@@ -25,12 +25,13 @@ class SetReasoningSelfCritique(FuncBlock):
         self._restoreParams(args, self.params)
         critiqueLLM = args.get("critique")
         if not critiqueLLM:
-            critiqueLLM = kwargs["curInstruction"].llm
-
+            critiqueLLM = kwargs["curInstruction"].llm 
+        if not critiqueLLM:
+            critiqueLLM = context.globalContext.settings.getLLMDefault()
         if not critiqueLLM:
             raise ValueError(f"LLM {critiqueLLM} not found")
         
         kwargs["curInstruction"].reasoning = ReasoningSelfCritique(
-            self.context.globalContext,
-            critiqueLLM)
+            globalContext=self.context.globalContext,
+            llm=self.context.globalContext.settings.getLLM(critiqueLLM))
         return Response(respStr="set reasoning self critique") 
