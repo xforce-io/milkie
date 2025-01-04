@@ -48,14 +48,6 @@ class EnhancedOpenAI(EnhancedLLM):
             port=port,
             tokenizer_kwargs=tokenizer_kwargs)
 
-        if model_name.startswith("deepseek"):
-            if "chat" in model_name:
-                self.model_name = "deepseek-chat"
-            elif "coder" in model_name:
-                self.model_name = "deepseek-coder"
-            else:
-                raise ValueError(f"Unknown model type: {model_name}")
-
         self.endpoint = endpoint
         self.api_key = api_key
         self._llm = LLMApi(
