@@ -6,9 +6,10 @@ import sys
 
 import yaml
 
-EVAL_ROOT = "$HOME/dev/github/bird"
-SERVER_ROOT = "$HOME/dev/github/milkie"
-REPORT_ROOT = "$HOME/dev/github/bird/reports"
+HOME = os.getenv("HOME")
+EVAL_ROOT = f"{HOME}/dev/github/bird"
+SERVER_ROOT = f"{HOME}/dev/github/milkie"
+REPORT_ROOT = f"{HOME}/dev/github/bird/reports"
 
 EVAL_CONFIG_PATH = f"{EVAL_ROOT}/mini_dev/llm/run/run_gpt.sh"
 SERVER_CONFIG_PATH = f"{SERVER_ROOT}/clients/bird/bird.yaml"
