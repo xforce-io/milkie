@@ -98,7 +98,8 @@ def set_config(
         sys.exit(f"错误：YAML 配置文件不存在: {config_path}")
         
     value_str = f'"{value}"' if isinstance(value, str) else str(value)
-    status = os.system(f"sed -i 's/^\\([[:space:]]*\\){config_key}[[:space:]]*{sep}.*$/\\1{config_key}{sep}{value_str}/' {config_path}")
+    extra_whitespace = " " if config_path.endswith("yaml") else ""
+    status = os.system(f"sed -i 's/^\\([[:space:]]*\\){config_key}[[:space:]]*{sep}.*$/\\1{config_key}{sep}{extra_whitespace}{value_str}/' {config_path}")
     if status != 0:
         sys.exit(f"错误：更新配置文件失败: {config_path}")
 
