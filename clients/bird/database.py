@@ -97,7 +97,10 @@ class Database:
             ERROR(f"Error in descTablesFromQuery: {str(e)}")
             return []
             
-    def descTableFieldsFromQuery(self, query: str) -> Dict[str, str]:
+    def descTableFieldsFromQuery(
+            self, 
+            query: str, 
+            table_fields_record_samples: int) -> Dict[str, str]:
         """生成表和字段的详细描述"""
         try:
             # 1. 提取表名和字段
@@ -115,7 +118,10 @@ class Database:
             # 3. 获取字段样本数据并生成描述
             descriptions = {}
             for table_name, fields in valid_table_fields.items():
-                desc = self._generate_field_description(table_name, fields)
+                desc = self._generate_field_description(
+                    table_name, 
+                    fields, 
+                    table_fields_record_samples)
                 if desc:
                     descriptions[table_name] = desc
                     
@@ -287,7 +293,11 @@ class Database:
 - 基于样本数据的特征分析>
 """)
         
-    def _generate_field_description(self, table_name: str, fields: Set[str]) -> Optional[str]:
+    def _generate_field_description(
+            self, 
+            table_name: str, 
+            fields: Set[str], 
+            table_fields_record_samples: int) -> Optional[str]:
         """生成字段的详细描述"""
         # 1. 先检查缓存
         cache_key = [{"table": table_name, "fields": sorted(list(fields))}]
@@ -317,7 +327,7 @@ class Database:
             samples = self._get_field_samples(
                 table_name, 
                 fields, 
-                self._config.search.table_fields_record_samples)
+                table_fields_record_samples)
             if not samples:
                 return None
                 
