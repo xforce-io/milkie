@@ -43,7 +43,13 @@ def set_model(config :dict, model :str):
     set_config(
         config=config, 
         config_path=SERVER_CONFIG_PATH, 
-        config_key="model", 
+        config_key="thought_model", 
+        value=model, 
+        sep=":")
+    set_config(
+        config=config, 
+        config_path=SERVER_CONFIG_PATH, 
+        config_key="sql_model", 
         value=model, 
         sep=":")
 
@@ -89,7 +95,7 @@ def set_config(
         sys.exit(f"错误：YAML 配置文件不存在: {config_path}")
         
     value_str = f'"{value}"' if isinstance(value, str) else str(value)
-    status = os.system(f"sed -i 's/^\\([[:space:]]*\\){config_key}[[:space:]]*{sep}.*$/\\1{config_key}{sep}{value_str}/' {config_path}")
+    status = os.system(f"sed -i 's/^\\([[:space:]]*\\){config_key}[[:space:]]*{sep}.*$/\\1{config_key}{sep} {value_str}/' {config_path}")
     if status != 0:
         sys.exit(f"错误：更新配置文件失败: {config_path}")
 
@@ -104,7 +110,8 @@ def backup_configs(report_dir :str):
     backup_config(EVAL_CONFIG_PATH, report_dir)
 
 def start_eval():
-    os.system(f"cd {EVAL_ROOT}; ./mini_dev/evaluation/eval.sh --run")
+    os.system("conda activate BIRD")
+    os.system(f"cd {EVAL_ROOT}; bash mini_dev/evaluation/eval.sh --run")
 
 def restart_bird():
     os.system(f"cd {SERVER_ROOT}; ./clients/bird/bin/bird.sh restart")
