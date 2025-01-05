@@ -122,21 +122,16 @@ def restart_bird():
     """
     subprocess.run(cmd, shell=True, executable='/bin/bash')
 
-def start_eval():
+def start_eval(report_dir: str):
     cmd = f"""
     source ~/miniconda3/etc/profile.d/conda.sh
     conda activate BIRD
     cd {EVAL_ROOT}
-    bash mini_dev/evaluation/eval.sh --run
+    bash mini_dev/evaluation/eval.sh --run &> {report_dir}/eval.log",
     """
     subprocess.run(cmd, shell=True, executable='/bin/bash')
 
 def make_report(config: dict, report_dir: str):
-    try:
-        Path(report_dir).mkdir(parents=True, exist_ok=True)
-    except Exception as e:
-        sys.exit(f"错误：创建报告目录失败: {str(e)}")
-
     file_basic_info = f"{report_dir}/basic_info.txt"
     try:
         with open(file_basic_info, "w") as f:
@@ -153,7 +148,6 @@ def make_report(config: dict, report_dir: str):
     commands = [
         f"cp {EVAL_CONFIG_PATH} {report_dir}/eval.sh",
         f"cp {SERVER_CONFIG_PATH} {report_dir}/bird.yaml",
-        f"cd {EVAL_ROOT}; ./mini_dev/evaluation/eval.sh &> {report_dir}/eval.log",
         f"cd {SERVER_ROOT}; cp clients/bird/log/bird.log {report_dir}/bird.log",
         f"cd {SERVER_ROOT}; cp nohup.out {report_dir}/server.log"
     ]
@@ -199,11 +193,16 @@ def run_eval(configs: list[dict]):
         try:
             cur_time = datetime.datetime.now().strftime("%Y%m%d-%H%M")
             report_dir = f"{REPORT_ROOT}/{cur_time}"
+
+            try:
+                Path(report_dir).mkdir(parents=True, exist_ok=True)
+            except Exception as e:
+                sys.exit(f"错误：创建报告目录失败: {str(e)}")
             
             backup_configs(report_dir)
             apply_config(config)
             restart_bird()
-            start_eval()
+            start_eval(report_dir)
             make_report(config, report_dir)
         except Exception as e:
             sys.exit(f"错误：执行评估时发生错误: {str(e)}")
