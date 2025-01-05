@@ -153,7 +153,7 @@ def make_report(config: dict, report_dir: str):
     commands = [
         f"cp {EVAL_CONFIG_PATH} {report_dir}/eval.sh",
         f"cp {SERVER_CONFIG_PATH} {report_dir}/bird.yaml",
-        f"cd {EVAL_ROOT}; ./mini_dev/evaluation/eval.sh &> {report_dir}/eval.log",
+        f"cd {EVAL_ROOT}; bash mini_dev/evaluation/eval.sh &> {report_dir}/eval.log",
         f"cd {SERVER_ROOT}; cp clients/bird/log/bird.log {report_dir}/bird.log",
         f"cd {SERVER_ROOT}; cp nohup.out {report_dir}/server.log"
     ]
@@ -164,7 +164,7 @@ def make_report(config: dict, report_dir: str):
             sys.exit(f"错误：执行命令失败: {cmd}")
 
 def set_configs() -> list[dict]:
-    num_cases = [3, 5]
+    num_cases = [5, 8]
     table_desc_record_samples = [0, 3]
     table_fields_record_samples = [0, 10]
     models = ["deepseek-chat", "Tome-pro"]
