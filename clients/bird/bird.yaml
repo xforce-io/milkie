@@ -18,9 +18,9 @@ search:
   min_sqls: 2
   max_sqls: 3
   max_iters: 10
-  table_desc_record_samples: 0
-  table_fields_record_samples: 0
+  table_desc_record_samples: 3
+  table_fields_record_samples: 10
 
 model:
-  thought_model: "deepseek-chat"
-  sql_model: "deepseek-chat"
+  thought_model: "Tome-pro"
+  sql_model: "Tome-pro"
