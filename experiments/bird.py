@@ -114,6 +114,8 @@ def backup_configs(report_dir :str):
     backup_config(EVAL_CONFIG_PATH, report_dir)
 
 def restart_bird():
+    print("重启BIRD")
+
     cmd = f"""
     source ~/miniconda3/etc/profile.d/conda.sh
     conda activate {MAIN_CONDA_ENV}
@@ -123,6 +125,8 @@ def restart_bird():
     subprocess.run(cmd, shell=True, executable='/bin/bash')
 
 def start_eval(report_dir: str):
+    print(f"开始评估，报告目录: {report_dir}")
+    
     cmd = f"""
     source ~/miniconda3/etc/profile.d/conda.sh
     conda activate BIRD
@@ -132,6 +136,8 @@ def start_eval(report_dir: str):
     subprocess.run(cmd, shell=True, executable='/bin/bash')
 
 def make_report(config: dict, report_dir: str):
+    print(f"生成报告，报告目录: {report_dir}")
+
     file_basic_info = f"{report_dir}/basic_info.txt"
     try:
         with open(file_basic_info, "w") as f:
@@ -191,6 +197,7 @@ def run_eval(configs: list[dict]):
                 sys.exit(f"错误：配置缺少必要字段: {key}")
         
         try:
+            print(f"开始评估，配置: {config}")
             cur_time = datetime.datetime.now().strftime("%Y%m%d-%H%M")
             report_dir = f"{REPORT_ROOT}/{cur_time}"
 
