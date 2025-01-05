@@ -3,6 +3,7 @@ import os
 from typing import Any
 from pathlib import Path
 import sys
+import subprocess
 
 import yaml
 
@@ -112,10 +113,20 @@ def backup_configs(report_dir :str):
     backup_config(EVAL_CONFIG_PATH, report_dir)
 
 def start_eval():
-    os.system(f"conda activate {MAIN_CONDA_ENV}; cd {EVAL_ROOT}; bash mini_dev/evaluation/eval.sh --run")
+    cmd = f"""
+    conda activate {MAIN_CONDA_ENV}
+    cd {EVAL_ROOT}
+    bash mini_dev/evaluation/eval.sh --run
+    """
+    subprocess.run(cmd, shell=True, executable='/bin/bash')
 
 def restart_bird():
-    os.system(f"conda activate {MAIN_CONDA_ENV}; cd {SERVER_ROOT}; ./clients/bird/bin/bird.sh restart")
+    cmd = f"""
+    conda activate {MAIN_CONDA_ENV}
+    cd {SERVER_ROOT}
+    ./clients/bird/bin/bird.sh restart
+    """
+    subprocess.run(cmd, shell=True, executable='/bin/bash')
 
 def make_report(config: dict, report_dir: str):
     try:
