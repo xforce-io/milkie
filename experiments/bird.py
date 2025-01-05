@@ -113,21 +113,21 @@ def backup_configs(report_dir :str):
     backup_config(SERVER_CONFIG_PATH, report_dir)
     backup_config(EVAL_CONFIG_PATH, report_dir)
 
-def start_eval():
-    cmd = f"""
-    source ~/miniconda3/etc/profile.d/conda.sh
-    conda activate {MAIN_CONDA_ENV}
-    cd {EVAL_ROOT}
-    bash mini_dev/evaluation/eval.sh --run
-    """
-    subprocess.run(cmd, shell=True, executable='/bin/bash')
-
 def restart_bird():
     cmd = f"""
     source ~/miniconda3/etc/profile.d/conda.sh
     conda activate {MAIN_CONDA_ENV}
     cd {SERVER_ROOT}
     ./clients/bird/bin/bird.sh restart
+    """
+    subprocess.run(cmd, shell=True, executable='/bin/bash')
+
+def start_eval():
+    cmd = f"""
+    source ~/miniconda3/etc/profile.d/conda.sh
+    conda activate BIRD
+    cd {EVAL_ROOT}
+    bash mini_dev/evaluation/eval.sh --run
     """
     subprocess.run(cmd, shell=True, executable='/bin/bash')
 
