@@ -131,7 +131,8 @@ def start_eval(report_dir: str):
     source ~/miniconda3/etc/profile.d/conda.sh
     conda activate BIRD
     cd {EVAL_ROOT}
-    bash mini_dev/evaluation/eval.sh --run &> {report_dir}/eval.log",
+    bash mini_dev/evaluation/eval.sh --run 
+    bash mini_dev/evaluation/eval.sh &> {report_dir}/eval.log"
     """
     subprocess.run(cmd, shell=True, executable='/bin/bash')
 
