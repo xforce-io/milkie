@@ -146,14 +146,14 @@ def set_configs() -> list[dict]:
     table_fields_record_samples = [0, 10]
     models = ["deepseek-chat", "Tome-pro"]
     configs = []
-    for num_cases in num_cases:
-        for table_desc_record_samples in table_desc_record_samples:
-            for table_fields_record_samples in table_fields_record_samples:
+    for num_case in num_cases:
+        for table_desc_record_sample in table_desc_record_samples:
+            for table_fields_record_sample in table_fields_record_samples:
                 for model in models:
                     configs.append({
-                        "num_cases": num_cases,
-                        "table_desc_record_samples": table_desc_record_samples,
-                        "table_fields_record_samples": table_fields_record_samples,
+                        "num_cases": num_case,
+                        "table_desc_record_samples": table_desc_record_sample,
+                        "table_fields_record_samples": table_fields_record_sample,
                         "model": model
                     })
     return configs
