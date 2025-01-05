@@ -26,6 +26,8 @@ class SearchConfig:
     min_sqls: int
     max_sqls: int
     max_iters: int
+    table_desc_record_samples: int
+    table_fields_record_samples: int
 
 @dataclass
 class ModelConfig:
