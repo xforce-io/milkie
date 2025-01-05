@@ -132,7 +132,7 @@ def start_eval(report_dir: str):
     conda activate BIRD
     cd {EVAL_ROOT}
     bash mini_dev/evaluation/eval.sh --run 
-    bash mini_dev/evaluation/eval.sh &> {report_dir}/eval.log"
+    bash mini_dev/evaluation/eval.sh &> {report_dir}/eval.log
     """
     subprocess.run(cmd, shell=True, executable='/bin/bash')
 
