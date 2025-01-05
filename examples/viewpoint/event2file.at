@@ -15,7 +15,7 @@ filepaths. #CODE 读取{{viewpointDir}}下的所有的文档，把这些文档�
 emptyFile. #CODE 清空文件{{eventToFilepath}}
 FOR filepath in filepaths
     content. #CODE 读取{{filepath}}的文件内容
-    event. @LLM(qwen-plus-as) 
+    event.  
         任务：精确匹配文件内容与事件列表
 
         输入：

@@ -114,6 +114,7 @@ def backup_configs(report_dir :str):
 
 def start_eval():
     cmd = f"""
+    source ~/miniconda3/etc/profile.d/conda.sh
     conda activate {MAIN_CONDA_ENV}
     cd {EVAL_ROOT}
     bash mini_dev/evaluation/eval.sh --run
@@ -122,6 +123,7 @@ def start_eval():
 
 def restart_bird():
     cmd = f"""
+    source ~/miniconda3/etc/profile.d/conda.sh
     conda activate {MAIN_CONDA_ENV}
     cd {SERVER_ROOT}
     ./clients/bird/bin/bird.sh restart
