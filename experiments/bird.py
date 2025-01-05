@@ -98,7 +98,7 @@ def set_config(
         sys.exit(f"错误：YAML 配置文件不存在: {config_path}")
         
     value_str = f'"{value}"' if isinstance(value, str) else str(value)
-    status = os.system(f"sed -i 's/^\\([[:space:]]*\\){config_key}[[:space:]]*{sep}.*$/\\1{config_key}{sep} {value_str}/' {config_path}")
+    status = os.system(f"sed -i 's/^\\([[:space:]]*\\){config_key}[[:space:]]*{sep}.*$/\\1{config_key}{sep}{value_str}/' {config_path}")
     if status != 0:
         sys.exit(f"错误：更新配置文件失败: {config_path}")
 
@@ -114,6 +114,7 @@ def backup_configs(report_dir :str):
 
 def start_eval():
     cmd = f"""
+    source ~/miniconda3/etc/profile.d/conda.sh
     conda activate {MAIN_CONDA_ENV}
     cd {EVAL_ROOT}
     bash mini_dev/evaluation/eval.sh --run
@@ -122,6 +123,7 @@ def start_eval():
 
 def restart_bird():
     cmd = f"""
+    source ~/miniconda3/etc/profile.d/conda.sh
     conda activate {MAIN_CONDA_ENV}
     cd {SERVER_ROOT}
     ./clients/bird/bin/bird.sh restart
