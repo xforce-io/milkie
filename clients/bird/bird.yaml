@@ -17,6 +17,8 @@ search:
   min_sqls: 2
   max_sqls: 3
   max_iters: 10
+  table_desc_record_samples: 5
+  table_fields_record_samples: 5
 
 model:
   thought_model: "deepseek-chat"

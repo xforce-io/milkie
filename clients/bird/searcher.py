@@ -26,10 +26,15 @@ class Searcher:
         if error_patterns:
             error_hints = "\n已有的错误模式：\n" + "\n".join(f"- {e}" for e in error_patterns)
             
+        if self.config.search.table_desc_record_samples > 0:
+            schema_desc_prompt = f'''可用schema解释 ```{self._db.descTablesFromQuery(query, self.config.search.table_desc_record_samples)}```'''
+        else:
+            schema_desc_prompt = ""
+            
         return escape(f"""
     [{self._get_thought_model()}] (trial: {trial}) 请根据请求中包括的 schema、问题做分析，一步一步思考，给出问题的解决思路
     schema及问题 ```{query}```
-    可用schema解释 ```{self._db.descTablesFromQuery(query)}```
+    {schema_desc_prompt}
     已有错误模式 ```{error_hints}```
 
     请注意以下规则：
@@ -45,9 +50,15 @@ class Searcher:
         if error_patterns:
             error_hints = "\n已有的错误模式：\n" + "\n".join(f"- {e}" for e in error_patterns)
             
+        if self.config.search.table_fields_record_samples > 0:
+            schema_desc_prompt = f'''可用schema解释 ```{self._db.descTableFieldsFromQuery(query, self.config.search.table_fields_record_samples)}```'''
+        else:
+            schema_desc_prompt = ""
+            
         return escape(f"""
     [{self.config.model.sql_model}] (trial: {trial}) 请结合原始问题和分析思考结果，给出最终的 sql 
     schema及问题 ```{query}```
+    {schema_desc_prompt}
     分析思考结果 ```{thought}```
     已有错误模式 ```{error_hints}```
     
