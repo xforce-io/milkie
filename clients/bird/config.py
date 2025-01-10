@@ -21,13 +21,24 @@ class DatabaseConfig:
     database: str
 
 @dataclass
-class SearchConfig:
+class SearchText2SqlConfig:
     max_thoughts: int
     min_sqls: int
     max_sqls: int
+
+@dataclass
+class SearchTaskAlignmentConfig:
+    max_dummy_sqls: int
+    max_symbolic_reprs: int
+    max_sqls: int
+
+@dataclass
+class SearchConfig:
     max_iters: int
     table_desc_record_samples: int
     table_fields_record_samples: int
+    text2sql: SearchText2SqlConfig
+    task_alignment: SearchTaskAlignmentConfig
 
 @dataclass
 class ModelConfig:

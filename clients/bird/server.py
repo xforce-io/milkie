@@ -6,7 +6,8 @@ import time
 import uvicorn
 
 from clients.bird.config import Config
-from clients.bird.searcher import Searcher
+from clients.bird.task_alignment_searcher import TaskAlignmentSearcher
+from clients.bird.text2sql_searcher import Text2SqlSearcher
 from clients.bird.logger import ERROR, INFO, logger
 
 class Message(BaseModel):
@@ -107,6 +108,28 @@ class Server:
             host="0.0.0.0",
             port=self.config.server.port
         )
+
+def search(query: str, config: Optional[Config] = None) -> str:
+    """
+    执行text-to-sql搜索
+    
+    Args:
+        query: 查询字符串
+        config: 可选的配置对象
+        
+    Returns:
+        str: 生成的SQL语句
+    """
+    try:
+        searcher = TaskAlignmentSearcher(
+            query=query,
+            max_iters=config.search.max_iters if config else Config.load().search.max_iters,
+            config=config
+        )
+        return searcher.inference()
+    except Exception as e:
+        ERROR(f"Search failed: {str(e)}")
+        raise
 
 def main():
     try:
