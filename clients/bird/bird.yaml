@@ -14,12 +14,17 @@ database:
   
   
 search:
-  max_thoughts: 2
-  min_sqls: 2
-  max_sqls: 3
   max_iters: 10
   table_desc_record_samples: 5
   table_fields_record_samples: 5
+  text2sql:
+    max_thoughts: 2
+    min_sqls: 2
+    max_sqls: 3
+  task_alignment:
+    max_dummy_sqls: 2
+    max_symbolic_reprs: 2
+    max_sqls: 3
 
 model:
   thought_model: "Tome-pro"
