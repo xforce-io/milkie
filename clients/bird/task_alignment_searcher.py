@@ -75,13 +75,14 @@ class TaskAlignmentSearcher(BaseSqlSearcher):
         code = self._generate_dummy_sql_prompt(node.data["query"])
         dummy_sql = self._client.execute(code, self.config.agent.name)
         node.add_successful_child()
-        INFO(f"Node[{node.id}] expanded to dummy_sql node[{node.children[0].id}|{dummy_sql}]")
-        return Node(
+        newNode = Node(
             type=TaskAlignmentNodeType.DUMMY_SQL,
             parent=node,
             depth=node.depth + 1,
             data={"dummy_sql": dummy_sql}
         )
+        INFO(f"Node[{node.id}] expanded to dummy_sql node[{newNode.id}|{dummy_sql}]")
+        return newNode
         
     def _expand_schema_linking(self, node: Node) -> Node:
         """扩展schema_linking节点"""
@@ -90,13 +91,14 @@ class TaskAlignmentSearcher(BaseSqlSearcher):
         # 解析 SQL 中的 table.field 信息
         schema_linking = self._parse_schema_linking(sql)
         node.add_successful_child()
-        INFO(f"Node[{node.id}] expanded to schema_linking node[{node.children[0].id}|{schema_linking}]")
-        return Node(
+        newNode = Node(
             type=TaskAlignmentNodeType.SCHEMA_LINKING,
             parent=node,
             depth=node.depth + 1,
             data={"schema_linking": schema_linking}
         )
+        INFO(f"Node[{node.id}] expanded to schema_linking node[{newNode.id}|{schema_linking}]")
+        return newNode
         
     def _expand_symbolic_repr(self, node: Node) -> Node:
         """扩展symbolic_repr节点"""
@@ -108,13 +110,14 @@ class TaskAlignmentSearcher(BaseSqlSearcher):
             schema_linking
         )
         node.add_successful_child()
-        INFO(f"Node[{node.id}] expanded to symbolic_repr node[{node.children[0].id}|{symbolic_repr}]")
-        return Node(
+        newNode = Node(
             type=TaskAlignmentNodeType.SYMBOLIC_REPR,
             parent=node,
             depth=node.depth + 1,
             data={"symbolic_repr": symbolic_repr}
         )
+        INFO(f"Node[{node.id}] expanded to symbolic_repr node[{newNode.id}|{symbolic_repr}]")
+        return newNode
 
     def _parse_schema_linking(self, sql: str) -> list[str]:
         """解析SQL中的表和字段关系
