@@ -205,7 +205,7 @@ class Database:
             for table_name, fields in table_fields.items():
                 try:
                     # 获取表的所有字段
-                    query = f"SHOW COLUMNS FROM {table_name}"
+                    query = f"SHOW COLUMNS FROM `{table_name}`"
                     cursor.execute(query)
                     valid_fields = {row[0] for row in cursor.fetchall()}
                     
@@ -249,7 +249,7 @@ class Database:
             
             # 构建查询语句
             fields_str = ", ".join(f"DISTINCT {field}" for field in fields)
-            query = f"SELECT {fields_str} FROM {table_name} LIMIT {table_fields_record_samples}"
+            query = f"SELECT {fields_str} FROM `{table_name}` LIMIT {table_fields_record_samples}"
             
             cursor.execute(query)
             results = cursor.fetchall()
@@ -314,7 +314,7 @@ class Database:
             cursor = self._db.cursor()
             
             # 2. 获取字段的schema信息
-            query = f"SHOW FULL COLUMNS FROM {table_name}"
+            query = f"SHOW FULL COLUMNS FROM `{table_name}`"
             cursor.execute(query)
             columns = cursor.fetchall()
             
