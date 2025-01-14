@@ -2,6 +2,7 @@ from typing import Optional
 from clients.bird.base_searcher import Node, NodeExpansionRule, NodeType
 from clients.bird.config import Config
 from clients.bird.base_sql_searcher import BaseSqlSearcher, BaseSqlNodeType
+from clients.bird.logger import INFO
 from milkie.utils.data_utils import escape
 
 class TaskAlignmentNodeType(BaseSqlNodeType):
@@ -74,6 +75,7 @@ class TaskAlignmentSearcher(BaseSqlSearcher):
         code = self._generate_dummy_sql_prompt(node.data["query"])
         dummy_sql = self._client.execute(code, self.config.agent.name)
         node.add_successful_child()
+        INFO(f"Node[{node.id}] expanded to dummy_sql node[{node.children[0].id}|{dummy_sql}]")
         return Node(
             type=TaskAlignmentNodeType.DUMMY_SQL,
             parent=node,
@@ -88,6 +90,7 @@ class TaskAlignmentSearcher(BaseSqlSearcher):
         # 解析 SQL 中的 table.field 信息
         schema_linking = self._parse_schema_linking(sql)
         node.add_successful_child()
+        INFO(f"Node[{node.id}] expanded to schema_linking node[{node.children[0].id}|{schema_linking}]")
         return Node(
             type=TaskAlignmentNodeType.SCHEMA_LINKING,
             parent=node,
@@ -105,6 +108,7 @@ class TaskAlignmentSearcher(BaseSqlSearcher):
             schema_linking
         )
         node.add_successful_child()
+        INFO(f"Node[{node.id}] expanded to symbolic_repr node[{node.children[0].id}|{symbolic_repr}]")
         return Node(
             type=TaskAlignmentNodeType.SYMBOLIC_REPR,
             parent=node,
