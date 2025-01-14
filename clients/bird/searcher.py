@@ -1,4 +1,5 @@
 from typing import Optional
+import traceback
 from clients.bird.task_alignment_searcher import TaskAlignmentSearcher
 from clients.bird.config import Config
 from clients.bird.logger import ERROR
@@ -16,5 +17,5 @@ class Searcher:
             tree = TaskAlignmentSearcher(query, self.config.search.max_iters)
             return tree.inference()
         except Exception as e:
-            ERROR(f"Error in inference: {str(e)}")
+            ERROR(f"Error in inference: {str(e)} {traceback.format_exc()}")
             raise
