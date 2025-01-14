@@ -11,7 +11,8 @@ class Node:
             type: str,
             parent: Optional['Node'] = None,
             children: Optional[List['Node']] = None,
-            depth: int = 0):
+            depth: int = 0,
+            data: Optional[dict] = None):
         self.id = str(uuid.uuid4())
         self.type = type
         self.parent = parent
@@ -22,7 +23,7 @@ class Node:
         self.successful_children = 0
         
         # 扩展数据，由具体实现定义
-        self.data = {}
+        self.data = data or {}
         # 错误模式集合
         self.error_patterns = set()
         
