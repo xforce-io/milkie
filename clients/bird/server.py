@@ -7,7 +7,6 @@ import uvicorn
 
 from clients.bird.config import Config
 from clients.bird.task_alignment_searcher import TaskAlignmentSearcher
-from clients.bird.text2sql_searcher import Text2SqlSearcher
 from clients.bird.logger import ERROR, INFO, logger
 
 class Message(BaseModel):
