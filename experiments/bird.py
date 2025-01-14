@@ -165,10 +165,10 @@ def make_report(config: dict, report_dir: str):
             sys.exit(f"错误：执行命令失败: {cmd}")
 
 def set_configs() -> list[dict]:
-    num_cases = [5, 8]
-    table_desc_record_samples = [0, 3]
-    table_fields_record_samples = [0, 10]
-    models = ["deepseek-chat", "Tome-pro"]
+    num_cases = [500]
+    table_desc_record_samples = [5]
+    table_fields_record_samples = [0, 5]
+    models = ["Tome-pro"]
     configs = []
     for num_case in num_cases:
         for table_desc_record_sample in table_desc_record_samples:
