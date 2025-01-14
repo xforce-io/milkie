@@ -42,6 +42,9 @@ class Node:
     def get_successful_children(self) -> int:
         return self.successful_children
         
+    def add_child(self, child: 'Node'):
+        self.children.append(child)
+        
     def add_error_pattern(self, error: str):
         """添加错误模式并传播到父节点"""
         self.error_patterns.add(error)
@@ -164,7 +167,6 @@ class BaseSearchTree(ABC):
                         try:
                             new_node = self._expand_node(node, rule.target_type)
                             if new_node:
-                                node.children.append(new_node)
                                 self._process_expansion_result(node, new_node)
                             
                             # 处理高置信度节点
