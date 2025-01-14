@@ -1,5 +1,6 @@
 import traceback
 from typing import Optional
+import traceback
 from clients.bird.task_alignment_searcher import TaskAlignmentSearcher
 from clients.bird.config import Config
 from clients.bird.logger import ERROR

@@ -1,8 +1,7 @@
+import traceback
 from typing import List, Optional, Any
 from abc import ABC, abstractmethod
 import uuid
-
-from clients.bird.logger import ERROR, WARNING
 
 class NodeType(object):
     """基础节点类型，可被继承扩展"""
@@ -143,7 +142,6 @@ class BaseSearchTree(ABC):
         """处理节点扩展错误，提供默认实现"""
         error_msg = str(error)
         node.add_error_pattern(error_msg)
-        WARNING(f"Error in expansion: {error_msg}")
 
     def forward_step(self):
         """执行一次前向扩展，采用广度优先策略"""

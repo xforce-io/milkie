@@ -33,7 +33,7 @@ MaxLogLen = 2000
 def INFO(msg: str):
     logger.info(msg[:MaxLogLen])
 
-def WARNING(msg: str):
+def WARN(msg: str):
     logger.warning(msg[:MaxLogLen])
 
 def ERROR(msg: str):

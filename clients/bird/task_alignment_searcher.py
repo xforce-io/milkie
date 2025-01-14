@@ -180,12 +180,3 @@ class TaskAlignmentSearcher(BaseSqlSearcher):
         schema_linking ```{" ".join(schema_linking)}```
         结果 pandas 代码如下：
         """)
-    
-    def _generate_sql_prompt(self, query: str, symbolic_repr: str) -> str:
-        """生成sql提示"""
-        return escape(f"""
-        [{self.config.model.sql_model}] 请根据请求中包括的 schema、问题做分析，一步一步思考，给出问题的解决SQL
-        schema及问题 ```{query}```
-        pandas 代码 ```{symbolic_repr}```
-        结果 SQL 如下：
-        """)
