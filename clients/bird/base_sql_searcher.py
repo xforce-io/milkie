@@ -1,5 +1,5 @@
 from typing import Optional, Set
-from clients.bird.base_searcher import BaseSearchTree, Node, NodeType, NodeExpansionRule
+from clients.bird.base_searcher import BaseSearchTree, Node, NodeType
 from clients.bird.config import Config
 from clients.bird.database import Database
 from clients.bird.logger import INFO, ERROR
