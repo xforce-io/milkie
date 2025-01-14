@@ -40,6 +40,16 @@ class SearchConfig:
     text2sql: SearchText2SqlConfig
     task_alignment: SearchTaskAlignmentConfig
 
+    @staticmethod
+    def from_dict(data: dict) -> 'SearchConfig':
+        return SearchConfig(
+            max_iters=data['max_iters'],
+            table_desc_record_samples=data['table_desc_record_samples'],
+            table_fields_record_samples=data['table_fields_record_samples'],
+            text2sql=SearchText2SqlConfig(**data['text2sql']),
+            task_alignment=SearchTaskAlignmentConfig(**data['task_alignment'])
+        )
+
 @dataclass
 class ModelConfig:
     thought_model: str  # 用于生成思考的模型
@@ -65,6 +75,6 @@ class Config:
             server=ServerConfig(**data['server']),
             agent=AgentConfig(**data['agent']),
             database=DatabaseConfig(**data['database']),
-            search=SearchConfig(**data['search']),
+            search=SearchConfig.from_dict(data['search']),
             model=ModelConfig(**data['model'])
         )
