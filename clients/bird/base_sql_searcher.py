@@ -30,14 +30,13 @@ class BaseSqlSearcher(BaseSearchTree):
         
         super().__init__(max_iters)
         
-    def _expand_sql(self, node: Node) -> Node:
+    def _expand_sql(self, node: Node, cot :str) -> Node:
         """扩展SQL节点"""
-        node.data["sql_count"] += 1
         code = self._generate_sql_prompt(
-            node.data["query"],
-            node.data["dummy_sql"],
+            self.query,
+            cot,
             node.get_error_patterns(),
-            node.data["sql_count"]
+            node.get_num_children()
         )
         sql = self._client.execute(code, self.config.agent.name)
         sql = self._preprocess_sql(sql)
@@ -56,9 +55,9 @@ class BaseSqlSearcher(BaseSearchTree):
             sql_node.data["error"] = error
             sql_node.add_error_pattern(error)
         else:
-            node.data["success_count"] += 1
+            node.add_successful_child()
             # 如果是第一次就成功，标记为高置信度
-            if node.data["sql_count"] == 1:
+            if node.get_num_children() == 1:
                 sql_node.high_confidence = True
             
         if sql_node.data["success"]:

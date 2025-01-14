@@ -1,5 +1,5 @@
 from typing import Optional
-from clients.bird.base_searcher import Node, NodeExpansionRule
+from clients.bird.base_searcher import Node, NodeExpansionRule, NodeType
 from clients.bird.config import Config
 from clients.bird.base_sql_searcher import BaseSqlSearcher, BaseSqlNodeType
 from milkie.utils.data_utils import escape
@@ -57,11 +57,23 @@ class TaskAlignmentSearcher(BaseSqlSearcher):
             max_expansions=self.config.search.task_alignment.max_sqls
         ))
 
+    def _expand_node(self, node: Node, target_type: NodeType) -> Optional[Node]:
+        """执行节点扩展"""
+        if target_type == TaskAlignmentNodeType.DUMMY_SQL:
+            return self._expand_dummy_sql(node)
+        elif target_type == TaskAlignmentNodeType.SCHEMA_LINKING:
+            return self._expand_schema_linking(node)
+        elif target_type == TaskAlignmentNodeType.SYMBOLIC_REPR:
+            return self._expand_symbolic_repr(node)
+        elif target_type == TaskAlignmentNodeType.SQL:
+            return self._expand_sql(node, node.data["symbolic_repr"])
+        return None
+
     def _expand_dummy_sql(self, node: Node) -> Node:
         """扩展dummy_sql节点"""
-        node.data["dummy_sql_count"] += 1
         code = self._generate_dummy_sql_prompt(node.data["query"])
         dummy_sql = self._client.execute(code, self.config.agent.name)
+        node.add_successful_child()
         return Node(
             type=TaskAlignmentNodeType.DUMMY_SQL,
             parent=node,
@@ -75,6 +87,7 @@ class TaskAlignmentSearcher(BaseSqlSearcher):
         sql = node.data["dummy_sql"]
         # 解析 SQL 中的 table.field 信息
         schema_linking = self._parse_schema_linking(sql)
+        node.add_successful_child()
         return Node(
             type=TaskAlignmentNodeType.SCHEMA_LINKING,
             parent=node,
@@ -91,6 +104,7 @@ class TaskAlignmentSearcher(BaseSqlSearcher):
             self.query,
             schema_linking
         )
+        node.add_successful_child()
         return Node(
             type=TaskAlignmentNodeType.SYMBOLIC_REPR,
             parent=node,
@@ -98,22 +112,6 @@ class TaskAlignmentSearcher(BaseSqlSearcher):
             data={"symbolic_repr": symbolic_repr}
         )
 
-    def _expand_sql(self, node: Node) -> Node:
-        """扩展sql节点"""
-        # 从父节点获取 symbolic_repr
-        symbolic_repr = node.data["symbolic_repr"]
-        code = self._generate_sql_prompt(
-            self.query,
-            symbolic_repr
-        )
-        sql = self._client.execute(code, self.config.agent.name)
-        return Node(
-            type=TaskAlignmentNodeType.SQL,
-            parent=node,
-            depth=node.depth + 1,
-            data={"sql": sql}
-        )
-        
     def _parse_schema_linking(self, sql: str) -> list[str]:
         """解析SQL中的表和字段关系
         

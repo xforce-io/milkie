@@ -3,13 +3,13 @@ from abc import ABC, abstractmethod
 from enum import Enum, auto
 import uuid
 
-class NodeType(str, Enum):
+class NodeType(object):
     """基础节点类型，可被继承扩展"""
     BASE = "base"
 
 class Node:
     def __init__(self, 
-            type: NodeType,
+            type: str,
             parent: Optional['Node'] = None,
             children: Optional[List['Node']] = None,
             depth: int = 0):
@@ -20,17 +20,28 @@ class Node:
         self.depth = depth
         self.completed = False
         self.high_confidence = False
+        self.successful_children = 0
         
         # 扩展数据，由具体实现定义
         self.data = {}
         # 错误模式集合
         self.error_patterns = set()
         
+    def get_num_children(self) -> int:
+        """获取子节点数量"""
+        return len(self.children)
+        
     def is_completed(self) -> bool:
         return self.completed
         
     def mark_completed(self):
         self.completed = True
+        
+    def add_successful_child(self):
+        self.successful_children += 1
+        
+    def get_successful_children(self) -> int:
+        return self.successful_children
         
     def add_error_pattern(self, error: str):
         """添加错误模式并传播到父节点"""
@@ -112,10 +123,11 @@ class BaseSearchTree(ABC):
         """执行具体的节点扩展逻辑"""
         pass
         
-    @abstractmethod
     def _should_continue_expansion(self, node: Node, rule: NodeExpansionRule) -> bool:
-        """判断节点是否应该继续扩展"""
-        pass
+        """判断是否应该继续扩展"""
+        return (node.get_num_children() < rule.max_expansions and 
+                (node.get_num_children() < rule.min_expansions or 
+                    node.get_successful_children() == 0))
         
     @abstractmethod
     def _process_expansion_result(self, source_node: Node, new_node: Node):
@@ -148,12 +160,13 @@ class BaseSearchTree(ABC):
                 
             # 查找适用的扩展规则
             for rule in self.expansion_rules:
-                if rule.source_type == node.type and self._should_continue_expansion(node, rule):
-                    try:
-                        new_node = self._expand_node(node, rule.target_type)
-                        if new_node:
-                            node.children.append(new_node)
-                            self._process_expansion_result(node, new_node)
+                if rule.source_type == node.type :
+                    if self._should_continue_expansion(node, rule):
+                        try:
+                            new_node = self._expand_node(node, rule.target_type)
+                            if new_node:
+                                node.children.append(new_node)
+                                self._process_expansion_result(node, new_node)
                             
                             # 处理高置信度节点
                             if new_node.high_confidence:
@@ -162,8 +175,10 @@ class BaseSearchTree(ABC):
                                     self.leaf_nodes.append(new_node)
                             else:
                                 next_level.append(new_node)
-                    except Exception as e:
-                        self._handle_expansion_error(node, rule, e)
+                        except Exception as e:
+                            self._handle_expansion_error(node, rule, e)
+                    else:
+                        node.mark_completed()
                         
         # 检查节点是否需要继续探索
         for node in current_level:
@@ -178,7 +193,6 @@ class BaseSearchTree(ABC):
         return (self.iteration >= self.max_iters or 
                 (not self.stack and self.root.is_completed()))
                 
-    @abstractmethod
     def _check_node_completion(self, node: Node) -> bool:
         """检查节点是否应该标记为完成"""
-        pass 
+        return node.is_completed()

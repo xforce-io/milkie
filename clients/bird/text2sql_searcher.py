@@ -20,7 +20,6 @@ class Text2SqlSearcher(BaseSqlSearcher):
         """创建根节点"""
         root = Node(type=Text2SqlNodeType.ROOT)
         root.data["query"] = self.query
-        root.data["thought_count"] = 0
         return root
         
     def _init_expansion_rules(self):
@@ -30,32 +29,31 @@ class Text2SqlSearcher(BaseSqlSearcher):
             source_type=Text2SqlNodeType.ROOT,
             target_type=Text2SqlNodeType.THOUGHT,
             min_expansions=1,
-            max_expansions=self.config.search.max_thoughts
+            max_expansions=self.config.search.text2sql.max_thoughts
         ))
         
         # THOUGHT -> SQL
         self.expansion_rules.append(NodeExpansionRule(
             source_type=Text2SqlNodeType.THOUGHT,
             target_type=Text2SqlNodeType.SQL,
-            min_expansions=self.config.search.min_sqls,
-            max_expansions=self.config.search.max_sqls
+            min_expansions=self.config.search.text2sql.min_sqls,
+            max_expansions=self.config.search.text2sql.max_sqls
         ))
         
     def _expand_node(self, node: Node, target_type: NodeType) -> Optional[Node]:
         """执行节点扩展"""
         if target_type == Text2SqlNodeType.THOUGHT:
-            return self._expand_thought(node)
+            return self._expand_thought(node, node.data["thought"])
         elif target_type == Text2SqlNodeType.SQL:
             return self._expand_sql(node)
         return None
         
     def _expand_thought(self, node: Node) -> Node:
         """扩展THOUGHT节点"""
-        node.data["thought_count"] += 1
         code = self._generate_thought_prompt(
             node.data["query"],
             node.get_error_patterns(),
-            node.data["thought_count"]
+            node.get_num_children()
         )
         thought = self._client.execute(code, self.config.agent.name)
         
@@ -66,40 +64,12 @@ class Text2SqlSearcher(BaseSqlSearcher):
         )
         thought_node.data["query"] = node.data["query"]
         thought_node.data["thought"] = thought
-        thought_node.data["sql_count"] = 0
-        thought_node.data["success_count"] = 0
+
+        node.add_successful_child()
         
         INFO(f"Node[{node.id}] expanded to THOUGHT node[{thought_node.id}|{self._unnewline(thought)}]")
         return thought_node
        
-    def _should_continue_expansion(self, node: Node, rule: NodeExpansionRule) -> bool:
-        """判断是否应该继续扩展"""
-        if node.type == Text2SqlNodeType.ROOT:
-            return node.data["thought_count"] < rule.max_expansions
-        elif node.type == Text2SqlNodeType.THOUGHT:
-            return (node.data["sql_count"] < rule.max_expansions and 
-                    (node.data["sql_count"] < rule.min_expansions or 
-                     node.data["success_count"] == 0))
-        return False
-            
-    def _check_node_completion(self, node: Node) -> bool:
-        """检查节点是否完成"""
-        if node.is_completed():
-            return True
-            
-        if node.type == Text2SqlNodeType.ROOT:
-            should_complete = node.data["thought_count"] >= self.config.search.max_thoughts
-        elif node.type == Text2SqlNodeType.THOUGHT:
-            should_complete = (node.data["sql_count"] >= self.config.search.max_sqls or
-                             (node.data["sql_count"] >= self.config.search.min_sqls and
-                              node.data["success_count"] > 0))
-        else:
-            should_complete = True
-            
-        if should_complete:
-            node.mark_completed()
-        return should_complete
-        
     def _handle_expansion_error(self, node: Node, rule: NodeExpansionRule, error: Exception):
         """处理扩展错误"""
         error_msg = str(error)

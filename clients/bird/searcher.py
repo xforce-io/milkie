@@ -1,10 +1,12 @@
 from typing import Any, Optional
+from clients.bird.base_searcher import Node, NodeType
+from clients.bird.base_sql_searcher import BaseSqlSearcher
+from clients.bird.task_alignment_searcher import TaskAlignmentSearcher
 from milkie.sdk.agent_client import AgentClient
 from milkie.sdk.config_server import ConfigServer
 from clients.bird.config import Config
 from clients.bird.database import Database
 from clients.bird.logger import INFO, ERROR
-from clients.bird.tree import SearchTree, Node, NodeType
 from milkie.utils.data_utils import escape
 
 class Searcher:
@@ -70,7 +72,7 @@ class Searcher:
     现在请输出最终这条 sql：
 """)
 
-    def forward_step(self, tree: SearchTree):
+    def forward_step(self, tree: BaseSqlSearcher):
         """执行一次前向扩展，采用广度优先策略"""
         # 当前层级的所有节点
         current_level = []
@@ -185,7 +187,7 @@ class Searcher:
     def inference(self, query: str) -> str:
         try:
             # 创建搜索树
-            tree = SearchTree(query, self.config.search.max_iters)
+            tree = TaskAlignmentSearcher(query, self.config.search.max_iters)
             
             # 执行前向扩展直到完成
             while not tree.is_completed():
