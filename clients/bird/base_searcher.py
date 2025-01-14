@@ -4,7 +4,7 @@ import uuid
 
 class NodeType(object):
     """基础节点类型，可被继承扩展"""
-    BASE = "base"
+    ROOT = "root"
 
 class Node:
     def __init__(self, 

@@ -9,7 +9,6 @@ from milkie.utils.data_utils import escape
 
 class BaseSqlNodeType(NodeType):
     """BaseSQL特定的节点类型"""
-    ROOT = "root"
     SQL = "sql"
 
 class BaseSqlSearcher(BaseSearchTree):
