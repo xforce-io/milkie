@@ -248,8 +248,8 @@ class Database:
             cursor = self._db.cursor()
             
             # 构建查询语句
-            fields_str = ", ".join(f"DISTINCT {field}" for field in fields)
-            query = f"SELECT {fields_str} FROM `{table_name}` LIMIT {table_fields_record_samples}"
+            fields_str = ", ".join(f"`{field}`" for field in fields)
+            query = f"SELECT DISTINCT {fields_str} FROM `{table_name}` LIMIT {table_fields_record_samples}"
             
             cursor.execute(query)
             results = cursor.fetchall()
