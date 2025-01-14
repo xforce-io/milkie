@@ -105,10 +105,11 @@ class TaskAlignmentSearcher(BaseSqlSearcher):
         # 从父节点获取 schema_linking
         schema_linking = node.data["schema_linking"]
         # 生成符号化表示
-        symbolic_repr = self._generate_symbolic_repr_prompt(
+        symbolic_repr_prompt = self._generate_symbolic_repr_prompt(
             self.query,
             schema_linking
         )
+        symbolic_repr = self._client.execute(symbolic_repr_prompt, self.config.agent.name)
         node.add_successful_child()
         newNode = Node(
             type=TaskAlignmentNodeType.SYMBOLIC_REPR,
