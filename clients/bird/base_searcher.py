@@ -1,9 +1,9 @@
 from typing import List, Optional, Any
 from abc import ABC, abstractmethod
-from enum import Enum
+from enum import Enum, auto
 import uuid
 
-class NodeType(Enum):
+class NodeType(str, Enum):
     """基础节点类型，可被继承扩展"""
     BASE = "base"
 
