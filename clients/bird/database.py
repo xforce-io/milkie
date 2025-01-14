@@ -201,11 +201,12 @@ class Database:
         cursor = None
         try:
             cursor = self._db.cursor()
-            
+            query = None
             for table_name, fields in table_fields.items():
                 try:
                     # 获取表的所有字段
-                    cursor.execute(f"SHOW COLUMNS FROM {table_name}")
+                    query = f"SHOW COLUMNS FROM {table_name}"
+                    cursor.execute(query)
                     valid_fields = {row[0] for row in cursor.fetchall()}
                     
                     # 过滤出有效字段
@@ -214,7 +215,7 @@ class Database:
                         valid_mappings[table_name] = valid_table_fields
                         
                 except Exception as e:
-                    ERROR(f"Error validating table {table_name}: {str(e)}")
+                    ERROR(f"Error validating table {table_name}: {str(e)} query: {query}")
                     continue
                     
             return valid_mappings
@@ -242,6 +243,7 @@ class Database:
             Dict[str, List[Any]]: 字段到样本值列表的映射
         """
         cursor = None
+        query = None
         try:
             cursor = self._db.cursor()
             
@@ -262,7 +264,7 @@ class Database:
             return samples
             
         except Exception as e:
-            ERROR(f"Error getting field samples for table {table_name}: {str(e)}")
+            ERROR(f"Error getting field samples for table {table_name}: {str(e)} query: {query}")
             return {}
         finally:
             if cursor:
@@ -307,11 +309,13 @@ class Database:
             return cached_desc
 
         cursor = None
+        query = None
         try:
             cursor = self._db.cursor()
             
             # 2. 获取字段的schema信息
-            cursor.execute(f"SHOW FULL COLUMNS FROM {table_name}")
+            query = f"SHOW FULL COLUMNS FROM {table_name}"
+            cursor.execute(query)
             columns = cursor.fetchall()
             
             # 过滤出目标字段的schema信息
@@ -346,7 +350,7 @@ class Database:
             return None
             
         except Exception as e:
-            ERROR(f"Error generating field description for table {table_name}: {str(e)}")
+            ERROR(f"Error generating field description for table {table_name}: {str(e)} query: {query}")
             return None
         finally:
             if cursor:
@@ -417,12 +421,14 @@ class Database:
             INFO(f"Cache hit for table {table_name}")
             return cached_desc
             
+        query = None
         try:
             cursor = None
             cursor = self._db.cursor()
             
             # 2. 获取表结构
-            cursor.execute(f"SHOW FULL COLUMNS FROM `{table_name}`")
+            query = f"SHOW FULL COLUMNS FROM `{table_name}`"
+            cursor.execute(query)
             columns = cursor.fetchall()
             
             # 构建schema信息
@@ -469,7 +475,7 @@ class Database:
                 return ""
                 
         except Exception as e:
-            ERROR(f"Error describing table {table_name}: {str(e)}")
+            ERROR(f"Error describing table {table_name}: {str(e)} query: {query}")
             return ""
         finally:
             if cursor:
