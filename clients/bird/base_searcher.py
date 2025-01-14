@@ -1,6 +1,5 @@
 from typing import List, Optional, Any
 from abc import ABC, abstractmethod
-from enum import Enum, auto
 import uuid
 
 class NodeType(object):
