@@ -12,7 +12,6 @@ database:
   password: "root123"
   database: "BIRD"
   
-  
 search:
   max_iters: 10
   table_desc_record_samples: 5
