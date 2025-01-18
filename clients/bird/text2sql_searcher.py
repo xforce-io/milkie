@@ -79,7 +79,7 @@ class Text2SqlSearcher(BaseSqlSearcher):
         """生成thought提示"""
         error_hints = ""
         if error_patterns:
-            error_hints = "\n已有的错误模式：\n" + "\n".join(f"- {e}" for e in error_patterns)
+            error_hints = "已有的错误模式 ```" + "/".join(f"- {e}" for e in error_patterns) + "```"
             
         if self.config.search.table_desc_record_samples > 0:
             schema_desc_prompt = f'''可用schema解释 ```{self._db.descTablesFromQuery(query, self.config.search.table_desc_record_samples)}```'''
@@ -89,8 +89,8 @@ class Text2SqlSearcher(BaseSqlSearcher):
         return escape(f"""
     [{self.config.model.thought_model}] (trial: {trial}) 请根据请求中包括的 schema、问题做分析，一步一步思考，给出问题的解决思路
     schema及问题 ```{query}```
+    {error_hints}
     {schema_desc_prompt}
-    已有错误模式 ```{error_hints}```
 
     请注意以下规则：
     1. 首先明确 query 中的问题问的 metric，不需要回答多余的信息

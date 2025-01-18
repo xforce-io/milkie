@@ -62,7 +62,7 @@ class BaseSqlSearcher(BaseSearchTree):
         if sql_node.data["success"]:
             INFO(f"Node[{node.id}] expanded to successful SQL node[{sql_node.id}|{self._unnewline(sql)}] result[{result}]")
         else:
-            INFO(f"Node[{node.id}] expanded to failed SQL node[{sql_node.id}|{self._unnewline(sql)}] result[{result}] error[{error}]")
+            INFO(f"Node[{node.id}] expanded to failed SQL node[{sql_node.id}|{self._unnewline(sql)}] error[{error}]")
             
         return sql_node
         
@@ -138,7 +138,7 @@ class BaseSqlSearcher(BaseSearchTree):
         """生成SQL提示"""
         error_hints = ""
         if error_patterns:
-            error_hints = "\n已有的错误模式：\n" + "\n".join(f"- {e}" for e in error_patterns)
+            error_hints = "已有的错误模式 ```" + "/".join(f"- {e}" for e in error_patterns) + "```"   
             
         if self.config.search.table_fields_record_samples > 0:
             schema_desc_prompt = f'''可用schema解释 ```{self._db.descTableFieldsFromQuery(query, self.config.search.table_fields_record_samples)}```'''
@@ -148,10 +148,10 @@ class BaseSqlSearcher(BaseSearchTree):
         return escape(f"""
     [{self.config.model.sql_model}] (trial: {trial}) 请结合原始问题和分析思考结果，给出最终的 sql 
     schema及问题 ```{query}```
+    {error_hints}
     {schema_desc_prompt}
     分析思考结果 ```{thought}```
-    已有错误模式 ```{error_hints}```
-    
+
     请注意以下规则：
     1. 仅输出单条 SQL，请保证输出的 SQL 必须是完整的、可执行的
     2. 仔细检查 tables 的 schema，不要使用不存在的 column，和 mysql 关键词冲突的 column 请进行转义,比如 Virtual 转成 `Virtual`
