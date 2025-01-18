@@ -60,9 +60,9 @@ class BaseSqlSearcher(BaseSearchTree):
                 sql_node.high_confidence = True
             
         if sql_node.data["success"]:
-            INFO(f"Node[{node.id}] expanded to successful SQL node[{sql_node.id}|{self._unnewline(sql)}] with result: {result}")
+            INFO(f"Node[{node.id}] expanded to successful SQL node[{sql_node.id}|{self._unnewline(sql)}] result[{result}]")
         else:
-            INFO(f"Node[{node.id}] expanded to failed SQL node[{sql_node.id}|{self._unnewline(sql)}]")
+            INFO(f"Node[{node.id}] expanded to failed SQL node[{sql_node.id}|{self._unnewline(sql)}] result[{result}] error[{error}]")
             
         return sql_node
         
@@ -76,9 +76,9 @@ class BaseSqlSearcher(BaseSearchTree):
         """获取最佳SQL结果"""
         # 对叶子节点进行排序
         def node_priority(node: Node) -> tuple:
-            has_result = node.type == NodeType.SQL and node.other.result is not None
-            result_not_empty = has_result and node.other.result != "[]"
-            return (has_result, result_not_empty, node.other.success)
+            has_result = node.type == BaseSqlNodeType.SQL and node.data["result"] is not None
+            result_not_empty = has_result and node.data["result"] != "[]"
+            return (has_result, result_not_empty, node.data["success"])
         
         self.leaf_nodes.sort(key=node_priority, reverse=True)
         
@@ -89,7 +89,7 @@ class BaseSqlSearcher(BaseSearchTree):
         # 获取所有有非空结果的节点
         valid_nodes = [
             node for node in self.leaf_nodes 
-            if node.type == NodeType.SQL 
+            if node.type == BaseSqlNodeType.SQL 
             and node.data["result"] is not None 
             and node.data["result"] != "[]"
         ]
@@ -98,7 +98,7 @@ class BaseSqlSearcher(BaseSearchTree):
             # 如果没有非空结果，尝试找有空结果的成功节点
             empty_nodes = [
                 node for node in self.leaf_nodes
-                if node.type == NodeType.SQL
+                if node.type == BaseSqlNodeType.SQL
                 and node.data["result"] is not None
                 and node.data["result"] == "[]"
                 and node.data["success"]
