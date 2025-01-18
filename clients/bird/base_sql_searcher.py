@@ -74,17 +74,65 @@ class BaseSqlSearcher(BaseSearchTree):
            
     def get_best_sql(self) -> str:
         """获取最佳SQL结果"""
-        successful_nodes = [
+        # 对叶子节点进行排序
+        def node_priority(node: Node) -> tuple:
+            has_result = node.type == NodeType.SQL and node.other.result is not None
+            result_not_empty = has_result and node.other.result != "[]"
+            return (has_result, result_not_empty, node.other.success)
+        
+        self.leaf_nodes.sort(key=node_priority, reverse=True)
+        
+        if not self.leaf_nodes:
+            INFO("No leaf nodes found")
+            return None
+        
+        # 获取所有有非空结果的节点
+        valid_nodes = [
             node for node in self.leaf_nodes 
-            if node.type == BaseSqlNodeType.SQL and 
-            node.data["success"]
+            if node.type == NodeType.SQL 
+            and node.data["result"] is not None 
+            and node.data["result"] != "[]"
         ]
         
-        if not successful_nodes:
-            raise RuntimeError("No successful SQL found")
+        if not valid_nodes:
+            # 如果没有非空结果，尝试找有空结果的成功节点
+            empty_nodes = [
+                node for node in self.leaf_nodes
+                if node.type == NodeType.SQL
+                and node.data["result"] is not None
+                and node.data["result"] == "[]"
+                and node.data["success"]
+            ]
             
-        # 这里可以添加更复杂的选择逻辑
-        return successful_nodes[-1].data["sql"]
+            if empty_nodes:
+                selected_node = empty_nodes[0]
+                INFO(f"No non-empty results found, selected SQL node[{selected_node.id}] with empty result")
+                return selected_node.data["sql"]
+                
+            ERROR("No valid results found")
+            return None
+        
+        # 统计结果出现次数
+        result_counts = {}
+        for node in valid_nodes:
+            result_counts[node.data["result"]] = result_counts.get(node.data["result"], 0) + 1
+        
+        # 找到出现次数最多的结果
+        max_count = max(result_counts.values())
+        most_common_results = [
+            result for result, count in result_counts.items() 
+            if count == max_count
+        ]
+        
+        # 在出现次数最多的结果中，选择第一个应的 SQL
+        for node in valid_nodes:
+            if node.data["result"] in most_common_results:
+                INFO(f"Selected SQL node[{node.id}] with most common result (count: {max_count})")
+                return node.data["sql"]
+        
+        # 这种情况理论上不会发生
+        ERROR("Failed to find SQL for most common result")
+        return None
         
     def _generate_sql_prompt(self, query: str, thought: str, error_patterns: Set[str], trial: int) -> str:
         """生成SQL提示"""
