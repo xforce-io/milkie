@@ -40,6 +40,8 @@ class Node:
         
     def add_successful_child(self):
         self.successful_children += 1
+        if self.parent:
+            self.parent.add_successful_child()
         
     def get_successful_children(self) -> int:
         return self.successful_children

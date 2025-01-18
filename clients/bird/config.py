@@ -19,6 +19,7 @@ class DatabaseConfig:
     user: str
     password: str
     database: str
+    charset: str = 'utf8mb4'
 
 @dataclass
 class SearchText2SqlConfig:

@@ -37,12 +37,9 @@ class BaseSqlSearcher(BaseSearchTree):
             node.get_error_patterns(),
             node.get_num_children()
         )
-        INFO(f"SQL code: {code}")
         sql = self._client.execute(code, self.config.agent.name)
-        INFO(f"SQL result: {sql}")
         sql = self._preprocess_sql(sql)
         result, error = self._db.execsql(sql)
-        INFO(f"SQL result: {result}")
         
         sql_node = Node(
             type=BaseSqlNodeType.SQL,

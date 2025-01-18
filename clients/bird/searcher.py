@@ -1,7 +1,7 @@
 import traceback
 from typing import Optional
 import traceback
-from clients.bird.task_alignment_searcher import TaskAlignmentSearcher
+from clients.bird.text2sql_searcher import Text2SqlSearcher
 from clients.bird.config import Config
 from clients.bird.logger import ERROR
 
@@ -15,7 +15,7 @@ class Searcher:
 
     def inference(self, query: str) -> str:
         try:
-            tree = TaskAlignmentSearcher(query, self.config.search.max_iters)
+            tree = Text2SqlSearcher(query, self.config.search.max_iters)
             return tree.inference()
         except Exception as e:
             ERROR(f"Error in inference: {str(e)} {traceback.format_exc()}")

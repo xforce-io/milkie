@@ -11,6 +11,7 @@ database:
   user: "root"
   password: "root123"
   database: "BIRD"
+  charset: "utf8mb4"
   
 search:
   max_iters: 10

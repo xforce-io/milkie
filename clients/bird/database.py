@@ -25,6 +25,10 @@ class Database:
         # 确保缓存管理器已初始化
         self._init_cache()
         
+        # 缓存表和字段信息
+        self._tables_info = {}
+        self._init_tables_info()
+        
     def execsql(self, sql: str) -> tuple[Optional[str], Optional[str]]:
         """
         执行SQL查询
@@ -139,17 +143,21 @@ class Database:
             cls._cache_mgr = CacheKVMgr(cache_dir, dumpInterval=5, expireTimeByDay=30)
     
     def _connect(self):
-        """重新建立数据库连接"""
-        self._db = pymysql.connect(
-            host=self._config.host,
-            port=self._config.port,
-            user=self._config.user,
-            password=self._config.password,
-            database=self._config.database,
-            read_timeout=15,
-            write_timeout=15
-        )
-        
+        """连接到数据库"""
+        try:
+            self._db = pymysql.connect(
+                host=self._config.host,
+                port=self._config.port,
+                user=self._config.user,
+                password=self._config.password,
+                database=self._config.database,
+                charset=self._config.charset
+            )
+            logger.info("数据库连接成功")
+        except Exception as e:
+            logger.error(f"数据库连接失败: {str(e)}")
+            raise
+            
     def _extract_tables_and_fields(self, query: str) -> Dict[str, Set[str]]:
         """
         从查询中提取表名和字段名
@@ -480,3 +488,62 @@ class Database:
         finally:
             if cursor:
                 cursor.close()
+
+    def _init_tables_info(self):
+        """初始化表和字段信息的缓存"""
+        try:
+            # 如果数据库连接断开，重新连接
+            self._db.ping(reconnect=True)
+            
+            cursor = self._db.cursor()
+            
+            # 获取所有表名
+            cursor.execute("SHOW TABLES")
+            tables = [table[0] for table in cursor.fetchall()]
+            
+            # 获取每个表的字段信息
+            for table in tables:
+                cursor.execute(f"DESCRIBE `{table}`")
+                fields = [field[0] for field in cursor.fetchall()]
+                self._tables_info[table] = fields
+                
+        except Exception as e:
+            logger.error(f"初始化表信息时发生错误: {str(e)}")
+        finally:
+            if cursor:
+                cursor.close()
+                
+    def table_exists(self, table: str) -> bool:
+        """检查表是否存在
+        
+        Args:
+            table: 要检查的表名（不含反引号）
+            
+        Returns:
+            bool: 表是否存在
+        """
+        # 如果缓存为空，重新初始化
+        if not self._tables_info:
+            self._init_tables_info()
+            
+        return table in self._tables_info
+        
+    def field_exists(self, table: str, field: str) -> bool:
+        """检查字段是否存在于指定的表中
+        
+        Args:
+            table: 要检查的表名（不含反引号）
+            field: 要检查的字段名
+            
+        Returns:
+            bool: 字段是否存在
+        """
+        # 如果缓存为空，重新初始化
+        if not self._tables_info:
+            self._init_tables_info()
+            
+        # 先检查表是否存在
+        if not self.table_exists(table):
+            return False
+            
+        return field in self._tables_info[table]

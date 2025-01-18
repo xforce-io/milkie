@@ -43,9 +43,9 @@ class Text2SqlSearcher(BaseSqlSearcher):
     def _expand_node(self, node: Node, target_type: NodeType) -> Optional[Node]:
         """执行节点扩展"""
         if target_type == Text2SqlNodeType.THOUGHT:
-            return self._expand_thought(node, node.data["thought"])
+            return self._expand_thought(node)
         elif target_type == Text2SqlNodeType.SQL:
-            return self._expand_sql(node)
+            return self._expand_sql(node, node.data["thought"])
         return None
         
     def _expand_thought(self, node: Node) -> Node:
@@ -65,8 +65,6 @@ class Text2SqlSearcher(BaseSqlSearcher):
         thought_node.data["query"] = node.data["query"]
         thought_node.data["thought"] = thought
 
-        node.add_successful_child()
-        
         INFO(f"Node[{node.id}] expanded to THOUGHT node[{thought_node.id}|{self._unnewline(thought)}]")
         return thought_node
        

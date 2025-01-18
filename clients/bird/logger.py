@@ -28,7 +28,7 @@ def setup_logger(name: str = "bird") -> logging.Logger:
 # 创建全局日志对象
 logger = setup_logger() 
 
-MaxLogLen = 2000
+MaxLogLen = 4000
 
 def INFO(msg: str):
     logger.info(msg[:MaxLogLen])
