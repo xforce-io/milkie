@@ -4,6 +4,7 @@ from enum import Enum
 import json
 import logging
 import re
+import time
 from typing import Any, Callable, List, Optional, Tuple
 
 from milkie.agent.base_block import BaseBlock
@@ -192,7 +193,7 @@ class StepLLMInstrAnalysis(StepLLMBlock):
             for name, agent in kwargs["experts"].items():
                 systemPrompt += f"{name} -> {agent.desc}\n"
             systemPrompt += '''```\n
-            如果需要咨询专家团，请使用 ” @expertName ('->'前面的字符串) + 问题 + ？“ 来调用专家团中的专家。
+            如果需要咨询专家团，请使用 " @expertName ('->'前面的字符串) + 问题 + ？" 来调用专家团中的专家。
             '''
         return systemPrompt
         
@@ -381,17 +382,22 @@ class InstructResult:
     def __init__(
             self, 
             response :Response,
+            logMessage :str = None,
             goto :str = None,
             useTool :bool = False):
         self.response = response
         self.goto = goto
         self.useTool = useTool
+        self.logMessage = logMessage
 
     def isRet(self):
         return self.response.respStr == KeyRet
 
     def isNext(self):
         return self.response.respStr == KeyNext
+
+    def getLogMessage(self):
+        return self.logMessage
 
 from milkie.agent.llm_block.syntax_parser import SyntaxParser
 
@@ -624,7 +630,6 @@ class Instruction:
             logMessage += f"tool[{logData.get('toolName', '')}] "
         logMessage += f"ans[{response}]"
         
-        INFO(logger, logMessage)
         DEBUG(logger, f"var_dict[{self.varDict}]")
         
         self.llmBlock.context.reqTrace.add("instruction", logData)
@@ -636,32 +641,38 @@ class Instruction:
                     retJson = restoreVariablesInDict(retJson, self.varDict.getAllDict())
                     return InstructResult(
                         Response(respDict=retJson),
-                        useTool=False)
+                        useTool=False,
+                        logMessage=logMessage)
                 else:
                     return InstructResult(
                         Response(respStr=response),
-                        useTool=False)
+                        useTool=False,
+                        logMessage=logMessage)
             return InstructResult(
                 Response(respStr=response), 
                 useTool=useTool,
-                goto=goto)
+                goto=goto,
+                logMessage=logMessage)
         elif type(response) == Response:
             #return of a function
             if response.respList != None:
                 return InstructResult(
                     response=response,
                     useTool=useTool,
-                    goto=goto)
+                    goto=goto,
+                    logMessage=logMessage)
             elif response.respStr != None:
                 return InstructResult(
                     response=response,
                     useTool=useTool,
-                    goto=goto)
+                    goto=goto,
+                    logMessage=logMessage)
             elif response.respInt != None:
                 return InstructResult(
                     response=response,
                     useTool=useTool,
-                    goto=goto)
+                    goto=goto,
+                    logMessage=logMessage)
             else:
                 raise RuntimeError(f"unsupported response[{response}]")
         elif type(response) == int:
@@ -669,29 +680,34 @@ class Instruction:
             return InstructResult(
                 response=Response(respInt=response),
                 useTool=useTool,
-                goto=goto)
+                goto=goto,
+                logMessage=logMessage)
         elif type(response) == float:
             #return of a naive type
             return InstructResult(
                 response=Response(respFloat=response),
                 useTool=useTool,
-                goto=goto)
+                goto=goto,
+                logMessage=logMessage)
         elif type(response) == bool:
             #return of a naive type
             return InstructResult(
                 response=Response(respBool=response),
                 useTool=useTool,
-                goto=goto)
+                goto=goto,
+                logMessage=logMessage)
         elif type(response) == list:
             return InstructResult(
                 response=Response(respList=response),
                 useTool=useTool,
-                goto=goto)
+                goto=goto,
+                logMessage=logMessage)
         elif type(response) == dict:
             return InstructResult(
                 response=Response(respDict=response),
                 useTool=useTool,
-                goto=goto)
+                goto=goto,
+                logMessage=logMessage)
         else:
             raise RuntimeError(f"unsupported response type[{type(response)}]")
 
@@ -865,7 +881,10 @@ class TaskEngine:
         return [label for label, _ in self.instructions]
 
     def _step(self, instruction: Instruction, args: dict, **kwargs) -> InstructResult:
-        return instruction.execute(args, **kwargs)
+        t0 = time.time()
+        instructResult = instruction.execute(args, **kwargs)
+        INFO(logger, instructResult.logMessage + f" costSec[{time.time() - t0:.2f}]")
+        return instructResult
 
 class LLMBlock(BaseBlock):
 

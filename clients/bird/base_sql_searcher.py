@@ -1,3 +1,4 @@
+import time
 from typing import Optional, Set
 from clients.bird.base_searcher import BaseSearchTree, Node, NodeType
 from clients.bird.config import Config
@@ -13,6 +14,8 @@ class BaseSqlNodeType(NodeType):
 
 class BaseSqlSearcher(BaseSearchTree):
     def __init__(self, 
+            client: AgentClient,
+            database: Database,
             query: str,
             max_iters: int,
             config: Optional[Config] = None):
@@ -21,16 +24,14 @@ class BaseSqlSearcher(BaseSearchTree):
             
         self.config = config
         self.query = query
-        self._client = AgentClient(ConfigServer(config.agent.addr))
-        self._db = Database(
-            config.database,
-            self._client
-        )
+        self._client = client
+        self._db = database
         
         super().__init__(max_iters)
         
     def _expand_sql(self, node: Node, cot :str) -> Node:
         """扩展SQL节点"""
+        t0 = time.time()
         code = self._generate_sql_prompt(
             self.query,
             cot,
@@ -60,9 +61,9 @@ class BaseSqlSearcher(BaseSearchTree):
                 sql_node.high_confidence = True
             
         if sql_node.data["success"]:
-            INFO(f"Node[{node.id}] expanded to successful SQL node[{sql_node.id}|{self._unnewline(sql)}] result[{result}]")
+            INFO(f"Node[{node.id}] expanded to successful SQL node[{sql_node.id}|{self._unnewline(sql)}] result[{result}] costSec[{time.time() - t0:.2f}]")
         else:
-            INFO(f"Node[{node.id}] expanded to failed SQL node[{sql_node.id}|{self._unnewline(sql)}] error[{error}]")
+            INFO(f"Node[{node.id}] expanded to failed SQL node[{sql_node.id}|{self._unnewline(sql)}] error[{error}] costSec[{time.time() - t0:.2f}]")
             
         return sql_node
         
@@ -148,9 +149,9 @@ class BaseSqlSearcher(BaseSearchTree):
         return escape(f"""
     [{self.config.model.sql_model}] (trial: {trial}) 请结合原始问题和分析思考结果，给出最终的 sql 
     schema及问题 ```{query}```
-    {error_hints}
     {schema_desc_prompt}
     分析思考结果 ```{thought}```
+    {error_hints}
 
     请注意以下规则：
     1. 仅输出单条 SQL，请保证输出的 SQL 必须是完整的、可执行的

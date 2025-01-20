@@ -166,20 +166,26 @@ def make_report(config: dict, report_dir: str):
 
 def set_configs() -> list[dict]:
     num_cases = [500]
-    table_desc_record_samples = [5]
-    table_fields_record_samples = [0, 5]
-    models = ["Tome-pro"]
+    max_thoughts = [2]
+    max_sqls = [2]
+    table_desc_record_samples = [3]
+    table_fields_record_samples = [3]
+    models = ["deepseek-chat", "Tome-max"]
     configs = []
     for num_case in num_cases:
-        for table_desc_record_sample in table_desc_record_samples:
-            for table_fields_record_sample in table_fields_record_samples:
-                for model in models:
-                    configs.append({
-                        "num_cases": num_case,
-                        "table_desc_record_samples": table_desc_record_sample,
-                        "table_fields_record_samples": table_fields_record_sample,
-                        "model": model
-                    })
+        for max_thought in max_thoughts:
+            for max_sql in max_sqls:
+                for table_desc_record_sample in table_desc_record_samples:
+                    for table_fields_record_sample in table_fields_record_samples:
+                        for model in models:
+                            configs.append({
+                                "num_cases": num_case,
+                                "max_thoughts" : max_thought,
+                                "max_sqls" : max_sql,
+                                "table_desc_record_samples": table_desc_record_sample,
+                                "table_fields_record_samples": table_fields_record_sample,
+                                "model": model
+                            })
     return configs
 
 def run_eval(configs: list[dict]):

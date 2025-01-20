@@ -1,20 +1,29 @@
+import time
 from typing import Optional, Set
 from clients.bird.base_searcher import Node, NodeType, NodeExpansionRule
 from clients.bird.base_sql_searcher import BaseSqlNodeType, BaseSqlSearcher
 from clients.bird.config import Config
+from clients.bird.database import Database
 from clients.bird.logger import INFO, ERROR
 from milkie.utils.data_utils import escape
-
+from milkie.sdk.agent_client import AgentClient
 class Text2SqlNodeType(BaseSqlNodeType):
     """Text2SQL特定的节点类型"""
     THOUGHT = "thought"
 
 class Text2SqlSearcher(BaseSqlSearcher):
     def __init__(self, 
+            client: AgentClient,
+            database: Database,
             query: str,
             max_iters: int,
             config: Optional[Config] = None):
-        super().__init__(query, max_iters, config)
+        super().__init__(
+            client,
+            database,
+            query, 
+            max_iters, 
+            config)
         
     def _create_root_node(self) -> Node:
         """创建根节点"""
@@ -50,6 +59,7 @@ class Text2SqlSearcher(BaseSqlSearcher):
         
     def _expand_thought(self, node: Node) -> Node:
         """扩展THOUGHT节点"""
+        t0 = time.time()
         code = self._generate_thought_prompt(
             node.data["query"],
             node.get_error_patterns(),
@@ -65,7 +75,7 @@ class Text2SqlSearcher(BaseSqlSearcher):
         thought_node.data["query"] = node.data["query"]
         thought_node.data["thought"] = thought
 
-        INFO(f"Node[{node.id}] expanded to THOUGHT node[{thought_node.id}|{self._unnewline(thought)}]")
+        INFO(f"Node[{node.id}] expanded to THOUGHT node[{thought_node.id}|{self._unnewline(thought)}] costSec[{time.time() - t0:.2f}]")
         return thought_node
        
     def _handle_expansion_error(self, node: Node, rule: NodeExpansionRule, error: Exception):
@@ -73,7 +83,7 @@ class Text2SqlSearcher(BaseSqlSearcher):
         error_msg = str(error)
         ERROR(f"Node[{node.id}] failed to expand to {rule.target_type}: {error_msg}")
         if node.type == Text2SqlNodeType.THOUGHT:
-            node.data["error_patterns"].add(error_msg)
+            node.error_patterns.add(error_msg)
 
     def _generate_thought_prompt(self, query: str, error_patterns: Set[str], trial: int) -> str:
         """生成thought提示"""
@@ -89,8 +99,8 @@ class Text2SqlSearcher(BaseSqlSearcher):
         return escape(f"""
     [{self.config.model.thought_model}] (trial: {trial}) 请根据请求中包括的 schema、问题做分析，一步一步思考，给出问题的解决思路
     schema及问题 ```{query}```
-    {error_hints}
     {schema_desc_prompt}
+    {error_hints}
 
     请注意以下规则：
     1. 首先明确 query 中的问题问的 metric，不需要回答多余的信息

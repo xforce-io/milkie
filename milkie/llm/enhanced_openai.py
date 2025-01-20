@@ -29,6 +29,7 @@ class EnhancedOpenAI(EnhancedLLM):
     MAX_RETRIES = 1  # 最大重试次数
     
     def __init__(self, 
+            cacheMgr :CacheKVMgr,
             model_name :str,
             system_prompt :str,
             endpoint :str,
@@ -51,13 +52,13 @@ class EnhancedOpenAI(EnhancedLLM):
             port=port,
             tokenizer_kwargs=tokenizer_kwargs)
 
+        self._cacheMgr = cacheMgr
         self.endpoint = endpoint
         self.api_key = api_key
         self._llm = LLMApi(
             context_window=context_window,
             model_name=model_name,
             client=OpenAI(api_key=api_key, base_url=endpoint))
-        self._cacheMgr = CacheKVMgr("data/cache/", expireTimeByDay=7)
 
     def _fail(self, messages :Sequence[ChatMessage], **kwargs: Any):
         self._cacheMgr.removeValue(

@@ -30,7 +30,7 @@ class BasicToolkit(Toolkit):
     def __init__(self, globalContext: GlobalContext):
         super().__init__(globalContext)
 
-        self.cacheMgr = CacheKVMgr("data/cache/", expireTimeByDay=1)
+        self.cacheMgr = CacheKVMgr("data/cache/", category='basictoolkit', expireTimeByDay=1)
         self.robotPolicies = loadRobotPolicies("config/robots.yaml")
         self.lastAccessTime = {} 
 

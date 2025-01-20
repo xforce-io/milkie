@@ -23,6 +23,9 @@ class CacheKV:
                 with open(self.filePath, 'r', encoding="utf-8") as f:
                     loaded_cache = json.load(f)
                     for key, value in loaded_cache.items():
+                        if self._cacheItemExpired(value):
+                            continue
+
                         if isinstance(value, dict) and 'value' in value and 'timestamp' in value:
                             self.cache[key] = value
                         else:
@@ -40,6 +43,8 @@ class CacheKV:
         with self.lock:
             # 确保目录存在
             os.makedirs(os.path.dirname(self.filePath), exist_ok=True)
+            # 清除过期缓存
+            self.cache = {key: value for key, value in self.cache.items() if not self._cacheItemExpired(value)}
             with open(self.filePath, 'w', encoding="utf-8") as f:
                 json.dump(self.cache, f, ensure_ascii=False)
             self.lastDumpSec = curTime
@@ -52,7 +57,7 @@ class CacheKV:
         with self.lock:
             cached_item = self.cache.get(keyStr)
             if cached_item:
-                if time.time() - cached_item['timestamp'] < self.expireTimeByDay * 86400:
+                if not self._cacheItemExpired(cached_item):
                     return cached_item['value']
                 else:
                     del self.cache[keyStr]
@@ -71,11 +76,16 @@ class CacheKV:
                 del self.cache[keyStr]
         self.dumpCache()
 
+    def _cacheItemExpired(self, cacheItem: dict) -> bool:
+        return time.time() - cacheItem['timestamp'] > self.expireTimeByDay * 86400
+
 class CacheKVMgr:
     FilePrefix = "cache_"
     
-    def __init__(self, cacheDir: str, dumpInterval: int = 5, expireTimeByDay: float = 1):
+    def __init__(self, cacheDir: str, category: str, dumpInterval: int = 5, expireTimeByDay: float = 1):
+        self.prefix = f"{CacheKVMgr.FilePrefix}{category}_"
         self.cacheDir = cacheDir
+        self.category = category
         self.dumpInterval = dumpInterval
         self.expireTimeByDay = expireTimeByDay
         self.caches = {}
@@ -86,8 +96,8 @@ class CacheKVMgr:
             os.makedirs(self.cacheDir)
         
         for fileName in os.listdir(self.cacheDir):
-            if fileName.startswith(CacheKVMgr.FilePrefix) and fileName.endswith('.json'):
-                modelName = fileName[len(CacheKVMgr.FilePrefix):-5]
+            if fileName.startswith(self.prefix) and fileName.endswith('.json'):
+                modelName = fileName[len(self.prefix):-5]
                 filePath = os.path.join(self.cacheDir, fileName)
                 try:
                     self.caches[modelName] = CacheKV(filePath, self.dumpInterval, self.expireTimeByDay)
@@ -107,7 +117,7 @@ class CacheKVMgr:
     def setValue(self, modelName: str, key: List[Dict], value: Any):
         cache = self.getCache(modelName)
         if not cache:
-            filePath = os.path.join(self.cacheDir, f"cache_{modelName}.json")
+            filePath = os.path.join(self.cacheDir, f"{self.prefix}{modelName}.json")
             cache = CacheKV(filePath, self.dumpInterval, self.expireTimeByDay)
             self.caches[modelName] = cache
         cache.set(key, value)
@@ -118,7 +128,7 @@ class CacheKVMgr:
             cache.remove(key)
 
 if __name__ == "__main__":
-    cacheMgr = CacheKVMgr('data/cache', dumpInterval=10)
+    cacheMgr = CacheKVMgr('data/cache', category='test', dumpInterval=10)
 
     modelName = "exampleModel"
     key = [
@@ -127,7 +137,7 @@ if __name__ == "__main__":
     value = {"data": "some data"}
     cacheMgr.setValue(modelName, key, value)
     
-    cacheMgr = CacheKVMgr('data/cache', dumpInterval=10)
+    cacheMgr = CacheKVMgr('data/cache', category='test', dumpInterval=10)
     cachedValue = cacheMgr.getValue(modelName, key)
     assert cachedValue["data"] == "some data"
 

@@ -39,6 +39,12 @@ class Database:
                 - 空结果字符串
                 - 执行出错
         """
+        cache_key = [{"sql": sql}]
+        cached_result = self._cache_mgr.getValue("sqlresults", cache_key)
+        if cached_result:
+            INFO(f"Cache hit for SQL: {sql}")
+            return cached_result, None
+
         cursor = None
         try:
             # 检查连接是否断开，如果断开则重连
@@ -59,6 +65,8 @@ class Database:
                 formatted_row = dict(zip(columns, row))
                 formatted_results.append(formatted_row)
             
+            # 存入缓存
+            self._cache_mgr.setValue("sqlresults", cache_key, str(formatted_results))
             return str(formatted_results), None
             
         except Exception as e:
@@ -140,7 +148,11 @@ class Database:
         """初始化缓存管理器（如果还未初始化）"""
         if cls._cache_mgr is None:
             cache_dir = os.path.join(os.path.dirname(__file__), '../../data/cache')
-            cls._cache_mgr = CacheKVMgr(cache_dir, dumpInterval=5, expireTimeByDay=30)
+            cls._cache_mgr = CacheKVMgr(
+                cache_dir, 
+                category='database', 
+                dumpInterval=5, 
+                expireTimeByDay=3)
     
     def _connect(self):
         """连接到数据库"""
@@ -250,6 +262,13 @@ class Database:
         Returns:
             Dict[str, List[Any]]: 字段到样本值列表的映射
         """
+
+        cache_key = [{"table": table_name, "fields": sorted(list(fields))}]
+        cached_samples = self._cache_mgr.getValue("tablesamples", cache_key)
+        if cached_samples:
+            INFO(f"Cache hit for table {table_name} fields")
+            return cached_samples
+
         cursor = None
         query = None
         try:
@@ -269,6 +288,8 @@ class Database:
                     if row[i] is not None:  # 排除空值
                         samples[field].append(row[i])
                         
+            # 存入缓存
+            self._cache_mgr.setValue("tablesamples", cache_key, samples)
             return samples
             
         except Exception as e:
