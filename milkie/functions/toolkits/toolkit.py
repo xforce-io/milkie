@@ -157,6 +157,8 @@ class Toolkit():
         if needToParse:
             args = restoreVariablesInDict(args, allDict)
         result = tool.func(**args, **kwargs)
+        if not result or result.strip() == "":
+            raise ValueError(f"funcCall func[{funcName}] args[{args}] result[{result}]")
 
         info = f"funcCall func[{funcName}] args[{args}] result[{result[:MaxLenLog]}]"
         logger.info(info)

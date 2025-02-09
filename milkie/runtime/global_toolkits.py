@@ -1,6 +1,7 @@
 from milkie.functions.toolkits.agent_toolkit import AgentToolkit
 from milkie.functions.toolkits.basic_toolkit import BasicToolkit
 from milkie.functions.toolkits.filesys_toolkit import FilesysToolkit
+from milkie.functions.toolkits.search_toolkit import SearchToolkit
 from milkie.functions.toolkits.toolkit import Toolkit
 
 
@@ -10,6 +11,7 @@ class GlobalToolkits(object):
         self.toolkits = {
             "FilesysToolKit": FilesysToolkit(self.globalContext),
             "BasicToolKit": BasicToolkit(self.globalContext),
+            "SearchToolKit": SearchToolkit(self.globalContext),
         }
         self.agents = dict()
 

@@ -201,7 +201,7 @@ class EnhancedOpenAI(EnhancedLLM):
             return
         
         retry_count = 0
-        while retry_count <= self.MAX_RETRIES:
+        while retry_count < self.MAX_RETRIES:
             try:
                 self._addDisturbance(messagesJson, **kwargs)
                 theArgs = self._createApiArgs(messagesJson, stream=True, **kwargs)
@@ -224,20 +224,21 @@ class EnhancedOpenAI(EnhancedLLM):
 
                 content = "".join(fullContent)
                 arguments = "".join(funcArgs) if funcArgs else ""
-                self._setCacheValue(
-                    messagesJson=messagesJson, 
-                    content=content, 
-                    toolCalls=[
-                        ChatCompletionMessageToolCall(
-                            id=str(uuid.uuid4()),
-                            type="function",
-                            function=Function(
-                                name=funcName, 
-                                arguments=arguments
+                if content or funcName:
+                    self._setCacheValue(
+                        messagesJson=messagesJson, 
+                        content=content, 
+                        toolCalls=[
+                            ChatCompletionMessageToolCall(
+                                id=str(uuid.uuid4()),
+                                type="function",
+                                function=Function(
+                                    name=funcName, 
+                                    arguments=arguments
+                                )
                             )
-                        )
-                    ] if funcName is not None else None,
-                    numTokens=len(content.split()))
+                        ] if funcName is not None else None,
+                        numTokens=len(content.split()))
                 break
             except Exception as e:
                 retry_count += 1

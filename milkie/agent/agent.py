@@ -4,6 +4,7 @@ from typing import List
 from milkie.agent.base_block import BaseBlock
 from milkie.agent.flow_block import FlowBlock
 from milkie.agent.func_block.func_block import FuncBlock, RepoFuncs
+from milkie.agent.func_block.no_cache import NoCache
 from milkie.agent.func_block.reindex_from_local_block import ReindexFromLocalBlock
 from milkie.agent.func_block.retrieval_block import RetrievalBlock
 from milkie.agent.func_block.set_model import SetModel
@@ -50,6 +51,11 @@ class Agent(BaseBlock):
             repoFuncs=self.repoFuncs
         ))
         self.repoFuncs.add("ReindexFromLocal", ReindexFromLocalBlock(
+            context=self.context,
+            config=self.config,
+            repoFuncs=self.repoFuncs
+        ))
+        self.repoFuncs.add("NoCache", NoCache(
             context=self.context,
             config=self.config,
             repoFuncs=self.repoFuncs

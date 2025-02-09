@@ -1,4 +1,4 @@
-#!/home/ari/miniconda3/envs/xfc/bin/python
+#!/Users/xupeng/miniconda3/bin/python
 
 import os
 import sys

@@ -19,6 +19,7 @@ class OutputSyntaxFormat(Enum):
     REGEX = 2
     EXTRACT = 3
     CHECK = 4
+    JSON = 5
 
 class ResultOutputProcessSingle:
     def __init__(self, storeVar: str, output: Any=None, errmsg: str=None):
@@ -107,11 +108,13 @@ class OutputSyntax:
             return OutputSyntaxFormat.EXTRACT
         elif self.originalSyntax.startswith("c```"):
             return OutputSyntaxFormat.CHECK
+        elif self.originalSyntax.strip() == "json":
+            return OutputSyntaxFormat.JSON
         else:
             return OutputSyntaxFormat.NORMAL
 
     def _parse(self):
-        if self.format == OutputSyntaxFormat.NORMAL:
+        if self.format == OutputSyntaxFormat.NORMAL or self.format == OutputSyntaxFormat.JSON:
             return
 
         content = self.originalSyntax[1:]
@@ -165,6 +168,8 @@ class OutputSyntax:
                 allArgs["text"] = output
                 return stepLLMExtractor.completionAndFormat(
                     args=allArgs)
+            elif self.format == OutputSyntaxFormat.JSON:
+                return json.loads(output)
 
         if self.format == OutputSyntaxFormat.CHECK:
             try:

@@ -1,7 +1,5 @@
 @name details
 
-@import BasicToolKit
-
 @desc
 为论文集合生成分析报告
 @desc

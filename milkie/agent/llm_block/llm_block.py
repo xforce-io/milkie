@@ -307,11 +307,8 @@ class StreamingProcessor:
             stdout("", info=True, flush=True, **kwargs)
 
             if self.currentSentence:
-                lastSentence = "".join(self.currentSentence)
-                self.currentContent.append(lastSentence)
-                if self.respToolbox and lastSentence.startswith("@"):
-                    expertsResp = self.respToolbox.queryExpert(lastSentence, context=self.context)
-                    self.currentContent.append(expertsResp)
+                expertsResp = self.processExpertQuery()
+                self.currentContent.append(expertsResp)
 
         except Exception as e:
             logger.error(f"Error in readFromGen: {e}", exc_info=True)
@@ -420,6 +417,7 @@ class Instruction:
         self.formattedInstruct = self.curInstruct
         self.onlyFuncCall = False
         self.isNaiveType = False
+        self.noCache = False
         self.label = label
         self.prev: Instruction = prev
         self.observation = observation
@@ -444,6 +442,9 @@ class Instruction:
             self._formatCurInstruct(args)
         except Exception as e:
             raise RuntimeError(f"fail parse instruct[{self.curInstruct}]: {str(e)}")
+
+        if self.noCache:
+            kwargs["no_cache"] = True
 
         if self.onlyFuncCall or self.isNaiveType:
             # in this case, the response is the result of the only function call, or a naive type

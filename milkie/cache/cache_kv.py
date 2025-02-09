@@ -127,6 +127,24 @@ class CacheKVMgr:
         if cache:
             cache.remove(key)
 
+class CacheKVCenter:
+
+    def __init__(self):
+        self.repos = {}
+
+    def getCacheMgr(
+            self, 
+            cacheDir: str, 
+            category: str, 
+            dumpInterval: int = 5, 
+            expireTimeByDay: float = 1) -> CacheKVMgr:
+        key = f"{cacheDir}_{category}"
+        if key not in self.repos:
+            self.repos[key] = CacheKVMgr(cacheDir, category, dumpInterval, expireTimeByDay)
+        return self.repos[key]
+
+GlobalCacheKVCenter = CacheKVCenter()
+
 if __name__ == "__main__":
     cacheMgr = CacheKVMgr('data/cache', category='test', dumpInterval=10)
 
