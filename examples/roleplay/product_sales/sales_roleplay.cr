@@ -6,8 +6,8 @@
 
 @host sales
 
-@experts
+@skills
 	cio
-@experts
+@skills
 
 @prologue 李总您好，我是云盘产品销售经理，很高兴认识您

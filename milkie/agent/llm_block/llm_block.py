@@ -7,6 +7,8 @@ import re
 import time
 from typing import Any, Callable, List, Optional, Tuple
 
+from llama_index_client import ChatMessage
+
 from milkie.agent.base_block import BaseBlock
 from milkie.agent.llm_block.step_llm_toolcall import StepLLMToolCall
 from milkie.agent.llm_block.step_llm_extractor import StepLLMExtractor
@@ -185,15 +187,15 @@ class StepLLMInstrAnalysis(StepLLMBlock):
 
     def makeSystemPrompt(self, args: dict, **kwargs) -> str:
         systemPrompt = super().makeSystemPrompt(args=args, **kwargs)
-        if "experts" in kwargs:
+        if "skills" in kwargs:
             systemPrompt += f"""
-            注意：专家团成员如下
+            注意：拥有技能如下
             ```
             """
-            for name, agent in kwargs["experts"].items():
+            for name, agent in kwargs["skills"].items():
                 systemPrompt += f"{name} -> {agent.desc}\n"
             systemPrompt += '''```\n
-            如果需要咨询专家团，请使用 " @expertName ('->'前面的字符串) + 问题 + ？" 来调用专家团中的专家。
+            如果需要使用技能，请使用 " @skillName + 问题 + ？" 来调用技能。
             '''
         return systemPrompt
         
@@ -223,7 +225,9 @@ class StepLLMInstrAnalysis(StepLLMBlock):
 
         streamingProcessor = StreamingProcessor(
             respToolbox=self.llmBlock.respToolbox,
-            context=self.llmBlock.context)
+            context=self.llmBlock.context,
+            llm=self.llm,
+            messages=self._messages)
         toolUsed, result = streamingProcessor.readFromGen(
             response=result,
             **kwargs)
@@ -259,56 +263,75 @@ class StepLLMInstrAnalysis(StepLLMBlock):
 class StreamingProcessor:
     def __init__(self,
                  respToolbox: Toolbox,
-                 context: Context):
+                 context: Context,
+                 llm: EnhancedLLM,
+                 messages: list[ChatMessage]):
         self.respToolbox = respToolbox
         self.context = context
-        self.currentContent = []
+        self.accuResults = []
         self.currentSentence = []
         self.currentTools = []
+        self.response = None
+        self.llm = llm
+        self.messages = messages
+        self.streamReset = False
 
     def readFromGen(
             self,
             response: Response, 
             **kwargs) -> Tuple[Optional[str], str]:
-        expertsResp = None
+        self.response = response
+        skillResp = None
 
         try:
-            if not response.respGen:
+            if not self.response.respGen:
                 logger.warning("No response generator found")
                 return None, ""
 
-            for chunk in response.respGen:
-                content = None
-                if hasattr(chunk.raw, "tool_calls") and \
-                        isinstance(chunk.raw.tool_calls, list) and \
-                        len(chunk.raw.tool_calls) > 0:
-                    toolCalls = chunk.raw.tool_calls
-                    if len(self.currentTools) == 0:
-                        self.currentTools = [{
-                            "name": "",
-                            "args": ""
-                        }] * len(toolCalls)
-                    
-                    for i, toolCall in enumerate(toolCalls):
-                        if toolCall.function.name:
-                            self.currentTools[i]["name"] = toolCall.function.name
-                        if toolCall.function.arguments:
-                            self.currentTools[i]["args"] += toolCall.function.arguments
-                elif hasattr(chunk.raw, "delta") and hasattr(chunk.raw.delta, "content"):
-                    content = chunk.raw.delta.content
-                elif hasattr(chunk.raw, "content") and chunk.raw.content is not None:
-                    content = chunk.raw.content
+            while True:
+                for chunk in self.response.respGen:
+                    content = None
+                    if hasattr(chunk.raw, "tool_calls") and \
+                            isinstance(chunk.raw.tool_calls, list) and \
+                            len(chunk.raw.tool_calls) > 0:
+                        toolCalls = chunk.raw.tool_calls
+                        if len(self.currentTools) == 0:
+                            self.currentTools = [{
+                                "name": "",
+                                "args": ""
+                            }] * len(toolCalls)
+                        
+                        for i, toolCall in enumerate(toolCalls):
+                            if toolCall.function.name:
+                                self.currentTools[i]["name"] = toolCall.function.name
+                            if toolCall.function.arguments:
+                                self.currentTools[i]["args"] += toolCall.function.arguments
+                    elif hasattr(chunk.raw, "delta") and hasattr(chunk.raw.delta, "content"):
+                        content = chunk.raw.delta.content
+                    elif hasattr(chunk.raw, "content") and chunk.raw.content is not None:
+                        content = chunk.raw.content
 
-                if content:
-                    expertsResp = self.processDeltaContent(
-                        deltaContent=content,
-                        **kwargs)
+                    if content:
+                        skillResp = self.processDeltaContent(
+                            deltaContent=content,
+                            **kwargs)
+                        if skillResp:
+                            break
 
-            stdout("", info=True, flush=True, **kwargs)
+                if self.streamReset:
+                    self.streamReset = False
+                    continue
 
-            if self.currentSentence:
-                expertsResp = self.processExpertQuery()
-                self.currentContent.append(expertsResp)
+                stdout("", info=True, flush=True, **kwargs)
+
+                if self.currentSentence:
+                    skillResp = self.processSentence()
+                    if not skillResp:
+                        break
+
+                    self.accuResults.append(skillResp)
+                else:
+                    break
 
         except Exception as e:
             logger.error(f"Error in readFromGen: {e}", exc_info=True)
@@ -317,42 +340,59 @@ class StreamingProcessor:
         if len(self.currentTools) > 0:
             return self.currentTools[0]["name"], self.currentTools[0]["args"]
         else:
-            return None, "".join(self.currentContent)
+            return None, "".join(self.accuResults)
 
     def processDeltaContent(
             self,
             deltaContent: str,
             **kwargs) -> str:
         endIndex = -1
-        for i, char in enumerate(deltaContent):
-            if char in SymbolEndSentence:
-                endIndex = i
-                break
-        
-        expertsResp = ""
-        if endIndex >= 0:
-            currentPart = deltaContent[:endIndex+1]
-            self.currentSentence.append(currentPart)
-            stdout(currentPart, info=True, end="", flush=True, **kwargs)
-            
-            expertsResp = self.processExpertQuery()
-            self.currentContent.append(expertsResp)
-            
-            self.currentSentence = [deltaContent[endIndex+1:]]
-            stdout(deltaContent[endIndex+1:], info=True, end="", flush=True, **kwargs)
-        else:
-            self.currentSentence.append(deltaContent)
-            stdout(deltaContent, info=True, end="", flush=True, **kwargs)
-        
-        return expertsResp
+        while True:
+            startIndex = endIndex + 1
+            i = startIndex
+            endIndex = -1
+            while i < len(deltaContent):
+                if deltaContent[i] in SymbolEndSentence:
+                    endIndex = i
+                    break
+                i += 1
 
-    def processExpertQuery(self) -> str:
-        sentence = "".join(self.currentSentence)
-        self.currentContent.append(sentence)
-        
+            skillResp = ""
+            if endIndex >= 0:
+                currentPart = deltaContent[startIndex:endIndex+1]
+                self.currentSentence.append(currentPart)
+                stdout(currentPart, info=True, end="", flush=True, **kwargs)
+                
+                skillResp = self.processSentence()
+                if skillResp:
+                    self.accuResults.append(skillResp)
+                    return skillResp
+            else:
+                self.currentSentence.append(deltaContent[startIndex:])
+                stdout(deltaContent[startIndex:], info=True, end="", flush=True, **kwargs)
+                return None
+
+    def processSentence(self) -> str:
+        sentence = "".join(self.currentSentence).strip()
+        self.accuResults.append(sentence)
+        self.currentSentence = []
         if self.respToolbox and sentence.startswith("@"):
-            expertsResp = self.respToolbox.queryExpert(sentence, context=self.context)
-            return expertsResp
+            skillName, skillResp = self.respToolbox.useSkill(sentence, context=self.context)
+
+            endMark = f" @{skillName} END\n"
+            stdout(endMark, info=True, end="", flush=True)
+
+            self.messages = [
+                self.messages[0],                                                   # system prompt
+                self.messages[1],                                                   # user prompt
+                ChatMessage(role="assistant", content="".join(self.accuResults)),   # assistant result
+                ChatMessage(role="assistant", content=skillResp + endMark),         # skill result
+                ChatMessage(role="assistant", content="下面我们继续探讨")              # continue
+            ]
+
+            self.response.respGen = self.llm.stream(self.messages)
+            self.streamReset = True
+            return skillResp + endMark
         return ""
 
 class StepLLMSynthsisInstructionRecord(StepLLMBlock):
@@ -494,7 +534,7 @@ class Instruction:
         kwargs["respToolbox"] = respToolbox
         
         instAnalysisResult = self.stepInstAnalysis.streamAndFormat(
-            llm=self.llm if self.llm else self.syntaxParser.model,
+            llm=self._getCurLLM(),
             reasoning=self.reasoning,
             args=args,
             **kwargs)
@@ -626,7 +666,7 @@ class Instruction:
             goto :str,
             logType: str,
             **logData) -> InstructResult:
-        logMessage = f"instrExec({self.label}|{logType}): instr[{self.formattedInstruct}] "
+        logMessage = f"instrExec({self.label}|{self._getCurLLM().model_name}|{logType}): instr[{self.formattedInstruct}] "
         if logType == "tool":
             logMessage += f"tool[{logData.get('toolName', '')}] "
         logMessage += f"ans[{response}]"
@@ -775,6 +815,9 @@ class Instruction:
             return curInstruct.lower() == 'True'
         
         return None
+
+    def _getCurLLM(self) -> EnhancedLLM:
+        return self.llm if self.llm else self.syntaxParser.model
 
 class InstructionRecord:
     def __init__(self, instruction :Instruction, result :InstructResult) -> None:

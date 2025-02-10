@@ -21,6 +21,7 @@ from llama_index.core.base.llms.generic_utils import (
 import uuid
 import time
 import json
+import copy
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +60,22 @@ class EnhancedOpenAI(EnhancedLLM):
             context_window=context_window,
             model_name=model_name,
             client=OpenAI(api_key=api_key, base_url=endpoint))
+
+    def __deepcopy__(self, memo):
+        """自定义深拷贝方法,_llm实例共享"""
+        cls = self.__class__
+        result = cls.__new__(cls)
+        memo[id(self)] = result
+        
+        # 复制所有属性
+        for k, v in self.__dict__.items():
+            if k == '_llm' or k == '_cacheMgr':
+                # _llm 实例共享
+                setattr(result, k, v)
+            else:
+                # 其他属性正常深拷贝
+                setattr(result, k, copy.deepcopy(v, memo))
+        return result
 
     def _fail(self, messages :Sequence[ChatMessage], **kwargs: Any):
         self._cacheMgr.removeValue(

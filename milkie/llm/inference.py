@@ -10,89 +10,74 @@ from milkie.utils.data_utils import escape
 
 logger = logging.getLogger(__name__)
 
-def chat(
+def makeMessages(
         llm :EnhancedLLM, 
         systemPrompt :str,
         prompt :str, 
         promptArgs :dict, 
+        **kwargs) -> list[ChatMessage]:
+    prompt = escape(prompt)
+    chatPromptTmpl = makeMessageTemplates(
+        systemPrompt, 
+        kwargs["history"] if "history" in kwargs else None, 
+        prompt)
+    return llm.makeMessages(chatPromptTmpl, promptArgs)
+
+def chat(
+        llm :EnhancedLLM, 
+        messages :list[ChatMessage],
         stream :bool = False,
         **kwargs) -> Response:
     chatArgs = {k : v for k, v in kwargs.items() if k == "tools" or k == "no_cache"}
     if stream:
         return chatStream(
             llm=llm, 
-            systemPrompt=systemPrompt, 
-            prompt=prompt, 
-            promptArgs=promptArgs, 
+            messages=messages, 
             **chatArgs)
     else:
         return chatCompletion(
             llm=llm, 
-            systemPrompt=systemPrompt, 
-            prompt=prompt, 
-            promptArgs=promptArgs, 
+            messages=messages, 
             **chatArgs)
 
 def chatCompletion(
         llm :EnhancedLLM, 
-        systemPrompt :str,
-        prompt :str, 
-        promptArgs :dict, 
+        messages :list[ChatMessage],
         **kwargs) -> Response:
-    prompt = escape(prompt)
-    chatPromptTmpl = makeMessageTemplates(
-        systemPrompt, 
-        kwargs["history"] if "history" in kwargs else None, 
-        prompt)
     response = Response(respStr="", source_nodes=None, metadata={})
 
     import time
     t0 = time.time()
     response.respStr, numTokens, chatCompletion = llm.predict(
-        prompt=chatPromptTmpl,
-        promptArgs=promptArgs,
+        messages=messages,
         **kwargs)
     t1 = time.time()
     answer = response.respStr.replace("\n", "//")
     response.metadata["numTokens"] = numTokens
     response.metadata["chatCompletion"] = chatCompletion
-    DEBUG(logger, f"chat prompt[{chatPromptTmpl.get_template()}] answer[{answer}] ({t1-t0:.2f}s)")
+    DEBUG(logger, f"chat messages[{messages}] answer[{answer}] ({t1-t0:.2f}s)")
     return response
 
 def chatStream(
         llm: EnhancedLLM,
-        systemPrompt: str,
-        prompt: str,
-        promptArgs: Dict[str, Any],
+        messages: list[ChatMessage],
         **kwargs
 ) -> Response:
-    prompt = escape(prompt)
-    chatPromptTmpl = makeMessageTemplates(
-        systemPrompt, 
-        kwargs["history"] if "history" in kwargs else None, 
-        prompt)
     response = Response(respGen=None, source_nodes=None, metadata={})
 
     import time
     t0 = time.time()
-    response.respGen = llm.stream(prompt=chatPromptTmpl, promptArgs=promptArgs, **kwargs)
+    response.respGen = llm.stream(messages=messages, **kwargs)
     t1 = time.time()
 
-    DEBUG(logger, f"stream chat prompt[{chatPromptTmpl.get_template()}] ({t1-t0:.2f}s)")
+    DEBUG(logger, f"stream chat messages[{messages}] ({t1-t0:.2f}s)")
     return response
 
 def failChat(
         llm :EnhancedLLM, 
-        systemPrompt :str,
-        prompt :str, 
-        promptArgs :dict, 
+        messages :list[ChatMessage],
         **kwargs):
-    prompt = escape(prompt)
-    chatPromptTmpl = makeMessageTemplates(
-        systemPrompt, 
-        kwargs["history"] if "history" in kwargs else None, 
-        prompt)
-    llm.fail(chatPromptTmpl, promptArgs, **kwargs)
+    llm.fail(messages, **kwargs)
 
 def makeMessageTemplates(systemPrompt :str, history :Optional[History], prompt :str) -> ChatPromptTemplate:
     messageTemplates = []

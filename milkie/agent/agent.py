@@ -40,7 +40,7 @@ class Agent(BaseBlock):
 
         self.name = name
         self.desc = desc
-        self.experts = dict[str, Agent]()
+        self.skills = dict[str, Agent]()
         self.code = code
         self.systemPrompt = systemPrompt
         self.funcBlocks: List[FuncBlock] = []
@@ -77,7 +77,7 @@ class Agent(BaseBlock):
         ))
 
     def assignExpert(self, expert: Agent):
-        self.experts[expert.name] = expert
+        self.skills[expert.name] = expert
 
     def setCodeAndCompile(self, code: str):
         self.isCompiled = False
@@ -188,8 +188,8 @@ class Agent(BaseBlock):
                 self.systemPrompt:
             args["system_prompt"] = self.systemPrompt
 
-        if len(self.experts) > 0:
-            kwargs["experts"] = self.experts
+        if len(self.skills) > 0:
+            kwargs["skills"] = self.skills
 
         if "top" in kwargs and not kwargs["top"]:
             kwargs["history"] = None

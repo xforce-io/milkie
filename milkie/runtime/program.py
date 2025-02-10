@@ -56,7 +56,7 @@ class Program:
 
         self.name = None
         self.desc = None
-        self.experts = None
+        self.skills = None
         self.program = self.readProgramFile()
 
         # 定义所有内容收集器的配置
@@ -66,10 +66,10 @@ class Program:
                 attributeName='desc',
                 errorMsg="Program description is already set"
             )),
-            'experts': ContentCollector(CollectorConfig(
-                prefix='@experts',
-                attributeName='experts',
-                errorMsg="Program experts is already set"
+            'skills': ContentCollector(CollectorConfig(
+                prefix='@skills',
+                attributeName='skills',
+                errorMsg="Program skills is already set"
             ))
         }
 
@@ -102,23 +102,23 @@ class Program:
     def getDesc(self) -> str:
         return self.desc
 
-    def getExpertAssignments(self) -> list[tuple[str, str]]:
-        if len(self.experts.strip()) == 0:
+    def getRoleAssignments(self) -> list[tuple[str, str]]:
+        if len(self.skills.strip()) == 0:
             return None
 
-        experts = []
-        pairs = [expert.strip() for expert in self.experts.split("\n") if len(expert.strip()) > 0]
+        skills = []
+        pairs = [skill.strip() for skill in self.skills.split("\n") if len(skill.strip()) > 0]
         for pair in pairs:
             roleAndName = pair.split("->")
             if len(roleAndName) == 2:
                 role, name = roleAndName
-                experts.append((role.strip(), name.strip()))
+                skills.append((role.strip(), name.strip()))
             elif len(roleAndName) == 1:
                 name = roleAndName[0].strip()
-                experts.append((name, name))
+                skills.append((name, name))
             else:
-                raise SyntaxError(f"Invalid expert format[{self.programFilepath}]")
-        return experts
+                raise SyntaxError(f"Invalid skill format[{self.programFilepath}]")
+        return skills
 
     def _handleName(self, line: str) -> None:
         self.name = line.split()[-1].strip()

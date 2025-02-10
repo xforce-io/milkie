@@ -1,4 +1,5 @@
 from abc import abstractmethod
+import copy
 from typing import Any, Optional, Sequence, Generator
 from threading import Thread
 import random, uuid
@@ -150,17 +151,15 @@ class EnhancedLLM(object):
     def getMBU(self, tokensPerSec :float, memBandwidth :float) -> float:
         return self.getNumParams() * self._getSingleParameterSizeInBytes() * tokensPerSec / memBandwidth
 
+    def makeMessages(self, prompt: BasePromptTemplate, promptArgs: dict):
+        return self._llm._get_messages(prompt, **promptArgs)
+
     @torch.inference_mode()
     def predict(
             self, 
-            prompt: BasePromptTemplate, 
-            promptArgs: dict,
+            messages: list[ChatMessage],
             **kwargs: Any):
-        if len(promptArgs) > 0:
-            messages = self._llm._get_messages(prompt, **promptArgs)
-        else :
-            messages = prompt.message_templates
-
+        assert len(messages) > 0
         response = self._completion(messages, **kwargs)
         output = response.message.content or ""
         numTokens = response.raw["num_tokens"]
@@ -171,14 +170,10 @@ class EnhancedLLM(object):
     @torch.inference_mode()
     def stream(
             self, 
-            prompt: BasePromptTemplate, 
-            promptArgs: dict,
+            messages: list[ChatMessage],
             **kwargs: Any
     ) -> Generator[ChatResponse, None, None]:
-        if len(promptArgs) > 0:
-            messages = self._llm._get_messages(prompt, **promptArgs)
-        else:
-            messages = prompt.message_templates
+        assert len(messages) > 0
         return self._stream(messages, **kwargs)
 
     def filterGenArgs(kwargs :dict):
@@ -187,29 +182,15 @@ class EnhancedLLM(object):
     def filterArgs(kwargs :dict, keysLeft :list[str]):
         return {k: v for k, v in kwargs.items() if k in keysLeft} 
 
-    #deprecated
-    @torch.inference_mode()
-    def predictBatch(
-            self, 
-            prompt: BasePromptTemplate, 
-            argsList: list[dict],
-            **kwargs: Any):
-        if argsList is not None and len(argsList) > 0:
-            messages = [self._llm._get_messages(prompt, **args) for args in argsList]
-        else:
-            messages = [self._llm._get_messages(prompt, **{})]
-        return self._predictBatch(messages, **kwargs)
-
     def fail(
             self, 
-            prompt :BasePromptTemplate, 
-            promptArgs :dict, 
+            messages :list[ChatMessage],
             **kwargs: Any):
-        if len(promptArgs) > 0:
-            messages = self._llm._get_messages(prompt, **promptArgs)
-        else:
-            messages = prompt.message_templates
+        assert len(messages) > 0
         self._fail(messages, **kwargs)
+
+    def clone(self):
+        return copy.deepcopy(self)
 
     @abstractmethod
     def _fail(self, messages :Sequence[ChatMessage], **kwargs: Any):
@@ -241,24 +222,6 @@ class EnhancedLLM(object):
                 add_generation_prompt=True,
                 tokenize=False)
         return [generic_messages_to_prompt(messages) for messages in messagesBatch]
-
-    @torch.inference_mode()
-    def _predictBatch(
-            self, 
-            messages,
-            **kwargs: Any):
-        result = []
-        if self._systemPrompt is not None:
-            for msgs in messages:
-                msgs.insert(0, ChatMessage(role="system", content=self._systemPrompt))
-        chatResponses = self._chatBatch(messages, **kwargs)
-        for chatResponse in chatResponses:
-            output = chatResponse.message.content or ""
-            numTokens = chatResponse.raw["num_tokens"]
-            if numTokens == 0:
-                numTokens = len(chatResponse.raw["model_output"])
-            result += [(self._llm._parse_output(output), numTokens, chatResponse.raw["chat_completion"])]
-        return result
 
     def _completion(self, messages: Sequence[ChatMessage], **kwargs: Any) -> ChatResponse:
         prompt = self._llm.messages_to_prompt(messages)

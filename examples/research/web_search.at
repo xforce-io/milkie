@@ -1,0 +1,23 @@
+@name web_search 
+
+@import SearchToolKit
+
+@desc
+从网络中快速收集一件事情的信息，并且做初步的解读
+@desc
+
+links. 上网搜索关于这个主题相关信息：{query} => json
+FOR link in links
+    webpage. 从链接获取对应网页内容: {link.url}
+    content. 请阅读这段信息 
+        ```{webpage}```
+    如果这段文字和主题【{query}】相关，就请整理成一段连贯的文字;
+    否则，就回复“不相关”
+END -> contents
+
+allContent. #PY ```"/".join(contents)```
+result. 请阅读这段文字
+```
+{allContent}
+```
+根据主题【{query}】输出一段文字，以“综合上面的信息”开始：

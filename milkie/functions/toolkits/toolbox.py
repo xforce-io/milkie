@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from milkie.context import Context
 from milkie.functions.toolkits.agent_toolkit import AgentToolkit
 from milkie.functions.toolkits.toolkit import Toolkit
@@ -30,14 +30,14 @@ class Toolbox(Toolkit):
             toolbox.addToolkit(globalToolkits.getToolkit(toolkit))
         return toolbox
 
-    def queryExpert(self, query: str, context: Optional[Context] = None) -> str:
+    def useSkill(self, query: str, context: Optional[Context] = None) -> Tuple[str, str]:
         for toolkit in self.toolkits:
             if isinstance(toolkit, AgentToolkit) and query[1:].startswith(toolkit.agent.name):
                 responce = toolkit.agent.execute(
-                    query=query, 
+                    query=query[len(toolkit.agent.name)+1:].strip(), 
                     args=context.getVarDict().getGlobalDict())
-                return responce.respStr
-        return ""
+                return toolkit.agent.name, responce.respStr
+        return None, ""
 
     def isEmpty(self) -> bool:
         return super().isEmpty()    

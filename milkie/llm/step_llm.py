@@ -1,5 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import Optional
+
+from llama_index_client import ChatMessage
 from milkie.global_context import GlobalContext
 from milkie.llm.enhanced_llm import EnhancedLLM
 from milkie.prompt.prompt import Loader
@@ -9,7 +11,7 @@ from milkie.trace import stdout
 from milkie.utils.commons import getToolsSchemaForTools
 from milkie.llm.reasoning.reasoning import Reasoning
 from milkie.llm.reasoning.reasoning_naive import ReasoningNaive
-
+from milkie.llm.inference import makeMessages
 class StepLLM(ABC):
     def __init__(
             self, 
@@ -21,6 +23,7 @@ class StepLLM(ABC):
         self.promptMaker = promptMaker
         self.llm = llm
         self.reasoning = reasoning
+        self._messages : list[ChatMessage] = []
     
     def completion(
             self, 
@@ -119,6 +122,13 @@ class StepLLM(ABC):
         self.prompt = self.makePrompt(useTool="tools" in kwargs, args=args, **kwargs)
         self.systemPrompt = self.makeSystemPrompt(args=args, **kwargs)
 
+        self._messages = makeMessages(
+            llm=llm, 
+            systemPrompt=self.systemPrompt, 
+            prompt=self.prompt, 
+            promptArgs=args, 
+            **kwargs)
+
         if "tools" in kwargs and kwargs["tools"] is not None and len(kwargs["tools"]) > 0:
             kwargs["tools"] = getToolsSchemaForTools(kwargs["tools"])
         else:
@@ -129,9 +139,7 @@ class StepLLM(ABC):
 
         return reasoning.reason(
             llm=llm, 
-            systemPrompt=self.systemPrompt,
-            prompt=self.prompt, 
-            promptArgs=args,
+            messages=self._messages,
             stream=stream,
             **kwargs)
 
@@ -143,9 +151,13 @@ class StepLLM(ABC):
             llm :Optional[EnhancedLLM] = None, 
             args: dict = {},
             **kwargs):
-        failChat(
+        messages = makeMessages(
             llm=llm if llm else self.llm, 
             systemPrompt=self.systemPrompt,
             prompt=self.prompt, 
             promptArgs=args,
+            **kwargs)
+        failChat(
+            llm=llm if llm else self.llm, 
+            messages=messages, 
             **kwargs)

@@ -1,3 +1,4 @@
+from llama_index_client import ChatMessage
 from milkie.llm.enhanced_llm import EnhancedLLM
 from abc import ABC, abstractmethod
 
@@ -14,9 +15,7 @@ class Reasoning(ABC):
     def reason(
             self, 
             llm :EnhancedLLM, 
-            systemPrompt :str,
-            prompt :str, 
-            promptArgs :dict,
+            messages :list[ChatMessage],
             stream :bool = False,
             **kwargs) -> str:
         pass
@@ -42,15 +41,11 @@ class Reasoning(ABC):
     def _chat(
             self, 
             llm: EnhancedLLM, 
-            systemPrompt: str, 
-            prompt: str, 
-            promptArgs: dict, 
+            messages: list[ChatMessage], 
             stream: bool = False,
             **kwargs) -> str:
         return chat(
             llm=llm, 
-            systemPrompt=systemPrompt, 
-            prompt=prompt, 
-            promptArgs=promptArgs, 
+            messages=messages, 
             stream=stream, 
             **kwargs)

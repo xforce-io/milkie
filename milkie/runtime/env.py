@@ -59,9 +59,9 @@ class Env:
             self.globalToolkits.addAgent(agent)
 
         for agentProgram in agentPrograms:
-            expertAssignments = agentProgram.getExpertAssignments()
-            if expertAssignments:
-                for agentName, _ in expertAssignments:
+            roleAssignments = agentProgram.getRoleAssignments()
+            if roleAssignments:
+                for agentName, _ in roleAssignments:
                     self.agents[agentProgram.name].assignExpert(self.agents[agentName])
 
         for chatroomProgram in chatroomPrograms:
@@ -69,9 +69,9 @@ class Env:
             self.chatrooms[chatroomProgram.name].setHost(self.agents)
 
             # set roles
-            expertAssignments = chatroomProgram.getExpertAssignments()
-            if expertAssignments:
-                for agentName, roleName in expertAssignments:
+            roleAssignments = chatroomProgram.getRoleAssignments()
+            if roleAssignments:
+                for agentName, roleName in roleAssignments:
                     self.chatrooms[chatroomProgram.name].assignRole(self.agents[agentName], roleName)
 
             # set prologue

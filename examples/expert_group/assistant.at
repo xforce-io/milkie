@@ -4,10 +4,10 @@
 作为一个助手机器人，能够帮我找到合适的专家来进行问题回答
 @desc
 
-@experts
+@skills
 	computer_expert
 	financial_expert
-@experts
+@skills
 
 @system
 
