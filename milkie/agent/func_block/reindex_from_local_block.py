@@ -12,6 +12,7 @@ class ReindexFromLocalBlock(FuncBlock):
             config :str = None, 
             repoFuncs=None):
         super().__init__(
+            agentName="ReindexFromLocal", 
             context=context, 
             config=config, 
             repoFuncs=repoFuncs)

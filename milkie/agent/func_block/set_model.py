@@ -11,7 +11,11 @@ class SetModel(FuncBlock):
             context: Context, 
             config: str, 
             repoFuncs=None):
-        super().__init__(context=context, config=config, repoFuncs=repoFuncs)
+        super().__init__(
+            agentName="SetModel", 
+            context=context, 
+            config=config, 
+            repoFuncs=repoFuncs)
 
         self.funcName = "LLM"
         self.params = ["name"]

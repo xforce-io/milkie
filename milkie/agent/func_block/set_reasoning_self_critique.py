@@ -12,6 +12,7 @@ class SetReasoningSelfCritique(FuncBlock):
             config: str, 
             repoFuncs=None):
         super().__init__(
+            agentName="SetReasoningSelfCritique", 
             context=context, 
             config=config, 
             repoFuncs=repoFuncs)

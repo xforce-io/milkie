@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 class FuncBlock(BaseBlock):
     def __init__(
             self,
+            agentName: str,
             funcDefinition: str=None,
             funcName: str = None,
             params: List[str] = [],
@@ -25,7 +26,14 @@ class FuncBlock(BaseBlock):
             toolkit: Toolkit = None,
             repoFuncs=None  # 添加 repoFuncs 参数
     ):
-        super().__init__(context, config, toolkit, repoFuncs=repoFuncs)  # 传递 repoFuncs 给父类
+        super().__init__(
+            agentName=agentName, 
+            context=context, 
+            config=config, 
+            toolkit=toolkit, 
+            repoFuncs=repoFuncs
+        )
+
         if funcDefinition:
             self.funcDefinition = funcDefinition.strip()
             self.funcName = None
@@ -50,6 +58,7 @@ class FuncBlock(BaseBlock):
         # Create FlowBlock
         from milkie.agent.flow_block import FlowBlock
         self.flowBlock = FlowBlock.create(
+            agentName=self.agentName,
             context=self.context,
             config=self.config,
             toolkit=self.toolkit,
@@ -179,12 +188,14 @@ class FuncBlock(BaseBlock):
 
     @staticmethod
     def create(
+            agentName: str,
             funcDefinition: str,
             context: Context = None,
             config: str | GlobalConfig = None,
             toolkit: Toolkit = None,
             repoFuncs=None) -> 'FuncBlock':
         return FuncBlock(
+            agentName=agentName,
             funcDefinition=funcDefinition,
             context=context,
             config=config,

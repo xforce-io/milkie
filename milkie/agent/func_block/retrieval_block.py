@@ -16,6 +16,7 @@ class RetrievalBlock(FuncBlock):
             config :str = None,
             repoFuncs=None):
         super().__init__(
+            agentName="Retrieval", 
             context=context, 
             config=config, 
             repoFuncs=repoFuncs)

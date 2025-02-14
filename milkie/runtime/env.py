@@ -1,5 +1,4 @@
 from milkie.agent.agent import Agent, FakeAgentStdin
-from milkie.agent.agents.base_agent import BaseAgent
 from milkie.chatroom.chatroom import Chatroom
 from milkie.config.config import GlobalConfig
 from milkie.context import Context
@@ -37,10 +36,10 @@ class Env:
 
         for agentProgram in agentPrograms:
             self.agents[agentProgram.name] = Agent(
-                name=agentProgram.name,
+                agentName=agentProgram.name,
                 desc=agentProgram.desc,
                 code=agentProgram.getCode(), 
-                context=self.context,
+                context=self.context.copy(),
                 config=self.config,
                 toolkit=agentProgram.toolkit, 
                 usePrevResult=False,
@@ -51,7 +50,7 @@ class Env:
                 name=chatroomProgram.name,
                 desc=chatroomProgram.desc,
                 host=chatroomProgram.host,
-                context=self.context,
+                context=self.context.copy(),
                 config=self.config
             )
         

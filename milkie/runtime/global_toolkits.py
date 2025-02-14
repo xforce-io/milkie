@@ -9,9 +9,9 @@ class GlobalToolkits(object):
     def __init__(self, globalContext):
         self.globalContext = globalContext
         self.toolkits = {
-            "FilesysToolKit": FilesysToolkit(self.globalContext),
-            "BasicToolKit": BasicToolkit(self.globalContext),
-            "SearchToolKit": SearchToolkit(self.globalContext),
+            "FilesysToolkit": FilesysToolkit(self.globalContext),
+            "BasicToolkit": BasicToolkit(self.globalContext),
+            "SearchToolkit": SearchToolkit(self.globalContext),
         }
         self.agents = dict()
 

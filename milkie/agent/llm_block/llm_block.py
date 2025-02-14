@@ -222,6 +222,7 @@ class StepLLMInstrAnalysis(StepLLMBlock):
     def formatResult(self, result :Response, **kwargs) -> InstAnalysisResult:
         allDict = self.llmBlock.getVarDict().getAllDict()
         needToParse = self.instruction.formattedInstruct.find("{") >= 0
+        toolkit = self._getToolkit()
 
         streamingProcessor = StreamingProcessor(
             respToolbox=self.llmBlock.respToolbox,
@@ -232,7 +233,7 @@ class StepLLMInstrAnalysis(StepLLMBlock):
             response=result,
             **kwargs)
         if toolUsed:
-            funcExecRecords = self.llmBlock.toolkit.exec(
+            funcExecRecords = toolkit.exec(
                 [(toolUsed, result)], 
                 allDict,
                 needToParse=needToParse)
@@ -243,8 +244,8 @@ class StepLLMInstrAnalysis(StepLLMBlock):
                 response=f"{toolUsed}({result})")
             
         # if function call is not in tools, but it is an answer
-        if not self.llmBlock.toolkit.isEmpty():
-            funcExecRecords = self.llmBlock.toolkit.extractToolFromMsg(
+        if toolkit and not toolkit.isEmpty():
+            funcExecRecords = toolkit.extractToolFromMsg(
                 result,
                 allDict,
                 needToParse=needToParse)
@@ -259,6 +260,9 @@ class StepLLMInstrAnalysis(StepLLMBlock):
             InstAnalysisResult.Result.ANSWER,
             funcExecRecords=None,
             response=result)
+
+    def _getToolkit(self):
+        return self.instruction.toolkit
 
 class StreamingProcessor:
     def __init__(self,
@@ -275,6 +279,7 @@ class StreamingProcessor:
         self.llm = llm
         self.messages = messages
         self.streamReset = False
+        self.sentences_to_detect_skill = []
 
     def readFromGen(
             self,
@@ -308,8 +313,12 @@ class StreamingProcessor:
                                 self.currentTools[i]["args"] += toolCall.function.arguments
                     elif hasattr(chunk.raw, "delta") and hasattr(chunk.raw.delta, "content"):
                         content = chunk.raw.delta.content
-                    elif hasattr(chunk.raw, "content") and chunk.raw.content is not None:
+                    elif hasattr(chunk.raw, "delta") and hasattr(chunk.raw.delta, "reasoning_content"):
+                        content = chunk.raw.delta.reasoning_content
+                    elif hasattr(chunk.raw, "content") and chunk.raw.content:
                         content = chunk.raw.content
+                    elif hasattr(chunk.raw, "reasoning_content") and chunk.raw.reasoning_content:
+                        content = chunk.raw.reasoning_content
 
                     if content:
                         skillResp = self.processDeltaContent(
@@ -376,24 +385,47 @@ class StreamingProcessor:
         sentence = "".join(self.currentSentence).strip()
         self.accuResults.append(sentence)
         self.currentSentence = []
-        if self.respToolbox and sentence.startswith("@"):
-            skillName, skillResp = self.respToolbox.useSkill(sentence, context=self.context)
+        if not self.respToolbox:
+            return None
+        
+        startIndex = 0
+        while True:
+            idx = sentence.find("@", startIndex)
+            if idx == -1:
+                break
 
-            endMark = f" @{skillName} END\n"
-            stdout(endMark, info=True, end="", flush=True)
+            resp = self._processSentenceStartWithAt(sentence[idx:])
+            if resp:
+                return resp
 
-            self.messages = [
-                self.messages[0],                                                   # system prompt
-                self.messages[1],                                                   # user prompt
-                ChatMessage(role="assistant", content="".join(self.accuResults)),   # assistant result
-                ChatMessage(role="assistant", content=skillResp + endMark),         # skill result
-                ChatMessage(role="assistant", content="下面我们继续探讨")              # continue
-            ]
+            startIndex = idx + 1
+        return None
 
-            self.response.respGen = self.llm.stream(self.messages)
-            self.streamReset = True
-            return skillResp + endMark
-        return ""
+    def _processSentenceStartWithAt(self, sentence: str) -> str:
+        if sentence in self.sentences_to_detect_skill:
+            INFO(logger, f"sentence[{sentence}] in sentences_to_detect_skill[{self.sentences_to_detect_skill}]")
+            return None
+        
+        skillName, skillResp = self.respToolbox.useSkill(sentence, context=self.context)
+        if not skillName:
+            return None
+
+        self.sentences_to_detect_skill.append(sentence)
+
+        endMark = f" @{skillName} END\n"
+        stdout(f"<<<{endMark.strip()}>>>\n", info=True, end="", flush=True)
+
+        self.messages = [
+            self.messages[0],                                                   # system prompt
+            self.messages[1],                                                   # user prompt
+            ChatMessage(role="assistant", content="".join(self.accuResults)),   # assistant result
+            ChatMessage(role="assistant", content=skillResp + endMark),         # skill result
+            ChatMessage(role="assistant", content="下面我们继续探讨")              # continue
+        ]
+
+        self.response.respGen = self.llm.stream(self.messages)
+        self.streamReset = True
+        return skillResp + endMark
 
 class StepLLMSynthsisInstructionRecord(StepLLMBlock):
     def __init__(self, promptMaker, llmBlock, instructionRecord: InstructionRecord) -> None:
@@ -476,6 +508,7 @@ class Instruction:
             instruction=self)
         self.llm :EnhancedLLM = None
         self.reasoning :Reasoning = None
+        self.toolkit :Toolkit = None
 
     def execute(self, args :dict, **kwargs) -> InstructResult:
         try:
@@ -490,7 +523,7 @@ class Instruction:
             # in this case, the response is the result of the only function call, or a naive type
             return self._processNaiveType(args, **kwargs)
 
-        useTool = (self.llmBlock.toolkit != None)
+        useTool = (self._getToolkit() != None)
         logTypes = []
         if self.syntaxParser.flag == SyntaxParser.Flag.CODE:
             return self._processGenCode(logType="code", args=args, **kwargs)
@@ -519,7 +552,7 @@ class Instruction:
             args["prompt_flag"] = None
 
         if useTool:
-            kwargs["tools"] = self.llmBlock.toolkit.getTools()
+            kwargs["tools"] = self._getToolkit().getTools()
         
         if self.llmBlock.getEnv():
             respToolbox = Toolbox(self.llmBlock.getEnv().getGlobalToolkits())
@@ -607,10 +640,11 @@ class Instruction:
     
     def _processCall(self, args: dict, **kwargs):
         def callFunc(instruction: Instruction, theArgs: dict):
+            args = {**instruction.llmBlock.context.getVarDict().getAllDict(), **theArgs["args"]}
             return instruction.llmBlock.context.getEnv().execute(
                 agentName=instruction.syntaxParser.callObj,
-                query=theArgs["query"],
-                args=theArgs["args"])
+                query=theArgs["query"].format(**args),
+                args=args)
         return self._processWithRetry(lambdaFunc=callFunc, args=args, logType="call")
 
     def _processRet(self, args: dict, **kwargs):
@@ -644,7 +678,7 @@ class Instruction:
                 output=resp.resp,
                 stepLLMExtractor=self.llmBlock.stepLLMExtractor,
                 varDict=self.varDict,
-                toolkit=self.llmBlock.toolkit,
+                toolkit=self._getToolkit(),
                 retry=True,
                 contextLen=self.syntaxParser.model.getContextWindow())
             if not instrOutput.hasError():
@@ -819,6 +853,9 @@ class Instruction:
     def _getCurLLM(self) -> EnhancedLLM:
         return self.llm if self.llm else self.syntaxParser.model
 
+    def _getToolkit(self) -> Toolkit:
+        return self.toolkit if self.toolkit else self.llmBlock.toolkit
+
 class InstructionRecord:
     def __init__(self, instruction :Instruction, result :InstructResult) -> None:
         self.instruction = instruction
@@ -934,6 +971,7 @@ class LLMBlock(BaseBlock):
 
     def __init__(
             self,
+            agentName: str,
             context: Context = None,
             config: str = None,
             usePrevResult: bool = DefaultUsePrevResult,
@@ -943,7 +981,13 @@ class LLMBlock(BaseBlock):
             jsonKeys: list = None,
             decomposeTask: bool = True,
             repoFuncs=None) -> None:
-        super().__init__(context, config, toolkit, usePrevResult, repoFuncs)
+        super().__init__(
+            agentName=agentName,
+            context=context, 
+            config=config, 
+            toolkit=toolkit, 
+            usePrevResult=usePrevResult, 
+            repoFuncs=repoFuncs)
 
         self.usePrevResult = usePrevResult
         self.systemPrompt = Loader.load(self.context.globalContext.settings.llmBasicConfig.systemPrompt)
@@ -1080,6 +1124,7 @@ class LLMBlock(BaseBlock):
 
     @staticmethod
     def create(
+            agentName: str,
             context: Context = None,
             config: str = None,
             usePrevResult: bool = DefaultUsePrevResult,
@@ -1090,6 +1135,7 @@ class LLMBlock(BaseBlock):
             decomposeTask: bool = True,
             repoFuncs=None) -> 'LLMBlock':
         return LLMBlock(
+            agentName=agentName,
             context=context,
             config=config,
             usePrevResult=usePrevResult,
@@ -1109,5 +1155,7 @@ if __name__ == "__main__":
     Fish. #RET {poetry}
     Slime. #RET {{"result": "{joke}"}}
     """
-    llmBlock = LLMBlock.create(taskExpr=task)
+    llmBlock = LLMBlock.create(
+        agentName="test", 
+        taskExpr=task)
     print(llmBlock.execute().resp)

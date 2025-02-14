@@ -20,6 +20,7 @@ from typing import Any, Callable, List, Optional, Tuple, Dict
 
 from milkie.config.constant import MaxLenLog
 from milkie.context import VarDict
+from milkie.log import INFO
 from milkie.utils.data_utils import extractFromBlock, restoreVariablesInDict, unescape
 
 from ..openai_function import OpenAIFunction
@@ -160,8 +161,7 @@ class Toolkit():
         if not result or result.strip() == "":
             raise ValueError(f"funcCall func[{funcName}] args[{args}] result[{result}]")
 
-        info = f"funcCall func[{funcName}] args[{args}] result[{result[:MaxLenLog]}]"
-        logger.info(info)
+        INFO(logger, f"funcCall func[{funcName}] args[{args}] result[{result[:MaxLenLog]}]")
         return FuncExecRecord((funcName, args), tool, result)
 
     def genCodeAndRun(self, instruction: str, varDict: Optional[Dict[str, Any]] = None, **kwargs) -> str:

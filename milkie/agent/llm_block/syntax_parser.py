@@ -10,7 +10,7 @@ from milkie.context import VarDict
 from milkie.functions.toolkits.toolkit import Toolkit
 from milkie.runtime.global_toolkits import GlobalToolkits
 from milkie.settings import Settings
-from milkie.utils.data_utils import codeToLines, extractBlock, isBlock, unescape
+from milkie.utils.data_utils import codeToLines, extractBlock, extractFromBlock, extractJsonBlock, isBlock, unescape
 
 logger = logging.getLogger(__name__)
 
@@ -169,8 +169,7 @@ class OutputSyntax:
                 return stepLLMExtractor.completionAndFormat(
                     args=allArgs)
             elif self.format == OutputSyntaxFormat.JSON:
-                return json.loads(output)
-
+                return extractJsonBlock(output)
         if self.format == OutputSyntaxFormat.CHECK:
             try:
                 return toolkit.runCode(

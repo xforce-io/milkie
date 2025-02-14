@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 class ForBlock(BaseBlock):
     def __init__(
             self, 
+            agentName: str,
             forStatement: str, 
             context: Context = None, 
             config: str | GlobalConfig = None,
@@ -23,7 +24,14 @@ class ForBlock(BaseBlock):
             loopBlockClass=LLMBlock,
             retStorage=None,
             repoFuncs=None):
-        super().__init__(context, config, toolkit, usePrevResult, repoFuncs)
+        super().__init__(
+            agentName=agentName, 
+            context=context, 
+            config=config, 
+            toolkit=toolkit, 
+            usePrevResult=usePrevResult, 
+            repoFuncs=repoFuncs)
+
         self.forStatement = forStatement.strip()
         self.loopVar = None
         self.iterable = None
@@ -52,6 +60,7 @@ class ForBlock(BaseBlock):
 
     def compile(self):
         self.loopBlock = self.loopBlockClass(
+            agentName=self.agentName,
             context=self.context,
             config=self.config,
             toolkit=self.toolkit,
@@ -155,6 +164,7 @@ class ForBlock(BaseBlock):
 
     @staticmethod
     def create(
+            agentName: str,
             forStatement: str, 
             context: Context = None, 
             config: str | GlobalConfig = None,
@@ -164,6 +174,7 @@ class ForBlock(BaseBlock):
             retStorage=None,
             repoFuncs=None) -> 'ForBlock':
         return ForBlock(
+            agentName=agentName,
             forStatement=forStatement,
             context=context,
             config=config,

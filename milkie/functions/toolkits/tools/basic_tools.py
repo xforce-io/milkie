@@ -73,6 +73,14 @@ class ToolSearchWebFromDuckDuckGo(Tool):
         self.cacheMgr.setValue(modelName, cacheKey, responses)
         return json.dumps(responses, ensure_ascii=False)
 
+class ToolSearchWebFromSougouWechat(Tool):
+
+    def __init__(self):
+        self.cacheMgr = GlobalCacheKVCenter.getCacheMgr("data/cache/", category='web_search', expireTimeByDay=1)
+
+    def execute(self, query: str, maxResults: int = 10) -> str:
+        pass
+
 class ToolGetWebContentFromUrls(Tool):
 
     def __init__(self):
@@ -397,3 +405,6 @@ class ToolDownloadFileFromUrl(Tool):
             ERROR(logger, error_msg)
             raise RuntimeError(error_msg)
 
+if __name__ == "__main__":
+    tool = ToolGetWebContentFromUrls()
+    print(tool.execute("https://gzh.sogou.com/link?url=dn9a_-gY295K0Rci_xozVXfdMkSQTLW6cwJThYulHEtVjXrGTiVgS3hZnhri_N6Bg_6QFbXnNiHFlp-jtSY3U1qXa8Fplpd9aILA1MZiPLyr7wwt_HSME45tJvneg6RTWPcHmUejWGn7Y8mApH927kwS9HarzbSEVZX3ahogZu0Km75Ex2q45T5DlwTSbN8sBBSpqoZUXcS1xcw79erA7Z-QdkaDnp3mS9YdHKhvJ9nYfBa7oFPjcWbMMgYtVHjjNQwnEtRUz2ajotuuiAmOIg..&type=2&query=%E4%BA%BA%E5%B7%A5%E6%99%BA%E8%83%BD&token=C6EC131AB41321CE9096BE9092A2BA10912A00ED67AD8E67"))

@@ -1,6 +1,6 @@
 @name search_and_reason
 
-@import BasicToolKit
+@import BasicToolkit
 
 @desc 
 高级搜索推理 agent

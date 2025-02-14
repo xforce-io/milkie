@@ -11,7 +11,11 @@ class NoCache(FuncBlock):
             context: Context, 
             config: str, 
             repoFuncs=None):
-        super().__init__(context=context, config=config, repoFuncs=repoFuncs)
+        super().__init__(
+            agentName="NoCache", 
+            context=context, 
+            config=config, 
+            repoFuncs=repoFuncs)
 
         self.funcName = "NoCache"
         self.params = []

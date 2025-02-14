@@ -4,7 +4,7 @@
 订阅paperwithcode上的论文
 @desc
 
-@import BasicToolKit
+@import BasicToolkit
 
 DEF getContent(url)
 	papersPage. @LLM(deepseek-chat) 获取 {url} 页面内容

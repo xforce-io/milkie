@@ -18,7 +18,7 @@ class SearchToolkit(Toolkit):
         Args:
             query (str): 要搜索的查询字符串
         """
-        return self.toolWebSearch.execute(query, maxResults=5)
+        return self.toolWebSearch.execute(query, maxResults=10)
 
     def getWebContentFromUrls(self, urls: str) -> str:
         """

@@ -12,13 +12,21 @@ from milkie.utils.data_utils import codeToLines
 class FlowBlock(BaseBlock):
     def __init__(
             self, 
+            agentName: str,
             flowCode: str, 
             context: Context = None, 
             config: str | GlobalConfig = None,
             toolkit: Toolkit = None,
             usePrevResult=DefaultUsePrevResult,
             repoFuncs=None):
-        super().__init__(context, config, toolkit, usePrevResult, repoFuncs)
+        super().__init__(
+            agentName=agentName, 
+            context=context, 
+            config=config, 
+            toolkit=toolkit, 
+            usePrevResult=usePrevResult, 
+            repoFuncs=repoFuncs
+        )
         self.flowCode = flowCode
         self.blocks: List[Union[LLMBlock, ForBlock]] = []
 
@@ -78,12 +86,14 @@ class FlowBlock(BaseBlock):
             forLines.append(f"{KeywordForEnd}")  # 自动添加结束标记
 
         return ForBlock.create(
-            '\n'.join(forLines), 
+            agentName=self.agentName,
+            forStatement='\n'.join(forLines), 
             context=self.context, 
             config=self.config, 
             retStorage=retStorage,
             toolkit=self.toolkit,
-            usePrevResult=self.usePrevResult
+            usePrevResult=self.usePrevResult,
+            repoFuncs=self.repoFuncs
         ), i
 
     def processForEnd(self, line):
@@ -106,6 +116,7 @@ class FlowBlock(BaseBlock):
     def addLlmBlock(self, blockLines):
         self.blocks.append(
             LLMBlock.create(
+                agentName=self.agentName,
                 context=self.context, 
                 config=self.config, 
                 taskExpr='\n'.join(blockLines),
@@ -139,6 +150,7 @@ class FlowBlock(BaseBlock):
 
     @staticmethod
     def create(
+            agentName: str,
             flowCode: str, 
             context: Context = None, 
             config: str | GlobalConfig = None,
@@ -146,6 +158,7 @@ class FlowBlock(BaseBlock):
             usePrevResult=DefaultUsePrevResult,
             repoFuncs=None) -> 'FlowBlock':
         return FlowBlock(
+            agentName=agentName,
             flowCode=flowCode,
             context=context,
             config=config,

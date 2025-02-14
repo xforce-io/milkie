@@ -17,7 +17,7 @@
 
 -----------------------
 
-@import BasicToolKit
+@import BasicToolkit
 
 <tool_call> 获取上海天气  -> wheather_info
 <prompt> 用下述天气信息写一首诗 ```{wheather_info}``` -> poet
