@@ -50,14 +50,13 @@ class ToolSearchWebFromDuckDuckGo(Tool):
             return json.dumps(cachedResult, ensure_ascii=False)
 
         from duckduckgo_search import DDGS
-        from requests.exceptions import RequestException
 
         ddgs = DDGS()
         responses: List[Dict[str, Any]] = []
 
         try:
             results = ddgs.text(keywords=query, max_results=maxResults)
-        except RequestException as e:
+        except Exception as e:
             responses.append({"error": f"duckduckgo search failed.{e}"})
             return None
 
@@ -134,7 +133,7 @@ class ToolGetWebContentFromUrls(Tool):
 
             except Exception as e:
                 errorMsg = f"Error processing the article from {url}: {str(e)}"
-                ERROR(logger, errorMsg)
+                WARNING(logger, errorMsg)
                 cleanTexts.append(errorMsg)
 
         return "\n\n".join(cleanTexts)

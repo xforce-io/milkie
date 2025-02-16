@@ -123,7 +123,7 @@ class StepLLM(ABC):
         self.systemPrompt = self.makeSystemPrompt(args=args, **kwargs)
 
         self._messages = makeMessages(
-            llm=llm, 
+            llm=llm if llm else self.llm, 
             systemPrompt=self.systemPrompt, 
             prompt=self.prompt, 
             promptArgs=args, 

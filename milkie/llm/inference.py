@@ -4,7 +4,7 @@ from llama_index.core import ChatPromptTemplate
 from llama_index.core.base.llms.types import ChatMessage, MessageRole
 from milkie.context import History
 from milkie.llm.enhanced_llm import EnhancedLLM
-from milkie.log import DEBUG
+from milkie.log import DEBUG, ERROR
 from milkie.response import Response
 from milkie.utils.data_utils import escape
 
@@ -16,11 +16,16 @@ def makeMessages(
         prompt :str, 
         promptArgs :dict, 
         **kwargs) -> list[ChatMessage]:
-    prompt = escape(prompt)
-    chatPromptTmpl = makeMessageTemplates(
-        systemPrompt, 
-        kwargs["history"] if "history" in kwargs else None, 
-        prompt)
+    promptEscaped = escape(prompt)
+    systemPromptEscaped = escape(systemPrompt)
+    try:
+        chatPromptTmpl = makeMessageTemplates(
+            systemPromptEscaped, 
+            kwargs["history"] if "history" in kwargs else None, 
+            promptEscaped)
+    except Exception as e:
+        ERROR(logger, f"makeMessages error[{e}] systemPrompt[{systemPromptEscaped}] prompt[{promptEscaped}]")
+        raise e
     return llm.makeMessages(chatPromptTmpl, promptArgs)
 
 def chat(
