@@ -2,7 +2,7 @@ from enum import Enum
 import json
 import logging
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from milkie.agent.func_block.func_block import RepoFuncs
 from milkie.agent.llm_block.step_llm_extractor import StepLLMExtractor
 from milkie.config.constant import *
@@ -416,19 +416,16 @@ class SyntaxParser:
     def _handleFunctions(self):
         if self.repoFuncs is not None:
             for funcName, funcBlock in self.repoFuncs.getAll().items():
-                pattern = funcBlock.getFuncPattern()
+                pattern = funcBlock.getFuncNamePattern()
                 if pattern not in self.instruction:
                     continue
                 
-                paramsPattern = r'%s\(\s*([a-zA-Z0-9_\-,{}\.\s]*)\s*\)' % pattern
-                paramsMatch = re.search(paramsPattern, self.instruction)
-                if paramsMatch:
-                    params = paramsMatch.group(1).strip()
-                    params = [param.strip() for param in params.split(",") if len(param.strip()) > 0]
+                params, funcCallPattern = self._parseFuncParams(pattern, self.instruction)
+                if params is not None:
                     funcBlock.setParams(params)
+                    funcBlock.setFuncCallPattern(funcCallPattern)
                     funcBlock.compile()
                     self.funcsToCall.append(funcBlock)
-                    self.instruction = self.instruction.replace(paramsMatch.group(0), "")
                 else:
                     raise SyntaxError(f"function[{funcName}] params not found")
 
@@ -545,3 +542,81 @@ class SyntaxParser:
     def getOutputSyntaxes(self):
         return [struct.outputSyntax for struct in self.instOutput.outputStructs if struct.outputSyntax]
 
+    def _parseFuncParams(self, pattern: str, instruction: str) -> Tuple[List[str], str]:
+        paramsPattern = r'%s\(\s*(.*?)\s*\)' % re.escape(pattern)
+        paramsMatch = re.search(paramsPattern, instruction)
+        if not paramsMatch:
+            return None, None
+            
+        params_str = paramsMatch.group(1).strip()
+        if not params_str:
+            return [[], paramsMatch.group(0)]
+            
+        # 解析带引号的参数
+        params = []
+        i = 0
+        current_param = []
+        in_quotes = False
+        quote_type = None
+        
+        while i < len(params_str):
+            char = params_str[i]
+            
+            # 检查引号开始/结束
+            if char in ['"', "'"]:
+                # 检查三引号
+                if i + 2 < len(params_str) and params_str[i:i+3] in ['"""', "'''"]:
+                    if not in_quotes:
+                        in_quotes = True
+                        quote_type = params_str[i:i+3]
+                        i += 3
+                        continue
+                    elif quote_type == params_str[i:i+3]:
+                        in_quotes = False
+                        quote_type = None
+                        i += 3
+                        continue
+                # 单引号或双引号
+                elif not in_quotes:
+                    in_quotes = True
+                    quote_type = char
+                    i += 1
+                    continue
+                elif quote_type == char:
+                    in_quotes = False
+                    quote_type = None
+                    i += 1
+                    continue
+            
+            # 处理参数分隔符
+            if char == ',' and not in_quotes:
+                param = ''.join(current_param).strip()
+                if param:
+                    params.append(param)
+                current_param = []
+                i += 1
+                continue
+                
+            current_param.append(char)
+            i += 1
+            
+        # 添加最后一个参数
+        if current_param:
+            param = ''.join(current_param).strip()
+            if param:
+                params.append(param)
+                
+        # 去除参数外层的引号
+        cleaned_params = []
+        for param in params:
+            # 去除三引号
+            if (param.startswith('"""') and param.endswith('"""')) or \
+               (param.startswith("'''") and param.endswith("'''")):
+                param = param[3:-3]
+            # 去除单引号或双引号
+            elif (param.startswith('"') and param.endswith('"')) or \
+                 (param.startswith("'") and param.endswith("'")):
+                param = param[1:-1]
+            cleaned_params.append(param)
+            
+        return cleaned_params, paramsMatch.group(0)

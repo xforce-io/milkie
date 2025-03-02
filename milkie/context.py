@@ -67,7 +67,12 @@ class VarDict:
         self.globalDict.update(newDict)
 
     def copy(self) -> VarDict:
-        return copy.deepcopy(self)
+        result = copy.deepcopy(self)
+        return result
+
+    def remove(self, key: str) -> None:
+        self.localDict.pop(key, None)
+        self.globalDict.pop(key, None)
 
     def clear(self) -> None:
         """清空所有字典"""

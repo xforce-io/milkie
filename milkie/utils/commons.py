@@ -23,11 +23,10 @@ def getMemStat():
         logger.info(f"Total memory: {total} MB, Used memory: {used} MB, Free memory: {free} MB")
     logger.info("============================================================")
 
-def mergeDict(dict1 :dict, dict2 :dict):
+def addDict(dict1 :dict, dict2 :dict):
     result = {**dict1}
     for key, value in dict2.items():
-        if key not in result:
-            result[key] = value
+        result[key] = value
     return result
 
 def getToolsSchemaForTools(tools: List[OpenAIFunction]) -> list:

@@ -58,16 +58,20 @@ class Engine:
                 )
                 program.parse()
                 self.chatroomPrograms.append(program)
-        
-        self.env = Env(
-            context=Context(self.globalContext),
-            config=self.globalContext.globalConfig,
-            agentPrograms=self.agentPrograms,
-            chatroomPrograms=self.chatroomPrograms,
-            globalToolkits=self.globalToolkits
-        )
+
+        self.env = None
+        self.initContext = Context(self.globalContext)
 
     def run(self, chatroom: str = None, agent: str = None, args: dict = {}, **kwargs):
+        if self.env is None:
+            self.env = Env(
+                context=self.initContext,
+                config=self.globalContext.globalConfig,
+                agentPrograms=self.agentPrograms,
+                chatroomPrograms=self.chatroomPrograms,
+                globalToolkits=self.globalToolkits
+            )
+
         try:
             if chatroom:
                 return self.env.execute(

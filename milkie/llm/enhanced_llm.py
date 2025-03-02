@@ -111,6 +111,8 @@ class EnhancedLLM(object):
         self.model_name = model_name
         self.device = device
         self.port = port
+        self.prefix_complete = False
+        self.reasoner_model = False
 
         self._llm :LLM = None
 

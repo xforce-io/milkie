@@ -44,9 +44,16 @@ class FuncBlock(BaseBlock):
             self.params = params
 
         self.flowBlock = None
+        self.funcCallPattern :str = None
 
-    def getFuncPattern(self):
+    def getFuncNamePattern(self):
         return f"{InstFlagFunc}{self.funcName}"
+
+    def setFuncCallPattern(self, funcCallPattern: str):
+        self.funcCallPattern = funcCallPattern
+
+    def getFuncCallPattern(self):
+        return self.funcCallPattern
 
     def compile(self):
         if not self.funcDefinition:

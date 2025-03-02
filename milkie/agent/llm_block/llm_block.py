@@ -7,7 +7,7 @@ import re
 import time
 from typing import Any, Callable, List, Optional, Tuple
 
-from llama_index_client import ChatMessage
+from llama_index_client import ChatMessage, MessageRole
 
 from milkie.agent.base_block import BaseBlock
 from milkie.agent.llm_block.step_llm_toolcall import StepLLMToolCall
@@ -25,7 +25,7 @@ from milkie.llm.step_llm import StepLLM
 from milkie.log import INFO, DEBUG
 from milkie.response import Response
 from milkie.trace import stdout
-from milkie.utils.commons import mergeDict
+from milkie.utils.commons import addDict
 from milkie.utils.data_utils import codeToLines, restoreVariablesInDict, restoreVariablesInStr
 
 logger = logging.getLogger(__name__)
@@ -415,13 +415,22 @@ class StreamingProcessor:
         endMark = f" @{skillName} END\n"
         stdout(f"<<<{endMark.strip()}>>>\n", info=True, end="", flush=True)
 
-        self.messages = [
-            self.messages[0],                                                   # system prompt
-            self.messages[1],                                                   # user prompt
-            ChatMessage(role="assistant", content="".join(self.accuResults)),   # assistant result
-            ChatMessage(role="assistant", content=skillResp + endMark),         # skill result
-            ChatMessage(role="assistant", content="下面我们继续探讨")              # continue
-        ]
+        if not self.llm.prefix_complete:
+            self.messages += [
+                ChatMessage(                                                        
+                    role=MessageRole.ASSISTANT, 
+                    content="".join(self.accuResults) + skillResp + endMark + "下面我们继续探讨"),   
+            ]
+        elif len(self.messages) > 1 and self.messages[-1].role == MessageRole.ASSISTANT:
+            self.messages[-1].content += "".join(self.accuResults) + skillResp + endMark
+            self.messages[-1].additional_kwargs = {"prefix" : True}
+        else:
+            self.messages += [
+                ChatMessage(                                                        
+                    role=MessageRole.ASSISTANT, 
+                    content="".join(self.accuResults) + skillResp + endMark, 
+                    additional_kwargs={"prefix" : True}),   
+            ]
 
         self.response.respGen = self.llm.stream(self.messages)
         self.streamReset = True
@@ -566,8 +575,8 @@ class Instruction:
             respToolbox.merge(self.llmBlock.respToolbox)
         kwargs["respToolbox"] = respToolbox
         
+        self.stepInstAnalysis.setLLM(self._getCurLLM())
         instAnalysisResult = self.stepInstAnalysis.streamAndFormat(
-            llm=self._getCurLLM(),
             reasoning=self.reasoning,
             args=args,
             **kwargs)
@@ -665,7 +674,7 @@ class Instruction:
         query = self.syntaxParser.callArg
         MaxRetry = 3
         for i in range(MaxRetry):
-            stdout(f"execute call {self.syntaxParser.callObj} with query {query} ==> ", args=args, **kwargs)
+            stdout(f"[trial {i}] execute call {self.syntaxParser.callObj} with query {query} ==> ", args=args, **kwargs)
                 
             resp = lambdaFunc(self, {
                 "query": query,
@@ -787,7 +796,7 @@ class Instruction:
             raise RuntimeError(f"unsupported response type[{type(response)}]")
 
     def _formatCurInstruct(self, args :dict):
-        allArgs = mergeDict(args, self.varDict.getAllDict())
+        allArgs = addDict(args, self.varDict.getAllDict())
 
         #call functions
         curInstruct = self.curInstruct
@@ -798,15 +807,15 @@ class Instruction:
                     query=None, 
                     args=allArgs,
                     curInstruction=self)
-                if curInstruct.strip() == funcBlock.getFuncPattern().strip():
+                if curInstruct.strip() == funcBlock.getFuncCallPattern().strip():
                     self.onlyFuncCall = True
                     self.formattedInstruct = resp
                     return
 
                 try:
-                    curInstruct = curInstruct.replace(funcBlock.getFuncPattern(), str(resp.resp))
+                    curInstruct = curInstruct.replace(funcBlock.getFuncCallPattern(), str(resp.resp))
                 except Exception as e:
-                    raise RuntimeError(f"fail replace func[{funcBlock.getFuncPattern()}] with [{resp.resp}]")
+                    raise RuntimeError(f"fail replace func[{funcBlock.getFuncCallPattern()}] with [{resp.resp}]")
 
         #restore variables
         try:
@@ -1041,6 +1050,7 @@ class LLMBlock(BaseBlock):
 
         taskArgs = {**args}
         taskArgs["query"] = query
+        self.context.varDict.remove("query")
 
         if not self.isCompiled:
             self.compile()  # 只在未编译时进行编译

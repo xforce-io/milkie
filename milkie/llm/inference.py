@@ -26,7 +26,11 @@ def makeMessages(
     except Exception as e:
         ERROR(logger, f"makeMessages error[{e}] systemPrompt[{systemPromptEscaped}] prompt[{promptEscaped}]")
         raise e
-    return llm.makeMessages(chatPromptTmpl, promptArgs)
+    chatMessages = llm.makeMessages(chatPromptTmpl, promptArgs)
+    if llm.reasoner_model and chatMessages[0].role == MessageRole.SYSTEM:
+        chatMessages[1].content = chatMessages[0].content + chatMessages[1].content
+        chatMessages = chatMessages[1:]
+    return chatMessages
 
 def chat(
         llm :EnhancedLLM, 

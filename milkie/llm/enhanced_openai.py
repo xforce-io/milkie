@@ -2,7 +2,7 @@ import logging
 import re
 from queue import Queue
 from typing import Any, Sequence, Generator
-from llama_index_client import ChatMessage
+from llama_index_client import ChatMessage, MessageRole
 from openai import OpenAI
 from openai.types.chat import ChatCompletion
 from openai.types.chat.chat_completion_chunk import ChoiceDelta, ChoiceDeltaToolCall, ChoiceDeltaToolCallFunction
@@ -53,6 +53,12 @@ class EnhancedOpenAI(EnhancedLLM):
             port=port,
             tokenizer_kwargs=tokenizer_kwargs)
 
+        if "api.deepseek.com/beta" in endpoint:
+            self.prefix_complete = True
+
+        if model_name in ["deepseek-reasoner"]:
+            self.reasoner_model = True
+
         self._cacheMgr = cacheMgr
         self.endpoint = endpoint
         self.api_key = api_key
@@ -87,16 +93,21 @@ class EnhancedOpenAI(EnhancedLLM):
         messagesJson = []
         for message in messages:
             if message.role == "system":
-                messagesJson.append(ChatCompletionSystemMessageParam(
+                newMessage = ChatCompletionSystemMessageParam(
                     role=message.role,
                     content=message.content,
-                ))
+                )
             else:
                 content = re.sub(r'[\uD800-\uDFFF]', '', message.content)
-                messagesJson.append(ChatCompletionUserMessageParam(
+                newMessage = ChatCompletionUserMessageParam(
                     role=message.role,
                     content=content,
-                ))
+                )
+
+            if message.additional_kwargs and "prefix" in message.additional_kwargs:
+                newMessage["prefix"] = message.additional_kwargs["prefix"]
+            messagesJson.append(newMessage)
+
         return messagesJson
 
     def _createApiArgs(self, messagesJson: list, stream: bool = False, **kwargs: Any) -> dict:

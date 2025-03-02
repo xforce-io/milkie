@@ -6,12 +6,12 @@
 
 paperReport. "{root}/dev/github/milkie/data/paper_report"
 rawDir. "{paperReport}/raw"
-topic2paper. "{paperReport}/{date}/topic2paper.txt"
+topic2paperPath. "{paperReport}/{date}/topic2paper.txt"
 reportFile. "{paperReport}/{date}/report.md"
 emailAddr. "freeman.xu@aishu.cn"
 
 interestedFiles. #PY ```
-lines = open("{topic2paper}").readlines()
+lines = open("{topic2paperPath}").readlines()
 
 [line.split(">>")[1].strip().replace(".digest", ".txt") for line in lines if line.split(">>")[0].strip() != "None"]
 ```

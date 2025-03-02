@@ -25,6 +25,9 @@ class StepLLM(ABC):
         self.reasoning = reasoning
         self._messages : list[ChatMessage] = []
     
+    def setLLM(self, llm: EnhancedLLM):
+        self.llm = llm
+    
     def completion(
             self, 
             llm :Optional[EnhancedLLM] = None, 

@@ -18,6 +18,7 @@ from milkie.cache.cache_kv import GlobalCacheKVCenter
 from milkie.config.config_robots_whitelist import getRobotPolicy, loadRobotPolicies
 from milkie.functions.toolkits.tools.tool import Tool
 from milkie.log import DEBUG, ERROR, INFO, WARNING
+from milkie.trace import stdout
 from milkie.utils.data_utils import preprocessHtml
 
 logger = logging.getLogger(__name__)
@@ -107,6 +108,7 @@ class ToolGetWebContentFromUrls(Tool):
         cleanTexts = []
         
         for url in urls:
+            stdout(f"Fetching content from {url}", info=True, flush=True, end="")
             try:
                 htmlContent = self._fetchUrl(url)
 
@@ -136,6 +138,7 @@ class ToolGetWebContentFromUrls(Tool):
                 WARNING(logger, errorMsg)
                 cleanTexts.append(errorMsg)
 
+        stdout(f"Done fetching content", info=True, flush=True, end="")
         return "\n\n".join(cleanTexts)
 
     def _fetchUrl(self, url: str, headers: Dict[str, str] = None, timeout: int = 10) -> str:
@@ -351,14 +354,14 @@ class ToolDownloadFileFromUrl(Tool):
     def execute(
         self,
         url: str,
-        localDirectory: str = "data/pdf/"
+        localDirectory: str = "data/papers/"
     ) -> str:
         """
         从指定URL下载文件并保存到本地目录。
 
         Args:
             url (str): 要下载的文件的URL
-            localDirectory (str): 保存下载文件的本地目录，默认为 'data/pdf/'
+            localDirectory (str): 保存下载文件的本地目录，默认为 'data/papers/'
 
         Returns:
             str: 下载文件的本地路径或错误信息
