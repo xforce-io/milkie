@@ -1,9 +1,8 @@
-from typing import Dict
+from milkie.functions.toolkits.skillset import Skillset
 from milkie.functions.toolkits.toolkit import EmptyToolkit, Toolkit
 from milkie.global_context import GlobalContext
 import logging
 
-from milkie.runtime.global_toolkits import GlobalToolkits
 from milkie.runtime.program import Program, CollectorConfig, ContentCollector
 
 logger = logging.getLogger(__name__)
@@ -12,10 +11,10 @@ class AgentProgram(Program):
     def __init__(
             self, 
             programFilepath: str,
-            globalToolkits: GlobalToolkits = None,
+            globalSkillset: Skillset = None,
             globalContext: GlobalContext = None
         ) -> None:
-        super().__init__(programFilepath, globalToolkits, globalContext)
+        super().__init__(programFilepath, globalSkillset, globalContext)
 
         self.systemPrompt = None
         self.code = None
@@ -60,7 +59,7 @@ class AgentProgram(Program):
 
     def _handleImport(self, line: str) -> None:
         toolkitName = line.split()[-1]
-        if self.globalToolkits and self.globalToolkits.isValidToolkit(toolkitName):
+        if self.globalToolkits and self.globalToolkits.isValidSkillName(toolkitName):
             self.imports.append(self.globalToolkits.getToolkit(toolkitName))
             logger.debug(f"Imported toolkit: {toolkitName}")
         else:

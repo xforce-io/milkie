@@ -1,5 +1,6 @@
 import logging
 from llama_index.core.prompts.base import PromptTemplate
+from milkie.cache.cache_kv import CacheKVMgr
 from milkie.config.config import FRAMEWORK, EmbeddingConfig, SingleLLMConfig, LLMType
 
 logger = logging.getLogger(__name__)
@@ -11,6 +12,7 @@ class ModelFactory:
         self.localLlm = None
         
         self.embedModel = {}
+        self._cacheMgr = CacheKVMgr("data/cache/", category='model', expireTimeByDay=2)
 
     def getLLM(
             self, 
@@ -56,6 +58,7 @@ class ModelFactory:
         if config.type == LLMType.GEN_OPENAI:
             from milkie.llm.enhanced_openai import EnhancedOpenAI
             self.localLlm = EnhancedOpenAI(
+                cacheMgr=self._cacheMgr,
                 model_name=config.model,
                 system_prompt=config.systemPrompt,
                 endpoint=config.endpoint,

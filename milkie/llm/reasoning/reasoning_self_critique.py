@@ -1,4 +1,6 @@
 from __future__ import annotations
+
+from llama_index_client import ChatMessage
 from milkie.global_context import GlobalContext
 from milkie.llm.reasoning.reasoning import Reasoning
 from milkie.llm.enhanced_llm import EnhancedLLM
@@ -59,9 +61,7 @@ class ReasoningSelfCritique(Reasoning):
     def reason(
             self, 
             llm: EnhancedLLM, 
-            systemPrompt: str, 
-            prompt: str, 
-            promptArgs: dict, 
+            messages: list[ChatMessage], 
             stream: bool = False, 
             **kwargs) -> str:
         kwargs["temperature"] = 0.5
@@ -70,9 +70,7 @@ class ReasoningSelfCritique(Reasoning):
         stdout(f"\n(1) init result", info=True, **kwargs)
         initialResponse = self._chat(
             llm=llm, 
-            systemPrompt=systemPrompt, 
-            prompt=prompt, 
-            promptArgs=promptArgs, 
+            messages=messages, 
             stream=stream, 
             **kwargs)
         initialResponse = self._makeResp(
@@ -83,7 +81,7 @@ class ReasoningSelfCritique(Reasoning):
         # (2) 生成修改意见
         stdout(f"\n(2) critique", info=True, **kwargs)
         args = {
-            "instruction": prompt,
+            "instruction": messages[-1].content,
             "initialResponse": initialResponse
         }
         critiqueResponse = self.stepLLMCritique.llmCall(
@@ -99,7 +97,7 @@ class ReasoningSelfCritique(Reasoning):
         # (3) refine
         stdout(f"\n(3) refine", info=True, **kwargs)
         args = {
-            "instruction": prompt,
+            "instruction": messages[-1].content,
             "initialResponse": initialResponse,
             "critiqueResponse": critiqueResponse
         }

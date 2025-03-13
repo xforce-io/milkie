@@ -19,13 +19,37 @@ class DatabaseConfig:
     user: str
     password: str
     database: str
+    charset: str = 'utf8mb4'
 
 @dataclass
-class SearchConfig:
+class SearchText2SqlConfig:
     max_thoughts: int
     min_sqls: int
     max_sqls: int
+
+@dataclass
+class SearchTaskAlignmentConfig:
+    max_dummy_sqls: int
+    max_symbolic_reprs: int
+    max_sqls: int
+
+@dataclass
+class SearchConfig:
     max_iters: int
+    table_desc_record_samples: int
+    table_fields_record_samples: int
+    text2sql: SearchText2SqlConfig
+    task_alignment: SearchTaskAlignmentConfig
+
+    @staticmethod
+    def from_dict(data: dict) -> 'SearchConfig':
+        return SearchConfig(
+            max_iters=data['max_iters'],
+            table_desc_record_samples=data['table_desc_record_samples'],
+            table_fields_record_samples=data['table_fields_record_samples'],
+            text2sql=SearchText2SqlConfig(**data['text2sql']),
+            task_alignment=SearchTaskAlignmentConfig(**data['task_alignment'])
+        )
 
 @dataclass
 class ModelConfig:
@@ -52,6 +76,6 @@ class Config:
             server=ServerConfig(**data['server']),
             agent=AgentConfig(**data['agent']),
             database=DatabaseConfig(**data['database']),
-            search=SearchConfig(**data['search']),
+            search=SearchConfig.from_dict(data['search']),
             model=ModelConfig(**data['model'])
         )

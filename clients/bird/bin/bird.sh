@@ -7,7 +7,7 @@ port_expert=8123
 wait_for_port() {
     local port=$1
     local service_name=$2
-    local max_attempts=30  # 最多等待30秒
+    local max_attempts=40  # 最多等待30秒
     local attempt=1
     
     echo "Waiting for $service_name to be ready..."

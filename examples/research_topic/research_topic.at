@@ -1,0 +1,31 @@
+@name research_topic
+
+@desc
+对一个主题的进展进行思考和研究
+@desc
+
+list. #PY ```import os;os.system("python3 examples/research_topic/process.py '{keywords}'")```
+items. #PY ```import json;json.loads("{list}")```
+FOR item in items
+    content. #CODE 读取{{item.txt_path}}的文件内容，并返回内容 => c```type(_CUR_) == str and len(_CUR_) > 0```
+    extracted. 请阅读这段文字
+    ```
+    {content}
+    ```
+    把这段文字进行润色和调整，不相关的杂质信息去掉，请开始:
+    related. 请判断这段文字和主题【{keywords}】是否相关，如果相关，返回 RELATED，如果不相关，返回 NONE。现在请按照要求直接返回
+    judge. #PY ```
+        if "NONE" not in "{related}" :
+            result = "{extracted}"
+        else:
+            result = ""
+    ```
+    ret. #RET {{"content" : "{result}", "title" : "{item.title}", "citations":{item.citations}}}
+END -> targets
+
+merge. #PY ```import json;json.dumps([target for target in targets if target["content"]])```
+analysis. [deepseek-chat] 阅读下面多篇论文总结内容
+    ```
+    {merge}
+    ```
+    请写一段综述进行总结，引用多的文章重点讲述，请开始:

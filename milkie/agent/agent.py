@@ -4,6 +4,8 @@ from typing import List
 from milkie.agent.base_block import BaseBlock
 from milkie.agent.flow_block import FlowBlock
 from milkie.agent.func_block.func_block import FuncBlock, RepoFuncs
+from milkie.agent.func_block.import_func import ImportFunc
+from milkie.agent.func_block.no_cache import NoCache
 from milkie.agent.func_block.reindex_from_local_block import ReindexFromLocalBlock
 from milkie.agent.func_block.retrieval_block import RetrievalBlock
 from milkie.agent.func_block.set_model import SetModel
@@ -24,7 +26,7 @@ logger = logging.getLogger(__name__)
 class Agent(BaseBlock):
     def __init__(
             self, 
-            name: str,
+            agentName: str,
             desc: str,
             code: str, 
             context: Context = None, 
@@ -35,11 +37,17 @@ class Agent(BaseBlock):
 
         self.repoFuncs = RepoFuncs()
 
-        super().__init__(context, config, toolkit, usePrevResult, self.repoFuncs)
+        super().__init__(
+            agentName=agentName, 
+            context=context, 
+            config=config, 
+            toolkit=toolkit, 
+            usePrevResult=usePrevResult, 
+            repoFuncs=self.repoFuncs)
 
-        self.name = name
+        self.name = agentName
         self.desc = desc
-        self.experts = dict[str, Agent]()
+        self.skills = dict[str, Toolkit]()
         self.code = code
         self.systemPrompt = systemPrompt
         self.funcBlocks: List[FuncBlock] = []
@@ -54,7 +62,17 @@ class Agent(BaseBlock):
             config=self.config,
             repoFuncs=self.repoFuncs
         ))
+        self.repoFuncs.add("NoCache", NoCache(
+            context=self.context,
+            config=self.config,
+            repoFuncs=self.repoFuncs
+        ))
         self.repoFuncs.add("LLM", SetModel(
+            context=self.context,
+            config=self.config,
+            repoFuncs=self.repoFuncs
+        ))
+        self.repoFuncs.add("Import", ImportFunc(
             context=self.context,
             config=self.config,
             repoFuncs=self.repoFuncs
@@ -70,8 +88,8 @@ class Agent(BaseBlock):
             repoFuncs=self.repoFuncs
         ))
 
-    def assignExpert(self, expert: Agent):
-        self.experts[expert.name] = expert
+    def assignSkill(self, skill: Toolkit):
+        self.skills[skill.getName()] = skill
 
     def setCodeAndCompile(self, code: str):
         self.isCompiled = False
@@ -128,6 +146,7 @@ class Agent(BaseBlock):
             return
         
         self.topBlocks = [LLMBlock.create(
+            agentName=self.name,
             context=self.context,
             config=self.config,
             taskExpr=self.code,
@@ -142,7 +161,8 @@ class Agent(BaseBlock):
 
     def _addFuncBlock(self, lines):
         funcBlock = FuncBlock.create(
-            '\n'.join(lines),
+            agentName=self.name,
+            funcDefinition='\n'.join(lines),
             context=self.context,
             config=self.config,
             toolkit=self.toolkit,
@@ -152,7 +172,8 @@ class Agent(BaseBlock):
 
     def _addFlowBlock(self, lines):
         self.topBlocks.append(FlowBlock.create(
-            '\n'.join(lines),
+            agentName=self.name,
+            flowCode='\n'.join(lines),
             context=self.context,
             config=self.config,
             toolkit=self.toolkit,
@@ -182,8 +203,8 @@ class Agent(BaseBlock):
                 self.systemPrompt:
             args["system_prompt"] = self.systemPrompt
 
-        if len(self.experts) > 0:
-            kwargs["experts"] = self.experts
+        if len(self.skills) > 0:
+            kwargs["skills"] = self.skills
 
         if "top" in kwargs and not kwargs["top"]:
             kwargs["history"] = None
@@ -215,14 +236,14 @@ class FakeAgentStdin(Agent):
             usePrevResult=False, 
             systemPrompt: str = None):
         super().__init__(
-            "fake stdin",
-            "mock stdin agent",
-            code,
-            context,
-            config,
-            toolkit,
-            usePrevResult,
-            systemPrompt
+            agentName="fake stdin",
+            desc="mock stdin agent",
+            code=code,
+            context=context,
+            config=config,
+            toolkit=toolkit,
+            usePrevResult=usePrevResult,
+            systemPrompt=systemPrompt
         )
 
     def execute(
@@ -243,6 +264,9 @@ if __name__ == "__main__":
     1. 10 以内最大的质数 -> num
     2. 以@down({num})为主题写一首诗
     """
-    agent = Agent(code)
+    agent = Agent(
+        agentName="test", 
+        desc="test agent", 
+        code=code)
     agent.compile()
     print(agent.execute().resp)

@@ -10,7 +10,7 @@ briefsFilepath. "{viewpoint}/{date}/briefs.txt"
 hotnewsFilepath. "{viewpoint}/{date}/hotnews.txt"
 
 allBriefs. #PY ```import json;infos=json.loads(open("{briefsFilepath}", "r").read()); "".join([news["title"] for news in infos])```
-eventsStr. @LLM(Doubao-pro-32k) @ReasoningSelfCritique()
+eventsStr. @ReasoningSelfCritique()
     任务:
     从新闻内容中总结并整合关键的事件
 

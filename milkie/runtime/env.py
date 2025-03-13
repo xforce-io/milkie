@@ -1,12 +1,13 @@
 from milkie.agent.agent import Agent, FakeAgentStdin
-from milkie.agent.agents.base_agent import BaseAgent
 from milkie.chatroom.chatroom import Chatroom
 from milkie.config.config import GlobalConfig
 from milkie.context import Context
+from milkie.functions.toolkits.agent_toolkit import AgentToolkit
+from milkie.functions.toolkits.skillset import Skillset
 from milkie.runtime.agent_program import AgentProgram
 from milkie.runtime.chatroom_program import ChatroomProgram
 from milkie.runtime.datasource import DataSource
-from milkie.runtime.global_toolkits import GlobalToolkits
+from milkie.runtime.global_skills import GlobalSkills
 from milkie.response import Response
 from milkie.trace import stdout
 
@@ -17,7 +18,7 @@ class Env:
         config: str | GlobalConfig = None,
         agentPrograms: list[AgentProgram] = None,
         chatroomPrograms: list[ChatroomProgram] = None,
-        globalToolkits: GlobalToolkits = None
+        globalSkillset: Skillset = None
     ) -> None:
         self.context = context
         self.config = config
@@ -33,14 +34,14 @@ class Env:
         }
         self.chatrooms: dict[str, Chatroom] = {}
 
-        self.globalToolkits = globalToolkits
+        self.globalSkillset = globalSkillset
 
         for agentProgram in agentPrograms:
             self.agents[agentProgram.name] = Agent(
-                name=agentProgram.name,
+                agentName=agentProgram.name,
                 desc=agentProgram.desc,
                 code=agentProgram.getCode(), 
-                context=self.context,
+                context=self.context.copy(),
                 config=self.config,
                 toolkit=agentProgram.toolkit, 
                 usePrevResult=False,
@@ -51,27 +52,30 @@ class Env:
                 name=chatroomProgram.name,
                 desc=chatroomProgram.desc,
                 host=chatroomProgram.host,
-                context=self.context,
+                context=self.context.copy(),
                 config=self.config
             )
         
         for agent in self.agents.values():
-            self.globalToolkits.addAgent(agent)
+            self.globalSkillset.addSkill(AgentToolkit(agent))
 
         for agentProgram in agentPrograms:
-            expertAssignments = agentProgram.getExpertAssignments()
-            if expertAssignments:
-                for agentName, _ in expertAssignments:
-                    self.agents[agentProgram.name].assignExpert(self.agents[agentName])
+            roleAssignments = agentProgram.getRoleAssignments()
+            if roleAssignments:
+                for skillName, _ in roleAssignments:
+                    if skillName not in self.agents:
+                        self.agents[agentProgram.name].assignSkill(self.globalSkillset.getSkill(skillName))
+                    else:
+                        self.agents[agentProgram.name].assignSkill(AgentToolkit(self.agents[skillName]))
 
         for chatroomProgram in chatroomPrograms:
             # set host
             self.chatrooms[chatroomProgram.name].setHost(self.agents)
 
             # set roles
-            expertAssignments = chatroomProgram.getExpertAssignments()
-            if expertAssignments:
-                for agentName, roleName in expertAssignments:
+            roleAssignments = chatroomProgram.getRoleAssignments()
+            if roleAssignments:
+                for agentName, roleName in roleAssignments:
                     self.chatrooms[chatroomProgram.name].assignRole(self.agents[agentName], roleName)
 
             # set prologue
@@ -106,8 +110,8 @@ class Env:
             stdout(f"\n <<< end of agent[{agentName}] >>>\n", **kwargs)
             return response
 
-    def getGlobalToolkits(self) -> GlobalToolkits:
-        return self.globalToolkits
+    def getGlobalSkillset(self) -> Skillset:
+        return self.globalSkillset
 
     def getDataSource(self) -> DataSource:
         return self.dataSource

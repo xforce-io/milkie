@@ -2,7 +2,7 @@ import logging
 import re
 from queue import Queue
 from typing import Any, Sequence, Generator
-from llama_index_client import ChatMessage
+from llama_index_client import ChatMessage, MessageRole
 from openai import OpenAI
 from openai.types.chat import ChatCompletion
 from openai.types.chat.chat_completion_chunk import ChoiceDelta, ChoiceDeltaToolCall, ChoiceDeltaToolCallFunction
@@ -21,11 +21,16 @@ from llama_index.core.base.llms.generic_utils import (
 import uuid
 import time
 import json
+import copy
 
 logger = logging.getLogger(__name__)
 
 class EnhancedOpenAI(EnhancedLLM):
+    # 类级别常量
+    MAX_RETRIES = 1  # 最大重试次数
+    
     def __init__(self, 
+            cacheMgr :CacheKVMgr,
             model_name :str,
             system_prompt :str,
             endpoint :str,
@@ -48,21 +53,35 @@ class EnhancedOpenAI(EnhancedLLM):
             port=port,
             tokenizer_kwargs=tokenizer_kwargs)
 
-        if model_name.startswith("deepseek"):
-            if "chat" in model_name:
-                self.model_name = "deepseek-chat"
-            elif "coder" in model_name:
-                self.model_name = "deepseek-coder"
-            else:
-                raise ValueError(f"Unknown model type: {model_name}")
+        if "api.deepseek.com/beta" in endpoint:
+            self.prefix_complete = True
 
+        if model_name in ["deepseek-reasoner", "deepseek-r1"] or "qwq" in model_name:
+            self.reasoner_model = True
+
+        self._cacheMgr = cacheMgr
         self.endpoint = endpoint
         self.api_key = api_key
         self._llm = LLMApi(
             context_window=context_window,
             model_name=model_name,
             client=OpenAI(api_key=api_key, base_url=endpoint))
-        self._cacheMgr = CacheKVMgr("data/cache/", expireTimeByDay=7)
+
+    def __deepcopy__(self, memo):
+        """自定义深拷贝方法,_llm实例共享"""
+        cls = self.__class__
+        result = cls.__new__(cls)
+        memo[id(self)] = result
+        
+        # 复制所有属性
+        for k, v in self.__dict__.items():
+            if k == '_llm' or k == '_cacheMgr':
+                # _llm 实例共享
+                setattr(result, k, v)
+            else:
+                # 其他属性正常深拷贝
+                setattr(result, k, copy.deepcopy(v, memo))
+        return result
 
     def _fail(self, messages :Sequence[ChatMessage], **kwargs: Any):
         self._cacheMgr.removeValue(
@@ -74,16 +93,21 @@ class EnhancedOpenAI(EnhancedLLM):
         messagesJson = []
         for message in messages:
             if message.role == "system":
-                messagesJson.append(ChatCompletionSystemMessageParam(
+                newMessage = ChatCompletionSystemMessageParam(
                     role=message.role,
                     content=message.content,
-                ))
+                )
             else:
                 content = re.sub(r'[\uD800-\uDFFF]', '', message.content)
-                messagesJson.append(ChatCompletionUserMessageParam(
+                newMessage = ChatCompletionUserMessageParam(
                     role=message.role,
                     content=content,
-                ))
+                )
+
+            if message.additional_kwargs and "prefix" in message.additional_kwargs:
+                newMessage["prefix"] = message.additional_kwargs["prefix"]
+            messagesJson.append(newMessage)
+
         return messagesJson
 
     def _createApiArgs(self, messagesJson: list, stream: bool = False, **kwargs: Any) -> dict:
@@ -160,19 +184,25 @@ class EnhancedOpenAI(EnhancedLLM):
             chatCompletion = ChatCompletion.model_validate_json(cached["chatCompletion"])
             numTokens = cached["numTokens"]
         else:
-            try:
-                self._addDisturbance(messagesJson, **kwargs)
-                theArgs = self._createApiArgs(messagesJson, stream=False, **kwargs)
-                response = self._llm.getClient().chat.completions.create(**theArgs)
-                chatCompletion = response
-                numTokens = response.usage.completion_tokens
-                self._setCacheValue(
-                    messagesJson=messagesJson, 
-                    content=chatCompletion.choices[0].message.content, 
-                    toolCalls=chatCompletion.choices[0].message.tool_calls,
-                    numTokens=numTokens)
-            except Exception as e:
-                return self._handleApiError(e)
+            retry_count = 0
+            while retry_count <= self.MAX_RETRIES:
+                try:
+                    self._addDisturbance(messagesJson, **kwargs)
+                    theArgs = self._createApiArgs(messagesJson, stream=False, **kwargs)
+                    response = self._llm.getClient().chat.completions.create(**theArgs)
+                    chatCompletion = response
+                    numTokens = response.usage.completion_tokens
+                    self._setCacheValue(
+                        messagesJson=messagesJson, 
+                        content=chatCompletion.choices[0].message.content, 
+                        toolCalls=chatCompletion.choices[0].message.tool_calls,
+                        numTokens=numTokens)
+                    break
+                except Exception as e:
+                    retry_count += 1
+                    if retry_count > self.MAX_RETRIES:
+                        return self._handleApiError(e)
+                    logger.warning(f"Retry {retry_count}/{self.MAX_RETRIES} after error: {str(e)} model: {self.model_name}")
 
         return completion_response_to_chat_response(CompletionResponse(
             text=chatCompletion.choices[0].message.content or "",
@@ -198,45 +228,54 @@ class EnhancedOpenAI(EnhancedLLM):
                 toolCalls=chatCompletion.choices[0].message.tool_calls)
             return
         
-        try:
-            self._addDisturbance(messagesJson, **kwargs)
-            theArgs = self._createApiArgs(messagesJson, stream=True, **kwargs)
-            stream = self._llm.getClient().chat.completions.create(**theArgs)
-            fullContent = []
-            funcName = None
-            funcArgs = []
-            
-            for chunk in stream:
-                delta = chunk.choices[0].delta
-                if delta.content is not None:
-                    fullContent.append(delta.content)
-                    yield CompletionResponse(text=delta.content, raw=delta)
-                elif delta.tool_calls:
-                    if delta.tool_calls[0].function.name is not None:
-                        funcName = delta.tool_calls[0].function.name
-                    if delta.tool_calls[0].function.arguments is not None:
-                        funcArgs.append(delta.tool_calls[0].function.arguments)
-                    yield CompletionResponse(text="", raw=delta)
+        retry_count = 0
+        while retry_count < self.MAX_RETRIES:
+            try:
+                self._addDisturbance(messagesJson, **kwargs)
+                theArgs = self._createApiArgs(messagesJson, stream=True, **kwargs)
+                stream = self._llm.getClient().chat.completions.create(**theArgs)
+                fullContent = []
+                funcName = None
+                funcArgs = []
+                
+                for chunk in stream:
+                    delta = chunk.choices[0].delta
+                    if hasattr(delta, "content") and delta.content is not None:
+                        fullContent.append(delta.content)
+                        yield CompletionResponse(text=delta.content, raw=delta)
+                    elif hasattr(delta, "reasoning_content") and delta.reasoning_content is not None:
+                        fullContent.append(delta.reasoning_content)
+                        yield CompletionResponse(text=delta.reasoning_content, raw=delta)
+                    elif hasattr(delta, "tool_calls") and delta.tool_calls:
+                        if delta.tool_calls[0].function.name is not None:
+                            funcName = delta.tool_calls[0].function.name
+                        if delta.tool_calls[0].function.arguments is not None:
+                            funcArgs.append(delta.tool_calls[0].function.arguments)
+                        yield CompletionResponse(text="", raw=delta)
 
-            content = "".join(fullContent)
-            arguments = "".join(funcArgs) if funcArgs else ""
-            self._setCacheValue(
-                messagesJson=messagesJson, 
-                content=content, 
-                toolCalls=[
-                    ChatCompletionMessageToolCall(
-                        id=str(uuid.uuid4()),
-                        type="function",
-                        function=Function(
-                            name=funcName, 
-                            arguments=arguments
-                        )
-                    )
-                ] if funcName is not None else None,
-                numTokens=len(content.split()))
-
-        except Exception as e:
-            self._handleApiError(e, isStream=True)
+                content = "".join(fullContent)
+                arguments = "".join(funcArgs) if funcArgs else ""
+                if content or funcName:
+                    self._setCacheValue(
+                        messagesJson=messagesJson, 
+                        content=content, 
+                        toolCalls=[
+                            ChatCompletionMessageToolCall(
+                                id=str(uuid.uuid4()),
+                                type="function",
+                                function=Function(
+                                    name=funcName, 
+                                    arguments=arguments
+                                )
+                            )
+                        ] if funcName is not None else None,
+                        numTokens=len(content.split()))
+                break
+            except Exception as e:
+                retry_count += 1
+                if retry_count > self.MAX_RETRIES:
+                    self._handleApiError(e, isStream=True)
+                logger.warning(f"Retry {retry_count}/{self.MAX_RETRIES} after error: {str(e)} model: {self.model_name}")
 
     def _simulateStream(
             self, 

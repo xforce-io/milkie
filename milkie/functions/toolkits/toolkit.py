@@ -14,12 +14,14 @@ from __future__ import annotations
 # limitations under the License.
 # =========== Copyright 2023 @ CAMEL-AI.org. All Rights Reserved. ===========
 
+from abc import abstractmethod
 import json
 import logging
 from typing import Any, Callable, List, Optional, Tuple, Dict
 
 from milkie.config.constant import MaxLenLog
 from milkie.context import VarDict
+from milkie.log import INFO
 from milkie.utils.data_utils import extractFromBlock, restoreVariablesInDict, unescape
 
 from ..openai_function import OpenAIFunction
@@ -57,6 +59,10 @@ class Toolkit():
         if globalContext:
             self.codeInterpreter = CodeInterpreter(self.globalContext)
 
+    @abstractmethod
+    def getName(self) -> str:
+        raise NotImplementedError("Subclasses must implement this method.")
+
     def getTools(self) -> List[OpenAIFunction]:
         raise NotImplementedError("Subclasses must implement this method.")
 
@@ -69,7 +75,7 @@ class Toolkit():
 
     @staticmethod
     def getToolsDescWithSingleFunc(func :Callable) -> str:
-        return Toolkit.getDesc(Toolkit.getToolsWithSingleFunc(func))
+        return Toolkit.getDescFromFunctions(Toolkit.getToolsWithSingleFunc(func))
 
     def getToolsSchema(self) -> list:
         return [tool.get_openai_tool_schema() for tool in self.getTools()]
@@ -80,8 +86,11 @@ class Toolkit():
     def getToolsDict(self) -> dict:
         return {tool.get_function_name(): tool for tool in self.getTools()}
 
-    def getToolsDesc(self) -> str:
-        return self.getDesc(self.getTools())
+    def getDesc(self) -> str:
+        return self.getDescFromFunctions(self.getTools())
+
+    def getToolDescs(self) -> dict[str, str]:
+        return {tool.get_function_name(): tool.get_function_description() for tool in self.getTools()}
 
     @staticmethod
     def getUnionToolkit(toolkits: List[Toolkit]) -> Toolkit:
@@ -96,7 +105,7 @@ class Toolkit():
         return newToolkit
 
     @staticmethod
-    def getDesc(tools :List[OpenAIFunction]) -> str:
+    def getDescFromFunctions(tools :List[OpenAIFunction]) -> str:
         toolDescriptions = [tool.get_function_name() + " | " + tool.get_function_description() for tool in tools]
         return "\n".join(toolDescriptions)
 
@@ -157,9 +166,10 @@ class Toolkit():
         if needToParse:
             args = restoreVariablesInDict(args, allDict)
         result = tool.func(**args, **kwargs)
+        if not result or result.strip() == "":
+            raise ValueError(f"funcCall func[{funcName}] args[{args}] result[{result}]")
 
-        info = f"funcCall func[{funcName}] args[{args}] result[{result[:MaxLenLog]}]"
-        logger.info(info)
+        INFO(logger, f"funcCall func[{funcName}] args[{args}] result[{result[:MaxLenLog]}]")
         return FuncExecRecord((funcName, args), tool, result)
 
     def genCodeAndRun(self, instruction: str, varDict: Optional[Dict[str, Any]] = None, **kwargs) -> str:

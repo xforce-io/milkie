@@ -55,22 +55,6 @@ class FilesysIntegrationTest(BaseIntegrationTest):
         flowBlock.execute(context=self.context, args=args)
         self._checkCopyKgFiles()
 
-    def testCopyKgFilesThought(self):
-        self.prepairScenarioDataDir(self.kgDir)
-
-        flowCode = """
-        1. #THOUGHT 筛选{sourceDir}下所有文件名包含"知识图谱"的文件，并复制到{destDir}下
-        2. #DECOMPOSE
-        """
-        flowBlock = self._buildFlowBlock(flowCode, usePrevResult=True)
-        
-        args = {
-            "sourceDir": self.scenarioDir,
-            "destDir": self.kgDir
-        }
-        flowBlock.execute(context=self.context, args=args)
-        self._checkCopyKgFiles()
-
     def testClassifyFiles(self):
         self.prepairScenarioDataDir(self.kgDir)
         

@@ -14,15 +14,19 @@ from milkie.server.server import Server
 
 @dataclass
 class Args:
-    agent: str
-    chatroom: str
-    config: str
-    file: str
-    folder: str
-    query: str
-    server: bool
-    port: int
-    runArgs: Dict[str, Any]
+    agent: str = None
+    chatroom: str = None
+    config: str = None
+    file: str = None
+    folder: str = None
+    query: str = None
+    server: bool = False
+    port: int = 8000
+    runArgs: Dict[str, Any] = None
+
+    def __post_init__(self):
+        if self.runArgs is None:
+            self.runArgs = {}
 
 def parseArgs() -> Args:
     parser = argparse.ArgumentParser()
@@ -87,7 +91,7 @@ def main():
         queryArgs = {}
     
     # 将 runArgs 合并到 queryArgs
-    engine.env.context.varDict.updateFromDict(args.runArgs)
+    engine.initContext.varDict.updateFromDict(args.runArgs)
         
     engine.run(
         chatroom=args.chatroom,
@@ -95,5 +99,5 @@ def main():
         args=queryArgs
     )
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

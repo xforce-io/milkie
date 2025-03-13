@@ -37,7 +37,7 @@ def experiment(
     benchmarks = Benchmarks(
         ex,
         benchmarks,
-        globalConfig.getLLMConfig().batchSize)
+        globalConfig.getDefaultLLMConfig().batchSize)
 
     numQueries = 0
     lenOutputs = 0
@@ -51,7 +51,7 @@ def experiment(
         resps = agent.taskBatch(
             prompt, 
             argsList, 
-            **globalConfig.getLLMConfig().generationArgs.toJson())
+            **globalConfig.getDefaultLLMConfig().generationArgs.toJson())
         t1 = time.time()
         lenOutputs += sum(len(resp.response) for resp in resps)
         totalTokens += sum(resp.metadata["numTokens"] for resp in resps)

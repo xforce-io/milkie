@@ -6,8 +6,8 @@ import time
 import uvicorn
 
 from clients.bird.config import Config
+from clients.bird.logger import ERROR, INFO
 from clients.bird.searcher import Searcher
-from clients.bird.logger import ERROR, INFO, logger
 
 class Message(BaseModel):
     role: str
@@ -16,7 +16,7 @@ class Message(BaseModel):
 class ChatCompletionRequest(BaseModel):
     model: str
     messages: List[Message]
-    temperature: Optional[float] = 0.7
+    temperature: Optional[float] = 0
     top_p: Optional[float] = 1.0
     n: Optional[int] = 1
     stream: Optional[bool] = False

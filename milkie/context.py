@@ -1,17 +1,24 @@
 from __future__ import annotations
 import copy
-from typing import Dict, List, Optional, Any
+from datetime import datetime
+from typing import Dict, List, Optional, Any, Set
 from llama_index.core.base.response.schema import NodeWithScore
 from llama_index.core.base.llms.types import ChatMessage, MessageRole
 
 from milkie.agent.query_structure import QueryStructure, parseQuery
 from milkie.response import Response
 from milkie.utils.req_tracer import ReqTracer
+from milkie.global_context import GlobalContext
 
 class VarDict:
     """变量字典类，管理全局和局部变量"""
     def __init__(self):
-        self.globalDict: Dict[str, Any] = {}
+        self.varDict = {
+            "_date": datetime.now().strftime("%Y-%m-%d")
+        }
+        self.globalDict: Dict[str, Any] = {
+            "_date": datetime.now().strftime("%Y-%m-%d")
+        }
         self.localDict: Dict[str, Any] = {}
 
     def get(self, key: str) -> Any:
@@ -60,7 +67,12 @@ class VarDict:
         self.globalDict.update(newDict)
 
     def copy(self) -> VarDict:
-        return copy.deepcopy(self)
+        result = copy.deepcopy(self)
+        return result
+
+    def remove(self, key: str) -> None:
+        self.localDict.pop(key, None)
+        self.globalDict.pop(key, None)
 
     def clear(self) -> None:
         """清空所有字典"""
@@ -188,6 +200,5 @@ class Context:
         if Context.globalContext:
             return Context(Context.globalContext)
 
-        from milkie.global_context import GlobalContext
         Context.globalContext = GlobalContext.create(configPath)
         return Context(Context.globalContext)

@@ -7,52 +7,80 @@ def makeGlobalConfig(
         strategy :Strategy,
         **kwargs) -> GlobalConfig:
     configYaml = loadFromYaml("config/global.yaml")
-    if "type" in kwargs:
-        configYaml["llm"]["type"] = kwargs["type"]
-        
+    
     if "llm_model" in kwargs:
         model = GModelRepo.getModel(kwargs["llm_model"])
-        configYaml["llm"]["model"] = model.getModelPath()
-        configYaml["llm"]["tensor_parallel_size"] = model.getTensorParrallelSize()
+        model_name = model.getModelPath()
+        tensor_parallel_size = model.getTensorParrallelSize()
 
-    if "system_prompt" in kwargs:
-        configYaml["llm"]["system_prompt"] = kwargs["system_prompt"]
-
-    if "framework" in kwargs:
-        configYaml["llm"]["framework"] = kwargs["framework"]
-
-    if "device" in kwargs:
-        configYaml["llm"]["device"] = kwargs["device"]
-
-    if "ctx_len" in kwargs:
-        configYaml["llm"]["ctx_len"] = kwargs["ctx_len"]
-
-    if "batch_size" in kwargs:
-        configYaml["llm"]["batch_size"] = kwargs["batch_size"]
-
-    if "quantization_type" in kwargs:
-        configYaml["llm"]["model_args"]["quantization_type"] = kwargs["quantization_type"]
-
-    if "attn_implementation" in kwargs:
-        configYaml["llm"]["model_args"]["attn_implementation"] = kwargs["attn_implementation"]
-    
-    if "torch_compile" in kwargs:
-        configYaml["llm"]["model_args"]["torch_compile"] = kwargs["torch_compile"]
-
-    if "repetition_penalty" in kwargs:
-        configYaml["llm"]["generation_args"]["repetition_penalty"] = kwargs["repetition_penalty"]
-
-    if "temperature" in kwargs:
-        configYaml["llm"]["generation_args"]["temperature"] = kwargs["temperature"]
-
-    if "do_sample" in kwargs:
-        configYaml["llm"]["generation_args"]["do_sample"] = kwargs["do_sample"]
-    
-    if "use_cache" in kwargs:
-        configYaml["llm"]["generation_args"]["use_cache"] = kwargs["use_cache"]
+        # 判断模型来源
+        source = kwargs.get("source", "local")
         
-    if "prompt_lookup_num_tokens" in kwargs:
-        configYaml["llm"]["generation_args"]["prompt_lookup_num_tokens"] = kwargs["prompt_lookup_num_tokens"]
+        # 确保来源在llm配置中存在
+        if source not in configYaml["llm"]:
+            configYaml["llm"][source] = []
+        
+        # 查找是否已存在此模型配置
+        model_config = None
+        for config in configYaml["llm"][source]:
+            if config.get("model") == model_name:
+                model_config = config
+                break
+        
+        # 如果不存在，创建新的配置
+        if not model_config:
+            model_config = {"model": model_name}
+            configYaml["llm"][source].append(model_config)
+        
+        model_config["tensor_parallel_size"] = tensor_parallel_size
+        
+        # 添加其他参数
+        if "system_prompt" in kwargs:
+            model_config["system_prompt"] = kwargs["system_prompt"]
+            
+        if "framework" in kwargs:
+            model_config["framework"] = kwargs["framework"]
+
+        if "device" in kwargs:
+            model_config["device"] = kwargs["device"]
+
+        if "ctx_len" in kwargs:
+            model_config["ctx_len"] = kwargs["ctx_len"]
+
+        if "batch_size" in kwargs:
+            model_config["batch_size"] = kwargs["batch_size"]
+            
+        # 确保model_args存在
+        if "model_args" not in model_config:
+            model_config["model_args"] = {}
+            
+        if "quantization_type" in kwargs:
+            model_config["model_args"]["quantization_type"] = kwargs["quantization_type"]
+
+        if "attn_implementation" in kwargs:
+            model_config["model_args"]["attn_implementation"] = kwargs["attn_implementation"]
+        
+        if "torch_compile" in kwargs:
+            model_config["model_args"]["torch_compile"] = kwargs["torch_compile"]
+            
+        # 确保generation_args存在
+        if "generation_args" not in model_config:
+            model_config["generation_args"] = {}
+
+        if "repetition_penalty" in kwargs:
+            model_config["generation_args"]["repetition_penalty"] = kwargs["repetition_penalty"]
+
+        if "temperature" in kwargs:
+            model_config["generation_args"]["temperature"] = kwargs["temperature"]
+
+        if "do_sample" in kwargs:
+            model_config["generation_args"]["do_sample"] = kwargs["do_sample"]
+        
+        if "use_cache" in kwargs:
+            model_config["generation_args"]["use_cache"] = kwargs["use_cache"]
+            
+        if "prompt_lookup_num_tokens" in kwargs:
+            model_config["generation_args"]["prompt_lookup_num_tokens"] = kwargs["prompt_lookup_num_tokens"]
 
     def getAgentConfig(name :str):
         for agentConfig in configYaml["agents"]:

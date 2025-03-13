@@ -2,15 +2,14 @@ from enum import Enum
 import json
 import logging
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from milkie.agent.func_block.func_block import RepoFuncs
 from milkie.agent.llm_block.step_llm_extractor import StepLLMExtractor
 from milkie.config.constant import *
 from milkie.context import VarDict
 from milkie.functions.toolkits.toolkit import Toolkit
-from milkie.runtime.global_toolkits import GlobalToolkits
 from milkie.settings import Settings
-from milkie.utils.data_utils import codeToLines, extractBlock, isBlock, unescape
+from milkie.utils.data_utils import codeToLines, extractBlock, extractJsonBlock, isBlock, unescape
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +18,7 @@ class OutputSyntaxFormat(Enum):
     REGEX = 2
     EXTRACT = 3
     CHECK = 4
+    JSON = 5
 
 class ResultOutputProcessSingle:
     def __init__(self, storeVar: str, output: Any=None, errmsg: str=None):
@@ -107,11 +107,13 @@ class OutputSyntax:
             return OutputSyntaxFormat.EXTRACT
         elif self.originalSyntax.startswith("c```"):
             return OutputSyntaxFormat.CHECK
+        elif self.originalSyntax.strip() == "json":
+            return OutputSyntaxFormat.JSON
         else:
             return OutputSyntaxFormat.NORMAL
 
     def _parse(self):
-        if self.format == OutputSyntaxFormat.NORMAL:
+        if self.format == OutputSyntaxFormat.NORMAL or self.format == OutputSyntaxFormat.JSON:
             return
 
         content = self.originalSyntax[1:]
@@ -165,7 +167,8 @@ class OutputSyntax:
                 allArgs["text"] = output
                 return stepLLMExtractor.completionAndFormat(
                     args=allArgs)
-
+            elif self.format == OutputSyntaxFormat.JSON:
+                return extractJsonBlock(output)
         if self.format == OutputSyntaxFormat.CHECK:
             try:
                 return toolkit.runCode(
@@ -298,7 +301,7 @@ class InstrOutput:
                     storeVar=outputStruct.storeVar,
                     output=output)
 
-from milkie.functions.toolkits.toolbox import Toolbox
+from milkie.functions.toolkits.skillset import Skillset
 
 class SyntaxParser:
     class Flag(Enum):
@@ -310,7 +313,6 @@ class SyntaxParser:
         PY = 6
         CALL = 7
         THOUGHT = 8
-        DECOMPOSE = 9
 
     class TypeCall(Enum):
         STDIN = 1
@@ -321,8 +323,7 @@ class SyntaxParser:
             settings: Settings,
             label: str,
             instruction: str,
-            repoFuncs: RepoFuncs,
-            toolkits: GlobalToolkits) -> None:
+            repoFuncs: RepoFuncs) -> None:
         self.settings = settings
 
         self.flag = SyntaxParser.Flag.NONE
@@ -332,10 +333,8 @@ class SyntaxParser:
         self.returnVal = False 
         self.instruction = instruction.strip()
         self.funcsToCall = []
-        self.respToolbox: Toolbox = None
         
         self.repoFuncs = repoFuncs
-        self.toolkits = toolkits
         self.typeCall = None
         self.callObj = None
         self.callArg = None
@@ -368,7 +367,6 @@ class SyntaxParser:
         self._handleFlags()
         self._handleModel() # model should be handled after flags
         self._handleFunctions()
-        self._handleRespToolkit()
 
     def _handleOutputAndStore(self):
         parts = re.split(r'(=>|->)', self.instruction)
@@ -412,45 +410,18 @@ class SyntaxParser:
     def _handleFunctions(self):
         if self.repoFuncs is not None:
             for funcName, funcBlock in self.repoFuncs.getAll().items():
-                pattern = funcBlock.getFuncPattern()
+                pattern = funcBlock.getFuncNamePattern()
                 if pattern not in self.instruction:
                     continue
                 
-                paramsPattern = r'%s\(\s*([a-zA-Z0-9_\-,{}\.\s]*)\s*\)' % pattern
-                paramsMatch = re.search(paramsPattern, self.instruction)
-                if paramsMatch:
-                    params = paramsMatch.group(1).strip()
-                    params = [param.strip() for param in params.split(",") if len(param.strip()) > 0]
+                params, funcCallPattern = self._parseFuncParams(pattern, self.instruction)
+                if params is not None:
                     funcBlock.setParams(params)
+                    funcBlock.setFuncCallPattern(funcCallPattern)
                     funcBlock.compile()
                     self.funcsToCall.append(funcBlock)
-                    self.instruction = self.instruction.replace(paramsMatch.group(0), "")
                 else:
                     raise SyntaxError(f"function[{funcName}] params not found")
-
-    def _handleRespToolkit(self):
-        indexStart = self.instruction.find(InstFlagRespToolkitStart)
-        if indexStart == -1:
-            return
-
-        indexEnd = self.instruction.find(InstFlagRespToolkitEnd, indexStart)
-        if indexEnd == -1 or indexEnd <= indexStart:
-            return
-
-        toolbox = self.instruction[indexStart+len(InstFlagRespToolkitStart):indexEnd].strip()
-        if not toolbox:
-            self.respToolbox = None
-            return
-
-        toolnames = [t.strip() for t in toolbox.split("/")]
-
-        self.respToolbox = Toolbox.createToolbox(self.toolkits, toolnames)
-        if not self.respToolbox or not self.respToolbox.getTools():
-            raise RuntimeError(f"Invalid toolkit: {toolbox}")
-
-        # Remove the respToolkit instruction from the main instruction
-        self.instruction = self.instruction[:indexStart] + self.instruction[indexEnd+len(InstFlagRespToolkitEnd):]
-        self.instruction = self.instruction.strip()
 
     def _handleFlags(self):
         flagHandlers = {
@@ -460,8 +431,6 @@ class SyntaxParser:
             InstFlagGoto: self._handleGotoFlag,
             InstFlagPy: self._handlePyFlag,
             InstFlagCall: self._handleCallFlag,
-            InstFlagThought: self._handleThoughtFlag,
-            InstFlagDecompose: self._handleDecomposeFlag
         }
 
         flagsFound = [flag for flag in flagHandlers.keys() if flag in self.instruction]
@@ -516,14 +485,6 @@ class SyntaxParser:
         else:
             raise SyntaxError(f"function[{self.callObj}] params not found or not properly quoted")
 
-    def _handleThoughtFlag(self):
-        self.flag = SyntaxParser.Flag.THOUGHT
-        self.instruction = self.instruction.replace(InstFlagThought, "").strip()
-
-    def _handleDecomposeFlag(self):
-        self.flag = SyntaxParser.Flag.DECOMPOSE
-        self.instruction = self.instruction.replace(InstFlagDecompose, "").strip()
-
     def _extractPyCode(self):
         def _extractCode(text):
             pattern = r"```(.*?)```"
@@ -541,3 +502,81 @@ class SyntaxParser:
     def getOutputSyntaxes(self):
         return [struct.outputSyntax for struct in self.instOutput.outputStructs if struct.outputSyntax]
 
+    def _parseFuncParams(self, pattern: str, instruction: str) -> Tuple[List[str], str]:
+        paramsPattern = r'%s\(\s*(.*?)\s*\)' % re.escape(pattern)
+        paramsMatch = re.search(paramsPattern, instruction)
+        if not paramsMatch:
+            return None, None
+            
+        params_str = paramsMatch.group(1).strip()
+        if not params_str:
+            return [[], paramsMatch.group(0)]
+            
+        # 解析带引号的参数
+        params = []
+        i = 0
+        current_param = []
+        in_quotes = False
+        quote_type = None
+        
+        while i < len(params_str):
+            char = params_str[i]
+            
+            # 检查引号开始/结束
+            if char in ['"', "'"]:
+                # 检查三引号
+                if i + 2 < len(params_str) and params_str[i:i+3] in ['"""', "'''"]:
+                    if not in_quotes:
+                        in_quotes = True
+                        quote_type = params_str[i:i+3]
+                        i += 3
+                        continue
+                    elif quote_type == params_str[i:i+3]:
+                        in_quotes = False
+                        quote_type = None
+                        i += 3
+                        continue
+                # 单引号或双引号
+                elif not in_quotes:
+                    in_quotes = True
+                    quote_type = char
+                    i += 1
+                    continue
+                elif quote_type == char:
+                    in_quotes = False
+                    quote_type = None
+                    i += 1
+                    continue
+            
+            # 处理参数分隔符
+            if char == ',' and not in_quotes:
+                param = ''.join(current_param).strip()
+                if param:
+                    params.append(param)
+                current_param = []
+                i += 1
+                continue
+                
+            current_param.append(char)
+            i += 1
+            
+        # 添加最后一个参数
+        if current_param:
+            param = ''.join(current_param).strip()
+            if param:
+                params.append(param)
+                
+        # 去除参数外层的引号
+        cleaned_params = []
+        for param in params:
+            # 去除三引号
+            if (param.startswith('"""') and param.endswith('"""')) or \
+               (param.startswith("'''") and param.endswith("'''")):
+                param = param[3:-3]
+            # 去除单引号或双引号
+            elif (param.startswith('"') and param.endswith('"')) or \
+                 (param.startswith("'") and param.endswith("'")):
+                param = param[1:-1]
+            cleaned_params.append(param)
+            
+        return cleaned_params, paramsMatch.group(0)

@@ -11,4 +11,4 @@ class PromptMaker:
         self.task = task
 
     def getToolsDesc(self) -> str:
-        return self.toolkit.getToolsDesc()
+        return self.toolkit.getDesc()

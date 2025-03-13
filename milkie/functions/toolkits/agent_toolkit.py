@@ -8,6 +8,12 @@ class AgentToolkit(Toolkit):
         self.agent = agent
         self.agentFunction = self._createAgentFunction()
 
+    def getName(self) -> str:
+        return self.agent.name
+
+    def getDesc(self) -> str:
+        return self.agent.desc
+
     def execute(self, query :str, args :dict = {}, **kwargs):
         kwargs["top"] = False
         stdout(f"\n", info=True)

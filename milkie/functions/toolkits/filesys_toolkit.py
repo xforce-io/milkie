@@ -15,6 +15,9 @@ class FilesysToolkit(Toolkit):
     def __init__(self, globalContext :GlobalContext=None):
         super().__init__(globalContext)
 
+    def getName(self) -> str:
+        return "FilesysToolkit"
+
     def createDirectory(
             self, 
             parentPath: str, 
@@ -296,4 +299,4 @@ class FilesysToolkit(Toolkit):
 
 if __name__ == "__main__":
     filesysTools = FilesysToolkit()
-    print(filesysTools.getToolsDesc())
+    print(filesysTools.getDesc())

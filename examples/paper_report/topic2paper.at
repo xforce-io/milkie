@@ -21,7 +21,7 @@ filepaths. #CODE
 emptyFile. #CODE 清空文件{{topicToPaper}}
 FOR filepath in filepaths
     content. #CODE 读取{{filepath}}的文件内容,并返回内容 => c```type(_CUR_) == str and len(_CUR_) > 0```
-    topic. [deepseek-chat]
+    topic. [v3]
         任务：精确匹配文件内容与兴趣主题
 
         输入：

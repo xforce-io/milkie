@@ -1,3 +1,4 @@
+from llama_index_client import ChatMessage
 from milkie.llm.enhanced_llm import EnhancedLLM
 from milkie.llm.inference import chat
 from milkie.llm.reasoning.reasoning import Reasoning
@@ -7,15 +8,11 @@ class ReasoningNaive(Reasoning):
     def reason(
             self, 
             llm: EnhancedLLM, 
-            systemPrompt: str, 
-            prompt: str, 
-            promptArgs: dict, 
+            messages: list[ChatMessage], 
             stream: bool = False,
             **kwargs) -> str:
         return self._chat(
             llm=llm, 
-            systemPrompt=systemPrompt, 
-            prompt=prompt, 
-            promptArgs=promptArgs, 
+            messages=messages, 
             stream=stream, 
             **kwargs)

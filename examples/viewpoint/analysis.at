@@ -14,7 +14,7 @@ viewpoints = [item.split("---") for item in filtered]
 ```
 FOR viewpoint in viewpoints
 
-    analysis. [qwen-plus] 
+    analysis.  
     新闻标题：{viewpoint.0}
 
     相关观点：
@@ -32,7 +32,7 @@ FOR viewpoint in viewpoints
 
     请保持分析的客观性和可操作性。尽量保持在150字以内，现在请输出:
 
-    summary. [qwen-plus]
+    summary. 
      新闻标题：{viewpoint.0}
 
     相关观点：

@@ -13,6 +13,7 @@ class SetReasoningSelfConsistency(FuncBlock):
             config: str, 
             repoFuncs=None):
         super().__init__(
+            agentName="SetReasoningSelfConsistency", 
             context=context, 
             config=config, 
             repoFuncs=repoFuncs)

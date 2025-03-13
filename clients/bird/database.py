@@ -12,9 +12,6 @@ class Database:
     # 类级别的缓存管理器
     _cache_mgr = None
     
-    # 配置常量
-    SAMPLE_SIZE = 30  # 每个字段采样数量
-    
     def __init__(
             self, 
             config: Optional[DatabaseConfig] = None,
@@ -28,6 +25,10 @@ class Database:
         # 确保缓存管理器已初始化
         self._init_cache()
         
+        # 缓存表和字段信息
+        self._tables_info = {}
+        self._init_tables_info()
+        
     def execsql(self, sql: str) -> tuple[Optional[str], Optional[str]]:
         """
         执行SQL查询
@@ -38,6 +39,12 @@ class Database:
                 - 空结果字符串
                 - 执行出错
         """
+        cache_key = [{"sql": sql}]
+        cached_result = self._cache_mgr.getValue("sqlresults", cache_key)
+        if cached_result:
+            INFO(f"Cache hit for SQL: {sql}")
+            return cached_result, None
+
         cursor = None
         try:
             # 检查连接是否断开，如果断开则重连
@@ -58,6 +65,8 @@ class Database:
                 formatted_row = dict(zip(columns, row))
                 formatted_results.append(formatted_row)
             
+            # 存入缓存
+            self._cache_mgr.setValue("sqlresults", cache_key, str(formatted_results))
             return str(formatted_results), None
             
         except Exception as e:
@@ -67,7 +76,10 @@ class Database:
             if cursor:
                 cursor.close()
                 
-    def descTablesFromQuery(self, query: str) -> List[str]:
+    def descTablesFromQuery(
+            self, 
+            query: str, 
+            table_desc_record_samples: int) -> List[str]:
         """
         从查询中提取表名并获取每个表的描述
         
@@ -87,7 +99,7 @@ class Database:
             # 2. 获取每个表的描述
             table_briefs = []
             for table_name in table_names:
-                brief = self._descTable(table_name)
+                brief = self._descTable(table_name, table_desc_record_samples)
                 if brief:
                     table_briefs.append(brief)
                     
@@ -97,47 +109,34 @@ class Database:
             ERROR(f"Error in descTablesFromQuery: {str(e)}")
             return []
             
-    def descTableFieldsFromQuery(self, query: str) -> Dict[str, str]:
-        """
-        生成表和字段的详细描述
-        
-        Args:
-            query: SQL查询字符串
-            
-        Returns:
-            Dict[str, str]: 表名到描述的映射
-        """
+    def descTableFieldsFromQuery(
+            self, 
+            query: str, 
+            table_fields_record_samples: int) -> Dict[str, str]:
+        """生成表和字段的详细描述"""
         try:
-            # 1. 从缓存中检查
-            cache_key = [{"query": query}]
-            cached_desc = self._cache_mgr.getValue("tablefields", cache_key)
-            if cached_desc:
-                INFO(f"Cache hit for query")
-                return cached_desc
-            
-            # 2. 提取表名和字段
+            # 1. 提取表名和字段
             table_fields = self._extract_tables_and_fields(query)
             if not table_fields:
                 ERROR("No tables or fields found in query")
                 return {}
                 
-            # 3. 验证表和字段的存在性，获取有效的表字段映射
+            # 2. 验证表和字段的存在性，获取有效的表字段映射
             valid_table_fields = self._validate_tables_and_fields(table_fields)
             if not valid_table_fields:
                 ERROR("No valid tables or fields found")
                 return {}
                 
-            # 4. 获取字段样本数据并生成描述
+            # 3. 获取字段样本数据并生成描述
             descriptions = {}
             for table_name, fields in valid_table_fields.items():
-                desc = self._generate_field_description(table_name, fields)
+                desc = self._generate_field_description(
+                    table_name, 
+                    fields, 
+                    table_fields_record_samples)
                 if desc:
                     descriptions[table_name] = desc
                     
-            # 5. 存入缓存
-            if descriptions:
-                self._cache_mgr.setValue("tablefields", cache_key, descriptions)
-                
             return descriptions
             
         except Exception as e:
@@ -149,20 +148,28 @@ class Database:
         """初始化缓存管理器（如果还未初始化）"""
         if cls._cache_mgr is None:
             cache_dir = os.path.join(os.path.dirname(__file__), '../../data/cache')
-            cls._cache_mgr = CacheKVMgr(cache_dir, dumpInterval=5, expireTimeByDay=30)
+            cls._cache_mgr = CacheKVMgr(
+                cache_dir, 
+                category='database', 
+                dumpInterval=5, 
+                expireTimeByDay=3)
     
     def _connect(self):
-        """重新建立数据库连接"""
-        self._db = pymysql.connect(
-            host=self._config.host,
-            port=self._config.port,
-            user=self._config.user,
-            password=self._config.password,
-            database=self._config.database,
-            read_timeout=15,
-            write_timeout=15
-        )
-        
+        """连接到数据库"""
+        try:
+            self._db = pymysql.connect(
+                host=self._config.host,
+                port=self._config.port,
+                user=self._config.user,
+                password=self._config.password,
+                database=self._config.database,
+                charset=self._config.charset
+            )
+            logger.info("数据库连接成功")
+        except Exception as e:
+            logger.error(f"数据库连接失败: {str(e)}")
+            raise
+            
     def _extract_tables_and_fields(self, query: str) -> Dict[str, Set[str]]:
         """
         从查询中提取表名和字段名
@@ -214,11 +221,12 @@ class Database:
         cursor = None
         try:
             cursor = self._db.cursor()
-            
+            query = None
             for table_name, fields in table_fields.items():
                 try:
                     # 获取表的所有字段
-                    cursor.execute(f"SHOW COLUMNS FROM {table_name}")
+                    query = f"SHOW COLUMNS FROM `{table_name}`"
+                    cursor.execute(query)
                     valid_fields = {row[0] for row in cursor.fetchall()}
                     
                     # 过滤出有效字段
@@ -227,7 +235,7 @@ class Database:
                         valid_mappings[table_name] = valid_table_fields
                         
                 except Exception as e:
-                    ERROR(f"Error validating table {table_name}: {str(e)}")
+                    ERROR(f"Error validating table {table_name}: {str(e)} query: {query}")
                     continue
                     
             return valid_mappings
@@ -239,7 +247,11 @@ class Database:
             if cursor:
                 cursor.close()
                 
-    def _get_field_samples(self, table_name: str, fields: Set[str]) -> Dict[str, List[Any]]:
+    def _get_field_samples(
+            self, 
+            table_name: str, 
+            fields: Set[str], 
+            table_fields_record_samples: int) -> Dict[str, List[Any]]:
         """
         获取字段的样本数据
         
@@ -250,13 +262,21 @@ class Database:
         Returns:
             Dict[str, List[Any]]: 字段到样本值列表的映射
         """
+
+        cache_key = [{"table": table_name, "fields": sorted(list(fields))}]
+        cached_samples = self._cache_mgr.getValue("tablesamples", cache_key)
+        if cached_samples:
+            INFO(f"Cache hit for table {table_name} fields")
+            return cached_samples
+
         cursor = None
+        query = None
         try:
             cursor = self._db.cursor()
             
             # 构建查询语句
-            fields_str = ", ".join(f"DISTINCT {field}" for field in fields)
-            query = f"SELECT {fields_str} FROM {table_name} LIMIT {self.SAMPLE_SIZE}"
+            fields_str = ", ".join(f"`{field}`" for field in fields)
+            query = f"SELECT DISTINCT {fields_str} FROM `{table_name}` LIMIT {table_fields_record_samples}"
             
             cursor.execute(query)
             results = cursor.fetchall()
@@ -268,10 +288,12 @@ class Database:
                     if row[i] is not None:  # 排除空值
                         samples[field].append(row[i])
                         
+            # 存入缓存
+            self._cache_mgr.setValue("tablesamples", cache_key, samples)
             return samples
             
         except Exception as e:
-            ERROR(f"Error getting field samples for table {table_name}: {str(e)}")
+            ERROR(f"Error getting field samples for table {table_name}: {str(e)} query: {query}")
             return {}
         finally:
             if cursor:
@@ -302,23 +324,27 @@ class Database:
 - 基于样本数据的特征分析>
 """)
         
-    def _generate_field_description(self, table_name: str, fields: Set[str]) -> Optional[str]:
-        """
-        生成字段的详细描述
-        
-        Args:
-            table_name: 表名
-            fields: 字段集合
-            
-        Returns:
-            Optional[str]: 生成的描述
-        """
+    def _generate_field_description(
+            self, 
+            table_name: str, 
+            fields: Set[str], 
+            table_fields_record_samples: int) -> Optional[str]:
+        """生成字段的详细描述"""
+        # 1. 先检查缓存
+        cache_key = [{"table": table_name, "fields": sorted(list(fields))}]
+        cached_desc = self._cache_mgr.getValue("tablefields", cache_key)
+        if cached_desc:
+            INFO(f"Cache hit for table {table_name} fields")
+            return cached_desc
+
         cursor = None
+        query = None
         try:
             cursor = self._db.cursor()
             
-            # 1. 获取字段的schema信息
-            cursor.execute(f"SHOW FULL COLUMNS FROM {table_name}")
+            # 2. 获取字段的schema信息
+            query = f"SHOW FULL COLUMNS FROM `{table_name}`"
+            cursor.execute(query)
             columns = cursor.fetchall()
             
             # 过滤出目标字段的schema信息
@@ -330,21 +356,30 @@ class Database:
                     field_comment = col[8] if len(col) > 8 else ''
                     schema_info.append(f"{field_name} {field_type} - {field_comment}")
                     
-            # 2. 获取样本数据
-            samples = self._get_field_samples(table_name, fields)
+            # 3. 获取样本数据
+            samples = self._get_field_samples(
+                table_name, 
+                fields, 
+                table_fields_record_samples)
             if not samples:
                 return None
                 
-            # 3. 生成描述
+            # 4. 生成描述
             if self._client:
                 prompt = self._get_field_desc_prompt(table_name, fields, schema_info, samples)
                 description = self._client.execute(prompt, "cot_expert")
+                
+                # 5. 存入缓存
+                if description:
+                    self._cache_mgr.setValue("tablefields", cache_key, description)
+                    INFO(f"Generated and cached description for table {table_name} fields")
+                
                 return description
                 
             return None
             
         except Exception as e:
-            ERROR(f"Error generating field description for table {table_name}: {str(e)}")
+            ERROR(f"Error generating field description for table {table_name}: {str(e)} query: {query}")
             return None
         finally:
             if cursor:
@@ -395,7 +430,10 @@ class Database:
 现在请开始输出:
 """)
 
-    def _descTable(self, table_name: str) -> str:
+    def _descTable(
+            self, 
+            table_name: str, 
+            table_desc_record_samples: int) -> str:
         """
         获取表的描述信息，包括schema和示例数据的分析
         
@@ -406,18 +444,20 @@ class Database:
             str: 表的描述信息，包括用途和关键字段说明
         """
         # 1. 先检查缓存
-        cache_key = [{"table": table_name}]
+        cache_key = [{"table": table_name, "samples": table_desc_record_samples}]
         cached_desc = self._cache_mgr.getValue("tableschema", cache_key)
         if cached_desc:
             INFO(f"Cache hit for table {table_name}")
             return cached_desc
             
+        query = None
         try:
             cursor = None
             cursor = self._db.cursor()
             
             # 2. 获取表结构
-            cursor.execute(f"SHOW FULL COLUMNS FROM `{table_name}`")
+            query = f"SHOW FULL COLUMNS FROM `{table_name}`"
+            cursor.execute(query)
             columns = cursor.fetchall()
             
             # 构建schema信息
@@ -438,8 +478,8 @@ class Database:
                 ]
                 schema_info.append(" ".join(part for part in info_parts if part))
                 
-            # 3. 获取示例数据（最多2条）
-            cursor.execute(f"SELECT * FROM `{table_name}` LIMIT 2")
+            # 3. 获取示例数据（最多5条）
+            cursor.execute(f"SELECT * FROM `{table_name}` LIMIT {table_desc_record_samples}")
             records = cursor.fetchall()
             field_names = [col[0] for col in columns]
             
@@ -464,8 +504,67 @@ class Database:
                 return ""
                 
         except Exception as e:
-            ERROR(f"Error describing table {table_name}: {str(e)}")
+            ERROR(f"Error describing table {table_name}: {str(e)} query: {query}")
             return ""
         finally:
             if cursor:
                 cursor.close()
+
+    def _init_tables_info(self):
+        """初始化表和字段信息的缓存"""
+        try:
+            # 如果数据库连接断开，重新连接
+            self._db.ping(reconnect=True)
+            
+            cursor = self._db.cursor()
+            
+            # 获取所有表名
+            cursor.execute("SHOW TABLES")
+            tables = [table[0] for table in cursor.fetchall()]
+            
+            # 获取每个表的字段信息
+            for table in tables:
+                cursor.execute(f"DESCRIBE `{table}`")
+                fields = [field[0] for field in cursor.fetchall()]
+                self._tables_info[table] = fields
+                
+        except Exception as e:
+            logger.error(f"初始化表信息时发生错误: {str(e)}")
+        finally:
+            if cursor:
+                cursor.close()
+                
+    def table_exists(self, table: str) -> bool:
+        """检查表是否存在
+        
+        Args:
+            table: 要检查的表名（不含反引号）
+            
+        Returns:
+            bool: 表是否存在
+        """
+        # 如果缓存为空，重新初始化
+        if not self._tables_info:
+            self._init_tables_info()
+            
+        return table in self._tables_info
+        
+    def field_exists(self, table: str, field: str) -> bool:
+        """检查字段是否存在于指定的表中
+        
+        Args:
+            table: 要检查的表名（不含反引号）
+            field: 要检查的字段名
+            
+        Returns:
+            bool: 字段是否存在
+        """
+        # 如果缓存为空，重新初始化
+        if not self._tables_info:
+            self._init_tables_info()
+            
+        # 先检查表是否存在
+        if not self.table_exists(table):
+            return False
+            
+        return field in self._tables_info[table]

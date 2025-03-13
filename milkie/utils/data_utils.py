@@ -1,3 +1,4 @@
+import json
 from typing import List
 import yaml
 import logging
@@ -74,6 +75,17 @@ def extractBlock(blockType: str, blockContent: str) -> str | None:
     if len(matches) == 1:
         return matches[0]
     return None
+
+def extractJsonBlock(blockContent: str) -> dict | None:
+    blockContent = blockContent.strip()
+    if not blockContent.startswith("[") and not blockContent.startswith("{"):
+        blockContent = extractBlock("json", blockContent)
+
+    try:
+        return json.loads(blockContent)
+    except Exception as e:
+        logger.warning(f"Error parsing JSON[{blockContent}] error[{e}]")
+        return None
 
 def escape(prompt :str) :
     # to prevent 'format' exception in get_template_vars

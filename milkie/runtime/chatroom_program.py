@@ -1,15 +1,15 @@
 from milkie.runtime.program import Program
 from milkie.global_context import GlobalContext
-from milkie.runtime.global_toolkits import GlobalToolkits
+from milkie.functions.toolkits.skillset import Skillset
 
 class ChatroomProgram(Program):
     def __init__(
             self, 
             programFilepath: str, 
-            globalToolkits: GlobalToolkits = None, 
+            globalSkillset: Skillset = None, 
             globalContext: GlobalContext = None
         ) -> None:
-        super().__init__(programFilepath, globalToolkits, globalContext)
+        super().__init__(programFilepath, globalSkillset, globalContext)
 
         self.host = None
         self.prologue = None

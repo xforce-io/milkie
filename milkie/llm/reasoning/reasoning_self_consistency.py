@@ -1,3 +1,4 @@
+from llama_index_client import ChatMessage
 from milkie.global_context import GlobalContext
 from milkie.llm.reasoning.reasoning import Reasoning
 from milkie.llm.enhanced_llm import EnhancedLLM
@@ -45,19 +46,18 @@ class ReasoningSelfConsistency(Reasoning):
     def reason(
             self, 
             llm: EnhancedLLM, 
-            systemPrompt: str, 
-            prompt: str, 
-            promptArgs: dict, 
+            messages: list[ChatMessage], 
             stream: bool = False,
             **kwargs) -> str:
         resps = []
         kwargs["temperature"] = 0.5
+        originalPrompt = messages[-1].content
         for i in range(self.nIter):
+            prompt = f"trial {i}: {originalPrompt}"
+            messages[-1].content = prompt
             resp = self._chat(
                 llm=self.amateur if self.amateur else llm, 
-                systemPrompt=systemPrompt, 
-                prompt=f"trial {i}: {prompt}", 
-                promptArgs=promptArgs, 
+                messages=messages, 
                 stream=stream,
                 **kwargs)
             resps.append(resp)

@@ -12,11 +12,13 @@ class BaseBlock(ABC):
 
     def __init__(
             self, 
+            agentName: str,
             context: Context = None, 
             config: str | GlobalConfig = None,
             toolkit: Optional[Toolkit] = None,
             usePrevResult=DefaultUsePrevResult,
             repoFuncs=None):
+        self.agentName = agentName
         self.context = context or Context.create()
         self.config = config if config else self.context.globalContext.globalConfig
         self.toolkit = toolkit
