@@ -22,7 +22,8 @@ def makeMessages(
         chatPromptTmpl = makeMessageTemplates(
             systemPromptEscaped, 
             kwargs["history"] if "history" in kwargs else None, 
-            promptEscaped)
+            promptEscaped,
+            llm.reasoner_model)
     except Exception as e:
         ERROR(logger, f"makeMessages error[{e}] systemPrompt[{systemPromptEscaped}] prompt[{promptEscaped}]")
         raise e
@@ -88,14 +89,18 @@ def failChat(
         **kwargs):
     llm.fail(messages, **kwargs)
 
-def makeMessageTemplates(systemPrompt :str, history :Optional[History], prompt :str) -> ChatPromptTemplate:
+def makeMessageTemplates(
+        systemPrompt :str, 
+        history :Optional[History], 
+        prompt :str,
+        reasoningModel :bool) -> ChatPromptTemplate:
     messageTemplates = []
     if history and history.use():
         history.setSystemPrompt(systemPrompt)
         history.addHistoryUserPrompt(prompt)
         messageTemplates = history.getDialogue()
     else:
-        if systemPrompt:
+        if systemPrompt and not reasoningModel:
             messageTemplates += [ChatMessage(content=systemPrompt, role=MessageRole.SYSTEM)]    
         messageTemplates += [ChatMessage(content=prompt, role=MessageRole.USER)]
     return ChatPromptTemplate(message_templates=messageTemplates)

@@ -65,7 +65,6 @@ class ForBlock(BaseBlock):
             config=self.config,
             toolkit=self.toolkit,
             taskExpr=self.loopBody,
-            decomposeTask=True,
             repoFuncs=self.repoFuncs
         )
         self.loopBlock.compile()

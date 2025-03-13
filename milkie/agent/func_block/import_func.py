@@ -30,5 +30,5 @@ class ImportFunc(FuncBlock):
 
         self._restoreParams(args, self.params)
         toolkit = args["toolkit"]
-        kwargs["curInstruction"].toolkit = context.globalContext.getEnv().getGlobalToolkits().getToolkit(toolkit)
+        kwargs["curInstruction"].toolkit = context.globalContext.getEnv().getGlobalSkillset().getSkill(toolkit)
         return Response(respStr="imported toolkit")

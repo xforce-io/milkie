@@ -47,7 +47,7 @@ class Agent(BaseBlock):
 
         self.name = agentName
         self.desc = desc
-        self.skills = dict[str, Agent]()
+        self.skills = dict[str, Toolkit]()
         self.code = code
         self.systemPrompt = systemPrompt
         self.funcBlocks: List[FuncBlock] = []
@@ -88,8 +88,8 @@ class Agent(BaseBlock):
             repoFuncs=self.repoFuncs
         ))
 
-    def assignExpert(self, expert: Agent):
-        self.skills[expert.name] = expert
+    def assignSkill(self, skill: Toolkit):
+        self.skills[skill.getName()] = skill
 
     def setCodeAndCompile(self, code: str):
         self.isCompiled = False

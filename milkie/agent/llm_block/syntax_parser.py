@@ -8,9 +8,8 @@ from milkie.agent.llm_block.step_llm_extractor import StepLLMExtractor
 from milkie.config.constant import *
 from milkie.context import VarDict
 from milkie.functions.toolkits.toolkit import Toolkit
-from milkie.runtime.global_toolkits import GlobalToolkits
 from milkie.settings import Settings
-from milkie.utils.data_utils import codeToLines, extractBlock, extractFromBlock, extractJsonBlock, isBlock, unescape
+from milkie.utils.data_utils import codeToLines, extractBlock, extractJsonBlock, isBlock, unescape
 
 logger = logging.getLogger(__name__)
 
@@ -302,7 +301,7 @@ class InstrOutput:
                     storeVar=outputStruct.storeVar,
                     output=output)
 
-from milkie.functions.toolkits.toolbox import Toolbox
+from milkie.functions.toolkits.skillset import Skillset
 
 class SyntaxParser:
     class Flag(Enum):
@@ -314,7 +313,6 @@ class SyntaxParser:
         PY = 6
         CALL = 7
         THOUGHT = 8
-        DECOMPOSE = 9
 
     class TypeCall(Enum):
         STDIN = 1
@@ -325,8 +323,7 @@ class SyntaxParser:
             settings: Settings,
             label: str,
             instruction: str,
-            repoFuncs: RepoFuncs,
-            toolkits: GlobalToolkits) -> None:
+            repoFuncs: RepoFuncs) -> None:
         self.settings = settings
 
         self.flag = SyntaxParser.Flag.NONE
@@ -336,10 +333,8 @@ class SyntaxParser:
         self.returnVal = False 
         self.instruction = instruction.strip()
         self.funcsToCall = []
-        self.respToolbox: Toolbox = None
         
         self.repoFuncs = repoFuncs
-        self.toolkits = toolkits
         self.typeCall = None
         self.callObj = None
         self.callArg = None
@@ -372,7 +367,6 @@ class SyntaxParser:
         self._handleFlags()
         self._handleModel() # model should be handled after flags
         self._handleFunctions()
-        self._handleRespToolkit()
 
     def _handleOutputAndStore(self):
         parts = re.split(r'(=>|->)', self.instruction)
@@ -429,30 +423,6 @@ class SyntaxParser:
                 else:
                     raise SyntaxError(f"function[{funcName}] params not found")
 
-    def _handleRespToolkit(self):
-        indexStart = self.instruction.find(InstFlagRespToolkitStart)
-        if indexStart == -1:
-            return
-
-        indexEnd = self.instruction.find(InstFlagRespToolkitEnd, indexStart)
-        if indexEnd == -1 or indexEnd <= indexStart:
-            return
-
-        toolbox = self.instruction[indexStart+len(InstFlagRespToolkitStart):indexEnd].strip()
-        if not toolbox:
-            self.respToolbox = None
-            return
-
-        toolnames = [t.strip() for t in toolbox.split("/")]
-
-        self.respToolbox = Toolbox.createToolbox(self.toolkits, toolnames)
-        if not self.respToolbox or not self.respToolbox.getTools():
-            raise RuntimeError(f"Invalid toolkit: {toolbox}")
-
-        # Remove the respToolkit instruction from the main instruction
-        self.instruction = self.instruction[:indexStart] + self.instruction[indexEnd+len(InstFlagRespToolkitEnd):]
-        self.instruction = self.instruction.strip()
-
     def _handleFlags(self):
         flagHandlers = {
             InstFlagRet: self._handleRetFlag,
@@ -461,8 +431,6 @@ class SyntaxParser:
             InstFlagGoto: self._handleGotoFlag,
             InstFlagPy: self._handlePyFlag,
             InstFlagCall: self._handleCallFlag,
-            InstFlagThought: self._handleThoughtFlag,
-            InstFlagDecompose: self._handleDecomposeFlag
         }
 
         flagsFound = [flag for flag in flagHandlers.keys() if flag in self.instruction]
@@ -516,14 +484,6 @@ class SyntaxParser:
             self.instruction = self.instruction.replace(InstFlagCall, "").replace(callArgMatch.group(0), "")
         else:
             raise SyntaxError(f"function[{self.callObj}] params not found or not properly quoted")
-
-    def _handleThoughtFlag(self):
-        self.flag = SyntaxParser.Flag.THOUGHT
-        self.instruction = self.instruction.replace(InstFlagThought, "").strip()
-
-    def _handleDecomposeFlag(self):
-        self.flag = SyntaxParser.Flag.DECOMPOSE
-        self.instruction = self.instruction.replace(InstFlagDecompose, "").strip()
 
     def _extractPyCode(self):
         def _extractCode(text):

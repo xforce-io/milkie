@@ -11,6 +11,9 @@ class SearchToolkit(Toolkit):
         self.toolWebSearch = ToolSearchWebFromDuckDuckGo()
         self.toolGetWebContentFromUrls = ToolGetWebContentFromUrls()
 
+    def getName(self) -> str:
+        return "SearchToolkit"
+
     def searchFromWeb(self, query: str) -> str:
         """
         从互联网搜索信息

@@ -7,14 +7,14 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 
 from milkie.agent.llm_block.syntax_parser import SyntaxParser, OutputSyntaxFormat
 from milkie.agent.func_block.func_block import RepoFuncs
-from milkie.runtime.global_toolkits import GlobalToolkits
-from milkie.functions.toolkits.toolbox import Toolbox
+from milkie.runtime.global_skills import GlobalSkills
+from milkie.functions.toolkits.skillset import Skillset
 
 class TestSyntaxParser(unittest.TestCase):
 
     def setUp(self):
         self.repoFuncs = RepoFuncs()  # 创建一个空的 RepoFuncs 对象用于测试
-        self.toolkits = Mock(spec=GlobalToolkits)  # 创建一个模拟的 Toolkits 对象
+        self.toolkits = Mock(spec=GlobalSkills)  # 创建一个模拟的 Toolkits 对象
 
     def testEndFlag(self):
         inst = SyntaxParser("Some instruction #RET", self.repoFuncs, self.toolkits)
@@ -59,16 +59,6 @@ class TestSyntaxParser(unittest.TestCase):
         self.assertEqual(inst.flag, SyntaxParser.Flag.CALL)
         self.assertEqual(inst.callObj, "obj")
         self.assertEqual(inst.callArg, "some argument")
-
-    def testThoughtFlag(self):
-        inst = SyntaxParser('#THOUGHT Some thought', self.repoFuncs, self.toolkits)
-        self.assertEqual(inst.flag, SyntaxParser.Flag.THOUGHT)
-        self.assertEqual(inst.getInstruction(), "Some thought")
-
-    def testDecomposeFlag(self):
-        inst = SyntaxParser('#DECOMPOSE Some task', self.repoFuncs, self.toolkits)
-        self.assertEqual(inst.flag, SyntaxParser.Flag.DECOMPOSE)
-        self.assertEqual(inst.getInstruction(), "Some task")
 
     def testMultipleFlagsError(self):
         with self.assertRaises(Exception):
@@ -188,50 +178,6 @@ class TestSyntaxParser(unittest.TestCase):
         self.assertEqual(outputSyntax.format, OutputSyntaxFormat.REGEX)
         self.assertEqual(outputSyntax.regExpr.pattern, r'\d+/\d+/\d+')
         self.assertEqual(outputSyntax.errorMessage, "日期格式不正确")
-
-    @patch('milkie.functions.toolkits.toolbox.Toolbox.createToolbox')
-    def testRespToolkit(self, mock_create_toolbox):
-        mock_toolbox = Mock(spec=Toolbox)
-        mock_toolbox.getTools.return_value = [Mock()]  # 确保toolbox有工具
-        mock_create_toolbox.return_value = mock_toolbox
-
-        inst = SyntaxParser("Some instruction <<respToolkit:TestToolkit>>", self.repoFuncs, self.toolkits)
-        self.assertEqual(inst.respToolbox, mock_toolbox)
-        mock_create_toolbox.assert_called_once_with(self.toolkits, ["respToolkit:TestToolkit"])
-
-    @patch('milkie.functions.toolkits.toolbox.Toolbox.createToolbox')
-    def testRespToolkitNotFound(self, mock_create_toolbox):
-        mock_toolbox = Mock(spec=Toolbox)
-        mock_toolbox.getTools.return_value = []  # 空的toolbox
-        mock_create_toolbox.return_value = mock_toolbox
-
-        with self.assertRaises(RuntimeError) as context:
-            SyntaxParser("Some instruction <<respToolkit:NonexistentToolkit>>", self.repoFuncs, self.toolkits)
-        
-        self.assertTrue("Invalid toolkit: respToolkit:NonexistentToolkit" in str(context.exception))
-
-    @patch('milkie.functions.toolkits.toolbox.Toolbox.createToolbox')
-    def testRespToolkitWithOtherInstructions(self, mock_create_toolbox):
-        mock_toolbox = Mock(spec=Toolbox)
-        mock_toolbox.getTools.return_value = [Mock()]  # 确保toolbox有工具
-        mock_create_toolbox.return_value = mock_toolbox
-
-        inst = SyntaxParser("Some instruction <<respToolkit:TestToolkit>> => output -> var1", self.repoFuncs, self.toolkits)
-        self.assertEqual(inst.respToolbox, mock_toolbox)
-        self.assertEqual(inst.getInstruction(), "Some instruction")
-        self.assertEqual(inst.getStoreVars(), ["var1"])
-        self.assertEqual(inst.getOutputSyntaxes()[0].originalSyntax, "output")
-
-    @patch('milkie.functions.toolkits.toolbox.Toolbox.createToolbox')
-    def testMultipleRespToolkits(self, mock_create_toolbox):
-        mock_toolbox1 = Mock(spec=Toolbox)
-        mock_toolbox1.getTools.return_value = [Mock()]
-        mock_toolbox2 = Mock(spec=Toolbox)
-        mock_toolbox2.getTools.return_value = [Mock()]
-        mock_create_toolbox.side_effect = [mock_toolbox1, mock_toolbox2]
-
-        inst = SyntaxParser("Some instruction <<respToolkit:Toolkit1>> more text <<respToolkit:Toolkit2>>", self.repoFuncs, self.toolkits)
-        self.assertEqual(inst.respToolbox, mock_toolbox1)  # 应该只使用第一个找到的 toolkit
 
 if __name__ == '__main__':
     unittest.main()

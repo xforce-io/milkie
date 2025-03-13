@@ -219,8 +219,8 @@ class ToolGetWebContentFromUrls(Tool):
 
 class ToolSendEmail(Tool):
 
-    def __init__(self):
-        pass
+    def __init__(self, globalContext):
+        self.globalContext = globalContext
 
     def execute(
         self,

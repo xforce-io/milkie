@@ -1,0 +1,7 @@
+@name retrieval
+
+@desc
+获取关于query的本地资料
+@desc
+
+info. @Retrieval("{query}")

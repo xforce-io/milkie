@@ -1,0 +1,15 @@
+@name investigate
+
+@desc
+对一个问题进行深入全面的思考和研究，然后回答
+@desc
+
+@skills
+    retrieval
+@skills
+
+buildIndex. @ReindexFromLocal('data/santi/')
+
+analysis. [r1] 现在是【{_date}】，我们现在在对这个主题进行研究 【{query}】
+如果需要，请随时针对任何你不了解的细节，调用工具查询资料。
+现在请开始研究工作。

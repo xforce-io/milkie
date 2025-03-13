@@ -12,6 +12,7 @@ from milkie.utils.commons import getToolsSchemaForTools
 from milkie.llm.reasoning.reasoning import Reasoning
 from milkie.llm.reasoning.reasoning_naive import ReasoningNaive
 from milkie.llm.inference import makeMessages
+
 class StepLLM(ABC):
     def __init__(
             self, 
@@ -24,6 +25,9 @@ class StepLLM(ABC):
         self.llm = llm
         self.reasoning = reasoning
         self._messages : list[ChatMessage] = []
+    
+    def setGlobalContext(self, globalContext: GlobalContext):
+        self.globalContext = globalContext
     
     def setLLM(self, llm: EnhancedLLM):
         self.llm = llm

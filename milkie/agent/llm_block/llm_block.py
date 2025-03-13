@@ -10,13 +10,12 @@ from typing import Any, Callable, List, Optional, Tuple
 from llama_index_client import ChatMessage, MessageRole
 
 from milkie.agent.base_block import BaseBlock
-from milkie.agent.llm_block.step_llm_toolcall import StepLLMToolCall
 from milkie.agent.llm_block.step_llm_extractor import StepLLMExtractor
 from milkie.config.constant import *
 from milkie.context import Context
-from milkie.functions.toolkits.toolbox import Toolbox
+from milkie.functions.toolkits.agent_toolkit import AgentToolkit
+from milkie.functions.toolkits.skillset import Skillset
 from milkie.functions.toolkits.toolkit import Toolkit, FuncExecRecord
-from milkie.functions.toolkits.basic_toolkit import BasicToolkit
 from milkie.llm.enhanced_llm import EnhancedLLM
 from milkie.llm.reasoning.reasoning import Reasoning
 from milkie.prompt.prompt import Loader
@@ -81,7 +80,6 @@ class PromptMakerInstruction(PromptMaker):
         self.origInstruction :str = None
         self.formattedInstruction :str = None
         self.instructionDetails :str = None
-        self.optionDecompose = False
         self.prev = None
     
     def setOrigInstruction(self, instruction: str):
@@ -117,44 +115,6 @@ class PromptMakerInstruction(PromptMaker):
         resultPrompt += f"""{self.formattedInstruction}"""
         return resultPrompt
 
-    def promptForThought(self, llmBlock :LLMBlock):
-        result = f"""
-            任务目标: [{self.formattedInstruction}]
-            Toolkit: {llmBlock.toolkit.getToolsDesc()}
-            请思考如何解决这个问题，基于Toolkit中的工具。
-            方法如下：
-            """
-        return result
-
-    def promptForDecompose(self, llmBlock :LLMBlock):
-        sampleToolKit = BasicToolkit(llmBlock.context.globalContext)
-        sampleEmailDesc = Toolkit.getToolsDescWithSingleFunc(sampleToolKit.sendEmail)
-        result = f"""
-            请将任务分解为指令，要求如下：
-            (1)每条指令必须仅对应一次Toolkit工具调用，或者直接生成response
-            (2)这些指令的逐步执行可以完成任务目标
-            (3)生成的指令的格式请参考下面示例
-            
-            示例如下
-
-            ```
-            任务目标：针对 {{topic}} 写一篇文章，做摘要，用 markdown 格式格式化，并且邮件发送给{{email}}
-            Toolkit：{sampleEmailDesc}
-            任务分解：
-            1. 详细分析下面的问题{{topic}} -> topicInfo
-            2. 我现在要针对主题{{topic}}写一篇文章，根据下述信息写一篇摘要: --{{topicInfo}}-- -> summary
-            3. 用 markdown 格式化下面内容--{{summary}}-- -> markdown
-            4. 邮件发送给{{email}}, 邮件标题为{{title}}, 邮件内容为{{markdown}}
-            ```
-
-            任务目标: [{llmBlock.getVarDict().get(KeyVarDictThtTask)}]
-            任务思路：[{llmBlock.getVarDict().get(KeyVarDictThought)}]
-            Toolkit：{llmBlock.toolkit.getToolsDesc()}
-            注意：分解任务时，请不要对已知的信息做重复计算
-            任务分解：
-            """
-        return result
-
     def prevStepSummary(self, instructionRecords :list[InstructionRecord]):
         result = ""
         if len(instructionRecords) > 0:
@@ -183,28 +143,26 @@ class StepLLMInstrAnalysis(StepLLMBlock):
 
         self.instruction = instruction
         self.instructionRecords = llmBlock.taskEngine.instructionRecords
-        self.stepToolCall = StepLLMToolCall(llmBlock.context.globalContext)
 
     def makeSystemPrompt(self, args: dict, **kwargs) -> str:
         systemPrompt = super().makeSystemPrompt(args=args, **kwargs)
         if "skills" in kwargs:
             systemPrompt += f"""
-            注意：拥有技能如下
+            注意：拥有技能如下(skillname -> skilldesc)
             ```
             """
-            for name, agent in kwargs["skills"].items():
-                systemPrompt += f"{name} -> {agent.desc}\n"
+            for name, skill in kwargs["skills"].items():
+                if isinstance(skill, AgentToolkit):
+                    systemPrompt += f"{name} -> {skill.getDesc()}\n"
+                else:
+                    for toolName, toolDesc in skill.getToolDescs().items():
+                        systemPrompt += f"{name}.{toolName} -> \n{toolDesc}\n"
             systemPrompt += '''```\n
-            如果需要使用技能，请使用 " @skillName + 问题 + ？" 来调用技能。
+            如果需要使用技能，请使用 "@skillname ((技能参数))" 来调用技能。
             '''
         return systemPrompt
         
     def makePrompt(self, useTool: bool = False, **args) -> str:
-        if args.get("prompt_flag", None) == InstFlagDecompose:
-            return self.promptMaker.promptForDecompose(self.llmBlock)
-        elif args.get("prompt_flag", None) == InstFlagThought:
-            return self.promptMaker.promptForThought(self.llmBlock)
-
         result = self.promptMaker.promptForInstruction(
             instructionRecords=self.instructionRecords,
             **args)
@@ -225,7 +183,7 @@ class StepLLMInstrAnalysis(StepLLMBlock):
         toolkit = self._getToolkit()
 
         streamingProcessor = StreamingProcessor(
-            respToolbox=self.llmBlock.respToolbox,
+            globalSkillset=self.llmBlock.globalSkillset,
             context=self.llmBlock.context,
             llm=self.llm,
             messages=self._messages)
@@ -264,15 +222,68 @@ class StepLLMInstrAnalysis(StepLLMBlock):
     def _getToolkit(self):
         return self.instruction.toolkit
 
+class StepLLMToolcall(StepLLM):
+    
+    def __init__(
+            self):
+        super().__init__(
+            globalContext=None,
+            promptMaker=None,
+            llm=None)
+    
+    def setToolkit(self, toolkit: Toolkit):
+        self.toolkit = toolkit
+
+    def setGlobalSkillset(self, globalSkillset: Skillset):
+        self.globalSkillset = globalSkillset
+
+    def setContext(self, context: Context):
+        self.globalContext = context.globalContext
+        self.context = context
+
+    def setQuery(self, query: str):
+        self.query = query
+
+    def makePrompt(self, useTool: bool = False, **args) -> str:
+        return self.query
+    
+    def formatResult(self, result: Response, **kwargs) -> str:
+        allDict = self.context.getVarDict().getAllDict()
+
+        streamingProcessor = StreamingProcessor(
+            globalSkillset=self.globalSkillset,
+            context=self.context,
+            llm=self.llm,
+            messages=self._messages)
+        toolUsed, result = streamingProcessor.readFromGen(
+            response=result,
+            **kwargs)
+        if toolUsed:
+            funcExecRecords = self.toolkit.exec(
+                [(toolUsed, result)], 
+                allDict,
+                needToParse=False)
+            stdout(funcExecRecords[0].result, **kwargs)
+            return InstAnalysisResult(
+                InstAnalysisResult.Result.TOOL,
+                funcExecRecords=funcExecRecords,
+                response=result)
+
+        return InstAnalysisResult(
+            InstAnalysisResult.Result.ANSWER,
+            funcExecRecords=None,
+            response=result)
+
 class StreamingProcessor:
     def __init__(self,
-                 respToolbox: Toolbox,
+                 globalSkillset: Skillset,
                  context: Context,
                  llm: EnhancedLLM,
                  messages: list[ChatMessage]):
-        self.respToolbox = respToolbox
+        self.globalSkillset = globalSkillset
         self.context = context
         self.accuResults = []
+        self.allResults = []
         self.currentSentence = []
         self.currentTools = []
         self.response = None
@@ -280,6 +291,7 @@ class StreamingProcessor:
         self.messages = messages
         self.streamReset = False
         self.sentences_to_detect_skill = []
+        self.stepLLMToolcall = StepLLMToolcall()
 
     def readFromGen(
             self,
@@ -349,32 +361,32 @@ class StreamingProcessor:
         if len(self.currentTools) > 0:
             return self.currentTools[0]["name"], self.currentTools[0]["args"]
         else:
-            return None, "".join(self.accuResults)
+            self.allResults.extend(self.accuResults)
+            return None, "".join(self.allResults)
 
     def processDeltaContent(
             self,
             deltaContent: str,
             **kwargs) -> str:
-        endIndex = -1
+        endIndex = -len(SymbolEndSkill)
         while True:
-            startIndex = endIndex + 1
+            startIndex = endIndex + len(SymbolEndSkill)
             i = startIndex
             endIndex = -1
             while i < len(deltaContent):
-                if deltaContent[i] in SymbolEndSentence:
+                if deltaContent[i:].startswith(SymbolEndSkill):
                     endIndex = i
                     break
                 i += 1
 
             skillResp = ""
             if endIndex >= 0:
-                currentPart = deltaContent[startIndex:endIndex+1]
+                currentPart = deltaContent[startIndex:endIndex+len(SymbolEndSkill)]
                 self.currentSentence.append(currentPart)
                 stdout(currentPart, info=True, end="", flush=True, **kwargs)
                 
                 skillResp = self.processSentence()
                 if skillResp:
-                    self.accuResults.append(skillResp)
                     return skillResp
             else:
                 self.currentSentence.append(deltaContent[startIndex:])
@@ -385,7 +397,7 @@ class StreamingProcessor:
         sentence = "".join(self.currentSentence).strip()
         self.accuResults.append(sentence)
         self.currentSentence = []
-        if not self.respToolbox:
+        if not self.globalSkillset:
             return None
         
         startIndex = 0
@@ -406,7 +418,12 @@ class StreamingProcessor:
             INFO(logger, f"sentence[{sentence}] in sentences_to_detect_skill[{self.sentences_to_detect_skill}]")
             return None
         
-        skillName, skillResp = self.respToolbox.useSkill(sentence, context=self.context)
+        self.stepLLMToolcall.setGlobalSkillset(self.globalSkillset)
+        self.stepLLMToolcall.setContext(self.context)
+        self.stepLLMToolcall.setQuery(sentence)
+        self.stepLLMToolcall.setLLM(self.llm if not self.llm.reasoner_model else self.context.getGlobalContext().settings.llmDefault)
+        
+        skillName, skillResp = self._useSkill(sentence)
         if not skillName:
             return None
 
@@ -419,11 +436,13 @@ class StreamingProcessor:
             self.messages += [
                 ChatMessage(                                                        
                     role=MessageRole.ASSISTANT, 
-                    content="".join(self.accuResults) + skillResp + endMark + "下面我们继续探讨"),   
+                    content="".join(self.accuResults) + skillResp + endMark + "我们继续"),   
             ]
         elif len(self.messages) > 1 and self.messages[-1].role == MessageRole.ASSISTANT:
-            self.messages[-1].content += "".join(self.accuResults) + skillResp + endMark
-            self.messages[-1].additional_kwargs = {"prefix" : True}
+            self.messages[-1] = ChatMessage(
+                role=MessageRole.ASSISTANT, 
+                content=self.messages[-1].content + "".join(self.accuResults) + skillResp + endMark, 
+                additional_kwargs={"prefix" : True})
         else:
             self.messages += [
                 ChatMessage(                                                        
@@ -431,10 +450,36 @@ class StreamingProcessor:
                     content="".join(self.accuResults) + skillResp + endMark, 
                     additional_kwargs={"prefix" : True}),   
             ]
+        self.allResults.extend(self.accuResults)
+        self.allResults.extend([skillResp, endMark])
+        self.accuResults = []
 
         self.response.respGen = self.llm.stream(self.messages)
         self.streamReset = True
         return skillResp + endMark
+
+    def _useSkill(self, query: str) -> Tuple[str, str]:
+        for toolkit in self.globalSkillset.skillset:
+            if isinstance(toolkit, AgentToolkit):
+                if not query[1:].startswith(toolkit.getName()) :
+                    continue
+
+                response = toolkit.agent.execute(
+                    query=query[len(toolkit.agent.name)+1:].strip(), 
+                    args=self.context.getVarDict().getGlobalDict())
+                return toolkit.getName(), response.respStr
+            else:
+                for toolName, _ in toolkit.getToolDescs().items():
+                    if not query[1:].startswith(toolName) and \
+                            not query[1:].startswith(f"{toolkit.getName()}.{toolName}"):
+                        continue
+
+                    kwargs = {"tools" : toolkit.getTools()}
+                    self.stepLLMToolcall.setToolkit(toolkit)
+                    response = self.stepLLMToolcall.streamAndFormat(**kwargs)
+                    return toolkit.getName(), response.response
+            
+        return None, ""
 
 class StepLLMSynthsisInstructionRecord(StepLLMBlock):
     def __init__(self, promptMaker, llmBlock, instructionRecord: InstructionRecord) -> None:
@@ -492,8 +537,7 @@ class Instruction:
             label=label,
             settings=llmBlock.context.globalContext.settings,
             instruction=curInstruct, 
-            repoFuncs=llmBlock.repoFuncs, 
-            toolkits=llmBlock.getEnv().getGlobalToolkits() if llmBlock.getEnv() else None)
+            repoFuncs=llmBlock.repoFuncs)
         self.curInstruct = self.syntaxParser.getInstruction()
         self.formattedInstruct = self.curInstruct
         self.onlyFuncCall = False
@@ -545,35 +589,12 @@ class Instruction:
         elif self.syntaxParser.flag == SyntaxParser.Flag.RET and self.syntaxParser.returnVal:
             return self._processRet(args=args, **kwargs)
 
-        if self.syntaxParser.flag == SyntaxParser.Flag.THOUGHT:
-            self.promptMaker.promptForThought(self.llmBlock)
-            args["prompt_flag"] = InstFlagThought
-            useTool = False
-            logTypes.append("thought")
-
-        elif self.syntaxParser.flag == SyntaxParser.Flag.DECOMPOSE:
-            self.promptMaker.promptForDecompose(self.llmBlock)
-            args["prompt_flag"] = InstFlagDecompose
-            useTool = False
-            logTypes.append("decompose")
-
-        else:
-            args["prompt_flag"] = None
+        args["prompt_flag"] = None
 
         if useTool:
             kwargs["tools"] = self._getToolkit().getTools()
         
-        if self.llmBlock.getEnv():
-            respToolbox = Toolbox(self.llmBlock.getEnv().getGlobalToolkits())
-        else:
-            respToolbox = None
-
-        if self.syntaxParser.respToolbox:
-            respToolbox.merge(self.syntaxParser.respToolbox)
-
-        if self.llmBlock.respToolbox:
-            respToolbox.merge(self.llmBlock.respToolbox)
-        kwargs["respToolbox"] = respToolbox
+        kwargs["globalSkillset"] = self.llmBlock.globalSkillset
         
         self.stepInstAnalysis.setLLM(self._getCurLLM())
         instAnalysisResult = self.stepInstAnalysis.streamAndFormat(
@@ -945,14 +966,6 @@ class TaskEngine:
             if curInstruction.syntaxParser.flag == SyntaxParser.Flag.RET:
                 break
 
-            # adjust instructions and curIdx
-            if curInstruction.syntaxParser.flag == SyntaxParser.Flag.DECOMPOSE:
-                newInstructions = self.llmBlock._decomposeTask(instructResult.response.resp)
-                for i, (curLabel, curInstruction) in enumerate(newInstructions):
-                    self.instructions.insert(curIdx + i + 1, (curLabel, curInstruction))  
-                curIdx += 1
-                continue
-
             # handle goto
             if instructResult.isNext():
                 curIdx += 1
@@ -1012,7 +1025,7 @@ class LLMBlock(BaseBlock):
         self.instructions = []
         self.stepLLMExtractor = StepLLMExtractor(
             globalContext=self.context.globalContext)
-        self.respToolbox = None
+        self.globalSkillset = None
 
     def compile(self):
         if self.isCompiled:
@@ -1056,9 +1069,7 @@ class LLMBlock(BaseBlock):
             self.compile()  # 只在未编译时进行编译
 
         if self.getEnv():
-            self.respToolbox = Toolbox.createToolbox(
-                globalToolkits=self.getEnv().globalToolkits,
-                toolkits=[agent.name for agent in self.getEnv().agents.values() if agent.name != "stdin"])
+            self.globalSkillset = self.getEnv().globalSkillset
 
         _, result = self.taskEngine.execute(
             context=context,

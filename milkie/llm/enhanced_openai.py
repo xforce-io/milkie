@@ -56,7 +56,7 @@ class EnhancedOpenAI(EnhancedLLM):
         if "api.deepseek.com/beta" in endpoint:
             self.prefix_complete = True
 
-        if model_name in ["deepseek-reasoner"]:
+        if model_name in ["deepseek-reasoner", "deepseek-r1"] or "qwq" in model_name:
             self.reasoner_model = True
 
         self._cacheMgr = cacheMgr
@@ -202,7 +202,7 @@ class EnhancedOpenAI(EnhancedLLM):
                     retry_count += 1
                     if retry_count > self.MAX_RETRIES:
                         return self._handleApiError(e)
-                    logger.warning(f"Retry {retry_count}/{self.MAX_RETRIES} after error: {str(e)}")
+                    logger.warning(f"Retry {retry_count}/{self.MAX_RETRIES} after error: {str(e)} model: {self.model_name}")
 
         return completion_response_to_chat_response(CompletionResponse(
             text=chatCompletion.choices[0].message.content or "",
@@ -240,10 +240,13 @@ class EnhancedOpenAI(EnhancedLLM):
                 
                 for chunk in stream:
                     delta = chunk.choices[0].delta
-                    if delta.content is not None:
+                    if hasattr(delta, "content") and delta.content is not None:
                         fullContent.append(delta.content)
                         yield CompletionResponse(text=delta.content, raw=delta)
-                    elif delta.tool_calls:
+                    elif hasattr(delta, "reasoning_content") and delta.reasoning_content is not None:
+                        fullContent.append(delta.reasoning_content)
+                        yield CompletionResponse(text=delta.reasoning_content, raw=delta)
+                    elif hasattr(delta, "tool_calls") and delta.tool_calls:
                         if delta.tool_calls[0].function.name is not None:
                             funcName = delta.tool_calls[0].function.name
                         if delta.tool_calls[0].function.arguments is not None:
@@ -272,7 +275,7 @@ class EnhancedOpenAI(EnhancedLLM):
                 retry_count += 1
                 if retry_count > self.MAX_RETRIES:
                     self._handleApiError(e, isStream=True)
-                logger.warning(f"Retry {retry_count}/{self.MAX_RETRIES} after error: {str(e)}")
+                logger.warning(f"Retry {retry_count}/{self.MAX_RETRIES} after error: {str(e)} model: {self.model_name}")
 
     def _simulateStream(
             self, 

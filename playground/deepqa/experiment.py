@@ -36,7 +36,7 @@ def experiment(
     benchmarks = Benchmarks(
         ex,
         benchmarks,
-        globalConfig.getLLMConfig().batchSize)
+        globalConfig.getDefaultLLMConfig().batchSize)
 
     numQueries = 0
     lenOutputs = 0
@@ -52,7 +52,7 @@ def experiment(
             resps = agent.taskBatch(
                 prompt, 
                 argsList, 
-                **globalConfig.getLLMConfig().generationArgs.toJson())
+                **globalConfig.getDefaultLLMConfig().generationArgs.toJson())
         except Exception as e:
             import traceback
             traceback.print_exc()

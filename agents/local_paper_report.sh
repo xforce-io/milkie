@@ -2,7 +2,7 @@
 
 # 默认不启动 crawler
 run_crawler=false
-days=7
+days=20
 
 # 解析命令行参数
 while [[ $# -gt 0 ]]; do

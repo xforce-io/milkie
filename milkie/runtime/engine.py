@@ -3,7 +3,7 @@ from milkie.context import Context
 from milkie.runtime.agent_program import AgentProgram
 from milkie.runtime.chatroom_program import ChatroomProgram
 from milkie.runtime.env import Env
-from milkie.runtime.global_toolkits import GlobalToolkits
+from milkie.runtime.global_skills import GlobalSkills
 from milkie.global_context import GlobalContext
 import logging
 
@@ -16,7 +16,8 @@ class Engine:
             file: str = None,
             config: str = None) -> None:
         self.globalContext = GlobalContext.create(config)
-        self.globalToolkits = GlobalToolkits(self.globalContext)
+        self.globalSkills = GlobalSkills(self.globalContext)
+        self.globalSkillset = self.globalSkills.createSkillset()
 
         self.agentPrograms = []
         self.chatroomPrograms = []
@@ -26,7 +27,7 @@ class Engine:
                     programFilepath = os.path.join(folder, filename)
                     program = AgentProgram(
                         programFilepath=programFilepath,
-                        globalToolkits=self.globalToolkits,
+                        globalSkillset=self.globalSkillset,
                         globalContext=self.globalContext
                     )
                     program.parse()
@@ -35,7 +36,7 @@ class Engine:
                     programFilepath = os.path.join(folder, filename)
                     program = ChatroomProgram(
                         programFilepath=programFilepath,
-                        globalToolkits=self.globalToolkits,
+                        globalSkillset=self.globalSkillset,
                         globalContext=self.globalContext
                     )
                     program.parse()
@@ -45,7 +46,7 @@ class Engine:
             if file.endswith('.at'):
                 program = AgentProgram(
                     programFilepath=file,
-                    globalToolkits=self.globalToolkits,
+                    globalSkillset=self.globalSkillset,
                     globalContext=self.globalContext
                 )
                 program.parse()
@@ -53,7 +54,7 @@ class Engine:
             elif file.endswith('.cr'):
                 program = ChatroomProgram(
                     programFilepath=file,
-                    globalToolkits=self.globalToolkits,
+                    globalSkillset=self.globalSkillset,
                     globalContext=self.globalContext
                 )
                 program.parse()
@@ -69,7 +70,7 @@ class Engine:
                 config=self.globalContext.globalConfig,
                 agentPrograms=self.agentPrograms,
                 chatroomPrograms=self.chatroomPrograms,
-                globalToolkits=self.globalToolkits
+                globalSkillset=self.globalSkillset
             )
 
         try:

@@ -256,6 +256,7 @@ class SingleLLMConfig(BaseConfig):
             apiKey :str = None,
             endpoint :str = None,
             apiVersion :str = None,
+            reasoner :bool = False,
             modelArgs :LLMModelArgs = None,
             generationArgs :LLMGenerationArgs = None):
         self.type = type
@@ -272,10 +273,11 @@ class SingleLLMConfig(BaseConfig):
         self.apiKey = apiKey
         self.endpoint = endpoint
         self.apiVersion = apiVersion
+        self.reasoner = reasoner
         self.modelArgs = modelArgs
         self.generationArgs = generationArgs
     
-    def fromArgs(basicConfig :LLMBasicConfig, config :dict):
+    def fromArgs(basicConfig :LLMBasicConfig, config :dict, cloud_configs :dict = None):
         framework = FRAMEWORK.NONE
         if "framework" in config.keys():
             if config["framework"] == FRAMEWORK.VLLM.name:
@@ -304,6 +306,7 @@ class SingleLLMConfig(BaseConfig):
 
         promptName = config["system_prompt"] if "system_prompt" in config else basicConfig.systemPrompt
         ctxLen = config["ctx_len"] if "ctx_len" in config else basicConfig.ctxLen
+        reasoner = config.get("reasoner", False)
         
         systemPrompt = Loader.load(promptName)
         if config["type"] == LLMType.HUGGINGFACE.name:
@@ -312,33 +315,70 @@ class SingleLLMConfig(BaseConfig):
                 model=config["model"],
                 systemPrompt=systemPrompt,
                 ctxLen=ctxLen,
-                batchSize=config["batch_size"],
-                tensorParallelSize=config["tensor_parallel_size"],
+                batchSize=config.get("batch_size", 1),
+                tensorParallelSize=config.get("tensor_parallel_size", 1),
                 framework=framework,
                 device=device,
                 port=port,
+                reasoner=reasoner,
                 modelArgs=modelArgs,
                 generationArgs=generationArgs)
         elif config["type"] == LLMType.GEN_OPENAI.name:
+            # 使用cloud配置
+            source = config.get("source", None)
+            api_key = config.get("api_key", None)
+            endpoint = config.get("endpoint", None)
+            
+            if not source:
+                raise Exception("source is required for GEN_OPENAI")
+            
+            # 从cloud_configs中查找相应的配置
+            cloud_config = None
+            if isinstance(cloud_configs, list):
+                cloud_config = next((c for c in cloud_configs if c.source == source), None)
+            
+            if cloud_config:
+                # 如果本地配置中没有提供，则使用云配置中的值
+                api_key = api_key or cloud_config.api_key
+                endpoint = endpoint or cloud_config.endpoint
+            
+            # 最终检查必要的参数
+            if not api_key or not endpoint:
+                raise Exception(f"api_key and endpoint are required for GEN_OPENAI with source '{source}'")
+            
             return SingleLLMConfig(
                 type=LLMType.GEN_OPENAI,
-                name=config["name"] if "name" in config else None,
+                name=config.get("name", None),
                 model=config["model"],
                 systemPrompt=systemPrompt,
                 ctxLen=ctxLen,
-                apiKey=config["api_key"],
-                endpoint=config["endpoint"],
-                generationArgs=generationArgs,)
+                apiKey=api_key,
+                endpoint=endpoint,
+                reasoner=reasoner,
+                generationArgs=generationArgs)
         elif config["type"] == LLMType.AZURE_OPENAI.name:
+            # 使用cloud配置
+            source = config.get("source", None)
+            api_key = config.get("api_key", None)
+            endpoint = config.get("endpoint", None)
+            
+            # 如果指定了source且cloud_configs不为空，从cloud配置中获取api_key和endpoint
+            if source and cloud_configs and source in cloud_configs:
+                cloud_config = next((c for c in cloud_configs if c["source"] == source), None)
+                if cloud_config:
+                    api_key = cloud_config.get("api_key", api_key)
+                    endpoint = cloud_config.get("endpoint", endpoint)
+                    
             return SingleLLMConfig(
                 type=LLMType.AZURE_OPENAI,
                 model=config["model"],
-                name=config["name"] if "name" in config else None,
-                batchSize=config["batch_size"],
-                deploymentName=config["deployment_name"],
-                apiKey=config["api_key"],
-                endpoint=config["endpoint"],
-                apiVersion=config["api_version"],
+                name=config.get("name", None),
+                batchSize=config.get("batch_size", 1),
+                deploymentName=config.get("deployment_name", None),
+                apiKey=api_key,
+                endpoint=endpoint,
+                apiVersion=config.get("api_version", None),
+                reasoner=reasoner,
                 modelArgs=modelArgs,
                 generationArgs=generationArgs)
         else:
@@ -352,16 +392,21 @@ class LLMConfig(BaseConfig):
         for llmConfig in llmConfigs:
             self.llmMap[llmConfig.model] = llmConfig
     
-    def fromArgs(basicConfig :LLMBasicConfig, config :dict):
+    def fromArgs(basicConfig :LLMBasicConfig, config :dict, cloud_configs :list = None):
         configs = []
         modelNames = []
-        for singleConfig in config:
-            llmConfig = SingleLLMConfig.fromArgs(basicConfig, singleConfig)
-            if llmConfig.name not in modelNames:
-                modelNames.append(llmConfig.name)
-            else:
-                raise Exception(f"LLM name {llmConfig.name} duplicated")
-            configs.append(llmConfig)
+        for provider, provider_configs in config.items():
+            for singleConfig in provider_configs:
+                singleConfig["source"] = provider
+                if "type" not in singleConfig:
+                    singleConfig["type"] = LLMType.GEN_OPENAI.name
+                        
+                llmConfig = SingleLLMConfig.fromArgs(basicConfig, singleConfig, cloud_configs)
+                if llmConfig.name not in modelNames:
+                    modelNames.append(llmConfig.name)
+                else:
+                    raise Exception(f"LLM name {llmConfig.name} duplicated")
+                configs.append(llmConfig)
         return LLMConfig(configs)
 
     def getConfig(self, model :str) -> SingleLLMConfig:
@@ -564,6 +609,43 @@ class ToolsConfig(BaseConfig):
         email_config = EmailConfig.fromArgs(config.get("email", {}))
         return cls(email_config=email_config)
 
+class CloudSourceConfig(BaseConfig):
+    def __init__(self, source: str, api_key: str, endpoint: str, additional_params: dict = None):
+        self.source = source
+        self.api_key = api_key
+        self.endpoint = endpoint
+        self.additional_params = additional_params or {}
+    
+    @classmethod
+    def fromArgs(cls, config: dict):
+        if not config.get("source"):
+            raise Exception("Cloud source config must have a 'source' field")
+        return cls(
+            source=config["source"],
+            api_key=config.get("api_key"),
+            endpoint=config.get("endpoint"),
+            additional_params={k: v for k, v in config.items() 
+                              if k not in ["source", "api_key", "endpoint"]}
+        )
+
+class CloudConfig(BaseConfig):
+    def __init__(self, cloud_sources: List[CloudSourceConfig]):
+        self.cloud_sources = cloud_sources
+        self.source_map = {source.source: source for source in cloud_sources}
+    
+    @classmethod
+    def fromArgs(cls, config: list):
+        if not config:
+            return cls([])
+        
+        sources = []
+        for source_config in config:
+            sources.append(CloudSourceConfig.fromArgs(source_config))
+        return cls(sources)
+    
+    def getSourceConfig(self, source: str) -> CloudSourceConfig:
+        return self.source_map.get(source)
+
 class GlobalConfig(BaseConfig):
     instanceCnt = 0
     
@@ -578,26 +660,52 @@ class GlobalConfig(BaseConfig):
         self.initFromDict(config)
 
     def initFromDict(self, config: dict):
-        self.llmBasicConfig :LLMBasicConfig = LLMBasicConfig.fromArgs(config["llm_basic"])
-        self.llmConfig :LLMConfig = LLMConfig.fromArgs(self.llmBasicConfig, config["llm"])
-        self.embeddingConfig :EmbeddingConfig = EmbeddingConfig.fromArgs(config["embedding"]) if "embedding" in config.keys() else None
-        self.agentsConfig: AgentsConfig = AgentsConfig.fromArgs(config["agents"])
-        self.memoryConfig :MemoryConfig = MemoryConfig.fromArgs(config["memory"])
-        self.indexConfig :IndexConfig = IndexConfig.fromArgs(config["index"])
-        self.retrievalConfig :RetrievalConfig = RetrievalConfig.fromArgs(config["retrieval"]) if "retrieval" in config.keys() else None
-        self.toolsConfig :ToolsConfig = ToolsConfig.fromArgs(config.get("tools", {}))
+        # 统一使用fromArgs模式，必选项使用索引操作，可选项使用条件表达式
+        self.cloudConfig = CloudConfig.fromArgs(config.get("cloud", []))
+        self.llmBasicConfig = LLMBasicConfig.fromArgs(config["llm_basic"])
+        self.llmConfig = LLMConfig.fromArgs(
+            self.llmBasicConfig, config["llm"], self.cloudConfig.cloud_sources
+        )
+        
+        # 统一可选配置的处理方式
+        self.embeddingConfig = (
+            EmbeddingConfig.fromArgs(config["embedding"]) 
+            if "embedding" in config 
+            else None
+        )
+        
+        self.agentsConfig = AgentsConfig.fromArgs(config["agents"])
+        self.memoryConfig = MemoryConfig.fromArgs(config.get("memory", []))
+        self.indexConfig = IndexConfig.fromArgs(config.get("index", {}))
+        self.retrievalConfig = (
+            RetrievalConfig.fromArgs(config["retrieval"]) 
+            if "retrieval" in config 
+            else None
+        )
+        self.toolsConfig = ToolsConfig.fromArgs(config.get("tools", {}))
+        
+        # 统一处理配置间依赖关系
+        self._resolveConfigDependencies()
 
+    def _resolveConfigDependencies(self):
+        """统一处理配置项之间的依赖关系"""
         for agentConfig in self.agentsConfig.agentConfigs:
             if agentConfig.type == AgentType.QA:
                 if agentConfig.memoryConfig is None:
                     agentConfig.memoryConfig = self.memoryConfig
-
                 if agentConfig.indexConfig is None:
                     agentConfig.indexConfig = self.indexConfig
-
                 if agentConfig.retrievalConfig is None:
                     agentConfig.retrievalConfig = self.retrievalConfig
 
+    def getCloudConfig(self, source: str) -> CloudSourceConfig:
+        """获取特定云服务提供商的配置"""
+        return self.cloudConfig.getSourceConfig(source)
+
+    def getCloudConfigs(self) -> List[CloudSourceConfig]:
+        """获取所有云服务提供商配置"""
+        return self.cloudConfig.cloud_sources
+                    
     def getLLMBasicConfig(self) -> LLMBasicConfig:
         return self.llmBasicConfig
 

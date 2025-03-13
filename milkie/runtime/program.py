@@ -1,8 +1,8 @@
 from dataclasses import dataclass
 from typing import Dict, Optional
 import logging
+from milkie.functions.toolkits.skillset import Skillset
 from milkie.global_context import GlobalContext
-from milkie.runtime.global_toolkits import GlobalToolkits
 from milkie.utils.data_utils import codeToLines
 
 logger = logging.getLogger(__name__)
@@ -47,11 +47,11 @@ class Program:
     def __init__(
             self, 
             programFilepath: str,
-            globalToolkits: GlobalToolkits = None,
+            globalSkillset: Skillset = None,
             globalContext: GlobalContext = None
         ):
         self.programFilepath = programFilepath
-        self.globalToolkits = globalToolkits
+        self.globalSkillset = globalSkillset
         self.globalContext = globalContext
 
         self.name = None
@@ -106,19 +106,19 @@ class Program:
         if len(self.skills.strip()) == 0:
             return None
 
-        skills = []
+        roleAssignments = []
         pairs = [skill.strip() for skill in self.skills.split("\n") if len(skill.strip()) > 0]
         for pair in pairs:
             roleAndName = pair.split("->")
             if len(roleAndName) == 2:
                 role, name = roleAndName
-                skills.append((role.strip(), name.strip()))
+                roleAssignments.append((role.strip(), name.strip()))
             elif len(roleAndName) == 1:
                 name = roleAndName[0].strip()
-                skills.append((name, name))
+                roleAssignments.append((name, name))
             else:
                 raise SyntaxError(f"Invalid skill format[{self.programFilepath}]")
-        return skills
+        return roleAssignments
 
     def _handleName(self, line: str) -> None:
         self.name = line.split()[-1].strip()

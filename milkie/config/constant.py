@@ -15,11 +15,7 @@ InstFlagCode = "#CODE"
 InstFlagIf = "#IF"
 InstFlagPy = "#PY"
 InstFlagCall = "#CALL"
-InstFlagThought = "#THOUGHT"
-InstFlagDecompose = "#DECOMPOSE"
 InstFlagFunc = "@"
-InstFlagRespToolkitStart = "<<"
-InstFlagRespToolkitEnd = ">>"
 
 KeyVarDictThtTask = "_ThtTask_"
 KeyVarDictThought = "_Thought_"
@@ -37,4 +33,4 @@ KeywordEnd = "_END_"
 
 ExprNoInfoToExtract = "无相关信息"
 
-SymbolEndSentence = ['.', '!', '?', "。", "！", "？", "\n"]
+SymbolEndSkill = "))"

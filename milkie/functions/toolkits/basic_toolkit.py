@@ -12,7 +12,10 @@ class BasicToolkit(Toolkit):
     def __init__(self, globalContext: GlobalContext):
         super().__init__(globalContext)
 
-        self.toolSendEmail = ToolSendEmail()
+        self.toolSendEmail = ToolSendEmail(globalContext)
+
+    def getName(self) -> str:
+        return "BasicToolkit"
 
     def sendEmail(self, to_email: str, subject: str, body: str) -> str:
         """
