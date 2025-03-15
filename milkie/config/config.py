@@ -27,9 +27,6 @@ class LLMType(Enum):
 
 class FRAMEWORK(Enum):
     NONE = 0
-    HUGGINGFACE = 1
-    VLLM = 2
-    LMDEPLOY = 3
 
 class EmbeddingType(Enum):
     HUGGINGFACE = 0

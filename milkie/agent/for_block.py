@@ -2,6 +2,7 @@ import json
 import logging
 import re
 from milkie.agent.base_block import BaseBlock
+from milkie.agent.exec_graph import ExecNode
 from milkie.agent.llm_block.llm_block import LLMBlock
 from milkie.config.config import GlobalConfig
 from milkie.config.constant import DefaultUsePrevResult, KeywordForStart, KeyRet
@@ -118,12 +119,14 @@ class ForBlock(BaseBlock):
             query: str = None, 
             args: dict = {}, 
             prevBlock :BaseBlock=None,
+            execNodeParent: ExecNode = None,
             **kwargs) -> Response:
         super().execute(
             context=context, 
             query=query, 
             args=args, 
             prevBlock=prevBlock,
+            execNodeParent=execNodeParent,
             **kwargs)
 
         iterableValue = self.validate(self.getVarDict())
@@ -147,6 +150,7 @@ class ForBlock(BaseBlock):
                     query=query, 
                     args=args,
                     prevBlock=prevBlock,
+                    execNodeParent=execNodeParent,
                     **kwargs)
                 if result.resp != KeyRet:
                     results.append(result.resp)

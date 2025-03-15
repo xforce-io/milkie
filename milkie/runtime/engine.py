@@ -78,13 +78,13 @@ class Engine:
                 return self.env.execute(
                     chatroomName=chatroom,
                     query=args["query"] if "query" in args else None, 
-                    args=args, 
+                    args=args,
                     **kwargs)
             elif agent:
                 return self.env.execute(
                     agentName=agent,
                     query=args["query"] if "query" in args else None, 
-                    args=args, 
+                    args=args,
                     **kwargs)
         except Exception as e:
             print(f"Engine run error: {str(e)}", flush=True)

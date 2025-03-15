@@ -301,8 +301,6 @@ class InstrOutput:
                     storeVar=outputStruct.storeVar,
                     output=output)
 
-from milkie.functions.toolkits.skillset import Skillset
-
 class SyntaxParser:
     class Flag(Enum):
         NONE = 1

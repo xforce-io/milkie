@@ -9,7 +9,6 @@ class StepLLMExtractor(StepLLM):
             globalContext: GlobalContext):
         super().__init__(
             globalContext=globalContext, 
-            promptMaker=None,
             llm=globalContext.settings.getLLMCode())
 
     def makePrompt(self, useTool: bool = False, args: dict = {}, **kwargs) -> str:

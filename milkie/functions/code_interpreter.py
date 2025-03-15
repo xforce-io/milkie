@@ -23,7 +23,6 @@ class StepLLMCode(StepLLM):
             errorContext: Optional[str] = None):
         super().__init__(
             globalContext=globalContext, 
-            promptMaker=None,
             llm=globalContext.settings.getLLMCode(noCache=noCache))
         self.instruction = wrapVariablesInStr(instruction)
         self.prevResult = prevResult

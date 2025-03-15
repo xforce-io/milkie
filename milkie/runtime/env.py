@@ -7,7 +7,6 @@ from milkie.functions.toolkits.skillset import Skillset
 from milkie.runtime.agent_program import AgentProgram
 from milkie.runtime.chatroom_program import ChatroomProgram
 from milkie.runtime.datasource import DataSource
-from milkie.runtime.global_skills import GlobalSkills
 from milkie.response import Response
 from milkie.trace import stdout
 
@@ -101,12 +100,21 @@ class Env:
 
         if chatroomName:
             stdout(f"\n <<< start of chatroom[{chatroomName}] with query {query} >>> ", **kwargs)
-            response = self.chatrooms[chatroomName].execute(query=query, args=args, **kwargs)
+            response = self.chatrooms[chatroomName].execute(
+                query=query, 
+                args=args, 
+                **kwargs)
             stdout(f"\n <<< end of chatroom[{chatroomName}] >>>\n", **kwargs)
             return response
         elif agentName:
             stdout(f"\n <<< start of agent[{agentName}] with query {query} >>> ", **kwargs)
-            response = self.agents[agentName].execute(query=query, args=args, top=True, **kwargs)
+            self.context.setCurQuery(query)
+            response = self.agents[agentName].execute(
+                context=self.context,
+                query=query, 
+                args=args, 
+                top=True, 
+                **kwargs)
             stdout(f"\n <<< end of agent[{agentName}] >>>\n", **kwargs)
             return response
 

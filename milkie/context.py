@@ -1,11 +1,12 @@
 from __future__ import annotations
 import copy
 from datetime import datetime
-from typing import Dict, List, Optional, Any, Set
+from typing import Dict, List, Optional, Any
 from llama_index.core.base.response.schema import NodeWithScore
 from llama_index.core.base.llms.types import ChatMessage, MessageRole
 
 from milkie.agent.query_structure import QueryStructure, parseQuery
+from milkie.agent.exec_graph import ExecGraph
 from milkie.response import Response
 from milkie.utils.req_tracer import ReqTracer
 from milkie.global_context import GlobalContext
@@ -141,7 +142,8 @@ class Context:
         self.instructions: List[Any] = []
         self.varDict = VarDict()
         self.history = History()
-        
+        self.execGraph = ExecGraph()
+
     def getGlobalContext(self):
         return self.globalContext
 
@@ -154,6 +156,7 @@ class Context:
     
     def setCurQuery(self, query: str) -> None:
         self.curQuery = parseQuery(query)
+        self.execGraph.start(query)
 
     def getCurQuery(self) -> Optional[QueryStructure]:
         return self.curQuery

@@ -17,11 +17,9 @@ class StepLLM(ABC):
     def __init__(
             self, 
             globalContext: GlobalContext, 
-            promptMaker,
             llm :EnhancedLLM,
             reasoning: Reasoning = ReasoningNaive()):
         self.globalContext = globalContext
-        self.promptMaker = promptMaker
         self.llm = llm
         self.reasoning = reasoning
         self._messages : list[ChatMessage] = []

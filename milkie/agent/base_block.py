@@ -2,6 +2,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any, List, Optional
 
+from milkie.agent.exec_graph import ExecNode
 from milkie.config.config import GlobalConfig
 from milkie.config.constant import DefaultUsePrevResult
 from milkie.context import Context, VarDict
@@ -39,6 +40,7 @@ class BaseBlock(ABC):
             query :str, 
             args :dict, 
             prevBlock :BaseBlock=None, 
+            execNodeParent :ExecNode=None,
             **kwargs) -> Response:
         if context:
             self.setContext(context)

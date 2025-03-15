@@ -60,7 +60,6 @@ class RetrievalBlock(FuncBlock):
         return self._retrieve(query if query else args["query"], args)
 
     def _retrieve(self, query :str, args :dict) -> Response:
-        self.context.setCurQuery(query)
         self.dataSource.getMainRetriever().retrieve(self.context)
         retrievalResult = self.context.retrievalResult
         if retrievalResult is None:

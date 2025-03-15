@@ -1,5 +1,6 @@
 from typing import List, Union
 from milkie.agent.base_block import BaseBlock
+from milkie.agent.exec_graph import ExecNode
 from milkie.agent.for_block import ForBlock
 from milkie.agent.llm_block.llm_block import LLMBlock
 from milkie.config.constant import DefaultUsePrevResult, KeywordForEnd, KeywordForStart
@@ -132,8 +133,15 @@ class FlowBlock(BaseBlock):
             query: str = None, 
             args: dict = {}, 
             prevBlock: BaseBlock = None,
+            execNodeParent: ExecNode = None,
             **kwargs) -> Response:
-        super().execute(context, query, args, prevBlock, **kwargs)
+        super().execute(
+            context, 
+            query, 
+            args, 
+            prevBlock, 
+            execNodeParent, 
+            **kwargs)
         
         result = None
         lastBlock = prevBlock
@@ -143,6 +151,7 @@ class FlowBlock(BaseBlock):
                 query=query, 
                 args=args,
                 prevBlock=lastBlock,
+                execNodeParent=execNodeParent,
                 **kwargs
             )
             lastBlock = block

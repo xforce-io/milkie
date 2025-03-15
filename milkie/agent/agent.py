@@ -15,6 +15,7 @@ from milkie.agent.llm_block.llm_block import LLMBlock
 from milkie.config.constant import KeywordFuncStart, KeywordFuncEnd
 from milkie.context import Context
 from milkie.config.config import GlobalConfig
+from milkie.agent.exec_graph import ExecNode, ExecNodeType
 from milkie.functions.toolkits.toolkit import Toolkit
 from milkie.response import Response
 import logging
@@ -187,12 +188,14 @@ class Agent(BaseBlock):
             query: str = None, 
             args: dict = {}, 
             prevBlock: BaseBlock = None,
+            execNodeParent: ExecNode = None,
             **kwargs) -> Response:
         super().execute(
             context=context,
             query=query, 
             args=args, 
             prevBlock=prevBlock, 
+            execNodeParent=execNodeParent,
             **kwargs)
         
         result = None
@@ -213,12 +216,14 @@ class Agent(BaseBlock):
             history.resetUse()
             kwargs["history"] = history
 
+        execNode = execNodeParent.createChildNode(ExecNodeType.AGENT)
         for block in self.topBlocks:
             result = block.execute(
                 context=context,
                 query=query,
                 args=args,
                 prevBlock=lastBlock,
+                execNodeParent=execNode,
                 **{k: v for k, v in kwargs.items() if k != "top"}
             )
             lastBlock = block
