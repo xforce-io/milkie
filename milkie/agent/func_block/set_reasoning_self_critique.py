@@ -1,6 +1,7 @@
 from milkie.agent.base_block import BaseBlock
 from milkie.agent.func_block.func_block import FuncBlock
 from milkie.context import Context
+from milkie.global_context import GlobalContext
 from milkie.llm.reasoning.reasoning_self_critique import ReasoningSelfCritique
 from milkie.response import Response
 
@@ -8,20 +9,20 @@ class SetReasoningSelfCritique(FuncBlock):
 
     def __init__(
             self, 
-            context: Context, 
+            globalContext: GlobalContext, 
             config: str, 
             repoFuncs=None):
         super().__init__(
             agentName="SetReasoningSelfCritique", 
-            context=context, 
+            globalContext=globalContext, 
             config=config, 
             repoFuncs=repoFuncs)
 
         self.funcName = "ReasoningSelfCritique"
         self.params = ["critique"]
 
-    def execute(self, context: Context, query: str, args: dict, **kwargs):
-        BaseBlock.execute(self, context, query, args, **kwargs)
+    def execute(self, context: Context, args: dict, **kwargs):
+        BaseBlock.execute(self, context, args, **kwargs)
 
         self._restoreParams(args, self.params)
         critiqueLLM = args.get("critique")

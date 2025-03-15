@@ -1,3 +1,4 @@
+import copy
 import os
 from milkie.context import Context
 from milkie.runtime.agent_program import AgentProgram
@@ -15,8 +16,8 @@ class Engine:
             folder: str = None,
             file: str = None,
             config: str = None) -> None:
-        self.globalContext = GlobalContext.create(config)
-        self.globalSkills = GlobalSkills(self.globalContext)
+        Context.globalContext = GlobalContext.create(config)
+        self.globalSkills = GlobalSkills(Context.globalContext)
         self.globalSkillset = self.globalSkills.createSkillset()
 
         self.agentPrograms = []
@@ -28,7 +29,7 @@ class Engine:
                     program = AgentProgram(
                         programFilepath=programFilepath,
                         globalSkillset=self.globalSkillset,
-                        globalContext=self.globalContext
+                        globalContext=Context.globalContext
                     )
                     program.parse()
                     self.agentPrograms.append(program)
@@ -37,7 +38,7 @@ class Engine:
                     program = ChatroomProgram(
                         programFilepath=programFilepath,
                         globalSkillset=self.globalSkillset,
-                        globalContext=self.globalContext
+                        globalContext=Context.globalContext
                     )
                     program.parse()
                     self.chatroomPrograms.append(program)
@@ -47,7 +48,7 @@ class Engine:
                 program = AgentProgram(
                     programFilepath=file,
                     globalSkillset=self.globalSkillset,
-                    globalContext=self.globalContext
+                    globalContext=Context.globalContext
                 )
                 program.parse()
                 self.agentPrograms.append(program)
@@ -55,19 +56,25 @@ class Engine:
                 program = ChatroomProgram(
                     programFilepath=file,
                     globalSkillset=self.globalSkillset,
-                    globalContext=self.globalContext
+                    globalContext=Context.globalContext
                 )
                 program.parse()
                 self.chatroomPrograms.append(program)
 
         self.env = None
-        self.initContext = Context(self.globalContext)
+        self.initContext = Context.create()
 
-    def run(self, chatroom: str = None, agent: str = None, args: dict = {}, **kwargs):
+    def run(
+            self, 
+            chatroom: str = None, 
+            agent: str = None, 
+            args: dict = {}, 
+            **kwargs):
+        context = self._createContext(args)
         if self.env is None:
             self.env = Env(
-                context=self.initContext,
-                config=self.globalContext.globalConfig,
+                globalContext=Context.globalContext,
+                config=Context.globalContext.globalConfig,
                 agentPrograms=self.agentPrograms,
                 chatroomPrograms=self.chatroomPrograms,
                 globalSkillset=self.globalSkillset
@@ -77,15 +84,17 @@ class Engine:
             if chatroom:
                 return self.env.execute(
                     chatroomName=chatroom,
-                    query=args["query"] if "query" in args else None, 
+                    context=context,
+                    query=context.getQueryStr(),
                     args=args,
-                    **kwargs)
+                    **{**kwargs, "execNode" : context.getExecGraph().getRootNode()})
             elif agent:
                 return self.env.execute(
                     agentName=agent,
-                    query=args["query"] if "query" in args else None, 
+                    context=context,
+                    query=context.getQueryStr(),
                     args=args,
-                    **kwargs)
+                    **{**kwargs, "execNode" : context.getExecGraph().getRootNode()})
         except Exception as e:
             print(f"Engine run error: {str(e)}", flush=True)
             raise
@@ -96,6 +105,17 @@ class Engine:
             code: str, 
             args: dict={}, 
             **kwargs):
+        context = self._createContext(args)
         agent = self.env.agents[agentName]
         agent.setCodeAndCompile(code)
-        return self.env.execute(agentName=agentName, args=args, **kwargs)
+        return self.env.execute(
+            agentName=agentName, 
+            context=context, 
+            args=args, 
+            **{**kwargs, "execNode" : context.getExecGraph().getRootNode()})
+
+    def _createContext(self, args: dict):
+        context = self.initContext.copy()
+        if "query" in args:
+            context.setQuery(args["query"])
+        return context

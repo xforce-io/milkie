@@ -8,6 +8,7 @@ from milkie.config.config import GlobalConfig
 from milkie.config.constant import DefaultUsePrevResult, KeywordForStart, KeyRet
 from milkie.context import Context, VarDict
 from milkie.functions.toolkits.toolkit import Toolkit
+from milkie.global_context import GlobalContext
 from milkie.response import Response
 from milkie.utils.data_utils import codeToLines
 
@@ -18,7 +19,7 @@ class ForBlock(BaseBlock):
             self, 
             agentName: str,
             forStatement: str, 
-            context: Context = None, 
+            globalContext: GlobalContext = None, 
             config: str | GlobalConfig = None,
             toolkit: Toolkit = None,
             usePrevResult=DefaultUsePrevResult,
@@ -27,7 +28,7 @@ class ForBlock(BaseBlock):
             repoFuncs=None):
         super().__init__(
             agentName=agentName, 
-            context=context, 
+            globalContext=globalContext, 
             config=config, 
             toolkit=toolkit, 
             usePrevResult=usePrevResult, 
@@ -62,7 +63,7 @@ class ForBlock(BaseBlock):
     def compile(self):
         self.loopBlock = self.loopBlockClass(
             agentName=self.agentName,
-            context=self.context,
+            globalContext=self.globalContext,
             config=self.config,
             toolkit=self.toolkit,
             taskExpr=self.loopBody,
@@ -116,14 +117,12 @@ class ForBlock(BaseBlock):
     def execute(
             self, 
             context: Context,
-            query: str = None, 
             args: dict = {}, 
             prevBlock :BaseBlock=None,
             execNodeParent: ExecNode = None,
             **kwargs) -> Response:
         super().execute(
             context=context, 
-            query=query, 
             args=args, 
             prevBlock=prevBlock,
             execNodeParent=execNodeParent,
@@ -147,7 +146,6 @@ class ForBlock(BaseBlock):
             try:
                 result = self.loopBlock.execute(
                     context=context,
-                    query=query, 
                     args=args,
                     prevBlock=prevBlock,
                     execNodeParent=execNodeParent,
@@ -169,7 +167,7 @@ class ForBlock(BaseBlock):
     def create(
             agentName: str,
             forStatement: str, 
-            context: Context = None, 
+            globalContext: GlobalContext = None, 
             config: str | GlobalConfig = None,
             toolkit: Toolkit = None,
             usePrevResult=DefaultUsePrevResult,
@@ -179,7 +177,7 @@ class ForBlock(BaseBlock):
         return ForBlock(
             agentName=agentName,
             forStatement=forStatement,
-            context=context,
+            globalContext=globalContext,
             config=config,
             toolkit=toolkit,
             usePrevResult=usePrevResult,

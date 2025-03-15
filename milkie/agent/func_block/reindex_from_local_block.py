@@ -2,18 +2,18 @@ from milkie.agent.base_block import BaseBlock
 from milkie.agent.func_block.func_block import FuncBlock
 from milkie.context import Context
 from milkie.response import Response
-
+from milkie.global_context import GlobalContext
 
 class ReindexFromLocalBlock(FuncBlock):
 
     def __init__(
             self, 
-            context :Context = None, 
+            globalContext: GlobalContext, 
             config :str = None, 
             repoFuncs=None):
         super().__init__(
             agentName="ReindexFromLocal", 
-            context=context, 
+            globalContext=globalContext, 
             config=config, 
             repoFuncs=repoFuncs)
 
@@ -23,10 +23,9 @@ class ReindexFromLocalBlock(FuncBlock):
     def execute(
             self, 
             context: Context, 
-            query: str, 
             args: dict, 
             **kwargs) -> Response:
-        BaseBlock.execute(self, context, query, args, **kwargs)
+        BaseBlock.execute(self, context, args, **kwargs)
 
         self._restoreParams(args, self.params)
         localDir = args["localDir"]

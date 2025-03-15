@@ -1,28 +1,29 @@
 import os, sys
 from unittest.mock import Mock, patch
 
+from milkie.global_context import GlobalContext
+
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 
 import unittest
-from milkie.agent.llm_block.llm_block import LLMBlock, Instruction, InstAnalysisResult
+from milkie.agent.llm_block.llm_block import LLMBlock, Instruction
 from milkie.context import Context
-from milkie.response import Response
 
 class TestLLMBlock(unittest.TestCase):
     def setUp(self):
         """设置测试环境"""
         configPath = os.path.join(os.path.dirname(__file__), '../../config/global_test.yaml')
-        self.context = Context.create(configPath)
+        self.globalContext = GlobalContext.create(configPath)
         
         # 创建 LLMBlock 实例
         self.llmBlock = LLMBlock(
-            context=self.context,
+            globalContext=self.globalContext,
             taskExpr="Test Task"
         )
 
     def testInit(self):
         """测试初始化"""
-        llmBlock = LLMBlock(context=self.context, taskExpr="Test Task")
+        llmBlock = LLMBlock(globalContext=self.globalContext, taskExpr="Test Task")
         self.assertEqual(llmBlock.task, "Test Task")
         self.assertTrue(hasattr(llmBlock, 'taskEngine'))
 

@@ -87,7 +87,7 @@ class Server:
             response_id = f"chatcmpl-{int(time.time()*1000)}"
             
             # 调用 engine
-            response = self.engine.run(agent=self.agent_name, args=args)
+            response = self.engine.run(agent=self.agent_name, query=query, args=args)
             
             # 处理流式响应
             if request.stream and isinstance(response, Response) and response.respGen:

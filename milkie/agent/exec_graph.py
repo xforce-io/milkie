@@ -20,8 +20,8 @@ class ExecNode:
             self, 
             nodeType: ExecNodeType,
             instructionId: str = None):
-        self.nodeId = self.createNodeId()
         self.nodeType = nodeType
+        self.nodeId = self.createNodeId()
         self.nodeStatus = ExecNodeStatus.PENDING
         self.parentNode :ExecNode = None
         self.instructionId :str = instructionId
@@ -48,10 +48,13 @@ class ExecNode:
     def setInstructionId(self, instructionId: str):
         self.instructionId = instructionId
 
+    def getNodeId(self):
+        return self.nodeId
+
     def getInstructionId(self):
         return self.instructionId
 
-class ExecNodeRoot:
+class ExecNodeRoot(ExecNode):
     def __init__(
             self, 
             query: str):
@@ -60,14 +63,14 @@ class ExecNodeRoot:
         self.query = query
         self.nodeStatus = ExecNodeStatus.SUCCESS
 
-class ExecNodeAgent:
+class ExecNodeAgent(ExecNode):
     def __init__(self):
         super().__init__(ExecNodeType.AGENT)
 
-class ExecNodeLLM:
+class ExecNodeLLM(ExecNode):
     def __init__(
             self, 
-            instructionId: str):
+            instructionId: str = None):
         super().__init__(ExecNodeType.LLM, instructionId)
         
         self.content = ""
@@ -89,7 +92,7 @@ class ExecNodeLLM:
         execNodeLLM.setInstructionId(instructionId)
         return execNodeLLM
 
-class ExecNodeSkill:
+class ExecNodeSkill(ExecNode):
     def __init__(self):
         super().__init__(ExecNodeType.SKILL)
 
@@ -118,7 +121,7 @@ class ExecNodeSkill:
         execNodeSkill.setSkillResult(skillResult)
         return execNodeSkill
 
-class ExecNodeAssemble:
+class ExecNodeAssemble(ExecNode):
     
     def __init__(self):
         super().__init__(ExecNodeType.ASSEMBLE)
@@ -138,10 +141,13 @@ class ExecGraph:
 
     def start(self, query: str):
         self.rootNode = ExecNodeRoot(query)
-        self.nodes[self.rootNode.nodeId] = self.rootNode
+        self.nodes[self.rootNode.getNodeId()] = self.rootNode
 
     def addNode(self, node: ExecNode):
-        self.nodes[node.nodeId] = node
+        self.nodes[node.getNodeId()] = node
 
     def getNode(self, nodeId: str):
         return self.nodes[nodeId]
+
+    def getRootNode(self):
+        return self.rootNode

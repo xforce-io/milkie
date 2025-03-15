@@ -1,11 +1,11 @@
 from __future__ import annotations
-from abc import abstractmethod
 from enum import Enum
 
 import json
 import logging
 import re
 import time
+import traceback
 from typing import Any, Callable, List, Optional, Tuple
 import uuid
 
@@ -19,6 +19,7 @@ from milkie.context import Context
 from milkie.functions.toolkits.agent_toolkit import AgentToolkit
 from milkie.functions.toolkits.skillset import Skillset
 from milkie.functions.toolkits.toolkit import Toolkit, FuncExecRecord
+from milkie.global_context import GlobalContext
 from milkie.llm.enhanced_llm import EnhancedLLM
 from milkie.llm.reasoning.reasoning import Reasoning
 from milkie.prompt.prompt import Loader
@@ -92,7 +93,6 @@ class StepLLMStreaming(StepLLM):
     def setQuery(self, query: str):
         self.query = query
 
-    @abstractmethod
     def makePrompt(self, useTool: bool = False, **args) -> str:
         return self.query
     
@@ -133,18 +133,11 @@ class StepLLMStreaming(StepLLM):
 class StepLLMInstrAnalysis(StepLLMStreaming):
     def __init__(
             self, 
-            llmBlock :LLMBlock, 
             instruction: Instruction) -> None:
-        super().__init__(
-            llmBlock=llmBlock,
-            llm=llmBlock.context.globalContext.settings.llmDefault)
+        super().__init__()
 
         self.instruction = instruction
         self.needToParse = instruction.formattedInstruct.find("{") >= 0
-
-        self.setToolkit(instruction.toolkit)
-        self.setGlobalSkillset(llmBlock.globalSkillset)
-        self.setContext(llmBlock.context)
 
     def makeSystemPrompt(self, args: dict, **kwargs) -> str:
         systemPrompt = super().makeSystemPrompt(args=args, **kwargs)
@@ -248,7 +241,7 @@ class StreamingProcessor:
                 stdout("", info=True, flush=True, **kwargs)
 
                 if self.currentSentence:
-                    skillResp = self.processSentence()
+                    skillResp = self.processSentence(**kwargs)
                     if not skillResp:
                         break
 
@@ -288,7 +281,7 @@ class StreamingProcessor:
                 stdout(currentPart, info=True, end="", flush=True, **kwargs)
                 kwargs["execNode"].addContent(currentPart)
                 
-                skillResp = self.processSentence()
+                skillResp = self.processSentence(**kwargs)
                 if skillResp:
                     return skillResp
             else:
@@ -297,7 +290,7 @@ class StreamingProcessor:
                 kwargs["execNode"].addContent(deltaContent[startIndex:])
                 return None
 
-    def processSentence(self) -> str:
+    def processSentence(self, **kwargs) -> str:
         sentence = "".join(self.currentSentence).strip()
         self.accuResults.append(sentence)
         self.currentSentence = []
@@ -310,24 +303,24 @@ class StreamingProcessor:
             if idx == -1:
                 break
 
-            resp = self._processSentenceStartWithAt(sentence[idx:])
+            resp = self._processSentenceStartWithAt(sentence[idx:], **kwargs)
             if resp:
                 return resp
 
             startIndex = idx + 1
         return None
 
-    def _processSentenceStartWithAt(self, sentence: str) -> str:
+    def _processSentenceStartWithAt(self, sentence: str, **kwargs) -> str:
         if sentence in self.sentences_to_detect_skill:
             INFO(logger, f"sentence[{sentence}] in sentences_to_detect_skill[{self.sentences_to_detect_skill}]")
             return None
-        
+
         self.stepLLMToolcall.setGlobalSkillset(self.globalSkillset)
         self.stepLLMToolcall.setContext(self.context)
         self.stepLLMToolcall.setQuery(sentence)
         self.stepLLMToolcall.setLLM(self.llm if not self.llm.reasoner_model else self.context.getGlobalContext().settings.llmDefault)
         
-        skillName, skillResp = self._useSkill(sentence)
+        skillName, skillResp = self._useSkill(sentence, **kwargs)
         if not skillName:
             return None
 
@@ -362,15 +355,17 @@ class StreamingProcessor:
         self.streamReset = True
         return skillResp + endMark
 
-    def _useSkill(self, query: str) -> Tuple[str, str]:
+    def _useSkill(self, query: str, **kwargs) -> Tuple[str, str]:
         for toolkit in self.globalSkillset.skillset:
             if isinstance(toolkit, AgentToolkit):
                 if not query[1:].startswith(toolkit.getName()) :
                     continue
 
                 response = toolkit.agent.execute(
+                    context=self.context,
                     query=query[len(toolkit.agent.name)+1:].strip(), 
-                    args=self.context.getVarDict().getGlobalDict())
+                    args=self.context.getVarDict().getGlobalDict(),
+                    **kwargs)
                 return toolkit.getName(), response.respStr
             else:
                 for toolName, _ in toolkit.getToolDescs().items():
@@ -416,11 +411,10 @@ class Instruction:
             label: str = None,
             observation: str = None,
             prev = None) -> None:
-        self.id = self._createId()
         self.llmBlock = llmBlock
         self.syntaxParser = SyntaxParser(
             label=label,
-            settings=llmBlock.context.globalContext.settings,
+            settings=llmBlock.globalContext.settings,
             instruction=curInstruct, 
             repoFuncs=llmBlock.repoFuncs)
         self.curInstruct = self.syntaxParser.getInstruction()
@@ -431,10 +425,9 @@ class Instruction:
         self.label = label
         self.prev: Instruction = prev
         self.observation = observation
-        self.varDict = llmBlock.getVarDict()
+        self.id = self._createId()
 
         self.stepInstAnalysis = StepLLMInstrAnalysis(
-            llmBlock=llmBlock,
             instruction=self)
         self.llm :EnhancedLLM = None
         self.reasoning :Reasoning = None
@@ -445,12 +438,13 @@ class Instruction:
 
     def execute(
             self, 
-            execNode: ExecNode,
             args :dict, 
             **kwargs) -> InstructResult:
+        self.varDict = self.llmBlock.getVarDict()
         try:
             self._formatCurInstruct(args)
         except Exception as e:
+            print(traceback.format_exc())
             raise RuntimeError(f"fail parse instruct[{self.curInstruct}]: {str(e)}")
 
         if self.noCache:
@@ -480,7 +474,10 @@ class Instruction:
         
         kwargs["globalSkillset"] = self.llmBlock.globalSkillset
         
+        self.stepInstAnalysis.setContext(self.llmBlock.context)
         self.stepInstAnalysis.setLLM(self._getCurLLM())
+        self.stepInstAnalysis.setToolkit(self._getToolkit())
+        self.stepInstAnalysis.setGlobalSkillset(self.llmBlock.globalSkillset)
         instAnalysisResult = self.stepInstAnalysis.streamAndFormat(
             reasoning=self.reasoning,
             args=args,
@@ -557,11 +554,14 @@ class Instruction:
     
     def _processCall(self, args: dict, **kwargs):
         def callFunc(instruction: Instruction, theArgs: dict):
-            args = {**instruction.llmBlock.context.getVarDict().getAllDict(), **theArgs["args"]}
-            return instruction.llmBlock.context.getEnv().execute(
+            context = instruction.llmBlock.context
+            args = {**context.getVarDict().getAllDict(), **theArgs["args"]}
+            return context.getEnv().execute(
                 agentName=instruction.syntaxParser.callObj,
+                context=context,
                 query=theArgs["query"].format(**args),
-                args=args)
+                args=args,
+                **{"execNode" : kwargs["execNode"]})
         return self._processWithRetry(lambdaFunc=callFunc, args=args, logType="call")
 
     def _processRet(self, args: dict, **kwargs):
@@ -820,7 +820,7 @@ class TaskEngine:
             instructResult = self._step(
                     instruction=curInstruction, 
                     args=taskArgs, 
-                    **kwargs)
+                    **{**kwargs, "execNode" : execNode})
             if instructResult.isRet():
                 logger.info("end of the task")
                 break
@@ -876,7 +876,7 @@ class LLMBlock(BaseBlock):
     def __init__(
             self,
             agentName: str,
-            context: Context = None,
+            globalContext: GlobalContext = None,
             config: str = None,
             task: str = None,
             taskExpr: str = None,
@@ -886,12 +886,12 @@ class LLMBlock(BaseBlock):
             repoFuncs=None) -> None:
         super().__init__(
             agentName=agentName,
-            context=context, 
+            globalContext=globalContext, 
             config=config, 
             toolkit=toolkit, 
             repoFuncs=repoFuncs)
 
-        self.systemPrompt = Loader.load(self.context.globalContext.settings.llmBasicConfig.systemPrompt)
+        self.systemPrompt = Loader.load(self.globalContext.settings.llmBasicConfig.systemPrompt)
 
         if taskExpr:
             self.task = taskExpr    
@@ -903,7 +903,7 @@ class LLMBlock(BaseBlock):
         self.taskEngine = TaskEngine(self, self.task)
         self.instructions = []
         self.stepLLMExtractor = StepLLMExtractor(
-            globalContext=self.context.globalContext)
+            globalContext=self.globalContext)
         self.globalSkillset = None
 
     def compile(self):
@@ -927,14 +927,14 @@ class LLMBlock(BaseBlock):
     def execute(
             self, 
             context: Context,
-            query: str = None, 
+            query: str,
             args: dict = {},
             prevBlock: LLMBlock = None,
             execNodeParent: ExecNode = None,
             **kwargs) -> Response:
         super().execute(
             context=context, 
-            query=query, 
+            query=query,
             args=args, 
             prevBlock=prevBlock, 
             execNodeParent=execNodeParent,
@@ -1028,7 +1028,7 @@ class LLMBlock(BaseBlock):
     @staticmethod
     def create(
             agentName: str,
-            context: Context = None,
+            globalContext: GlobalContext = None,
             config: str = None,
             task: str = None,
             taskExpr: str = None,
@@ -1038,7 +1038,7 @@ class LLMBlock(BaseBlock):
             repoFuncs=None) -> 'LLMBlock':
         return LLMBlock(
             agentName=agentName,
-            context=context,
+            globalContext=globalContext,
             config=config,
             task=task,
             taskExpr=taskExpr,

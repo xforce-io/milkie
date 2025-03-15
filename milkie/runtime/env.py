@@ -4,6 +4,7 @@ from milkie.config.config import GlobalConfig
 from milkie.context import Context
 from milkie.functions.toolkits.agent_toolkit import AgentToolkit
 from milkie.functions.toolkits.skillset import Skillset
+from milkie.global_context import GlobalContext
 from milkie.runtime.agent_program import AgentProgram
 from milkie.runtime.chatroom_program import ChatroomProgram
 from milkie.runtime.datasource import DataSource
@@ -13,21 +14,21 @@ from milkie.trace import stdout
 class Env:
     def __init__(
         self, 
-        context: Context = None, 
+        globalContext: GlobalContext = None, 
         config: str | GlobalConfig = None,
         agentPrograms: list[AgentProgram] = None,
         chatroomPrograms: list[ChatroomProgram] = None,
         globalSkillset: Skillset = None
     ) -> None:
-        self.context = context
+        self.globalContext = globalContext
         self.config = config
-        self.context.getGlobalContext().setEnv(self)
-        self.dataSource = DataSource(self.context.globalContext.globalConfig)
+        self.globalContext.setEnv(self)
+        self.dataSource = DataSource(self.globalContext.globalConfig)
 
         self.agents: dict[str, Agent] = {
             "stdin": FakeAgentStdin(
                 code="", 
-                context=self.context, 
+                globalContext=self.globalContext, 
                 config=self.config
             )
         }
@@ -40,7 +41,7 @@ class Env:
                 agentName=agentProgram.name,
                 desc=agentProgram.desc,
                 code=agentProgram.getCode(), 
-                context=self.context.copy(),
+                globalContext=self.globalContext,
                 config=self.config,
                 toolkit=agentProgram.toolkit, 
                 usePrevResult=False,
@@ -51,7 +52,7 @@ class Env:
                 name=chatroomProgram.name,
                 desc=chatroomProgram.desc,
                 host=chatroomProgram.host,
-                context=self.context.copy(),
+                globalContext=self.globalContext,
                 config=self.config
             )
         
@@ -88,9 +89,10 @@ class Env:
 
     def execute(
             self, 
+            context: Context,
+            query: str,
             chatroomName: str=None,
             agentName: str=None, 
-            query: str=None, 
             args: dict={},
             **kwargs) -> Response:
         if chatroomName and chatroomName not in self.chatrooms:
@@ -101,17 +103,17 @@ class Env:
         if chatroomName:
             stdout(f"\n <<< start of chatroom[{chatroomName}] with query {query} >>> ", **kwargs)
             response = self.chatrooms[chatroomName].execute(
-                query=query, 
+                context=context,
+                query=query,
                 args=args, 
                 **kwargs)
             stdout(f"\n <<< end of chatroom[{chatroomName}] >>>\n", **kwargs)
             return response
         elif agentName:
             stdout(f"\n <<< start of agent[{agentName}] with query {query} >>> ", **kwargs)
-            self.context.setCurQuery(query)
             response = self.agents[agentName].execute(
-                context=self.context,
-                query=query, 
+                context=context,
+                query=query,
                 args=args, 
                 top=True, 
                 **kwargs)

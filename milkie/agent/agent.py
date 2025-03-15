@@ -17,6 +17,7 @@ from milkie.context import Context
 from milkie.config.config import GlobalConfig
 from milkie.agent.exec_graph import ExecNode, ExecNodeType
 from milkie.functions.toolkits.toolkit import Toolkit
+from milkie.global_context import GlobalContext
 from milkie.response import Response
 import logging
 
@@ -30,7 +31,7 @@ class Agent(BaseBlock):
             agentName: str,
             desc: str,
             code: str, 
-            context: Context = None, 
+            globalContext: GlobalContext = None, 
             config: str | GlobalConfig = None,
             toolkit: Toolkit = None,
             usePrevResult=False,
@@ -40,7 +41,7 @@ class Agent(BaseBlock):
 
         super().__init__(
             agentName=agentName, 
-            context=context, 
+            globalContext=globalContext, 
             config=config, 
             toolkit=toolkit, 
             usePrevResult=usePrevResult, 
@@ -54,37 +55,37 @@ class Agent(BaseBlock):
         self.funcBlocks: List[FuncBlock] = []
         self.topBlocks: List[FlowBlock] = []
         self.repoFuncs.add("Retrieval", RetrievalBlock(
-            context=self.context,
+            globalContext=globalContext,
             config=self.config,
             repoFuncs=self.repoFuncs
         ))
         self.repoFuncs.add("ReindexFromLocal", ReindexFromLocalBlock(
-            context=self.context,
+            globalContext=globalContext,
             config=self.config,
             repoFuncs=self.repoFuncs
         ))
         self.repoFuncs.add("NoCache", NoCache(
-            context=self.context,
+            globalContext=globalContext,
             config=self.config,
             repoFuncs=self.repoFuncs
         ))
         self.repoFuncs.add("LLM", SetModel(
-            context=self.context,
+            globalContext=globalContext,
             config=self.config,
             repoFuncs=self.repoFuncs
         ))
         self.repoFuncs.add("Import", ImportFunc(
-            context=self.context,
+            globalContext=globalContext,
             config=self.config,
             repoFuncs=self.repoFuncs
         ))
         self.repoFuncs.add("ReasoningSelfConsistency", SetReasoningSelfConsistency(
-            context=self.context,
+            globalContext=globalContext,
             config=self.config,
             repoFuncs=self.repoFuncs
         ))
         self.repoFuncs.add("ReasoningSelfCritique", SetReasoningSelfCritique(
-            context=self.context,
+            globalContext=globalContext,
             config=self.config,
             repoFuncs=self.repoFuncs
         ))
@@ -148,7 +149,7 @@ class Agent(BaseBlock):
         
         self.topBlocks = [LLMBlock.create(
             agentName=self.name,
-            context=self.context,
+            globalContext=self.globalContext,
             config=self.config,
             taskExpr=self.code,
             toolkit=self.toolkit,
@@ -164,7 +165,7 @@ class Agent(BaseBlock):
         funcBlock = FuncBlock.create(
             agentName=self.name,
             funcDefinition='\n'.join(lines),
-            context=self.context,
+            globalContext=self.globalContext,
             config=self.config,
             toolkit=self.toolkit,
             repoFuncs=self.repoFuncs
@@ -175,27 +176,24 @@ class Agent(BaseBlock):
         self.topBlocks.append(FlowBlock.create(
             agentName=self.name,
             flowCode='\n'.join(lines),
-            context=self.context,
+            globalContext=self.globalContext,
             config=self.config,
             toolkit=self.toolkit,
-            usePrevResult=self.usePrevResult,
             repoFuncs=self.repoFuncs
         ))
 
     def execute(
             self, 
             context: Context = None,
-            query: str = None, 
+            query: str = None,
             args: dict = {}, 
             prevBlock: BaseBlock = None,
-            execNodeParent: ExecNode = None,
             **kwargs) -> Response:
         super().execute(
             context=context,
-            query=query, 
+            query=query,
             args=args, 
             prevBlock=prevBlock, 
-            execNodeParent=execNodeParent,
             **kwargs)
         
         result = None
@@ -216,7 +214,7 @@ class Agent(BaseBlock):
             history.resetUse()
             kwargs["history"] = history
 
-        execNode = execNodeParent.createChildNode(ExecNodeType.AGENT)
+        execNode = kwargs["execNode"].createChildNode(ExecNodeType.AGENT)
         for block in self.topBlocks:
             result = block.execute(
                 context=context,
@@ -235,7 +233,7 @@ class FakeAgentStdin(Agent):
     def __init__(
             self, 
             code: str, 
-            context: Context = None, 
+            globalContext: GlobalContext = None, 
             config: str | GlobalConfig = None, 
             toolkit: Toolkit = None, 
             usePrevResult=False, 
@@ -244,7 +242,7 @@ class FakeAgentStdin(Agent):
             agentName="fake stdin",
             desc="mock stdin agent",
             code=code,
-            context=context,
+            globalContext=globalContext,
             config=config,
             toolkit=toolkit,
             usePrevResult=usePrevResult,
@@ -253,7 +251,8 @@ class FakeAgentStdin(Agent):
 
     def execute(
             self, 
-            query: str = None, 
+            context: Context,
+            query: str = None,
             args: dict = {}, 
             prevBlock: BaseBlock = None,
             **kwargs) -> Response:

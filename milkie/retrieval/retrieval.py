@@ -31,12 +31,10 @@ class RetrievalModule:
             self, 
             globalConfig :GlobalConfig,
             retrievalConfig :RetrievalConfig,
-            memoryWithIndex :MemoryWithIndex,
-            context :Context):
+            memoryWithIndex :MemoryWithIndex):
         self.globalConfig = globalConfig
         self.retrievalConfig = retrievalConfig
         self.memoryWithIndex = memoryWithIndex
-        self.context = context
 
         self._buildRetriever()
 
@@ -58,12 +56,12 @@ class RetrievalModule:
         self.memoryWithIndex.rebuildFromLocalDir(localDir)
         self._buildRetriever()
         
-    def retrieve(self, context :Context, **kwargs) -> List[NodeWithScore]:
+    def retrieve(self, context :Context, query :str, **kwargs) -> List[NodeWithScore]:
         if self.chunkAugment:
             self.chunkAugment.set_context(context)
 
-        if context.getCurQuery().queryType == QueryType.FILEPATH:
-            filepath = context.getCurQuery().query
+        if context.getQuery().queryType == QueryType.FILEPATH:
+            filepath = context.getQuery().query
             content = ""
             if filepath.endswith(".txt"):
                 content = self._getTxtFileContent(filepath)
@@ -107,8 +105,7 @@ class RetrievalModule:
             refine_template=candidateRefinePromptImpl("qa_refine"),
             response_synthesizer=responseSynthesizer)
         
-        curQuery = context.getCurQuery().query
-        result = self.engine.retrieve(QueryBundle(query_str=curQuery))
+        result = self.engine.retrieve(QueryBundle(query_str=query))
         context.setRetrievalResult(result)
         return result
 

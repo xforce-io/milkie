@@ -3,26 +3,26 @@ from milkie.agent.func_block.func_block import FuncBlock
 from milkie.context import Context
 from milkie.llm.reasoning.reasoning_self_consistency import ReasoningSelfConsistency
 from milkie.response import Response
-
+from milkie.global_context import GlobalContext
 
 class SetReasoningSelfConsistency(FuncBlock):
 
     def __init__(
             self, 
-            context: Context, 
+            globalContext: GlobalContext, 
             config: str, 
             repoFuncs=None):
         super().__init__(
             agentName="SetReasoningSelfConsistency", 
-            context=context, 
+            globalContext=globalContext, 
             config=config, 
             repoFuncs=repoFuncs)
 
         self.funcName = "ReasoningSelfConsistency"
         self.params = ["amateur"]
 
-    def execute(self, context: Context, query: str, args: dict, **kwargs):
-        BaseBlock.execute(self, context, query, args, **kwargs)
+    def execute(self, context: Context, args: dict, **kwargs):
+        BaseBlock.execute(self, context, args, **kwargs)
 
         self._restoreParams(args, self.params)
         amateur = args.get("amateur")

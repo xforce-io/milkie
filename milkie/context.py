@@ -67,6 +67,9 @@ class VarDict:
     def updateFromDict(self, newDict :dict) -> None:
         self.globalDict.update(newDict)
 
+    def updateFromDictLocal(self, newDict :dict) -> None:
+        self.localDict.update(newDict)
+
     def copy(self) -> VarDict:
         result = copy.deepcopy(self)
         return result
@@ -136,7 +139,7 @@ class Context:
     def __init__(self, globalContext) -> None:
         self.globalContext = globalContext
         self.reqTrace = ReqTracer()
-        self.curQuery: Optional[QueryStructure] = None
+        self.query: Optional[QueryStructure] = None
         self.retrievalResult: Optional[List[NodeWithScore]] = None
         self.decisionResult: Optional[Response] = None
         self.instructions: List[Any] = []
@@ -154,15 +157,21 @@ class Context:
         memoryWithIndex = self.globalContext.memoryWithIndex
         return memoryWithIndex.memory if memoryWithIndex else None
     
-    def setCurQuery(self, query: str) -> None:
-        self.curQuery = parseQuery(query)
+    def getExecGraph(self) -> ExecGraph:
+        return self.execGraph
+
+    def setQuery(self, query: str) -> None:
+        self.query = parseQuery(query)
         self.execGraph.start(query)
 
-    def getCurQuery(self) -> Optional[QueryStructure]:
-        return self.curQuery
+    def getQuery(self) -> Optional[QueryStructure]:
+        return self.query
 
-    def getCurInstruction(self) -> Optional[Any]:
-        return self.instructions[-1] if self.instructions else None
+    def getQueryStr(self) -> Optional[str]:
+        return self.query.query if self.query else None
+
+    def getInstructions(self) -> List[Any]:
+        return self.instructions
 
     def setRetrievalResult(self, retrievalResult: List[NodeWithScore]) -> None:
         self.retrievalResult = retrievalResult
@@ -186,15 +195,12 @@ class Context:
         return self.history
 
     def copy(self) -> Context:
-        """创建上下文的深拷贝"""
         newContext = Context(self.globalContext)
-        newContext.reqTrace = self.reqTrace
-        newContext.curQuery = self.curQuery
+        newContext.query = self.query
         newContext.retrievalResult = self.retrievalResult
         newContext.decisionResult = self.decisionResult
         newContext.instructions = self.instructions
         newContext.varDict = self.varDict.copy()
-        newContext.history = self.history.copy()
         return newContext
 
     @staticmethod
