@@ -162,8 +162,8 @@ class Toolkit():
             allDict: dict,
             needToParse :bool = False,
             **kwargs) -> FuncExecRecord:
-        import pdb; pdb.set_trace()
         tool = self.getToolsDict()[funcName]
+        
         if needToParse:
             args = restoreVariablesInDict(args, allDict)
         result = tool.func(**args, **kwargs)

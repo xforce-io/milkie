@@ -80,16 +80,17 @@ class Engine:
                 globalSkillset=self.globalSkillset
             )
 
+        result = None
         try:
             if chatroom:
-                return self.env.execute(
+                result = self.env.execute(
                     chatroomName=chatroom,
                     context=context,
                     query=context.getQueryStr(),
                     args=args,
                     **{**kwargs, "execNode" : context.getExecGraph().getRootNode()})
             elif agent:
-                return self.env.execute(
+                result = self.env.execute(
                     agentName=agent,
                     context=context,
                     query=context.getQueryStr(),
@@ -98,6 +99,9 @@ class Engine:
         except Exception as e:
             print(f"Engine run error: {str(e)}", flush=True)
             raise
+
+        print(context.getExecGraph().dump())
+        return result
 
     def executeAgent(
             self, 

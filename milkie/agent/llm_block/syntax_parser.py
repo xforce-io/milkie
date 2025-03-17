@@ -169,6 +169,7 @@ class OutputSyntax:
                     args=allArgs)
             elif self.format == OutputSyntaxFormat.JSON:
                 return extractJsonBlock(output)
+
         if self.format == OutputSyntaxFormat.CHECK:
             try:
                 return toolkit.runCode(

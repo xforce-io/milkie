@@ -15,7 +15,7 @@ from milkie.agent.llm_block.llm_block import LLMBlock
 from milkie.config.constant import KeywordFuncStart, KeywordFuncEnd
 from milkie.context import Context
 from milkie.config.config import GlobalConfig
-from milkie.agent.exec_graph import ExecNode, ExecNodeType
+from milkie.agent.exec_graph import ExecNode, ExecNodeAgent, ExecNodeType
 from milkie.functions.toolkits.toolkit import Toolkit
 from milkie.global_context import GlobalContext
 from milkie.response import Response
@@ -214,7 +214,9 @@ class Agent(BaseBlock):
             history.resetUse()
             kwargs["history"] = history
 
-        execNode = kwargs["execNode"].createChildNode(ExecNodeType.AGENT)
+        execNode = ExecNodeAgent.build(
+            execNodeParent=kwargs["execNode"],
+            name=self.name)
         for block in self.topBlocks:
             result = block.execute(
                 context=context,

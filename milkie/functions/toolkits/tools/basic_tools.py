@@ -109,7 +109,6 @@ class ToolSearchWebFromZhipu(Tool):
                 responses.append(response)
             
             self.cacheMgr.setValue(modelName, cacheKey, responses)
-            import pdb; pdb.set_trace()
             return json.dumps(responses, ensure_ascii=False)
             
         except Exception as e:

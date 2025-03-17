@@ -23,9 +23,6 @@ class GlobalSkills(object):
         }
         self.agents = dict()
 
-    def addAgent(self, agent):
-        self.agents[agent.name] = agent
-
     def getSkill(self, name: str) -> Toolkit:
         toolkit = self.toolkits.get(name)
         if toolkit:

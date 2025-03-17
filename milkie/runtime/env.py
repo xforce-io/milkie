@@ -46,7 +46,7 @@ class Env:
                 toolkit=agentProgram.toolkit, 
                 usePrevResult=False,
                 systemPrompt=agentProgram.getSystemPrompt())
-        
+
         for chatroomProgram in chatroomPrograms:
             self.chatrooms[chatroomProgram.name] = Chatroom(
                 name=chatroomProgram.name,

@@ -15,7 +15,7 @@ from milkie.agent.base_block import BaseBlock
 from milkie.agent.exec_graph import ExecNode, ExecNodeLLM, ExecNodeSkill
 from milkie.agent.llm_block.step_llm_extractor import StepLLMExtractor
 from milkie.config.constant import *
-from milkie.context import Context
+from milkie.context import Context, History
 from milkie.functions.toolkits.agent_toolkit import AgentToolkit
 from milkie.functions.toolkits.skillset import Skillset
 from milkie.functions.toolkits.toolkit import Toolkit, FuncExecRecord
@@ -117,7 +117,7 @@ class StepLLMStreaming(StepLLM):
             ExecNodeSkill.build(
                 execNodeParent=kwargs["execNode"], 
                 skillName=toolUsed, 
-                skillArgs=allDict, 
+                skillArgs=result, 
                 skillResult=funcExecRecords[0].result)
             
             return InstAnalysisResult(
@@ -154,6 +154,8 @@ class StepLLMInstrAnalysis(StepLLMStreaming):
                         systemPrompt += f"{name}.{toolName} -> \n{toolDesc}\n"
             systemPrompt += '''```\n
             如果需要使用技能，请使用 "@skillname ((技能参数))" 来调用技能。
+            例如，@tool1 ((参数1, 参数2)) 
+                 @tool2 ((参数3))
             '''
         return systemPrompt
         
@@ -303,14 +305,17 @@ class StreamingProcessor:
             if idx == -1:
                 break
 
-            resp = self._processSentenceStartWithAt(sentence[idx:], **kwargs)
+            resp = self._processSentenceStartWithAt(
+                sentence=sentence[idx:], 
+                preContext=sentence[:idx], 
+                **kwargs)
             if resp:
                 return resp
 
             startIndex = idx + 1
         return None
 
-    def _processSentenceStartWithAt(self, sentence: str, **kwargs) -> str:
+    def _processSentenceStartWithAt(self, sentence: str, preContext: str, **kwargs) -> str:
         if sentence in self.sentences_to_detect_skill:
             INFO(logger, f"sentence[{sentence}] in sentences_to_detect_skill[{self.sentences_to_detect_skill}]")
             return None
@@ -320,7 +325,7 @@ class StreamingProcessor:
         self.stepLLMToolcall.setQuery(sentence)
         self.stepLLMToolcall.setLLM(self.llm if not self.llm.reasoner_model else self.context.getGlobalContext().settings.llmDefault)
         
-        skillName, skillResp = self._useSkill(sentence, **kwargs)
+        skillName, skillResp = self._useSkill(sentence, preContext, **kwargs)
         if not skillName:
             return None
 
@@ -355,7 +360,7 @@ class StreamingProcessor:
         self.streamReset = True
         return skillResp + endMark
 
-    def _useSkill(self, query: str, **kwargs) -> Tuple[str, str]:
+    def _useSkill(self, query: str, preContext: str, **kwargs) -> Tuple[str, str]:
         for toolkit in self.globalSkillset.skillset:
             if isinstance(toolkit, AgentToolkit):
                 if not query[1:].startswith(toolkit.getName()) :
@@ -365,7 +370,7 @@ class StreamingProcessor:
                     context=self.context,
                     query=query[len(toolkit.agent.name)+1:].strip(), 
                     args=self.context.getVarDict().getGlobalDict(),
-                    **kwargs)
+                    **{k: v for k, v in kwargs.items() if k == "execNode"})
                 return toolkit.getName(), response.respStr
             else:
                 for toolName, _ in toolkit.getToolDescs().items():
@@ -373,7 +378,14 @@ class StreamingProcessor:
                             not query[1:].startswith(f"{toolkit.getName()}.{toolName}"):
                         continue
 
-                    kwargs = {"tools" : toolkit.getTools()}
+                    history = History()
+                    history.addHistoryUserPrompt(preContext)
+
+                    kwargs = {
+                        "tools" : toolkit.getTools(), 
+                        "execNode" : kwargs["execNode"],
+                        "history" : history
+                    }
                     self.stepLLMToolcall.setToolkit(toolkit)
                     response = self.stepLLMToolcall.streamAndFormat(**kwargs)
                     return toolkit.getName(), response.response
@@ -472,8 +484,6 @@ class Instruction:
         if useTool:
             kwargs["tools"] = self._getToolkit().getTools()
         
-        kwargs["globalSkillset"] = self.llmBlock.globalSkillset
-        
         self.stepInstAnalysis.setContext(self.llmBlock.context)
         self.stepInstAnalysis.setLLM(self._getCurLLM())
         self.stepInstAnalysis.setToolkit(self._getToolkit())
@@ -497,7 +507,6 @@ class Instruction:
             useTool=True,
             goto=None,
             analysis=instAnalysisResult.response,
-            answer=instAnalysisResult.funcExecRecords[0].result,
             logType="tool",
             toolName=instAnalysisResult.funcExecRecords[0].tool.get_function_name())
         
