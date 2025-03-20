@@ -7,7 +7,6 @@ from milkie.llm.enhanced_llm import EnhancedLLM
 from milkie.prompt.prompt import Loader
 from milkie.response import Response
 from milkie.llm.inference import failChat
-from milkie.trace import stdout
 from milkie.utils.commons import getToolsSchemaForTools
 from milkie.llm.reasoning.reasoning import Reasoning
 from milkie.llm.reasoning.reasoning_naive import ReasoningNaive
@@ -64,34 +63,6 @@ class StepLLM(ABC):
             **kwargs) -> Response:
         return self.formatResult(
             self.stream(llm, reasoning, args, **kwargs), 
-            **kwargs)
-
-    def streamOutputAndReturn(
-            self, 
-            llm :Optional[EnhancedLLM] = None, 
-            reasoning: Optional[Reasoning] = None,
-            args: dict = {}, 
-            **kwargs) -> str:
-        resp = self.llmCall(
-            llm=llm if llm else self.llm, 
-            reasoning=reasoning if reasoning else self.reasoning,
-            args=args, 
-            stream=True, 
-            **kwargs)
-        completeOutput = ""
-        for chunk in resp.respGen:
-            completeOutput += chunk.delta.content
-            stdout(chunk.delta.content, end="", flush=True, **kwargs)
-        return completeOutput
-
-    def streamOutputAndFormat(
-            self, 
-            llm :Optional[EnhancedLLM] = None, 
-            reasoning: Optional[Reasoning] = None,
-            args: dict = {}, 
-            **kwargs) -> Response:
-        return self.formatResult(
-            self.streamOutputAndReturn(llm, reasoning, args, **kwargs), 
             **kwargs)
     
     def completionAndFormat(

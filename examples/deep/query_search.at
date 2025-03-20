@@ -4,9 +4,9 @@
 从网络中快速收集一件事情的信息，并且做初步的解读
 @desc
 
-links. @Import("SearchToolkit") 上网搜索关于这个主题相关信息【{query}】 => json
+links. @Skill("SearchToolkit", "上网搜索关于这个主题相关信息【{query}】") => json
 FOR link in links
-    webpage. @Import("SearchToolkit") 从链接获取对应网页内容: {link.url}
+    webpage. @Skill("SearchToolkit", "从链接获取对应网页内容: {link.url}")
 END -> contents
 
 allContent. #PY ```"/".join(contents)```

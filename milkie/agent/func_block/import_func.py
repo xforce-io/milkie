@@ -33,3 +33,10 @@ class ImportFunc(FuncBlock):
         kwargs["curInstruction"].toolkit = context.globalContext.getEnv().getGlobalSkillset().getSkill(toolkit)
         return Response(respStr="imported toolkit")
 
+    def createFuncCall(self):
+        newFuncCall = ImportFunc(
+            globalContext=self.globalContext, 
+            config=self.config, 
+            repoFuncs=self.repoFuncs
+        )
+        return newFuncCall

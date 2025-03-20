@@ -1,5 +1,7 @@
-import copy
 import os
+from typing import Generator, Optional
+from milkie.agent.agent import Agent
+from milkie.chatroom.chatroom import Chatroom
 from milkie.context import Context
 from milkie.runtime.agent_program import AgentProgram
 from milkie.runtime.chatroom_program import ChatroomProgram
@@ -61,36 +63,53 @@ class Engine:
                 program.parse()
                 self.chatroomPrograms.append(program)
 
-        self.env = None
+        self.env = Env(
+            globalContext=Context.globalContext,
+            config=Context.globalContext.globalConfig,
+            agentPrograms=self.agentPrograms,
+            chatroomPrograms=self.chatroomPrograms,
+            globalSkillset=self.globalSkillset
+        )
         self.initContext = Context.create()
+
+    def getAllAgents(self) -> dict[str, Agent]:
+        return self.env.getAllAgents()
+
+    def getAgent(self, name: str) -> Optional[Agent]:
+        return self.env.getAgent(name)
+
+    def getAllChatrooms(self) -> dict[str, Chatroom]:
+        return self.env.getAllChatrooms()
+    
+    def getChatroom(self, name: str) -> Optional[Chatroom]:
+        return self.env.getChatroom(name)
+
+    def createContext(self, args: dict = {}) -> Context:
+        context = self.initContext.copy()
+        if "query" in args:
+            context.setQuery(args["query"])
+        return context
 
     def run(
             self, 
+            context: Optional[Context] = None,
             chatroom: str = None, 
             agent: str = None, 
             args: dict = {}, 
-            **kwargs):
-        context = self._createContext(args)
-        if self.env is None:
-            self.env = Env(
-                globalContext=Context.globalContext,
-                config=Context.globalContext.globalConfig,
-                agentPrograms=self.agentPrograms,
-                chatroomPrograms=self.chatroomPrograms,
-                globalSkillset=self.globalSkillset
-            )
+            **kwargs) -> Context:
+        if context is None:
+            context = self.createContext(args)
 
-        result = None
         try:
             if chatroom:
-                result = self.env.execute(
+                self.env.execute(
                     chatroomName=chatroom,
                     context=context,
                     query=context.getQueryStr(),
                     args=args,
                     **{**kwargs, "execNode" : context.getExecGraph().getRootNode()})
             elif agent:
-                result = self.env.execute(
+                self.env.execute(
                     agentName=agent,
                     context=context,
                     query=context.getQueryStr(),
@@ -101,7 +120,7 @@ class Engine:
             raise
 
         print(context.getExecGraph().dump())
-        return result
+        return context
 
     def executeAgent(
             self, 
@@ -109,7 +128,7 @@ class Engine:
             code: str, 
             args: dict={}, 
             **kwargs):
-        context = self._createContext(args)
+        context = self.createContext(args)
         agent = self.env.agents[agentName]
         agent.setCodeAndCompile(code)
         return self.env.execute(
@@ -117,9 +136,3 @@ class Engine:
             context=context, 
             args=args, 
             **{**kwargs, "execNode" : context.getExecGraph().getRootNode()})
-
-    def _createContext(self, args: dict):
-        context = self.initContext.copy()
-        if "query" in args:
-            context.setQuery(args["query"])
-        return context

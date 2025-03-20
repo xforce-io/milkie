@@ -11,6 +11,7 @@ class ExecNodeType(Enum):
     LLM = 2
     SKILL = 3
     ASSEMBLE = 4
+    TOOL = 5
 
 class ExecNode:
 
@@ -47,6 +48,8 @@ class ExecNode:
             childNode = ExecNodeSkill(self.execGraph)
         elif nodeType == ExecNodeType.ASSEMBLE:
             childNode = ExecNodeAssemble(self.execGraph)
+        elif nodeType == ExecNodeType.TOOL:
+            childNode = ExecNodeTool(self.execGraph)
         else:
             raise ValueError(f"Invalid node type: {nodeType}")
         
@@ -139,23 +142,23 @@ class ExecNodeSkill(ExecNode):
         super().__init__(execGraph, ExecNodeType.SKILL)
 
         self.skillName = ""
+        self.query = ""
         self.skillArgs = {}
         self.skillResult = ""
 
     def toDict(self) -> dict:
         base = super().toDict()
         base["skillName"] = self.skillName
+        base["query"] = self.query
         base["skillResult"] = self.skillResult
-        # 安全处理skillArgs
-        try:
-            json.dumps(self.skillArgs)  # 测试是否可序列化
-            base["skillArgs"] = self.skillArgs
-        except:
-            base["skillArgs"] = str(self.skillArgs)
+        base["skillArgs"] = self.skillArgs
         return base
 
     def setSkillName(self, skillName: str):
         self.skillName = skillName
+
+    def setQuery(self, query: str):
+        self.query = query
 
     def setSkillArgs(self, skillArgs: dict):
         self.skillArgs = skillArgs
@@ -167,13 +170,60 @@ class ExecNodeSkill(ExecNode):
     def build(
             execNodeParent: ExecNode, 
             skillName: str, 
+            query: str,
             skillArgs: dict, 
-            skillResult: str):
+            skillResult: str = None):
         execNodeSkill = execNodeParent.createChildNode(ExecNodeType.SKILL)
         execNodeSkill.setSkillName(skillName)
+        execNodeSkill.setQuery(query)
         execNodeSkill.setSkillArgs(skillArgs)
         execNodeSkill.setSkillResult(skillResult)
         return execNodeSkill
+
+class ExecNodeTool(ExecNode):
+    def __init__(
+            self, 
+            execGraph: ExecGraph):
+        super().__init__(execGraph, ExecNodeType.TOOL)
+
+        self.toolName = ""
+        self.query = ""
+        self.toolArgs = {}
+        self.toolResult = ""
+
+    def toDict(self) -> dict:
+        base = super().toDict()
+        base["toolName"] = self.toolName
+        base["query"] = self.query
+        base["toolArgs"] = self.toolArgs
+        base["toolResult"] = self.toolResult
+        return base
+
+    def setToolName(self, toolName: str):
+        self.toolName = toolName
+
+    def setQuery(self, query: str):
+        self.query = query
+
+    def setToolArgs(self, toolArgs: dict):
+        self.toolArgs = toolArgs
+
+    def setToolResult(self, toolResult: str):
+        self.toolResult = toolResult
+
+    @staticmethod
+    def build(
+            execNodeParent: ExecNode, 
+            toolName: str, 
+            query: str, 
+            toolArgs: dict,
+            toolResult: str = None):
+        execNodeTool = execNodeParent.createChildNode(ExecNodeType.TOOL)
+        execNodeTool.setToolName(toolName)
+        execNodeTool.setQuery(query)
+        execNodeTool.setToolArgs(toolArgs)
+        execNodeTool.setToolResult(toolResult)
+        return execNodeTool
 
 class ExecNodeAssemble(ExecNode):
     

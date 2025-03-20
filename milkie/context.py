@@ -1,7 +1,8 @@
 from __future__ import annotations
+from queue import Queue
 import copy
 from datetime import datetime
-from typing import Dict, List, Optional, Any
+from typing import Dict, Generator, List, Optional, Any
 from llama_index.core.base.response.schema import NodeWithScore
 from llama_index.core.base.llms.types import ChatMessage, MessageRole
 
@@ -38,7 +39,7 @@ class VarDict:
     
     def setGlobal(self, key: str, value: Any) -> None:
         assert key is not None
-            
+
         if value is None:
             self.globalDict.pop(key, None)
         else:
@@ -46,7 +47,7 @@ class VarDict:
 
     def setLocal(self, key: str, value: Any) -> None:
         assert key is not None
-            
+
         if value is None:
             self.localDict.pop(key, None)
         else:
@@ -145,6 +146,7 @@ class Context:
         self.instructions: List[Any] = []
         self.varDict = VarDict()
         self.history = History()
+        self.respQueue = Queue()
         self.execGraph = ExecGraph()
 
     def getGlobalContext(self):
@@ -194,6 +196,13 @@ class Context:
     def getHistory(self) -> History:
         return self.history
 
+    def getRespStream(self) -> Generator[str, None, None]:
+        while True:
+            item = self.respQueue.get()
+            if item is None:
+                break
+            yield item
+
     def copy(self) -> Context:
         newContext = Context(self.globalContext)
         newContext.query = self.query
@@ -203,6 +212,9 @@ class Context:
         newContext.varDict = self.varDict.copy()
         return newContext
 
+    def closeStream(self) -> None:
+        self.respQueue.put(None)
+
     @staticmethod
     def create(configPath: Optional[str] = None) -> Context:
         """创建新的上下文实例"""
@@ -211,3 +223,9 @@ class Context:
 
         Context.globalContext = GlobalContext.create(configPath)
         return Context(Context.globalContext)
+
+    def genResp(self, info :str, **kwargs):
+        if "end" in kwargs:
+            self.respQueue.put(info + kwargs["end"])
+        else:
+            self.respQueue.put(info + "\n")

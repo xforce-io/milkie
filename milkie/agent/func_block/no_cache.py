@@ -21,8 +21,21 @@ class NoCache(FuncBlock):
         self.funcName = "NoCache"
         self.params = []
 
-    def execute(self, context: Context, args: dict, **kwargs):
-        BaseBlock.execute(self, context, args, **kwargs)
+    def execute(
+            self, 
+            context: Context, 
+            query: str,
+            args: dict, 
+            **kwargs):
+        BaseBlock.execute(self, context, query, args, **kwargs)
 
         kwargs["curInstruction"].noCache = True
         return Response(respStr="set no cache")
+
+    def createFuncCall(self):
+        newFuncCall = NoCache(
+            globalContext=self.globalContext, 
+            config=self.config, 
+            repoFuncs=self.repoFuncs
+        )
+        return newFuncCall

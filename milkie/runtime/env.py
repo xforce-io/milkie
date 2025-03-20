@@ -1,3 +1,4 @@
+from typing import Optional
 from milkie.agent.agent import Agent, FakeAgentStdin
 from milkie.chatroom.chatroom import Chatroom
 from milkie.config.config import GlobalConfig
@@ -9,7 +10,6 @@ from milkie.runtime.agent_program import AgentProgram
 from milkie.runtime.chatroom_program import ChatroomProgram
 from milkie.runtime.datasource import DataSource
 from milkie.response import Response
-from milkie.trace import stdout
 
 class Env:
     def __init__(
@@ -87,6 +87,18 @@ class Env:
         for chatroom in self.chatrooms.values():
             chatroom.compile()
 
+    def getAllAgents(self) -> dict[str, Agent]:
+        return self.agents
+
+    def getAgent(self, name: str) -> Optional[Agent]:
+        return self.agents.get(name)
+
+    def getAllChatrooms(self) -> dict[str, Chatroom]:
+        return self.chatrooms
+
+    def getChatroom(self, name: str) -> Optional[Chatroom]:
+        return self.chatrooms.get(name)
+
     def execute(
             self, 
             context: Context,
@@ -101,23 +113,23 @@ class Env:
             raise RuntimeError(f"Agent[{agentName}] not found")
 
         if chatroomName:
-            stdout(f"\n <<< start of chatroom[{chatroomName}] with query {query} >>> ", **kwargs)
+            context.genResp(f"\n <<< start of chatroom[{chatroomName}] with query {query} >>> ", **kwargs)
             response = self.chatrooms[chatroomName].execute(
                 context=context,
                 query=query,
                 args=args, 
                 **kwargs)
-            stdout(f"\n <<< end of chatroom[{chatroomName}] >>>\n", **kwargs)
+            context.genResp(f"\n <<< end of chatroom[{chatroomName}] >>>\n", **kwargs)
             return response
         elif agentName:
-            stdout(f"\n <<< start of agent[{agentName}] with query {query} >>> ", **kwargs)
+            context.genResp(f"\n <<< start of agent[{agentName}] with query {query} >>> ", **kwargs)
             response = self.agents[agentName].execute(
                 context=context,
                 query=query,
                 args=args, 
                 top=True, 
                 **kwargs)
-            stdout(f"\n <<< end of agent[{agentName}] >>>\n", **kwargs)
+            context.genResp(f"\n <<< end of agent[{agentName}] >>>\n", **kwargs)
             return response
 
     def getGlobalSkillset(self) -> Skillset:

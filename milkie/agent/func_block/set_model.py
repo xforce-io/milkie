@@ -23,9 +23,10 @@ class SetModel(FuncBlock):
     def execute(
             self, 
             context: Context, 
+            query: str,
             args: dict, 
             **kwargs):
-        BaseBlock.execute(self, context, args, **kwargs)
+        BaseBlock.execute(self, context, query, args, **kwargs)
 
         self._restoreParams(args, self.params)
         name = args["name"]
@@ -35,3 +36,11 @@ class SetModel(FuncBlock):
         
         kwargs["curInstruction"].llm = llm
         return Response(respStr="set model to " + name)
+
+    def createFuncCall(self):
+        newFuncCall = SetModel(
+            globalContext=self.globalContext, 
+            config=self.config, 
+            repoFuncs=self.repoFuncs
+        )
+        return newFuncCall

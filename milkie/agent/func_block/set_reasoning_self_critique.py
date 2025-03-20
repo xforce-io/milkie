@@ -21,8 +21,8 @@ class SetReasoningSelfCritique(FuncBlock):
         self.funcName = "ReasoningSelfCritique"
         self.params = ["critique"]
 
-    def execute(self, context: Context, args: dict, **kwargs):
-        BaseBlock.execute(self, context, args, **kwargs)
+    def execute(self, context: Context, query: str, args: dict, **kwargs):
+        BaseBlock.execute(self, context, query, args, **kwargs)
 
         self._restoreParams(args, self.params)
         critiqueLLM = args.get("critique")
@@ -37,3 +37,11 @@ class SetReasoningSelfCritique(FuncBlock):
             globalContext=self.context.globalContext,
             critiqueLLM=critiqueLLM)
         return Response(respStr="set reasoning self critique") 
+
+    def createFuncCall(self):
+        newFuncCall = SetReasoningSelfCritique(
+            globalContext=self.globalContext, 
+            config=self.config, 
+            repoFuncs=self.repoFuncs
+        )
+        return newFuncCall

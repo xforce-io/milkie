@@ -23,14 +23,23 @@ class ReindexFromLocalBlock(FuncBlock):
     def execute(
             self, 
             context: Context, 
+            query: str,
             args: dict, 
             **kwargs) -> Response:
-        BaseBlock.execute(self, context, args, **kwargs)
+        BaseBlock.execute(self, context, query, args, **kwargs)
 
         self._restoreParams(args, self.params)
         localDir = args["localDir"]
         self._rebuildFromLocalDir(localDir)
         return Response(respStr="reindex from local dir: " + localDir)
+
+    def createFuncCall(self):
+        newFuncCall = ReindexFromLocalBlock(
+            globalContext=self.globalContext, 
+            config=self.config, 
+            repoFuncs=self.repoFuncs
+        )
+        return newFuncCall
 
     def _rebuildFromLocalDir(self, localDir :str):
         self.context.getEnv().dataSource.getMainRetriever().rebuildFromLocalDir(localDir)

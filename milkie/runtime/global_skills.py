@@ -5,7 +5,7 @@ from milkie.functions.toolkits.filesys_toolkit import FilesysToolkit
 from milkie.functions.toolkits.search_toolkit import SearchToolkit
 from milkie.functions.toolkits.skillset import Skillset
 from milkie.functions.toolkits.toolkit import Toolkit
-
+from milkie.functions.toolkits.test_toolkit import TestToolkit
 
 class GlobalSkills(object):
     def __init__(self, globalContext):
@@ -15,6 +15,7 @@ class GlobalSkills(object):
             FilesysToolkit(self.globalContext),
             BasicToolkit(self.globalContext),
             SearchToolkit(self.globalContext),
+            TestToolkit(self.globalContext),
         ]
 
         self.toolkits = {

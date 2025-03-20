@@ -1,4 +1,5 @@
 from __future__ import annotations
+from abc import abstractmethod
 import re
 from typing import List
 from milkie.agent.base_block import BaseBlock
@@ -10,7 +11,6 @@ from milkie.response import Response
 from milkie.config.constant import InstFlagFunc, KeywordForStart
 import logging
 
-from milkie.trace import stdout
 from milkie.utils.data_utils import restoreVariablesInDict, restoreVariablesInStr
 
 logger = logging.getLogger(__name__)
@@ -145,27 +145,33 @@ class FuncBlock(BaseBlock):
     def execute(
             self, 
             context: Context,
+            query: str,
             args: dict = {}, 
             prevBlock: BaseBlock = None, 
             **kwargs) -> Response:
         super().execute(
             context=context, 
+            query=query, 
             args=args, 
             prevBlock=prevBlock, 
             **kwargs)
         
         params = self._restoreParams(args, self.params)
 
-        stdout(f"called func start: {self.funcName}, params: {params}", **kwargs)
+        self.context.genResp(f"called func start: {self.funcName}, params: {params}", **kwargs)
         response = self.flowBlock.execute(
             context=context,
             args=args, 
             prevBlock=prevBlock, 
             **kwargs)
-        stdout(f"called func end: {self.funcName}", **kwargs)
+        self.context.genResp(f"called func end: {self.funcName}", **kwargs)
 
         self.clearVarDictLocal(self.params)
         return response
+
+    @abstractmethod
+    def createFuncCall(self) -> FuncBlock:
+        pass
 
     def _restoreParams(self, args :dict, params :List[str]) -> dict:
         replaced = {}

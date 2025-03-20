@@ -1,5 +1,4 @@
 import logging
-from llama_index.core.prompts.base import PromptTemplate
 from milkie.cache.cache_kv import CacheKVMgr
 from milkie.config.config import FRAMEWORK, EmbeddingConfig, SingleLLMConfig, LLMType
 
@@ -26,9 +25,6 @@ class ModelFactory:
                 self.llms[signatureModel] = llm
                 return llm
         
-        if signatureModel == self.signatureLLMModel:
-            return self.localLlm
-
         self.localLlm = self._setLLMModel(config)
         return self.localLlm
 

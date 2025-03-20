@@ -21,8 +21,8 @@ class SetReasoningSelfConsistency(FuncBlock):
         self.funcName = "ReasoningSelfConsistency"
         self.params = ["amateur"]
 
-    def execute(self, context: Context, args: dict, **kwargs):
-        BaseBlock.execute(self, context, args, **kwargs)
+    def execute(self, context: Context, query: str, args: dict, **kwargs):
+        BaseBlock.execute(self, context, query, args, **kwargs)
 
         self._restoreParams(args, self.params)
         amateur = args.get("amateur")
@@ -38,3 +38,11 @@ class SetReasoningSelfConsistency(FuncBlock):
             self.context.globalContext,
             amateur)
         return Response(respStr="set reasoning self consistency")
+
+    def createFuncCall(self):
+        newFuncCall = SetReasoningSelfConsistency(
+            globalContext=self.globalContext, 
+            config=self.config, 
+            repoFuncs=self.repoFuncs
+        )
+        return newFuncCall

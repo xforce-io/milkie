@@ -1,0 +1,433 @@
+/* 重置所有元素的文本方向 */
+html, body, div, span, h1, h2, h3, h4, h5, h6, p, pre, a, code, img, b, i,
+dl, dt, dd, ol, ul, li, form, label, table, caption, tbody, tfoot, thead, tr, th, td,
+article, aside, canvas, details, embed, figure, figcaption, footer, header, menu, nav,
+output, section, summary, time, mark, audio, video, input, textarea, button {
+  writing-mode: horizontal-tb !important;
+  text-orientation: mixed !important;
+  letter-spacing: normal !important;
+  text-align: left !important;
+  direction: ltr !important;
+  transform: none !important;
+  -webkit-transform: none !important;
+  font-size-adjust: none !important;
+  text-combine-upright: none !important;
+  text-transform: none !important;
+  vertical-align: baseline !important;
+}
+
+/* 防止容器使用垂直布局 */
+.ant-layout,
+.ant-layout-sider,
+.ant-layout-content,
+.ant-layout-header,
+.ant-divider,
+.ant-card,
+.ant-card-body,
+.ant-card-head,
+.ant-card-head-title,
+.ant-card-meta,
+.ant-card-meta-title,
+.ant-card-meta-description,
+.ant-list,
+.ant-list-item,
+.ant-typography,
+.ant-row,
+.ant-col,
+.ant-form,
+.ant-input,
+.ant-btn,
+.query-canvas,
+.query-upper-section,
+.query-lower-section,
+.agent-list {
+  writing-mode: horizontal-tb !important;
+  display: block !important;
+}
+
+/* 特别处理布局容器 */
+.ant-layout {
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+.ant-layout-has-sider {
+  flex-direction: row !important;
+}
+
+.ant-layout-sider {
+  position: relative !important;
+  min-width: 0 !important;
+  width: 300px !important;
+  flex: 0 0 300px !important;
+  max-width: 300px !important;
+}
+
+.ant-layout-content {
+  position: relative !important;
+  flex: auto !important;
+}
+
+/* 右侧查询区域样式重置 */
+.query-canvas {
+  display: flex !important;
+  flex-direction: column !important;
+  height: 100%;
+  gap: 16px;
+  padding: 16px;
+}
+
+/* 禁用任何可能导致垂直排列的动画和过渡 */
+* {
+  transition: none !important;
+  animation: none !important;
+  box-sizing: border-box;
+}
+
+body, html, #root {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  width: 100%;
+}
+
+/* 代理列表样式 */
+.agent-list {
+  display: flex !important;
+  flex-direction: column !important;
+  height: 100%;
+  overflow-y: auto;
+  padding: 0 16px;
+}
+
+.agent-list-title {
+  margin: 16px 0 !important;
+  padding: 0 8px;
+}
+
+.agent-list .ant-list {
+  width: 100%;
+}
+
+.agent-list .ant-list-item {
+  padding: 8px !important;
+  cursor: pointer;
+  transition: background-color 0.3s ease !important;
+  border-radius: 4px;
+  margin: 4px 0;
+  display: block !important;
+}
+
+.agent-list .ant-list-item:hover {
+  background-color: #f5f5f5;
+}
+
+.agent-list .selected-item {
+  background-color: #e6f7ff;
+}
+
+.agent-list .selected-item:hover {
+  background-color: #e6f7ff;
+}
+
+.agent-card {
+  border: none;
+  background: transparent !important;
+  box-shadow: none !important;
+  width: 100%;
+}
+
+.agent-card .ant-card-body {
+  padding: 12px !important;
+}
+
+.agent-card-selected .ant-card-meta-title {
+  color: #1890ff;
+}
+
+.agent-list .ant-card-meta-title {
+  margin-bottom: 4px !important;
+  font-size: 16px;
+  color: #333;
+}
+
+.agent-list .ant-card-meta-description {
+  color: #666;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* 查询画布样式 */
+.query-canvas {
+  flex: 1;
+  height: 100%;
+  min-height: 0;
+  display: flex !important;
+  flex-direction: column !important;
+  padding: 24px;
+  gap: 24px;
+  overflow: auto;
+  width: 100%;
+}
+
+.query-upper-section {
+  flex: 0 0 auto;
+  background: #fff;
+  border: 1px solid #e8e8e8;
+  border-radius: 8px;
+  padding: 24px;
+  width: 100%;
+  display: block !important;
+}
+
+.agent-header {
+  margin-bottom: 20px;
+}
+
+.query-input-container {
+  display: flex !important;
+  flex-direction: row !important;
+  gap: 16px;
+  align-items: flex-start;
+  margin-top: 16px;
+  width: 100%;
+}
+
+.query-input {
+  flex: 1;
+  font-size: 14px;
+  border-radius: 4px;
+  width: calc(100% - 140px);
+}
+
+.query-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 120px;
+}
+
+.query-button {
+  flex: 0 0 auto;
+  height: 40px;
+  padding: 0 16px;
+  font-size: 14px;
+  width: 100%;
+}
+
+.query-lower-section {
+  flex: 1;
+  min-height: 0;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden;
+  border: 1px solid #e8e8e8;
+  border-radius: 8px;
+  width: 100%;
+}
+
+.response-card {
+  height: 100%;
+  display: flex !important;
+  flex-direction: column !important;
+  border: none !important;
+  border-radius: 8px;
+  overflow: hidden;
+  width: 100%;
+}
+
+.response-card .ant-card-head {
+  flex: 0 0 auto;
+  min-height: 48px;
+  padding: 0 24px;
+  background: #fafafa;
+  border-bottom: 1px solid #e8e8e8;
+  display: flex !important;
+  align-items: center;
+}
+
+.response-card .ant-card-body {
+  flex: 1;
+  overflow: auto;
+  padding: 24px;
+  background: #fff;
+  min-height: 100px;
+}
+
+.loading-container {
+  display: flex !important;
+  justify-content: center;
+  align-items: center;
+  height: 200px;
+  width: 100%;
+}
+
+.response-pre {
+  margin: 0;
+  padding: 0;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+  font-size: 14px;
+  line-height: 1.6;
+  color: #333;
+}
+
+.empty-state {
+  display: flex !important;
+  justify-content: center;
+  align-items: center;
+  height: 100%;
+  background: #fafafa;
+  border-radius: 8px;
+  padding: 40px;
+  width: 100%;
+}
+
+/* 响应式调整 */
+@media (max-width: 768px) {
+  .app-main-content {
+    flex-direction: column !important;
+    height: auto;
+  }
+  
+  .app-sider {
+    width: 100% !important;
+    max-width: 100% !important;
+    flex: 0 0 auto !important;
+    height: auto;
+    min-height: 300px;
+  }
+  
+  .app-content {
+    width: 100%;
+    height: calc(100vh - 365px);
+  }
+}
+
+/* 覆盖默认的Vite样式 */
+#root {
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  text-align: left;
+}
+
+.logo {
+  height: 6em;
+  padding: 1.5em;
+  will-change: filter;
+  transition: filter 300ms;
+}
+.logo:hover {
+  filter: drop-shadow(0 0 2em #646cffaa);
+}
+.logo.react:hover {
+  filter: drop-shadow(0 0 2em #61dafbaa);
+}
+
+@keyframes logo-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  a:nth-of-type(2) .logo {
+    animation: logo-spin infinite 20s linear;
+  }
+}
+
+.card {
+  padding: 2em;
+}
+
+.read-the-docs {
+  color: #888;
+}
+
+/* 防止卡片高度变化导致的闪烁 */
+.agent-list .ant-card {
+  height: 100%;
+  min-height: 80px;
+}
+
+/* App容器相关样式 */
+.app-container {
+  min-height: 100vh;
+  height: 100vh;
+  width: 100%;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden;
+}
+
+.app-header {
+  padding: 0 24px;
+  background: #fff;
+  border-bottom: 1px solid #f0f0f0;
+  height: 64px;
+  flex: 0 0 auto;
+  display: flex !important;
+}
+
+.header-content {
+  height: 100%;
+  width: 100%;
+  display: flex !important;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.app-divider {
+  margin: 0;
+  flex: 0 0 auto;
+}
+
+.app-main-content {
+  flex: 1;
+  min-height: 0;
+  height: calc(100vh - 65px);
+  display: flex !important;
+  flex-direction: row !important;
+  background: #fff;
+  overflow: hidden;
+}
+
+.app-sider {
+  background: #fff;
+  border-right: 1px solid #f0f0f0;
+  flex: 0 0 300px !important;
+  width: 300px !important;
+  max-width: 300px !important;
+  min-width: 300px !important;
+  height: 100%;
+  overflow: auto;
+}
+
+.app-content {
+  flex: 1;
+  display: flex !important;
+  flex-direction: column !important;
+  height: 100%;
+  width: calc(100% - 300px);
+  overflow: hidden;
+}
+
+.streaming-cursor {
+  display: inline-block;
+  width: 8px;
+  height: 16px;
+  background-color: #1890ff;
+  margin-left: 4px;
+  vertical-align: middle;
+  animation: blink 1s infinite;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}

@@ -65,6 +65,14 @@ class RetrievalBlock(FuncBlock):
         self._restoreParams(args, self.params)
         return self._retrieve(query, args)
 
+    def createFuncCall(self):
+        newFuncCall = RetrievalBlock(
+            globalContext=self.globalContext, 
+            config=self.config, 
+            repoFuncs=self.repoFuncs
+        )
+        return newFuncCall
+
     def _retrieve(self, query: str, args: dict) -> Response:
         self.dataSource.getMainRetriever().retrieve(self.context, query, **args)
         retrievalResult = self.context.retrievalResult

@@ -11,11 +11,12 @@ from milkie.agent.func_block.retrieval_block import RetrievalBlock
 from milkie.agent.func_block.set_model import SetModel
 from milkie.agent.func_block.set_reasoning_self_consistency import SetReasoningSelfConsistency
 from milkie.agent.func_block.set_reasoning_self_critique import SetReasoningSelfCritique
+from milkie.agent.func_block.skill_func import SkillFunc
 from milkie.agent.llm_block.llm_block import LLMBlock
 from milkie.config.constant import KeywordFuncStart, KeywordFuncEnd
 from milkie.context import Context
 from milkie.config.config import GlobalConfig
-from milkie.agent.exec_graph import ExecNode, ExecNodeAgent, ExecNodeType
+from milkie.agent.exec_graph import ExecNodeAgent
 from milkie.functions.toolkits.toolkit import Toolkit
 from milkie.global_context import GlobalContext
 from milkie.response import Response
@@ -85,6 +86,11 @@ class Agent(BaseBlock):
             repoFuncs=self.repoFuncs
         ))
         self.repoFuncs.add("ReasoningSelfCritique", SetReasoningSelfCritique(
+            globalContext=globalContext,
+            config=self.config,
+            repoFuncs=self.repoFuncs
+        ))
+        self.repoFuncs.add("Skill", SkillFunc(
             globalContext=globalContext,
             config=self.config,
             repoFuncs=self.repoFuncs

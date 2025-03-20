@@ -415,10 +415,11 @@ class SyntaxParser:
                 
                 params, funcCallPattern = self._parseFuncParams(pattern, self.instruction)
                 if params is not None:
-                    funcBlock.setParams(params)
-                    funcBlock.setFuncCallPattern(funcCallPattern)
-                    funcBlock.compile()
-                    self.funcsToCall.append(funcBlock)
+                    newFuncBlock = funcBlock.createFuncCall()
+                    newFuncBlock.setParams(params)
+                    newFuncBlock.setFuncCallPattern(funcCallPattern)
+                    newFuncBlock.compile()
+                    self.funcsToCall.append(newFuncBlock)
                 else:
                     raise SyntaxError(f"function[{funcName}] params not found")
 
