@@ -1,0 +1,325 @@
+/* GraphView组件相关样式 */
+/* 重置和强制覆盖所有Tree相关样式 */
+.centered-tree,
+.centered-tree * {
+  box-sizing: border-box;
+}
+
+/* 容器样式 */
+.centered-tree {
+  width: 100% !important;
+  overflow: auto !important;
+  text-align: center !important;
+  padding: 20px 0 !important;
+  position: relative !important;
+}
+
+/* 强制树节点居中 */
+.centered-tree .ant-tree {
+  width: 100% !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  background: transparent !important;
+}
+
+.centered-tree .ant-tree-list {
+  width: 100% !important;
+  position: static !important;
+  display: flex !important;
+  justify-content: center !important;
+}
+
+.centered-tree .ant-tree-list-holder {
+  width: 100% !important;
+  position: static !important;
+  display: flex !important;
+  justify-content: center !important;
+}
+
+.centered-tree .ant-tree-list-holder-inner {
+  position: static !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  width: auto !important;
+  transform: none !important;
+}
+
+/* 树节点样式 */
+.centered-tree .ant-tree-treenode {
+  display: flex !important;
+  justify-content: center !important;
+  width: 100% !important;
+  padding: 8px 0 !important;
+  position: relative !important;
+  transition: none !important;
+  transform: none !important;
+}
+
+.centered-tree .ant-tree-node-content-wrapper {
+  position: static !important;
+  display: flex !important;
+  justify-content: center !important;
+  padding: 0 !important;
+  transition: none !important;
+  background: transparent !important;
+}
+
+/* 完全去除左侧缩进 */
+.centered-tree .ant-tree-indent, 
+.centered-tree .ant-tree-indent-unit {
+  display: none !important;
+  width: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
+/* 隐藏切换器 */
+.centered-tree .ant-tree-switcher {
+  display: none !important;
+  width: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
+/* 去除所有可能影响布局的元素 */
+.centered-tree .ant-tree-node-selected,
+.centered-tree .ant-tree-node-content-wrapper::before,
+.centered-tree .ant-tree-node-content-wrapper::after {
+  display: none !important;
+  background: transparent !important;
+}
+
+/* 增强线条样式 */
+.centered-tree .tree-node-line {
+  position: absolute !important;
+  border: 2px dashed #d9d9d9 !important;
+  z-index: 0 !important;
+  pointer-events: none !important;
+}
+
+/* 垂直连接线 */
+.centered-tree .tree-node-line-vertical {
+  width: 0 !important;
+  top: -50% !important;
+  bottom: 50% !important;
+  left: 50% !important;
+  border-left: 2px dashed #d9d9d9 !important;
+  border-right: 0 !important;
+  border-top: 0 !important;
+  border-bottom: 0 !important;
+}
+
+/* 全屏模式样式 */
+.graph-card.fullscreen {
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  z-index: 1000 !important;
+  margin: 0 !important;
+  border-radius: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.graph-card.fullscreen .centered-tree {
+  max-height: calc(100vh - 70px) !important;
+}
+
+.fullscreen-icon {
+  cursor: pointer !important;
+  font-size: 16px !important;
+  transition: all 0.3s !important;
+}
+
+.fullscreen-icon:hover {
+  color: #1890ff !important;
+}
+
+/* 子树样式 */
+.centered-tree .ant-tree-child-tree {
+  margin-top: 30px !important;
+  width: 100% !important;
+  position: relative !important;
+}
+
+/* 禁用所有动画和过渡 */
+.centered-tree .ant-tree-list-motion,
+.centered-tree .ant-tree-motion-collapse,
+.centered-tree .ant-motion-collapse,
+.centered-tree .ant-tree-treenode-motion {
+  transition: none !important;
+  animation: none !important;
+  overflow: visible !important;
+}
+
+/* GraphView 特有样式 */
+/* 卡片样式 */
+.tree-node-card {
+  padding: 12px !important;
+  margin: 8px 0 !important;
+  background: #fff !important;
+  border-radius: 8px !important;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1) !important;
+  border: 1px solid #f0f0f0 !important;
+  transition: all 0.3s !important;
+  position: relative !important;
+  width: 360px !important;
+  display: inline-block !important;
+  text-align: left !important;
+  z-index: 5 !important;
+}
+
+/* 根节点卡片样式 */
+.tree-node-card-root {
+  width: 420px !important;
+}
+
+/* 卡片hover效果 */
+.tree-node-card:hover {
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15) !important;
+  border-color: #91d5ff !important;
+}
+
+/* 展开按钮样式 */
+.tree-node-toggle-btn {
+  position: absolute !important;
+  top: 10px !important;
+  right: 10px !important;
+  width: 28px !important;
+  height: 28px !important;
+  border-radius: 50% !important;
+  background-color: #f5f5f5 !important;
+  border: 1px solid #d9d9d9 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  cursor: pointer !important;
+  z-index: 100 !important;
+  user-select: none !important;
+  font-size: 14px !important;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.1) !important;
+}
+
+.tree-node-toggle-btn:hover {
+  background-color: #e6f7ff !important;
+  border-color: #91d5ff !important;
+}
+
+.tree-node-toggle-btn:active {
+  background-color: #bae7ff !important;
+}
+
+/* QueryCanvas特有样式 */
+/* 带有前缀以避免冲突 */
+.query-canvas .tree-node {
+  padding: 12px !important;
+  margin: 8px 0 !important;
+  background: #fff !important;
+  border-radius: 8px !important;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1) !important;
+  border: 1px solid #f0f0f0 !important;
+  transition: all 0.3s !important;
+  position: relative !important;
+  width: 360px !important;
+  display: inline-block !important;
+  text-align: left !important;
+  z-index: 5 !important;
+}
+
+.query-canvas .tree-node:hover {
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15) !important;
+  border-color: #91d5ff !important;
+}
+
+.query-canvas .tree-node-content {
+  background: #fff !important;
+  border: 1px solid #f0f0f0 !important;
+  border-radius: 8px !important;
+  padding: 16px !important;
+}
+
+.query-canvas .content-field {
+  background: #f5f5f5 !important;
+  padding: 8px !important;
+  border-radius: 4px !important;
+  border: 1px solid #e8e8e8 !important;
+  margin-top: 4px !important;
+  overflow: auto !important;
+}
+
+/* 查询界面布局 */
+.query-canvas {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  gap: 16px;
+}
+
+.query-upper-section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.agent-header {
+  padding: 0 0 16px 0;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.query-input-container {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.query-buttons {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.query-lower-section {
+  flex: 1;
+  overflow: auto;
+}
+
+.response-card {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.response-pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.streaming-cursor {
+  display: inline-block;
+  width: 8px;
+  height: 16px;
+  background-color: #1890ff;
+  animation: blink 1s infinite;
+  vertical-align: middle;
+  margin-left: 2px;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+@keyframes highlight-update {
+  0% {
+    background-color: #ffff9c;
+    border-color: #faad14;
+  }
+  100% {
+    background-color: #fff;
+    border-color: #f0f0f0;
+  }
+}
