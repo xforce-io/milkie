@@ -12,6 +12,7 @@ import PyPDF2
 from newspaper import Article
 import markdown2
 from typing import Any, Dict, List
+import uuid
 
 import requests
 from milkie.cache.cache_kv import GlobalCacheKVCenter
@@ -22,6 +23,97 @@ from milkie.trace import stdout
 from milkie.utils.data_utils import preprocessHtml
 
 logger = logging.getLogger(__name__)
+
+class ToolSearchWebFromZhipu(Tool):
+    
+    def __init__(self, globalContext):
+        self.globalContext = globalContext
+        self.cacheMgr = GlobalCacheKVCenter.getCacheMgr("data/cache/", category='web_search', expireTimeByDay=10)
+
+    def execute(
+        self,
+        query: str, 
+        maxResults: int = 3
+    ) -> str:
+        r"""使用智谱AI搜索引擎在互联网上搜索信息
+
+        Args:
+            query (str): 要搜索的查询字符串
+            maxResults (int): 最大搜索结果数，默认为10
+
+        Returns: 搜索结果的JSON字符串
+        """
+        modelName = "zhipu_search"
+        cacheKey = [{"query": query, "maxResults": maxResults}]
+        
+        cachedResult = self.cacheMgr.getValue(modelName, cacheKey)
+        if cachedResult:
+            return json.dumps(cachedResult, ensure_ascii=False)
+
+        try:
+            # 从配置文件获取API密钥
+            zhipuConfig = self.globalContext.globalConfig.getCloudConfig("zhipu")
+            if not zhipuConfig or not zhipuConfig.api_key:
+                raise ValueError("Zhipu API key not found in configuration")
+
+            # 配置智谱API请求，根据官方文档使用tools接口
+            url = f"{zhipuConfig.endpoint}/api/paas/v4/tools"
+            headers = {
+                "Authorization": f"Bearer {zhipuConfig.api_key}",
+                "Content-Type": "application/json"
+            }
+            
+            # 根据智谱AI的文档格式化请求
+            data = {
+                "tool": "web-search-pro",
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": query
+                    }
+                ],
+                "request_id": str(uuid.uuid4()),
+                "stream": False
+            }
+            
+            response = requests.post(url, headers=headers, json=data)
+            response.raise_for_status()
+            
+            # 解析响应结果
+            responseData = response.json()
+            
+            # 检查响应格式
+            if ("choices" not in responseData or 
+                len(responseData["choices"]) == 0 or 
+                "message" not in responseData["choices"][0] or
+                "tool_calls" not in responseData["choices"][0]["message"]):
+                raise ValueError("Invalid response format from Zhipu API")
+            
+            # 提取搜索结果
+            toolCalls = responseData["choices"][0]["message"]["tool_calls"]
+            searchResults = []
+            
+            for toolCall in toolCalls:
+                if toolCall.get("type") == "search_result" and "search_result" in toolCall:
+                    searchResults.extend(toolCall["search_result"])
+            
+            # 将结果转换为统一格式
+            responses = []
+            for i, result in enumerate(searchResults[:maxResults], start=1):
+                response = {
+                    "resultId": i,
+                    "title": result.get("title", ""),
+                    "description": result.get("content", ""),
+                    "url": result.get("link", ""),
+                }
+                responses.append(response)
+            
+            self.cacheMgr.setValue(modelName, cacheKey, responses)
+            return json.dumps(responses, ensure_ascii=False)
+            
+        except Exception as e:
+            ERROR(logger, f"zhipu search failed: {str(e)}")
+            return json.dumps([{"error": f"zhipu search failed: {str(e)}"}], ensure_ascii=False)
 
 class ToolSearchWebFromDuckDuckGo(Tool):
     
@@ -73,14 +165,6 @@ class ToolSearchWebFromDuckDuckGo(Tool):
         self.cacheMgr.setValue(modelName, cacheKey, responses)
         return json.dumps(responses, ensure_ascii=False)
 
-class ToolSearchWebFromSougouWechat(Tool):
-
-    def __init__(self):
-        self.cacheMgr = GlobalCacheKVCenter.getCacheMgr("data/cache/", category='web_search', expireTimeByDay=1)
-
-    def execute(self, query: str, maxResults: int = 10) -> str:
-        pass
-
 class ToolGetWebContentFromUrls(Tool):
 
     def __init__(self):
@@ -108,7 +192,7 @@ class ToolGetWebContentFromUrls(Tool):
         cleanTexts = []
         
         for url in urls:
-            stdout(f"Fetching content from {url}", info=True, flush=True, end="")
+            stdout(f"Fetching content from {url}", info=True, flush=True)
             try:
                 htmlContent = self._fetchUrl(url)
 
@@ -137,8 +221,6 @@ class ToolGetWebContentFromUrls(Tool):
                 errorMsg = f"Error processing the article from {url}: {str(e)}"
                 WARNING(logger, errorMsg)
                 cleanTexts.append(errorMsg)
-
-        stdout(f"Done fetching content", info=True, flush=True, end="")
         return "\n\n".join(cleanTexts)
 
     def _fetchUrl(self, url: str, headers: Dict[str, str] = None, timeout: int = 10) -> str:

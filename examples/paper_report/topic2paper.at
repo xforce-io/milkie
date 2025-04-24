@@ -6,7 +6,7 @@
 
 
 interestedFile. "{root}/dev/github/milkie/examples/paper_report/interested.json"
-interested. #PY ```import json;"/".join(json.load(open("{interestedFile}")).keys())```
+interested. #PY ```import json; return_value = "/".join(json.load(open("{interestedFile}")).keys())```
 paperinfoDir. "{root}/dev/github/milkie/data/paper_report"
 rawDir. "{paperinfoDir}/raw"
 topicToPaper. "{paperinfoDir}/{date}/topic2paper.txt"

@@ -3,6 +3,7 @@ from llama_index.core.schema import TextNode
 from milkie.agent.base_block import BaseBlock
 from milkie.agent.func_block.func_block import FuncBlock
 from milkie.context import Context
+from milkie.global_context import GlobalContext
 from milkie.memory.memory_with_index import MemoryWithIndex
 from milkie.response import Response
 from milkie.retrieval.retrieval import RetrievalModule
@@ -12,12 +13,12 @@ class RetrievalBlock(FuncBlock):
 
     def __init__(
             self,
-            context :Context = None,
+            globalContext: GlobalContext,
             config :str = None,
             repoFuncs=None):
         super().__init__(
             agentName="Retrieval", 
-            context=context, 
+            globalContext=globalContext, 
             config=config, 
             repoFuncs=repoFuncs)
 
@@ -26,42 +27,54 @@ class RetrievalBlock(FuncBlock):
         
         if self.config.memoryConfig and self.config.indexConfig:
             self.memoryWithIndex = MemoryWithIndex(
-                self.context.globalContext.settings,
+                globalContext.settings,
                 self.config.memoryConfig,
                 self.config.indexConfig,
-                self.context.globalContext.serviceContext)
+                globalContext.serviceContext)
         else:
-            self.memoryWithIndex = context.getGlobalContext().memoryWithIndex
+            self.memoryWithIndex = globalContext.memoryWithIndex
 
-        self.dataSource :DataSource = context.getEnv().getDataSource()
+        self.dataSource :DataSource = globalContext.getEnv().getDataSource()
 
     def compile(self):
         if self.isCompiled:
             return
 
         self.dataSource.setMainRetriever(RetrievalModule(
-            globalConfig=self.context.globalContext.globalConfig,
+            globalConfig=self.globalContext.globalConfig,
             retrievalConfig=self.config.retrievalConfig,
-            memoryWithIndex=self.memoryWithIndex,
-            context=self.context))
+            memoryWithIndex=self.memoryWithIndex))
 
         self.isCompiled = True
 
     def execute(
             self, 
             context: Context, 
-            query: str = None, 
+            query: str,
             args: dict = None, 
             prevBlock: BaseBlock = None, 
             **kwargs) -> Response:
-        BaseBlock.execute(self, context, query, args, prevBlock, **kwargs)
+        BaseBlock.execute(
+            self, 
+            context=context, 
+            query=query, 
+            args=args, 
+            prevBlock=prevBlock, 
+            **kwargs)
 
         self._restoreParams(args, self.params)
-        return self._retrieve(query if query else args["query"], args)
+        return self._retrieve(query, args)
 
-    def _retrieve(self, query :str, args :dict) -> Response:
-        self.context.setCurQuery(query)
-        self.dataSource.getMainRetriever().retrieve(self.context)
+    def createFuncCall(self):
+        newFuncCall = RetrievalBlock(
+            globalContext=self.globalContext, 
+            config=self.config, 
+            repoFuncs=self.repoFuncs
+        )
+        return newFuncCall
+
+    def _retrieve(self, query: str, args: dict) -> Response:
+        self.dataSource.getMainRetriever().retrieve(self.context, query, **args)
         retrievalResult = self.context.retrievalResult
         if retrievalResult is None:
             return None
@@ -85,7 +98,7 @@ class RetrievalBlock(FuncBlock):
 
         response.metadata = {
             "blocks": blocks,
-            "curQuery" : self.context.getCurQuery().query}
+            "curQuery" : query}
         response.respStr = "\n".join(blocks)
         return response
 

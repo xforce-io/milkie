@@ -23,12 +23,13 @@ class Role(BaseBlock):
 
     def execute(
             self, 
-            query: str, 
+            context: Context, 
+            query: str,
             args: dict, 
             prevBlock: BaseBlock=None, 
             **kwargs) -> Response:
         return self.agent.execute(
-            context=self.context, 
+            context=context, 
             query=query, 
             args=args, 
             prevBlock=prevBlock, 

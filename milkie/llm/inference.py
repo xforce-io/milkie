@@ -97,8 +97,8 @@ def makeMessageTemplates(
     messageTemplates = []
     if history and history.use():
         history.setSystemPrompt(systemPrompt)
-        history.addHistoryUserPrompt(prompt)
-        messageTemplates = history.getDialogue()
+        history.addUserPrompt(prompt)
+        messageTemplates = history.getRecentDialogue()
     else:
         if systemPrompt and not reasoningModel:
             messageTemplates += [ChatMessage(content=systemPrompt, role=MessageRole.SYSTEM)]    

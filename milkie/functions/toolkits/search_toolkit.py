@@ -1,14 +1,14 @@
 from typing import List
 from milkie.functions.openai_function import OpenAIFunction
 from milkie.functions.toolkits.toolkit import Toolkit
-from milkie.functions.toolkits.tools.basic_tools import ToolSearchWebFromDuckDuckGo, ToolGetWebContentFromUrls
+from milkie.functions.toolkits.tools.basic_tools import ToolGetWebContentFromUrls, ToolSearchWebFromDuckDuckGo, ToolSearchWebFromZhipu
 from milkie.global_context import GlobalContext
 
 class SearchToolkit(Toolkit):
     def __init__(self, globalContext: GlobalContext):
         super().__init__(globalContext)
 
-        self.toolWebSearch = ToolSearchWebFromDuckDuckGo()
+        self.toolWebSearch = ToolSearchWebFromZhipu(globalContext=globalContext)
         self.toolGetWebContentFromUrls = ToolGetWebContentFromUrls()
 
     def getName(self) -> str:

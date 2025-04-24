@@ -11,7 +11,6 @@ class StepLLMReasoningSelfConsistency(StepLLM):
             globalContext: GlobalContext):
         super().__init__(
             globalContext, 
-            promptMaker=None, 
             llm=None)
 
     def makePrompt(

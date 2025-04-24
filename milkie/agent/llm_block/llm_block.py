@@ -5,27 +5,27 @@ import json
 import logging
 import re
 import time
-from typing import Any, Callable, List, Optional, Tuple
-
-from llama_index_client import ChatMessage, MessageRole
+from typing import Any, Callable
+import uuid
 
 from milkie.agent.base_block import BaseBlock
+from milkie.agent.exec_graph import ExecNode, ExecNodeLLM, ExecNodeLabel, ExecNodeSequence, ExecNodeSkill, ExecNodeType
 from milkie.agent.llm_block.step_llm_extractor import StepLLMExtractor
+from milkie.agent.step_llm_streaming import InstAnalysisResult, StepLLMStreaming
 from milkie.config.constant import *
 from milkie.context import Context
+from milkie.functions.code_interpreter import CodeInterpreter
 from milkie.functions.toolkits.agent_toolkit import AgentToolkit
-from milkie.functions.toolkits.skillset import Skillset
-from milkie.functions.toolkits.toolkit import Toolkit, FuncExecRecord
+from milkie.functions.toolkits.toolkit import Toolkit
+from milkie.global_context import GlobalContext
 from milkie.llm.enhanced_llm import EnhancedLLM
 from milkie.llm.reasoning.reasoning import Reasoning
 from milkie.prompt.prompt import Loader
-from milkie.prompt.prompt_maker import PromptMaker
-from milkie.llm.step_llm import StepLLM
 from milkie.log import INFO, DEBUG
 from milkie.response import Response
-from milkie.trace import stdout
+from milkie.types.object_type import ObjectType, ObjectTypeFactory
 from milkie.utils.commons import addDict
-from milkie.utils.data_utils import codeToLines, restoreVariablesInDict, restoreVariablesInStr
+from milkie.utils.data_utils import codeToLines, preprocessPyCode, restoreVariablesInDict, restoreVariablesInStr
 
 logger = logging.getLogger(__name__)
 
@@ -53,100 +53,18 @@ class ThinkingResult:
         self.result = result
         self.response = response
 
-class InstAnalysisResult:
-    class Result(Enum):
-        TOOL = 1
-        ANSWER = 2
-        NOANS = 3
-
-    def __init__(
-            self,
-            result :Result,
-            funcExecRecords: List[FuncExecRecord],
-            response :str):
-        self.result = result
-        self.funcExecRecords = funcExecRecords
-        self.response = response
-
-class PromptMakerInstruction(PromptMaker):
-
+class StepLLMInstrAnalysis(StepLLMStreaming):
     def __init__(
             self, 
-            toolkit :Toolkit, 
-            usePrevResult :bool) -> None:
-        super().__init__(toolkit)
-
-        self.usePrevResult = usePrevResult
-        self.origInstruction :str = None
-        self.formattedInstruction :str = None
-        self.instructionDetails :str = None
-        self.prev = None
-    
-    def setOrigInstruction(self, instruction: str):
-        self.origInstruction = instruction
-        self.formattedInstruction = instruction
-
-    def setFormattedInstruction(self, instruction: str):
-        self.formattedInstruction = instruction
-
-    def setInstructionDetails(self, details: str):
-        self.instructionDetails = details
-
-    def setPrev(self, prev):
-        self.prev = prev
-
-    def promptForInstruction(
-            self, 
-            instructionRecords :list[InstructionRecord],
-            **args):
-        resultPrompt = ""
-        if self.usePrevResult:
-            prevSummary = self.prevStepSummary(instructionRecords)
-            if len(prevSummary) > 0:
-                resultPrompt += f"""
-                你当前的Query是： {self.origInstruction}
-                """
-
-                resultPrompt += "前序Query情况如下:\n"
-                resultPrompt += "```\n"
-                resultPrompt += prevSummary
-                resultPrompt += "```\n"
-
-        resultPrompt += f"""{self.formattedInstruction}"""
-        return resultPrompt
-
-    def prevStepSummary(self, instructionRecords :list[InstructionRecord]):
-        result = ""
-        if len(instructionRecords) > 0:
-            result += f"上一步总结: {instructionRecords[-1].synthesizedInstructionRecord[:MaxLenLastStepResult]}\n"
-            result += f"上一步详情: {str(instructionRecords[-1].result.response.resp)[:MaxLenLastStepResult]}\n"
-        return result
-
-class StepLLMBlock(StepLLM):
-    def __init__(self, promptMaker, llmBlock :LLMBlock):
-        super().__init__(
-            globalContext=llmBlock.context.globalContext, 
-            promptMaker=promptMaker,
-            llm=llmBlock.context.globalContext.settings.llmDefault)
-
-        self.llmBlock = llmBlock
-
-class StepLLMInstrAnalysis(StepLLMBlock):
-    def __init__(
-            self, 
-            promptMaker :PromptMakerInstruction, 
-            llmBlock :LLMBlock, 
             instruction: Instruction) -> None:
-        super().__init__(
-            promptMaker=promptMaker, 
-            llmBlock=llmBlock)
+        super().__init__()
 
         self.instruction = instruction
-        self.instructionRecords = llmBlock.taskEngine.instructionRecords
+        self.needToParse = instruction.formattedInstruct.find("{") >= 0
 
     def makeSystemPrompt(self, args: dict, **kwargs) -> str:
         systemPrompt = super().makeSystemPrompt(args=args, **kwargs)
-        if "skills" in kwargs:
+        if "skills" in kwargs and not self.instruction.syntaxParser.getObjectOutputSyntax():
             systemPrompt += f"""
             注意：拥有技能如下(skillname -> skilldesc)
             ```
@@ -158,348 +76,35 @@ class StepLLMInstrAnalysis(StepLLMBlock):
                     for toolName, toolDesc in skill.getToolDescs().items():
                         systemPrompt += f"{name}.{toolName} -> \n{toolDesc}\n"
             systemPrompt += '''```\n
-            如果需要使用技能，请使用 "@skillname ((技能参数))" 来调用技能。
+            如果需要使用技能，请使用 "<skillname> 技能参数</skillname>" 来调用技能。
+            例如，"<tool1> 参数1, 参数2</tool1>" 
+                 "<tool2> 参数3</tool2>"
             '''
         return systemPrompt
         
     def makePrompt(self, useTool: bool = False, **args) -> str:
-        result = self.promptMaker.promptForInstruction(
-            instructionRecords=self.instructionRecords,
-            **args)
-
-        if self.instruction.syntaxParser.getNormalFormat():
+        result = self.instruction.formattedInstruct
+        if self.instruction.syntaxParser.getJsonFormat():
             result += f"""
-            请按照下述语义严格以 jsonify 格式输出结果：{self.instruction.syntaxParser.getJsonOutputSyntax()}，现在请直接输出 json:
+            请按照下述语义严格以 jsonify 格式输出结果：{self.instruction.syntaxParser.getJsonFormat()}，现在请直接输出 json:
+            """
+        elif self.instruction.syntaxParser.getJsonListFormat():
+            result += f"""
+            请按照下述语义严格以 json list 格式输出结果：{self.instruction.syntaxParser.getJsonListFormat()}，现在请直接输出 json list:
+            """
+        elif self.instruction.syntaxParser.getNormalFormat():
+            result += f"""
+            请按照下述格式要求输出结果：{self.instruction.syntaxParser.getNormalFormat()}，现在请直接输出结果:
+            """
+        elif self.instruction.syntaxParser.getObjectOutputSyntax():
+            result += f"""
+            请必须调用工具，按照工具调用格式输出:
             """
         elif not useTool:
             result += f"""
             请直接输出结果，不要输出任何其他内容:
             """
         return result
-
-    def formatResult(self, result :Response, **kwargs) -> InstAnalysisResult:
-        allDict = self.llmBlock.getVarDict().getAllDict()
-        needToParse = self.instruction.formattedInstruct.find("{") >= 0
-        toolkit = self._getToolkit()
-
-        streamingProcessor = StreamingProcessor(
-            globalSkillset=self.llmBlock.globalSkillset,
-            context=self.llmBlock.context,
-            llm=self.llm,
-            messages=self._messages)
-        toolUsed, result = streamingProcessor.readFromGen(
-            response=result,
-            **kwargs)
-        if toolUsed:
-            funcExecRecords = toolkit.exec(
-                [(toolUsed, result)], 
-                allDict,
-                needToParse=needToParse)
-            stdout(funcExecRecords[0].result, **kwargs)
-            return InstAnalysisResult(
-                InstAnalysisResult.Result.TOOL,
-                funcExecRecords=funcExecRecords,
-                response=f"{toolUsed}({result})")
-            
-        # if function call is not in tools, but it is an answer
-        if toolkit and not toolkit.isEmpty():
-            funcExecRecords = toolkit.extractToolFromMsg(
-                result,
-                allDict,
-                needToParse=needToParse)
-            if funcExecRecords:
-                stdout(funcExecRecords[0].result, **kwargs)
-                return InstAnalysisResult(
-                    InstAnalysisResult.Result.TOOL,
-                    funcExecRecords=funcExecRecords,
-                    response=result)
-
-        return InstAnalysisResult(
-            InstAnalysisResult.Result.ANSWER,
-            funcExecRecords=None,
-            response=result)
-
-    def _getToolkit(self):
-        return self.instruction.toolkit
-
-class StepLLMToolcall(StepLLM):
-    
-    def __init__(
-            self):
-        super().__init__(
-            globalContext=None,
-            promptMaker=None,
-            llm=None)
-    
-    def setToolkit(self, toolkit: Toolkit):
-        self.toolkit = toolkit
-
-    def setGlobalSkillset(self, globalSkillset: Skillset):
-        self.globalSkillset = globalSkillset
-
-    def setContext(self, context: Context):
-        self.globalContext = context.globalContext
-        self.context = context
-
-    def setQuery(self, query: str):
-        self.query = query
-
-    def makePrompt(self, useTool: bool = False, **args) -> str:
-        return self.query
-    
-    def formatResult(self, result: Response, **kwargs) -> str:
-        allDict = self.context.getVarDict().getAllDict()
-
-        streamingProcessor = StreamingProcessor(
-            globalSkillset=self.globalSkillset,
-            context=self.context,
-            llm=self.llm,
-            messages=self._messages)
-        toolUsed, result = streamingProcessor.readFromGen(
-            response=result,
-            **kwargs)
-        if toolUsed:
-            funcExecRecords = self.toolkit.exec(
-                [(toolUsed, result)], 
-                allDict,
-                needToParse=False)
-            stdout(funcExecRecords[0].result, **kwargs)
-            return InstAnalysisResult(
-                InstAnalysisResult.Result.TOOL,
-                funcExecRecords=funcExecRecords,
-                response=result)
-
-        return InstAnalysisResult(
-            InstAnalysisResult.Result.ANSWER,
-            funcExecRecords=None,
-            response=result)
-
-class StreamingProcessor:
-    def __init__(self,
-                 globalSkillset: Skillset,
-                 context: Context,
-                 llm: EnhancedLLM,
-                 messages: list[ChatMessage]):
-        self.globalSkillset = globalSkillset
-        self.context = context
-        self.accuResults = []
-        self.allResults = []
-        self.currentSentence = []
-        self.currentTools = []
-        self.response = None
-        self.llm = llm
-        self.messages = messages
-        self.streamReset = False
-        self.sentences_to_detect_skill = []
-        self.stepLLMToolcall = StepLLMToolcall()
-
-    def readFromGen(
-            self,
-            response: Response, 
-            **kwargs) -> Tuple[Optional[str], str]:
-        self.response = response
-        skillResp = None
-
-        try:
-            if not self.response.respGen:
-                logger.warning("No response generator found")
-                return None, ""
-
-            while True:
-                for chunk in self.response.respGen:
-                    content = None
-                    if hasattr(chunk.raw, "tool_calls") and \
-                            isinstance(chunk.raw.tool_calls, list) and \
-                            len(chunk.raw.tool_calls) > 0:
-                        toolCalls = chunk.raw.tool_calls
-                        if len(self.currentTools) == 0:
-                            self.currentTools = [{
-                                "name": "",
-                                "args": ""
-                            }] * len(toolCalls)
-                        
-                        for i, toolCall in enumerate(toolCalls):
-                            if toolCall.function.name:
-                                self.currentTools[i]["name"] = toolCall.function.name
-                            if toolCall.function.arguments:
-                                self.currentTools[i]["args"] += toolCall.function.arguments
-                    elif hasattr(chunk.raw, "delta") and hasattr(chunk.raw.delta, "content"):
-                        content = chunk.raw.delta.content
-                    elif hasattr(chunk.raw, "delta") and hasattr(chunk.raw.delta, "reasoning_content"):
-                        content = chunk.raw.delta.reasoning_content
-                    elif hasattr(chunk.raw, "content") and chunk.raw.content:
-                        content = chunk.raw.content
-                    elif hasattr(chunk.raw, "reasoning_content") and chunk.raw.reasoning_content:
-                        content = chunk.raw.reasoning_content
-
-                    if content:
-                        skillResp = self.processDeltaContent(
-                            deltaContent=content,
-                            **kwargs)
-                        if skillResp:
-                            break
-
-                if self.streamReset:
-                    self.streamReset = False
-                    continue
-
-                stdout("", info=True, flush=True, **kwargs)
-
-                if self.currentSentence:
-                    skillResp = self.processSentence()
-                    if not skillResp:
-                        break
-
-                    self.accuResults.append(skillResp)
-                else:
-                    break
-
-        except Exception as e:
-            logger.error(f"Error in readFromGen: {e}", exc_info=True)
-            raise
-
-        if len(self.currentTools) > 0:
-            return self.currentTools[0]["name"], self.currentTools[0]["args"]
-        else:
-            self.allResults.extend(self.accuResults)
-            return None, "".join(self.allResults)
-
-    def processDeltaContent(
-            self,
-            deltaContent: str,
-            **kwargs) -> str:
-        endIndex = -len(SymbolEndSkill)
-        while True:
-            startIndex = endIndex + len(SymbolEndSkill)
-            i = startIndex
-            endIndex = -1
-            while i < len(deltaContent):
-                if deltaContent[i:].startswith(SymbolEndSkill):
-                    endIndex = i
-                    break
-                i += 1
-
-            skillResp = ""
-            if endIndex >= 0:
-                currentPart = deltaContent[startIndex:endIndex+len(SymbolEndSkill)]
-                self.currentSentence.append(currentPart)
-                stdout(currentPart, info=True, end="", flush=True, **kwargs)
-                
-                skillResp = self.processSentence()
-                if skillResp:
-                    return skillResp
-            else:
-                self.currentSentence.append(deltaContent[startIndex:])
-                stdout(deltaContent[startIndex:], info=True, end="", flush=True, **kwargs)
-                return None
-
-    def processSentence(self) -> str:
-        sentence = "".join(self.currentSentence).strip()
-        self.accuResults.append(sentence)
-        self.currentSentence = []
-        if not self.globalSkillset:
-            return None
-        
-        startIndex = 0
-        while True:
-            idx = sentence.find("@", startIndex)
-            if idx == -1:
-                break
-
-            resp = self._processSentenceStartWithAt(sentence[idx:])
-            if resp:
-                return resp
-
-            startIndex = idx + 1
-        return None
-
-    def _processSentenceStartWithAt(self, sentence: str) -> str:
-        if sentence in self.sentences_to_detect_skill:
-            INFO(logger, f"sentence[{sentence}] in sentences_to_detect_skill[{self.sentences_to_detect_skill}]")
-            return None
-        
-        self.stepLLMToolcall.setGlobalSkillset(self.globalSkillset)
-        self.stepLLMToolcall.setContext(self.context)
-        self.stepLLMToolcall.setQuery(sentence)
-        self.stepLLMToolcall.setLLM(self.llm if not self.llm.reasoner_model else self.context.getGlobalContext().settings.llmDefault)
-        
-        skillName, skillResp = self._useSkill(sentence)
-        if not skillName:
-            return None
-
-        self.sentences_to_detect_skill.append(sentence)
-
-        endMark = f" @{skillName} END\n"
-        stdout(f"<<<{endMark.strip()}>>>\n", info=True, end="", flush=True)
-
-        if not self.llm.prefix_complete:
-            self.messages += [
-                ChatMessage(                                                        
-                    role=MessageRole.ASSISTANT, 
-                    content="".join(self.accuResults) + skillResp + endMark + "我们继续"),   
-            ]
-        elif len(self.messages) > 1 and self.messages[-1].role == MessageRole.ASSISTANT:
-            self.messages[-1] = ChatMessage(
-                role=MessageRole.ASSISTANT, 
-                content=self.messages[-1].content + "".join(self.accuResults) + skillResp + endMark, 
-                additional_kwargs={"prefix" : True})
-        else:
-            self.messages += [
-                ChatMessage(                                                        
-                    role=MessageRole.ASSISTANT, 
-                    content="".join(self.accuResults) + skillResp + endMark, 
-                    additional_kwargs={"prefix" : True}),   
-            ]
-        self.allResults.extend(self.accuResults)
-        self.allResults.extend([skillResp, endMark])
-        self.accuResults = []
-
-        self.response.respGen = self.llm.stream(self.messages)
-        self.streamReset = True
-        return skillResp + endMark
-
-    def _useSkill(self, query: str) -> Tuple[str, str]:
-        for toolkit in self.globalSkillset.skillset:
-            if isinstance(toolkit, AgentToolkit):
-                if not query[1:].startswith(toolkit.getName()) :
-                    continue
-
-                response = toolkit.agent.execute(
-                    query=query[len(toolkit.agent.name)+1:].strip(), 
-                    args=self.context.getVarDict().getGlobalDict())
-                return toolkit.getName(), response.respStr
-            else:
-                for toolName, _ in toolkit.getToolDescs().items():
-                    if not query[1:].startswith(toolName) and \
-                            not query[1:].startswith(f"{toolkit.getName()}.{toolName}"):
-                        continue
-
-                    kwargs = {"tools" : toolkit.getTools()}
-                    self.stepLLMToolcall.setToolkit(toolkit)
-                    response = self.stepLLMToolcall.streamAndFormat(**kwargs)
-                    return toolkit.getName(), response.response
-            
-        return None, ""
-
-class StepLLMSynthsisInstructionRecord(StepLLMBlock):
-    def __init__(self, promptMaker, llmBlock, instructionRecord: InstructionRecord) -> None:
-        super().__init__(promptMaker, llmBlock)
-        self.instructionRecord = instructionRecord
-
-    def makePrompt(self, useTool: bool = False, args: dict = {}, **kwargs) -> str:
-        resultPrompt = f"""
-        指令为：
-        {self.instructionRecord.instruction.curInstruct}
-
-        指令执行结果为：
-        {self.instructionRecord.result.response.resp}
-
-        请将指令指令本身和执行结果总结为一句话，请直接给出总结结果，总结结果为：
-        """
-        return resultPrompt
-
-    def formatResult(self, result :Response):
-        return result.resp
 
 class InstructResult:
     def __init__(
@@ -535,9 +140,11 @@ class Instruction:
         self.llmBlock = llmBlock
         self.syntaxParser = SyntaxParser(
             label=label,
-            settings=llmBlock.context.globalContext.settings,
+            settings=llmBlock.globalContext.settings,
             instruction=curInstruct, 
-            repoFuncs=llmBlock.repoFuncs)
+            repoFuncs=llmBlock.repoFuncs,
+            globalObjectTypes=llmBlock.globalObjectTypes)
+
         self.curInstruct = self.syntaxParser.getInstruction()
         self.formattedInstruct = self.curInstruct
         self.onlyFuncCall = False
@@ -546,26 +153,26 @@ class Instruction:
         self.label = label
         self.prev: Instruction = prev
         self.observation = observation
-        self.instructionRecords = llmBlock.taskEngine.instructionRecords
-        self.varDict = llmBlock.getVarDict()
+        self.id = self._createId()
 
-        self.promptMaker = PromptMakerInstruction(
-            toolkit=self.llmBlock.toolkit,
-            usePrevResult=self.llmBlock.usePrevResult)
-        self.promptMaker.setTask(llmBlock.taskEngine.task)
-        self.promptMaker.setOrigInstruction(self.curInstruct)
-        self.promptMaker.setPrev(self.prev)
         self.stepInstAnalysis = StepLLMInstrAnalysis(
-            promptMaker=self.promptMaker,
-            llmBlock=llmBlock,
             instruction=self)
         self.llm :EnhancedLLM = None
         self.reasoning :Reasoning = None
         self.toolkit :Toolkit = None
 
-    def execute(self, args :dict, **kwargs) -> InstructResult:
+    def getId(self):
+        return self.id
+
+    def execute(
+            self, 
+            context: Context,
+            args :dict, 
+            **kwargs) -> InstructResult:
+        self.codeInterpreter = CodeInterpreter(context.globalContext)
+        self.varDict = self.llmBlock.getVarDict()
         try:
-            self._formatCurInstruct(args)
+            self._formatCurInstruct(args, **kwargs)
         except Exception as e:
             raise RuntimeError(f"fail parse instruct[{self.curInstruct}]: {str(e)}")
 
@@ -576,7 +183,6 @@ class Instruction:
             # in this case, the response is the result of the only function call, or a naive type
             return self._processNaiveType(args, **kwargs)
 
-        useTool = (self._getToolkit() != None)
         logTypes = []
         if self.syntaxParser.flag == SyntaxParser.Flag.CODE:
             return self._processGenCode(logType="code", args=args, **kwargs)
@@ -591,12 +197,16 @@ class Instruction:
 
         args["prompt_flag"] = None
 
-        if useTool:
+        self.stepInstAnalysis.setContext(self.llmBlock.context)
+        self.stepInstAnalysis.setLLM(self.getCurLLM())
+        self.stepInstAnalysis.setGlobalSkillset(self.llmBlock.globalSkillset)
+        if self.syntaxParser.getObjectOutputSyntax():
+            self.stepInstAnalysis.setObjectTypes(self.syntaxParser.getObjectOutputSyntax())
+            kwargs["tools"] = ObjectTypeFactory.getOpenaiJsonSchema(self.syntaxParser.getObjectOutputSyntax())
+        elif self._getToolkit():
+            self.stepInstAnalysis.setToolkit(self._getToolkit())
             kwargs["tools"] = self._getToolkit().getTools()
-        
-        kwargs["globalSkillset"] = self.llmBlock.globalSkillset
-        
-        self.stepInstAnalysis.setLLM(self._getCurLLM())
+
         instAnalysisResult = self.stepInstAnalysis.streamAndFormat(
             reasoning=self.reasoning,
             args=args,
@@ -616,15 +226,24 @@ class Instruction:
             useTool=True,
             goto=None,
             analysis=instAnalysisResult.response,
-            answer=instAnalysisResult.funcExecRecords[0].result,
             logType="tool",
             toolName=instAnalysisResult.funcExecRecords[0].tool.get_function_name())
+        
+    def getCurLLM(self) -> EnhancedLLM:
+        return self.llm if self.llm else self.syntaxParser.model
+
+    def _getContext(self):
+        return self.llmBlock.context
+
+    def _createId(self):
+        return f"{self.llmBlock.agentName}_{self.label}_{uuid.uuid4()}"
         
     def __str__(self) -> str:
         return f"Instruction({self.label}): {self.formattedInstruct}"
         
     def _processNaiveType(self, args: dict, **kwargs):
-        stdout(self.formattedInstruct, args=args, **kwargs)
+        self._getContext().genResp(self.formattedInstruct, **kwargs)
+        kwargs["execNode"].castTo(ExecNodeLLM).addContent(str(self.formattedInstruct))
         return self._createResult(
             response=self.formattedInstruct,
             useTool=False,
@@ -635,10 +254,10 @@ class Instruction:
     def _processGenCode(self, logType: str, args: dict, **kwargs):
 
         def genCodeAndRun(instruction: Instruction, theArgs: dict):
-            result = instruction.llmBlock.toolkit.genCodeAndRun(
+            result = self.codeInterpreter.execute(
                 instruction=instruction.formattedInstruct,
                 varDict=instruction.varDict.getAllDict(),
-                no_cache=theArgs["no_cache"],
+                vm=instruction.llmBlock.context.vm,
                 **kwargs)
             instruction.varDict.setLocal(KeywordCurrent, result)
             return Response.buildFrom(result if result else "")
@@ -646,21 +265,15 @@ class Instruction:
         return self._processWithRetry(genCodeAndRun, args=args, logType=logType)
 
     def _processPyCode(self, args: dict, **kwargs):
-
-        def preprocessPyInstruct(instruct: str):
-            instruct = instruct.lstrip() \
-                .replace("$varDict", "self.varDict") \
-                .replace(KeyNext, f'"{KeyNext}"') \
-                .replace(KeyRet, f'"{KeyRet}"')
-            return instruct
-
-        result = self.llmBlock.toolkit.runCode(
-            preprocessPyInstruct(self.formattedInstruct),
-            self.varDict.getAllDict())
+        result = self.llmBlock.context.vm.execPython(
+            code=preprocessPyCode(self.formattedInstruct),
+            varDict=self.varDict.getAllDict(),
+            **kwargs)
         if result == None or not Response.isNaivePyType(result):
             result = ""
 
-        stdout(result, args=args, **kwargs)
+        self._getContext().genResp(result, **kwargs)
+        kwargs["execNode"].castTo(ExecNodeLLM).addContent(str(result))
         return self._createResult(
             result,
             useTool=False,
@@ -669,16 +282,32 @@ class Instruction:
             logType="py")
     
     def _processCall(self, args: dict, **kwargs):
+        execNodeLLM = kwargs["execNode"].castTo(ExecNodeLLM)
+        execNodeSkill :ExecNodeSkill = ExecNodeSkill.build(
+            execGraph=execNodeLLM.execGraph,
+            execNodeLLM=execNodeLLM,
+            skillName=self.syntaxParser.callObj,
+            query=self.syntaxParser.callArg,
+            skillResult=None,
+            label=ExecNodeLabel.AGENT)
+        
         def callFunc(instruction: Instruction, theArgs: dict):
-            args = {**instruction.llmBlock.context.getVarDict().getAllDict(), **theArgs["args"]}
-            return instruction.llmBlock.context.getEnv().execute(
+            context = instruction.llmBlock.context
+            args = {**context.getVarDict().getAllDict(), **theArgs["args"]}
+            return context.getEnv().execute(
                 agentName=instruction.syntaxParser.callObj,
+                context=context,
                 query=theArgs["query"].format(**args),
-                args=args)
-        return self._processWithRetry(lambdaFunc=callFunc, args=args, logType="call")
+                args=args,
+                **{"execNode" : execNodeSkill})
+
+        result = self._processWithRetry(lambdaFunc=callFunc, args=args, logType="call")
+        execNodeSkill.setSkillResult(result.response.resp)
+        return result
 
     def _processRet(self, args: dict, **kwargs):
-        stdout(self.formattedInstruct, args=args, **kwargs)
+        self._getContext().genResp(self.formattedInstruct, **kwargs)
+        kwargs["execNode"].castTo(ExecNodeLLM).addContent(str(self.formattedInstruct))
         return self._createResult(
             response=self.formattedInstruct,
             useTool=False,
@@ -695,7 +324,7 @@ class Instruction:
         query = self.syntaxParser.callArg
         MaxRetry = 3
         for i in range(MaxRetry):
-            stdout(f"[trial {i}] execute call {self.syntaxParser.callObj} with query {query} ==> ", args=args, **kwargs)
+            self._getContext().genResp(f"[trial {i}] execute call {self.syntaxParser.callObj} with query {query} ==> ", **kwargs)
                 
             resp = lambdaFunc(self, {
                 "query": query,
@@ -708,11 +337,11 @@ class Instruction:
                 output=resp.resp,
                 stepLLMExtractor=self.llmBlock.stepLLMExtractor,
                 varDict=self.varDict,
-                toolkit=self._getToolkit(),
+                vm=self.llmBlock.context.vm,
                 retry=True,
                 contextLen=self.syntaxParser.model.getContextWindow())
             if not instrOutput.hasError():
-                stdout(f"==> {resp.resp}", args=args, **kwargs)
+                self._getContext().genResp(f"==> {resp.resp}", **kwargs)
                 return self._createResult(
                     response=resp,
                     useTool=False,
@@ -730,7 +359,7 @@ class Instruction:
             goto :str,
             logType: str,
             **logData) -> InstructResult:
-        logMessage = f"instrExec({self.label}|{self._getCurLLM().model_name}|{logType}): instr[{self.formattedInstruct}] "
+        logMessage = f"instrExec({self.label}|{self.getCurLLM().model_name}|{logType}): instr[{self.formattedInstruct}] "
         if logType == "tool":
             logMessage += f"tool[{logData.get('toolName', '')}] "
         logMessage += f"ans[{response}]"
@@ -816,7 +445,7 @@ class Instruction:
         else:
             raise RuntimeError(f"unsupported response type[{type(response)}]")
 
-    def _formatCurInstruct(self, args :dict):
+    def _formatCurInstruct(self, args :dict, **kwargs):
         allArgs = addDict(args, self.varDict.getAllDict())
 
         #call functions
@@ -827,10 +456,10 @@ class Instruction:
                     context=self.llmBlock.context, 
                     query=None, 
                     args=allArgs,
-                    curInstruction=self)
+                    **{**kwargs, "curInstruction": self})
                 if curInstruct.strip() == funcBlock.getFuncCallPattern().strip():
                     self.onlyFuncCall = True
-                    self.formattedInstruct = resp
+                    self.formattedInstruct = resp.resp
                     return
 
                 try:
@@ -855,7 +484,6 @@ class Instruction:
             
         if self.syntaxParser.flag == SyntaxParser.Flag.GOTO:
             self.formattedInstruct = self.formattedInstruct.replace(f"#GOTO {self.syntaxParser.label}", "")
-        self.promptMaker.setFormattedInstruction(self.formattedInstruct)
 
     @staticmethod   
     def _isNaiveType(curInstruct: str):
@@ -880,8 +508,6 @@ class Instruction:
         
         return None
 
-    def _getCurLLM(self) -> EnhancedLLM:
-        return self.llm if self.llm else self.syntaxParser.model
 
     def _getToolkit(self) -> Toolkit:
         return self.toolkit if self.toolkit else self.llmBlock.toolkit
@@ -891,16 +517,6 @@ class InstructionRecord:
         self.instruction = instruction
         self.result = result
 
-        if instruction.llmBlock.usePrevResult:
-            if result.useTool:
-                self.stepSynthsisInstructionRecord = StepLLMSynthsisInstructionRecord(
-                    promptMaker=instruction.promptMaker,
-                    llmBlock=instruction.llmBlock,
-                    instructionRecord=self)
-                self.synthesizedInstructionRecord = self.stepSynthsisInstructionRecord.run()
-            else:
-                self.synthesizedInstructionRecord = self.result.response.resp
-
 class TaskEngine:
     def __init__(
             self, 
@@ -908,9 +524,8 @@ class TaskEngine:
             task :str) -> None:
         self.llmBlock = llmBlock
         self.task = task
-        self.instructions :list[tuple[str, Instruction]] = []
+        self.instructions :list[Instruction] = []
         self.lastInstruction :Instruction = None
-        self.instructionRecords :list[InstructionRecord] = []
 
         self.context = None
 
@@ -918,7 +533,8 @@ class TaskEngine:
             self, 
             context: Context,
             taskArgs :dict, 
-            instructions: list[tuple[str, Instruction]], 
+            instructions: list[Instruction], 
+            execNodeParent: ExecNode,
             **kwargs) ->tuple:
         self.context = context
         self.lastInstruction = None
@@ -926,17 +542,31 @@ class TaskEngine:
 
         curIdx = 0
         instructResult :InstructResult = None  # 初始化 instructResult
+
+        assert execNodeParent.type == ExecNodeType.SEQUENCE
+        execNodeSequence :ExecNodeSequence = execNodeParent
         while curIdx < len(self.instructions):
-            curLabel, curInstruction = self.instructions[curIdx]
+            curInstruction = self.instructions[curIdx]
             if len(curInstruction.curInstruct.strip()) == 0 and \
                     curInstruction.syntaxParser.flag == SyntaxParser.Flag.RET:
                 break
-            
-            stdout(f"\n{curLabel} -> ", **kwargs)
+
+            self.context.genResp(f"\n{curInstruction.label} -> ", **kwargs)
 
             curInstruction.syntaxParser.reset()
 
-            instructResult = self._step(instruction=curInstruction, args=taskArgs, **kwargs)
+            execNode = ExecNodeLLM.build(
+                execGraph=execNodeSequence.execGraph,
+                execNodeSequence=execNodeSequence,
+                instructionId=curInstruction.getId(),
+                curInstruct=curInstruction.curInstruct)
+
+            instructResult = self._step(
+                    context=context,
+                    instruction=curInstruction, 
+                    args=taskArgs, 
+                    **{**kwargs, "execNode" : execNode})
+
             if instructResult.isRet():
                 logger.info("end of the task")
                 break
@@ -951,17 +581,11 @@ class TaskEngine:
                 output=instructResult.response.resp,
                 stepLLMExtractor=self.llmBlock.stepLLMExtractor,
                 varDict=curInstruction.varDict,
-                toolkit=self.llmBlock.toolkit,
+                vm=self.llmBlock.context.vm,
                 retry=False,
                 contextLen=curInstruction.syntaxParser.model.getContextWindow())
             if curInstruction.syntaxParser.getInstrOutput().hasError():
                 raise RuntimeError(f"fail process output[{instructResult.response}]")
-
-            #append instruction record
-            self.instructionRecords.append(
-                InstructionRecord(
-                    instruction=curInstruction, 
-                    result=instructResult))
 
             if curInstruction.syntaxParser.flag == SyntaxParser.Flag.RET:
                 break
@@ -981,11 +605,16 @@ class TaskEngine:
         return (True, instructResult.response)
 
     def getInstrLabels(self) -> list[str]:
-        return [label for label, _ in self.instructions]
+        return [instruction.label for instruction in self.instructions]
 
-    def _step(self, instruction: Instruction, args: dict, **kwargs) -> InstructResult:
+    def _step(
+            self, 
+            context: Context,
+            instruction: Instruction, 
+            args: dict, 
+            **kwargs) -> InstructResult:
         t0 = time.time()
-        instructResult = instruction.execute(args, **kwargs)
+        instructResult = instruction.execute(context=context, args=args, **kwargs)
         INFO(logger, instructResult.logMessage + f" costSec[{time.time() - t0:.2f}]")
         return instructResult
 
@@ -994,9 +623,8 @@ class LLMBlock(BaseBlock):
     def __init__(
             self,
             agentName: str,
-            context: Context = None,
+            globalContext: GlobalContext = None,
             config: str = None,
-            usePrevResult: bool = DefaultUsePrevResult,
             task: str = None,
             taskExpr: str = None,
             toolkit: Toolkit = None,
@@ -1005,14 +633,12 @@ class LLMBlock(BaseBlock):
             repoFuncs=None) -> None:
         super().__init__(
             agentName=agentName,
-            context=context, 
+            globalContext=globalContext, 
             config=config, 
             toolkit=toolkit, 
-            usePrevResult=usePrevResult, 
             repoFuncs=repoFuncs)
 
-        self.usePrevResult = usePrevResult
-        self.systemPrompt = Loader.load(self.context.globalContext.settings.llmBasicConfig.systemPrompt)
+        self.systemPrompt = Loader.load(self.globalContext.settings.llmBasicConfig.systemPrompt)
 
         if taskExpr:
             self.task = taskExpr    
@@ -1024,8 +650,9 @@ class LLMBlock(BaseBlock):
         self.taskEngine = TaskEngine(self, self.task)
         self.instructions = []
         self.stepLLMExtractor = StepLLMExtractor(
-            globalContext=self.context.globalContext)
-        self.globalSkillset = None
+            globalContext=self.globalContext)
+        self.globalSkillset = self.getEnv().globalSkillset
+        self.globalObjectTypes = self.getEnv().globalObjectTypes
 
     def compile(self):
         if self.isCompiled:
@@ -1034,29 +661,31 @@ class LLMBlock(BaseBlock):
         if self.decomposeTask:
             self.instructions = self._decomposeTask(self.task)
             instrSummary = ""
-            for _, instruction in self.instructions:
+            for instruction in self.instructions:
                 instrSummary += f"{instruction}\n"
         else:
-            self.instructions = [("1", Instruction(
+            self.instructions = [Instruction(
                 llmBlock=self,
                 curInstruct=self.task,
                 label="1",
-                prev=None))]
+                prev=None)]
 
         self.isCompiled = True  # 设置编译标志为 True
 
     def execute(
             self, 
             context: Context,
-            query: str = None, 
+            query: str,
             args: dict = {},
             prevBlock: LLMBlock = None,
+            execNodeParent: ExecNode = None,
             **kwargs) -> Response:
         super().execute(
             context=context, 
-            query=query, 
+            query=query,
             args=args, 
             prevBlock=prevBlock, 
+            execNodeParent=execNodeParent,
             **kwargs)
 
         INFO(logger, f"LLMBlock execute: task[{self.task[:10]}] query[{query}] args[{args}]")
@@ -1068,13 +697,11 @@ class LLMBlock(BaseBlock):
         if not self.isCompiled:
             self.compile()  # 只在未编译时进行编译
 
-        if self.getEnv():
-            self.globalSkillset = self.getEnv().globalSkillset
-
         _, result = self.taskEngine.execute(
             context=context,
             taskArgs=taskArgs, 
             instructions=self.instructions,
+            execNodeParent=execNodeParent,
             **kwargs)
         return result
     
@@ -1082,7 +709,7 @@ class LLMBlock(BaseBlock):
         self.isCompiled = False
         self.compile()
 
-    def _decomposeTask(self, task: str) -> list[tuple[str, Instruction]]:
+    def _decomposeTask(self, task: str) -> list[Instruction]:
         labelPattern = r'\s*([\w\u4e00-\u9fff]+[.、])\s+'
         
         lines = codeToLines(task)
@@ -1116,11 +743,11 @@ class LLMBlock(BaseBlock):
         processedInstructions = self._processMarkdownList(instructions)
 
         return [
-            (label, Instruction(
+            Instruction(
                 llmBlock=self,
                 curInstruct=instruction,
                 label=label,
-                prev=None))
+                prev=None)
             for label, instruction in processedInstructions
         ]
 
@@ -1146,9 +773,8 @@ class LLMBlock(BaseBlock):
     @staticmethod
     def create(
             agentName: str,
-            context: Context = None,
+            globalContext: GlobalContext = None,
             config: str = None,
-            usePrevResult: bool = DefaultUsePrevResult,
             task: str = None,
             taskExpr: str = None,
             toolkit: Toolkit = None,
@@ -1157,9 +783,8 @@ class LLMBlock(BaseBlock):
             repoFuncs=None) -> 'LLMBlock':
         return LLMBlock(
             agentName=agentName,
-            context=context,
+            globalContext=globalContext,
             config=config,
-            usePrevResult=usePrevResult,
             task=task,
             taskExpr=taskExpr,
             toolkit=toolkit,

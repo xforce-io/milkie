@@ -1,0 +1,587 @@
+/* GraphView组件相关样式 */
+/* 重置和强制覆盖所有Tree相关样式 */
+.centered-tree,
+.centered-tree * {
+  box-sizing: border-box;
+}
+
+/* 容器样式 */
+.centered-tree {
+  width: 100% !important;
+  overflow: auto !important;
+  text-align: center !important;
+  padding: 20px 0 !important;
+  position: relative !important;
+  min-width: fit-content !important;
+  width: auto !important;
+  overflow-x: visible !important;
+  background: #fff;
+  padding: 20px;
+  border-radius: 8px;
+}
+
+/* 强制树节点居中 */
+.centered-tree .ant-tree {
+  width: 100% !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  background: transparent !important;
+}
+
+.centered-tree .ant-tree-list {
+  width: 100% !important;
+  position: static !important;
+  display: flex !important;
+  justify-content: center !important;
+}
+
+.centered-tree .ant-tree-list-holder {
+  width: 100% !important;
+  position: static !important;
+  display: flex !important;
+  justify-content: center !important;
+}
+
+.centered-tree .ant-tree-list-holder-inner {
+  position: static !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  width: auto !important;
+  transform: none !important;
+}
+
+/* 树节点样式 */
+.centered-tree .ant-tree-treenode {
+  display: flex !important;
+  justify-content: center !important;
+  width: 100% !important;
+  padding: 8px 0 !important;
+  position: relative !important;
+  transition: none !important;
+  transform: none !important;
+  width: auto !important;
+  min-width: fit-content !important;
+  margin: 0 10px !important;
+}
+
+.centered-tree .ant-tree-node-content-wrapper {
+  position: static !important;
+  display: flex !important;
+  justify-content: center !important;
+  padding: 0 !important;
+  transition: none !important;
+  background: transparent !important;
+}
+
+/* 完全去除左侧缩进 */
+.centered-tree .ant-tree-indent, 
+.centered-tree .ant-tree-indent-unit {
+  display: none !important;
+  width: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
+/* 隐藏切换器 */
+.centered-tree .ant-tree-switcher {
+  display: none !important;
+  width: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
+/* 去除所有可能影响布局的元素 */
+.centered-tree .ant-tree-node-selected,
+.centered-tree .ant-tree-node-content-wrapper::before,
+.centered-tree .ant-tree-node-content-wrapper::after {
+  display: none !important;
+  background: transparent !important;
+}
+
+/* 增强线条样式 */
+.centered-tree .tree-node-line {
+  position: absolute !important;
+  border: 2px dashed #d9d9d9 !important;
+  z-index: 0 !important;
+  pointer-events: none !important;
+}
+
+/* 垂直连接线 */
+.centered-tree .tree-node-line-vertical {
+  width: 0 !important;
+  top: -50% !important;
+  bottom: 50% !important;
+  left: 50% !important;
+  border-left: 2px dashed #d9d9d9 !important;
+  border-right: 0 !important;
+  border-top: 0 !important;
+  border-bottom: 0 !important;
+}
+
+/* 全屏模式样式 */
+.graph-card.fullscreen {
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  z-index: 1000 !important;
+  margin: 0 !important;
+  border-radius: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.graph-card.fullscreen .centered-tree {
+  max-height: calc(100vh - 70px) !important;
+}
+
+.fullscreen-icon {
+  cursor: pointer !important;
+  font-size: 16px !important;
+  transition: all 0.3s !important;
+}
+
+.fullscreen-icon:hover {
+  color: #1890ff !important;
+}
+
+/* 子树样式 */
+.centered-tree .ant-tree-child-tree {
+  margin-top: 30px !important;
+  width: 100% !important;
+  position: relative !important;
+}
+
+/* 禁用所有动画和过渡 */
+.centered-tree .ant-tree-list-motion,
+.centered-tree .ant-tree-motion-collapse,
+.centered-tree .ant-motion-collapse,
+.centered-tree .ant-tree-treenode-motion {
+  transition: none !important;
+  animation: none !important;
+  overflow: visible !important;
+}
+
+/* GraphView 特有样式 */
+/* 卡片样式 */
+.tree-node-card {
+  padding: 12px !important;
+  margin: 8px 0 !important;
+  background: #fff !important;
+  border-radius: 8px !important;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1) !important;
+  border: 1px solid #f0f0f0 !important;
+  transition: all 0.3s !important;
+  position: relative !important;
+  width: 360px !important;
+  display: inline-block !important;
+  text-align: left !important;
+  z-index: 5 !important;
+}
+
+/* 根节点卡片样式 */
+.tree-node-card-root {
+  width: 420px !important;
+}
+
+/* 卡片hover效果 */
+.tree-node-card:hover {
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15) !important;
+  border-color: #91d5ff !important;
+}
+
+/* 展开按钮样式 */
+.tree-node-toggle-btn {
+  position: absolute !important;
+  top: 10px !important;
+  right: 10px !important;
+  width: 28px !important;
+  height: 28px !important;
+  border-radius: 50% !important;
+  background-color: #f5f5f5 !important;
+  border: 1px solid #d9d9d9 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  cursor: pointer !important;
+  z-index: 100 !important;
+  user-select: none !important;
+  font-size: 14px !important;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.1) !important;
+}
+
+.tree-node-toggle-btn:hover {
+  background-color: #e6f7ff !important;
+  border-color: #91d5ff !important;
+}
+
+.tree-node-toggle-btn:active {
+  background-color: #bae7ff !important;
+}
+
+/* QueryCanvas特有样式 */
+/* 主容器 */
+.query-canvas {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 20px;
+  background-color: #fafafa;
+  gap: 16px;
+}
+
+/* 上部分 - 查询输入区域 */
+.query-upper-section {
+  padding: 16px;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+/* 代理头部信息 */
+.agent-header {
+  margin-bottom: 16px;
+}
+
+/* 查询输入容器 */
+.query-input-container {
+  display: flex;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+/* 查询输入框 */
+.query-input {
+  flex: 1;
+  border-radius: 8px !important;
+  resize: none;
+  min-height: 60px !important;  /* 减小输入框默认高度 */
+  max-height: 100px !important; /* 限制最大高度 */
+}
+
+.query-input:hover, .query-input:focus {
+  border-color: #40a9ff !important;
+  box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.1) !important;
+}
+
+/* 查询按钮区域 */
+.query-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* 查询按钮 */
+.query-button {
+  min-width: 120px;
+}
+
+/* 下部分 - 响应区域 */
+.query-lower-section {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 400px;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  overflow: hidden;
+}
+
+/* 响应卡片 */
+.response-card {
+  height: 100%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 响应文本区域 */
+.response-pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-y: auto;
+  padding: 16px;
+  font-family: monospace;
+  font-size: 14px;
+  line-height: 1.5;
+  background-color: #fafafa;
+  border-radius: 4px;
+  height: 100%;
+  min-height: 200px;
+}
+
+/* 流式响应光标动画 */
+.streaming-cursor {
+  display: inline-block;
+  width: 8px;
+  height: 16px;
+  background-color: #1890ff;
+  margin-left: 4px;
+  vertical-align: middle;
+  animation: blink 1s infinite;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+/* 高亮更新动画 */
+@keyframes highlight-update {
+  0% {
+    background-color: #ffff9c;
+    border-color: #faad14;
+  }
+  100% {
+    background-color: #fff;
+    border-color: #f0f0f0;
+  }
+}
+
+/* 响应卡片全屏样式 */
+.response-card.fullscreen {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1000;
+  margin: 0;
+  border-radius: 0;
+  width: 100% !important;
+  max-width: none;
+}
+
+.response-card.fullscreen .ant-card-body {
+  flex: 1;
+  overflow: auto;
+}
+
+/* 图表状态开关样式 */
+.graph-mode-switch {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 0;
+  padding: 10px;
+  border-radius: 6px;
+  background-color: #f5f7fa;
+  transition: all 0.3s;
+}
+
+.graph-mode-switch:hover {
+  background-color: #e6f7ff;
+}
+
+.graph-mode-switch .ant-switch-checked {
+  background-color: #52c41a;
+}
+
+/* 加载状态容器 */
+.loading-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 200px;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* 空状态样式 */
+.empty-state {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-direction: column;
+  height: 70vh;
+  text-align: center;
+  color: #8c8c8c;
+  gap: 20px;
+}
+
+.empty-state h4 {
+  font-weight: normal;
+  color: #595959;
+}
+
+/* JSON视图样式优化 */
+.response-json .pretty-json-container {
+  font-family: 'Menlo', 'Monaco', 'Courier New', monospace !important;
+  font-size: 14px !important;
+  line-height: 1.5 !important;
+}
+
+/* 优化JSON中文显示 */
+.response-json .variable-value,
+.response-json .variable-row * {
+  font-family: 'Menlo', 'Monaco', 'Microsoft YaHei', 'PingFang SC', 'Hiragino Sans GB', sans-serif !important;
+}
+
+/* 全屏样式 */
+.graph-container.fullscreen {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1000;
+  background: white;
+  padding: 20px;
+  overflow: auto;
+}
+
+/* Tab样式优化 */
+.ant-tabs-tab {
+  display: inline-flex;
+  justify-content: center;
+  min-width: 120px;
+}
+
+.ant-tabs-ink-bar {
+  left: 50%;
+  transform: translateX(-50%);
+  width: 80% !important;
+}
+
+/* 标签页样式 */
+.query-tabs .ant-tabs-nav {
+  margin-bottom: 16px !important;
+  display: flex !important;
+  justify-content: flex-start !important;
+  width: 100% !important;
+}
+
+.query-tabs .ant-tabs-nav::before {
+  border-bottom: 1px solid #f0f0f0 !important;
+  width: 100% !important;
+}
+
+.query-tabs .ant-tabs-nav-list {
+  width: auto !important;
+}
+
+.query-tabs .ant-tabs-tab {
+  padding: 12px 16px !important;
+  font-size: 16px !important;
+  text-align: center !important;
+  min-width: 100px !important;
+}
+
+.query-tabs .ant-tabs-tab + .ant-tabs-tab {
+  margin-left: 4px !important;
+}
+
+.query-tabs .ant-tabs-ink-bar {
+  height: 3px !important;
+  background-color: #1890ff !important;
+}
+
+/* 图表容器支持左右滚动 */
+.graph-container {
+  position: relative;
+  width: 100%;
+  overflow-x: auto !important;
+  overflow-y: auto;
+  white-space: nowrap;
+  padding-bottom: 20px;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.graph-view-container {
+  width: 100%;
+  min-height: 400px;
+  overflow-x: auto;
+}
+
+.graph-container.fullscreen {
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  z-index: 1000 !important;
+  background: white !important;
+  overflow-x: auto !important;
+  overflow-y: auto !important;
+}
+
+.graph-container.fullscreen .graph-view-container {
+  min-height: calc(100vh - 60px);
+}
+
+/* 全屏图标样式 */
+.fullscreen-icon {
+  cursor: pointer !important;
+  font-size: 28px !important; /* 增大图标尺寸 */
+  transition: all 0.3s !important;
+  display: inline-block !important;
+  vertical-align: middle !important;
+  line-height: 1 !important;
+}
+
+.fullscreen-icon:hover {
+  color: #1890ff !important;
+  transform: scale(1.1) !important;
+}
+
+/* 卡片最大高度和展开按钮 */
+.tree-node-card {
+  max-height: 400px !important;
+  overflow: hidden !important;
+  position: relative !important;
+  transition: max-height 0.3s ease !important;
+}
+
+.tree-node-card.expanded {
+  max-height: none !important;
+  overflow: visible !important;
+}
+
+.card-expand-button {
+  position: absolute !important;
+  bottom: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  background: linear-gradient(to bottom, rgba(255,255,255,0), rgba(255,255,255,1)) !important;
+  height: 40px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  cursor: pointer !important;
+  border-radius: 0 0 8px 8px !important;
+  z-index: 10 !important;
+}
+
+.card-expand-button:hover {
+  background: linear-gradient(to bottom, rgba(240,247,255,0), rgba(240,247,255,1)) !important;
+}
+
+/* 处理水平滚动的居中树结构 */
+.centered-tree {
+  min-width: fit-content !important;
+  width: auto !important;
+  overflow-x: visible !important;
+  background: #fff;
+  padding: 20px;
+  border-radius: 8px;
+}
+
+/* 增强卡片的布局 */
+.tree-children-container {
+  width: auto !important;
+  min-width: fit-content !important;
+  display: flex !important;
+  flex-wrap: nowrap !important; /* 防止卡片换行 */
+  justify-content: flex-start !important;
+  padding: 0 20px !important;
+  margin-top: 30px !important;
+  overflow-x: visible !important;
+}

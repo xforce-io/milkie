@@ -1,0 +1,151 @@
+:root {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
+    'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol',
+    'Noto Color Emoji';
+  line-height: 1.5;
+  font-weight: 400;
+
+  color-scheme: light;
+  color: #213547;
+  background-color: #ffffff;
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.react-flow,
+.react-flow__pane,
+.react-flow__viewport,
+.react-flow__container,
+.react-flow-container,
+.execution-flow-container {
+  background-color: #f0f0f0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 650px !important;
+  position: relative !important;
+}
+
+/* 添加容器尺寸样式 */
+.react-flow-wrapper,
+.react-flow__renderer,
+[data-testid="rf__wrapper"] {
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 650px !important;
+  position: relative !important;
+}
+
+/* 确保节点可见且可以正确定位 */
+.react-flow__node {
+  opacity: 1 !important;
+  visibility: visible !important;
+  z-index: 10 !important;
+  position: absolute !important;
+  pointer-events: all !important;
+}
+
+/* 确保视口可以正确平移和缩放 */
+.react-flow__viewport {
+  transform-origin: 0 0 !important;
+}
+
+/* 确保节点容器不受限制 */
+.react-flow__nodes {
+  position: absolute !important;
+  width: 100% !important;
+  height: 100% !important;
+  pointer-events: none !important;
+}
+
+html, body {
+  background-color: #ffffff;
+}
+
+a {
+  font-weight: 500;
+  color: #646cff;
+  text-decoration: inherit;
+}
+a:hover {
+  color: #535bf2;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+h1 {
+  font-size: 3.2em;
+  line-height: 1.1;
+}
+
+button {
+  border-radius: 8px;
+  border: 1px solid transparent;
+  padding: 0.6em 1.2em;
+  font-size: 1em;
+  font-weight: 500;
+  font-family: inherit;
+  background-color: #1a1a1a;
+  cursor: pointer;
+  transition: border-color 0.25s;
+}
+button:hover {
+  border-color: #646cff;
+}
+button:focus,
+button:focus-visible {
+  outline: 4px auto -webkit-focus-ring-color;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    color: #213547;
+  }
+  a:hover {
+    color: #747bff;
+  }
+  button {
+    background-color: #f9f9f9;
+  }
+}
+
+#root {
+  width: 100%;
+  height: 100vh;
+}
+
+/* 添加全局强制覆盖 */
+body, #root, .ant-layout, .ant-tabs-content, .ant-tabs-tabpane, .app-content {
+  background-color: #ffffff !important;
+  color: #213547 !important;
+}
+
+/* 执行图容器强制样式 */
+.ant-tabs-tabpane[class*="tabpane-active"],
+div[style*="尚无执行图数据"],
+div[style*="请在查询完成后"] {
+  background-color: #f0f0f0 !important;
+  color: #333333 !important;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color: #213547 !important;
+    background-color: #ffffff !important;
+  }
+  
+  body, #root {
+    background-color: #ffffff !important;
+    color: #213547 !important;
+  }
+  
+  .ant-layout {
+    background-color: #ffffff !important;
+  }
+}

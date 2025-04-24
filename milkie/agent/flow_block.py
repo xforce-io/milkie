@@ -1,11 +1,13 @@
 from typing import List, Union
 from milkie.agent.base_block import BaseBlock
+from milkie.agent.exec_graph import ExecNode
 from milkie.agent.for_block import ForBlock
 from milkie.agent.llm_block.llm_block import LLMBlock
 from milkie.config.constant import DefaultUsePrevResult, KeywordForEnd, KeywordForStart
 from milkie.context import Context
 from milkie.config.config import GlobalConfig
 from milkie.functions.toolkits.toolkit import Toolkit
+from milkie.global_context import GlobalContext
 from milkie.response import Response
 from milkie.utils.data_utils import codeToLines
 
@@ -14,17 +16,15 @@ class FlowBlock(BaseBlock):
             self, 
             agentName: str,
             flowCode: str, 
-            context: Context = None, 
+            globalContext: GlobalContext = None, 
             config: str | GlobalConfig = None,
             toolkit: Toolkit = None,
-            usePrevResult=DefaultUsePrevResult,
             repoFuncs=None):
         super().__init__(
             agentName=agentName, 
-            context=context, 
+            globalContext=globalContext, 
             config=config, 
             toolkit=toolkit, 
-            usePrevResult=usePrevResult, 
             repoFuncs=repoFuncs
         )
         self.flowCode = flowCode
@@ -88,11 +88,10 @@ class FlowBlock(BaseBlock):
         return ForBlock.create(
             agentName=self.agentName,
             forStatement='\n'.join(forLines), 
-            context=self.context, 
+            globalContext=self.globalContext, 
             config=self.config, 
             retStorage=retStorage,
             toolkit=self.toolkit,
-            usePrevResult=self.usePrevResult,
             repoFuncs=self.repoFuncs
         ), i
 
@@ -117,11 +116,10 @@ class FlowBlock(BaseBlock):
         self.blocks.append(
             LLMBlock.create(
                 agentName=self.agentName,
-                context=self.context, 
+                globalContext=self.globalContext, 
                 config=self.config, 
                 taskExpr='\n'.join(blockLines),
                 toolkit=self.toolkit,
-                usePrevResult=self.usePrevResult,
                 repoFuncs=self.repoFuncs
             )
         )
@@ -129,20 +127,28 @@ class FlowBlock(BaseBlock):
     def execute(
             self, 
             context: Context,
-            query: str = None, 
+            query: str,
             args: dict = {}, 
             prevBlock: BaseBlock = None,
+            execNodeParent: ExecNode = None,
             **kwargs) -> Response:
-        super().execute(context, query, args, prevBlock, **kwargs)
+        super().execute(
+            context=context, 
+            query=query, 
+            args=args, 
+            prevBlock=prevBlock, 
+            execNodeParent=execNodeParent, 
+            **kwargs)
         
         result = None
         lastBlock = prevBlock
         for block in self.blocks:
             result = block.execute(
                 context=context,
-                query=query, 
+                query=query,
                 args=args,
                 prevBlock=lastBlock,
+                execNodeParent=execNodeParent,
                 **kwargs
             )
             lastBlock = block
@@ -152,18 +158,16 @@ class FlowBlock(BaseBlock):
     def create(
             agentName: str,
             flowCode: str, 
-            context: Context = None, 
+            globalContext: GlobalContext = None, 
             config: str | GlobalConfig = None,
             toolkit: Toolkit = None,
-            usePrevResult=DefaultUsePrevResult,
             repoFuncs=None) -> 'FlowBlock':
         return FlowBlock(
             agentName=agentName,
             flowCode=flowCode,
-            context=context,
+            globalContext=globalContext,
             config=config,
             toolkit=toolkit,
-            usePrevResult=usePrevResult,
             repoFuncs=repoFuncs
         )
 

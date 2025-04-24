@@ -76,10 +76,6 @@ def main():
     
     # 如果是服务器模式
     if args.server:
-        if not args.agent:
-            print("Error: --agent is required when running in server mode")
-            sys.exit(1)
-        
         server = Server(engine=engine, agent_name=args.agent)
         server.run(port=args.port)
         return

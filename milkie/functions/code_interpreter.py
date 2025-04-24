@@ -1,15 +1,13 @@
+import ast
 from typing import Any, Dict, Optional
 import logging
 import traceback
-from milkie.context import Context
-from milkie.functions.import_white_list import WhiteListImport, addPreImport
 from milkie.global_context import GlobalContext
-from milkie.interpreter.internal_python_interpreter import InternalPythonInterpreter
 from milkie.llm.step_llm import StepLLM
 from milkie.log import DEBUG, ERROR, INFO, WARNING
 from milkie.response import Response
 from milkie.utils.data_utils import extractFromBlock, postRestoreVariablesInStr, wrapVariablesInStr
-import json
+from milkie.vm.vm import VM
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +21,6 @@ class StepLLMCode(StepLLM):
             errorContext: Optional[str] = None):
         super().__init__(
             globalContext=globalContext, 
-            promptMaker=None,
             llm=globalContext.settings.getLLMCode(noCache=noCache))
         self.instruction = wrapVariablesInStr(instruction)
         self.prevResult = prevResult
@@ -59,7 +56,6 @@ class StepLLMCode(StepLLM):
 class CodeInterpreter:
 
     def __init__(self, globalContext: GlobalContext):
-        self.interpreter = InternalPythonInterpreter(import_white_list=WhiteListImport)
         self.maxAttempts = 1
         self.globalContext = globalContext
 
@@ -67,6 +63,7 @@ class CodeInterpreter:
             self, 
             instruction: str, 
             varDict: Optional[Dict[str, Any]] = None, 
+            vm: VM = None,
             **kwargs) -> Any:
         attempt = 0
         errorContext = ""
@@ -84,13 +81,10 @@ class CodeInterpreter:
                     **kwargs)
                 code = extractFromBlock("python", code)
                 code = postRestoreVariablesInStr(code, varDict)
-                code = addPreImport(code)
-                
                 codeRepr = code.replace('\n', '//')
                 INFO(logger, f"execute code [{codeRepr}] model[{stepLLMCode.llm.model_name}]")
-                result = self.interpreter.run(code, code_type="python3", varDict=varDict)
-                return result
-
+                result = vm.execPython(code, varDict=varDict)
+                return VM.deserializePythonResult(result)
             except Exception as e:
                 attempt += 1
                 stepLLMCode.fail(args=varDict, **kwargs)
@@ -99,35 +93,3 @@ class CodeInterpreter:
                 
                 if attempt >= self.maxAttempts:
                     return None
-    
-    def executeCode(self, code: str, varDict: Optional[Dict[str, Any]] = None) -> Any:
-        """执行代码，处理特殊字符和转义"""
-        try:
-            # 添加日志以便调试
-            DEBUG(logger, f"Executing code: {code}")
-            
-            # 执行代码
-            return self.interpreter.run(code.replace('\\"', ''), code_type="python", varDict=varDict)
-            
-        except Exception as e:
-            ERROR(logger, f"Failed to execute code: {code}")
-            ERROR(logger, f"Error type: {type(e)}")
-            ERROR(logger, f"Error message: {str(e)}")
-            
-            # 如果是 JSON 解析错误，打印相关位置的内容
-            if isinstance(e, json.JSONDecodeError):
-                error_pos = e.pos
-                context_start = max(0, error_pos - 50)
-                context_end = min(len(code), error_pos + 50)
-                context = code[context_start:context_end]
-                ERROR(logger, f"JSON error context: {context}")
-                ERROR(logger, f"Error position: {error_pos}")
-                
-            raise RuntimeError(f"Code execution failed: {str(e)}")
-
-if __name__ == "__main__":
-    context = Context.create("config/global.yaml")
-    #codeInterpreter = CodeInterpreter(context.globalContext)
-    #print(codeInterpreter.interpreter.run("print(random.randint(1, 10))", code_type="python3"))
-    import pdb; pdb.set_trace()
-    print(CodeInterpreter(context.globalContext).execute("发送内容‘hello’到我的邮箱 pengxu@aishu.cn"))

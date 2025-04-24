@@ -10,7 +10,7 @@ from milkie.trace import stdout
 
 class StepLLMCritique(StepLLM):
     def __init__(self, globalContext: GlobalContext):
-        super().__init__(globalContext, promptMaker=None, llm=None)
+        super().__init__(globalContext, llm=None)
 
     def makePrompt(self, useTool: bool = False, args: dict = {}, **kwargs: dict) -> str:
         return f'''
@@ -27,7 +27,7 @@ class StepLLMCritique(StepLLM):
 
 class StepLLMRefine(StepLLM):
     def __init__(self, globalContext: GlobalContext):
-        super().__init__(globalContext, promptMaker=None, llm=None)
+        super().__init__(globalContext, llm=None)
 
     def makePrompt(self, useTool: bool = False, args: dict = {}, **kwargs: dict) -> str:
         return f'''

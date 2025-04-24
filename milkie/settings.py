@@ -17,6 +17,7 @@ class Settings(object):
         self.llms = self._buildLLMs(config.getLLMConfig())
         self.llmDefault = self.getLLM(self.llmBasicConfig.defaultModel)
         self.llmCodes = [self.getLLM(model) for model in self.llmBasicConfig.codeModel]
+        self.llmSkill = self.getLLM(self.llmBasicConfig.skillModel)
         if config.embeddingConfig:
             self._buildEmbedding(config.embeddingConfig)
         else:
@@ -30,6 +31,9 @@ class Settings(object):
     
     def getLLMCode(self, noCache :bool = True):
         return random.choice(self.llmCodes) if noCache else self.llmCodes[0]
+    
+    def getLLMSkill(self):
+        return self.llmSkill
     
     def getLLMDefault(self):
         return self.llmDefault

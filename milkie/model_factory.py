@@ -1,5 +1,4 @@
 import logging
-from llama_index.core.prompts.base import PromptTemplate
 from milkie.cache.cache_kv import CacheKVMgr
 from milkie.config.config import FRAMEWORK, EmbeddingConfig, SingleLLMConfig, LLMType
 
@@ -26,9 +25,6 @@ class ModelFactory:
                 self.llms[signatureModel] = llm
                 return llm
         
-        if signatureModel == self.signatureLLMModel:
-            return self.localLlm
-
         self.localLlm = self._setLLMModel(config)
         return self.localLlm
 
@@ -71,50 +67,7 @@ class ModelFactory:
                 port=config.port,
                 tokenizer_kwargs=tokenizerArgs)
         else:
-            if config.framework == FRAMEWORK.VLLM:
-                from milkie.llm.enhanced_vllm import EnhancedVLLM
-                self.localLlm = EnhancedVLLM(
-                    context_window=ctxLen,
-                    concurrency=config.batchSize,
-                    tensor_parallel_size=config.tensorParallelSize,
-                    tokenizer_name=config.model,
-                    model_name=config.model,
-                    system_prompt=config.systemPrompt,
-                    device=config.device,
-                    port=config.port,
-                    max_new_tokens=256,
-                    tokenizer_kwargs=tokenizerArgs)
-            elif config.framework == FRAMEWORK.LMDEPLOY:
-                from milkie.llm.enhanced_lmdeploy import EnhancedLmDeploy
-                self.localLlm = EnhancedLmDeploy(
-                    context_window=ctxLen,
-                    concurrency=config.batchSize,
-                    tensor_parallel_size=config.tensorParallelSize,
-                    tokenizer_name=config.model,
-                    model_name=config.model,
-                    system_prompt=config.systemPrompt,
-                    device=config.device,
-                    port=config.port,
-                    max_new_tokens=256,
-                    tokenizer_kwargs=tokenizerArgs)
-            else :
-                from milkie.llm.enhanced_hf_llm import EnhancedHFLLM
-                self.localLlm = EnhancedHFLLM(
-                    context_window=ctxLen,
-                    concurrency=config.batchSize,
-                    tensor_parallel_size=config.tensorParallelSize,
-                    device=config.device,
-                    port=config.port,
-                    max_new_tokens=256,
-                    model_kwargs=config.modelArgs.toJson(),
-                    generate_kwargs=config.generationArgs.toJson(),
-                    query_wrapper_prompt=PromptTemplate("{query}\n<|ASSISTANT|>\n"),
-                    tokenizer_name=config.model,
-                    model_name=config.model,
-                    system_prompt=config.systemPrompt,
-                    tokenizer_kwargs=tokenizerArgs,
-                    is_chat_model=True,
-                )
+            raise Exception(f"Unsupported LLM type: {config.type}")
 
         logging.info(f"Building LLM with model[{config.model}] framework[{config.framework}] model_args[{repr(config.modelArgs)}] memory[{self.localLlm.getMem()}GB]")
         return self.localLlm

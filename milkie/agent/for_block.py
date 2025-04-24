@@ -2,11 +2,13 @@ import json
 import logging
 import re
 from milkie.agent.base_block import BaseBlock
+from milkie.agent.exec_graph import ExecNode, ExecNodeAgent, ExecNodeFor, ExecNodeLabel, ExecNodeSequence, ExecNodeType
 from milkie.agent.llm_block.llm_block import LLMBlock
 from milkie.config.config import GlobalConfig
 from milkie.config.constant import DefaultUsePrevResult, KeywordForStart, KeyRet
 from milkie.context import Context, VarDict
 from milkie.functions.toolkits.toolkit import Toolkit
+from milkie.global_context import GlobalContext
 from milkie.response import Response
 from milkie.utils.data_utils import codeToLines
 
@@ -17,7 +19,7 @@ class ForBlock(BaseBlock):
             self, 
             agentName: str,
             forStatement: str, 
-            context: Context = None, 
+            globalContext: GlobalContext = None, 
             config: str | GlobalConfig = None,
             toolkit: Toolkit = None,
             usePrevResult=DefaultUsePrevResult,
@@ -26,7 +28,7 @@ class ForBlock(BaseBlock):
             repoFuncs=None):
         super().__init__(
             agentName=agentName, 
-            context=context, 
+            globalContext=globalContext, 
             config=config, 
             toolkit=toolkit, 
             usePrevResult=usePrevResult, 
@@ -61,7 +63,7 @@ class ForBlock(BaseBlock):
     def compile(self):
         self.loopBlock = self.loopBlockClass(
             agentName=self.agentName,
-            context=self.context,
+            globalContext=self.globalContext,
             config=self.config,
             toolkit=self.toolkit,
             taskExpr=self.loopBody,
@@ -115,15 +117,15 @@ class ForBlock(BaseBlock):
     def execute(
             self, 
             context: Context,
-            query: str = None, 
             args: dict = {}, 
             prevBlock :BaseBlock=None,
+            execNodeParent: ExecNode = None,
             **kwargs) -> Response:
         super().execute(
             context=context, 
-            query=query, 
             args=args, 
             prevBlock=prevBlock,
+            execNodeParent=execNodeParent,
             **kwargs)
 
         iterableValue = self.validate(self.getVarDict())
@@ -133,6 +135,12 @@ class ForBlock(BaseBlock):
         else:
             items = enumerate(iterableValue)
 
+        assert execNodeParent.label == ExecNodeLabel.AGENT
+        execNodeAgent :ExecNodeAgent = execNodeParent
+        execNodeFor :ExecNodeFor = ExecNodeFor.build(
+            execGraph=execNodeAgent.execGraph,
+            execNodeAgent=execNodeAgent)
+
         for key, value in items:
             if self.loopType == dict:
                 self.setVarDictGlobal(
@@ -141,12 +149,20 @@ class ForBlock(BaseBlock):
             else:
                 self.setVarDictGlobal(self.loopVar, value)
 
+            execNodeSequence :ExecNodeSequence = ExecNodeSequence.build(
+                execGraph=execNodeFor.execGraph,
+                context={
+                    "loopVar": key,
+                    "loopValue": value
+                })
+            execNodeFor.addExecute(execNodeSequence)
+
             try:
                 result = self.loopBlock.execute(
                     context=context,
-                    query=query, 
                     args=args,
                     prevBlock=prevBlock,
+                    execNodeParent=execNodeSequence,
                     **kwargs)
                 if result.resp != KeyRet:
                     results.append(result.resp)
@@ -165,7 +181,7 @@ class ForBlock(BaseBlock):
     def create(
             agentName: str,
             forStatement: str, 
-            context: Context = None, 
+            globalContext: GlobalContext = None, 
             config: str | GlobalConfig = None,
             toolkit: Toolkit = None,
             usePrevResult=DefaultUsePrevResult,
@@ -175,7 +191,7 @@ class ForBlock(BaseBlock):
         return ForBlock(
             agentName=agentName,
             forStatement=forStatement,
-            context=context,
+            globalContext=globalContext,
             config=config,
             toolkit=toolkit,
             usePrevResult=usePrevResult,

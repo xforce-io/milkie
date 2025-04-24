@@ -3,6 +3,8 @@ from typing import List
 import yaml
 import logging
 
+from milkie.config.constant import KeyNext, KeyRet
+
 logger = logging.getLogger(__name__)
 
 def loadFromYaml(path):
@@ -170,3 +172,10 @@ def codeToLines(code: str) -> List[str]:
                 lines[i] = lines[i].replace(temp, original)
                 
     return lines
+
+def preprocessPyCode(code: str):
+    return code.lstrip() \
+        .replace("$varDict", "self.varDict") \
+        .replace(KeyNext, f'"{KeyNext}"') \
+        .replace(KeyRet, f'"{KeyRet}"')
+

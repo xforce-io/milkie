@@ -5,6 +5,7 @@ from milkie.agent.base_block import BaseBlock
 from milkie.chatroom.role import Role
 from milkie.config.config import GlobalConfig
 from milkie.context import Context
+from milkie.global_context import GlobalContext
 from milkie.response import Response
 from milkie.trace import stdout
 
@@ -16,9 +17,9 @@ class Chatroom(BaseBlock):
             name: str,
             desc: str,
             host: str,
-            context: Context, 
+            globalContext: GlobalContext, 
             config: GlobalConfig):
-        super().__init__(context, config)
+        super().__init__(globalContext, config)
 
         self.name = name
         self.desc = desc
@@ -47,29 +48,34 @@ class Chatroom(BaseBlock):
 
     def compile(self):
         for name, role in self.roles.items():
-            role.setContext(self.context.copy())
+            role.setContext(self.context)
 
-    def execute(self, query: str, args: dict, **kwargs) -> Response:
+    def execute(
+            self, 
+            context: Context, 
+            query: str,
+            args: dict, 
+            **kwargs) -> Response:
         if len(self.roles) == 1:
-            return self.execute1v1Mode(self.prologue, args, **kwargs)
+            return self.execute1v1Mode(context, query, args, **kwargs)
         else:
             raise NotImplementedError("Multi-agent mode is not implemented yet.")
     
-    def execute1v1Mode(self, query: str, args: dict, **kwargs) -> Response:
+    def execute1v1Mode(self, context: Context, query: str, args: dict, **kwargs) -> Response:
         stdout(f"\nROLE[{self.host.name}] => \n{query}", info=True)
-        self.host.context.addHistoryAssistantPrompt(query)
+        self.host.context.historyAddAssistantPrompt(query)
         while True: 
             stdout(f"\n\nROLE[{self.onlyRole.name}] => ", info=True)
-            self.onlyRole.context.addHistoryUserPrompt(query)
-            resp = self.onlyRole.execute(query, args, **kwargs)
+            self.onlyRole.context.historyAddUserPrompt(query)
+            resp = self.onlyRole.execute(context, args, **kwargs)
             if resp.isEnd():
                 break
 
             query = resp.respStr
 
             stdout(f"\n\nROLE[{self.host.name}] => ", info=True)
-            self.host.context.addHistoryUserPrompt(query)
-            resp = self.host.execute(query, args, **kwargs)
+            self.host.context.historyAddUserPrompt(query)
+            resp = self.host.execute(context, args, **kwargs)
             if resp.isEnd():
                 break
 

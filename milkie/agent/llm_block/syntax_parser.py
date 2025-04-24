@@ -7,9 +7,10 @@ from milkie.agent.func_block.func_block import RepoFuncs
 from milkie.agent.llm_block.step_llm_extractor import StepLLMExtractor
 from milkie.config.constant import *
 from milkie.context import VarDict
-from milkie.functions.toolkits.toolkit import Toolkit
 from milkie.settings import Settings
+from milkie.types.object_type import ObjectType, ObjectTypeFactory
 from milkie.utils.data_utils import codeToLines, extractBlock, extractJsonBlock, isBlock, unescape
+from milkie.vm.vm import VM
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +20,8 @@ class OutputSyntaxFormat(Enum):
     EXTRACT = 3
     CHECK = 4
     JSON = 5
+    JSONLIST = 6
+    OBJECT = 7
 
 class ResultOutputProcessSingle:
     def __init__(self, storeVar: str, output: Any=None, errmsg: str=None):
@@ -88,13 +91,19 @@ class ResultOutputProcess:
         return f"ResultOutputProcess(results={self._results})"
 
 class OutputSyntax:
-    def __init__(self, syntax: str):
+    def __init__(
+            self, 
+            syntax: str,
+            globalObjectTypes: ObjectTypeFactory):
         self.originalSyntax = syntax.strip()
+        self.globalObjectTypes = globalObjectTypes
+        
         self.format = self._determineFormat()
         self.regExpr = None
         self.extractPattern = None
         self.checkPattern = None
         self.errorMessage = None
+        self.objectTypes = []
         self._parse()
     
     def getOriginalSyntax(self):
@@ -105,15 +114,21 @@ class OutputSyntax:
             return OutputSyntaxFormat.REGEX
         elif self.originalSyntax.startswith("e'") or self.originalSyntax.startswith('e"'):
             return OutputSyntaxFormat.EXTRACT
+        elif self.originalSyntax.startswith("o'") or self.originalSyntax.startswith('o"'):
+            return OutputSyntaxFormat.OBJECT
         elif self.originalSyntax.startswith("c```"):
             return OutputSyntaxFormat.CHECK
         elif self.originalSyntax.strip() == "json":
             return OutputSyntaxFormat.JSON
+        elif self.originalSyntax.strip() == "jsonl":
+            return OutputSyntaxFormat.JSONLIST
         else:
             return OutputSyntaxFormat.NORMAL
 
     def _parse(self):
-        if self.format == OutputSyntaxFormat.NORMAL or self.format == OutputSyntaxFormat.JSON:
+        if self.format == OutputSyntaxFormat.NORMAL or \
+                self.format == OutputSyntaxFormat.JSON or \
+                self.format == OutputSyntaxFormat.JSONLIST:
             return
 
         content = self.originalSyntax[1:]
@@ -146,18 +161,27 @@ class OutputSyntax:
             self.extractPattern = pattern
         elif self.format == OutputSyntaxFormat.CHECK:
             self.checkPattern = pattern
+        elif self.format == OutputSyntaxFormat.OBJECT:
+            titles = [title.strip() for title in pattern.split(',')]
+            if len(titles) == 0:
+                raise ValueError(f"Invalid syntax: missing object type[{pattern}]")
+
+            self.objectTypes = self.globalObjectTypes.getTypes(titles)
         else:
             raise ValueError(f"Invalid format: {self.format}")
 
     def getOutputSyntax(self):
         return unescape(self.originalSyntax)
 
+    def getObjectOutputSyntax(self):
+        return self.objectTypes
+
     def processOutput(
             self, 
             stepLLMExtractor: StepLLMExtractor, 
             output: Any,
             varDict: VarDict,
-            toolkit: Toolkit) -> Any:
+            vm: VM) -> Any:
         if type(output) == str:
             if self.format == OutputSyntaxFormat.REGEX:
                 return self.regExpr.search(output).group(1)
@@ -167,11 +191,14 @@ class OutputSyntax:
                 allArgs["text"] = output
                 return stepLLMExtractor.completionAndFormat(
                     args=allArgs)
-            elif self.format == OutputSyntaxFormat.JSON:
+            elif self.format == OutputSyntaxFormat.JSON or \
+                    self.format == OutputSyntaxFormat.JSONLIST or \
+                    self.format == OutputSyntaxFormat.OBJECT:
                 return extractJsonBlock(output)
+
         if self.format == OutputSyntaxFormat.CHECK:
             try:
-                return toolkit.runCode(
+                return vm.execPython(
                     code=self.checkPattern, 
                     varDict=varDict.getAllDict())
             except Exception as e:
@@ -192,12 +219,12 @@ class OutputStruct:
             stepLLMExtractor: StepLLMExtractor, 
             output: Any,
             varDict: VarDict,
-            toolkit: Toolkit) -> Any:
+            vm: VM) -> Any:
         return self.outputSyntax.processOutput(
             stepLLMExtractor=stepLLMExtractor, 
             output=output, 
             varDict=varDict,
-            toolkit=toolkit)
+            vm=vm)
 
     def getOutputSyntaxFormat(self):
         return self.outputSyntax.format if self.outputSyntax else None
@@ -217,9 +244,9 @@ class InstrOutput:
     def addOutputStruct(self, outputStruct: OutputStruct):
         self.outputStructs.append(outputStruct)
     
-    def getNormalFormat(self) -> str:
+    def getCertainOutputSyntax(self, format: OutputSyntaxFormat) -> str:
         for outputStruct in self.outputStructs:
-            if outputStruct.outputSyntax and outputStruct.outputSyntax.format == OutputSyntaxFormat.NORMAL:
+            if outputStruct.outputSyntax and outputStruct.outputSyntax.format == format:
                 return outputStruct.outputSyntax.getOutputSyntax()
         return None
     
@@ -235,7 +262,7 @@ class InstrOutput:
             output: Any,
             stepLLMExtractor: StepLLMExtractor, 
             varDict: VarDict,
-            toolkit: Toolkit,
+            vm: VM,
             retry: bool,
             contextLen: int):
         if self._processed:
@@ -245,7 +272,7 @@ class InstrOutput:
             output=output,
             stepLLMExtractor=stepLLMExtractor, 
             varDict=varDict,
-            toolkit=toolkit)
+            vm=vm)
         if not self._currentResult.hasError():
             self._processed = True
             self.storeResultToVarDict(varDict, contextLen)
@@ -270,7 +297,7 @@ class InstrOutput:
             output: Any,
             stepLLMExtractor: StepLLMExtractor, 
             varDict: VarDict,
-            toolkit: Toolkit):
+            vm: VM):
         if self._currentResult is None:
             self._currentResult = ResultOutputProcess()
 
@@ -283,7 +310,7 @@ class InstrOutput:
                     output=output, 
                     stepLLMExtractor=stepLLMExtractor, 
                     varDict=varDict,
-                    toolkit=toolkit)
+                    vm=vm)
                 if not processedOutput or \
                         (type(processedOutput) == str and processedOutput.strip() == ExprNoInfoToExtract):
                     self._currentResult.addError(
@@ -300,8 +327,6 @@ class InstrOutput:
                 self._currentResult.addSuccess(
                     storeVar=outputStruct.storeVar,
                     output=output)
-
-from milkie.functions.toolkits.skillset import Skillset
 
 class SyntaxParser:
     class Flag(Enum):
@@ -323,7 +348,8 @@ class SyntaxParser:
             settings: Settings,
             label: str,
             instruction: str,
-            repoFuncs: RepoFuncs) -> None:
+            repoFuncs: RepoFuncs,
+            globalObjectTypes: ObjectTypeFactory) -> None:
         self.settings = settings
 
         self.flag = SyntaxParser.Flag.NONE
@@ -335,6 +361,8 @@ class SyntaxParser:
         self.funcsToCall = []
         
         self.repoFuncs = repoFuncs
+        self.globalObjectTypes = globalObjectTypes
+
         self.typeCall = None
         self.callObj = None
         self.callArg = None
@@ -351,16 +379,31 @@ class SyntaxParser:
         return self.instOutput
 
     def getNormalFormat(self) -> str:
-        return self.instOutput.getNormalFormat()
+        return self.instOutput.getCertainOutputSyntax(OutputSyntaxFormat.NORMAL)
+
+    def getJsonFormat(self) -> str:
+        return self.instOutput.getCertainOutputSyntax(OutputSyntaxFormat.JSON)
+
+    def getJsonListFormat(self) -> str:
+        return self.instOutput.getCertainOutputSyntax(OutputSyntaxFormat.JSONLIST)
 
     def getStoreVars(self):
         return [struct.storeVar for struct in self.instOutput.outputStructs if struct.storeVar]
 
-    def getJsonOutputSyntax(self):
+    def getNormalOutputSyntax(self):
         outputStructs = [struct for struct in self.instOutput.outputStructs if struct.outputSyntax and struct.outputSyntax.format == OutputSyntaxFormat.NORMAL]
         if not outputStructs:
             return None
         return outputStructs[0].outputSyntax.getOriginalSyntax()
+
+    def getObjectOutputSyntax(self) -> List[ObjectType]:
+        outputStructs = [struct for struct in self.instOutput.outputStructs if struct.outputSyntax and struct.outputSyntax.format == OutputSyntaxFormat.OBJECT]
+        if len(outputStructs) > 1:
+            raise Exception("Multiple object types found in instruction with output syntax")
+        elif len(outputStructs) == 1:
+            return outputStructs[0].outputSyntax.getObjectOutputSyntax()
+        else:
+            return None
 
     def parseInstruction(self):
         self._handleOutputAndStore()
@@ -379,7 +422,7 @@ class SyntaxParser:
             content = parts[i+1].strip() if i+1 < len(parts) else ""
             
             if separator == "=>":
-                outputSyntax = OutputSyntax(content) if content else None
+                outputSyntax = OutputSyntax(content, self.globalObjectTypes) if content else None
                 lastSeparator = separator
             elif separator == "->":
                 if lastSeparator == "->" and outputSyntax is None:
@@ -394,6 +437,8 @@ class SyntaxParser:
         # Check for invalid syntax
         if '->' in self.instruction:
             raise Exception("Invalid syntax: store variable in instruction")
+
+        self._checkOutputSyntaxesConflicts()
 
     def _handleModel(self):
         if self.flag == SyntaxParser.Flag.CODE:
@@ -416,10 +461,11 @@ class SyntaxParser:
                 
                 params, funcCallPattern = self._parseFuncParams(pattern, self.instruction)
                 if params is not None:
-                    funcBlock.setParams(params)
-                    funcBlock.setFuncCallPattern(funcCallPattern)
-                    funcBlock.compile()
-                    self.funcsToCall.append(funcBlock)
+                    newFuncBlock = funcBlock.createFuncCall()
+                    newFuncBlock.setParams(params)
+                    newFuncBlock.setFuncCallPattern(funcCallPattern)
+                    newFuncBlock.compile()
+                    self.funcsToCall.append(newFuncBlock)
                 else:
                     raise SyntaxError(f"function[{funcName}] params not found")
 
@@ -502,16 +548,80 @@ class SyntaxParser:
     def getOutputSyntaxes(self):
         return [struct.outputSyntax for struct in self.instOutput.outputStructs if struct.outputSyntax]
 
+    def _checkOutputSyntaxesConflicts(self):
+        outputSyntaxes = self.getOutputSyntaxes()
+        for outputSyntax in outputSyntaxes:
+            if outputSyntax.format == OutputSyntaxFormat.OBJECT:
+                if len(outputSyntaxes) > 1:
+                    raise Exception("Multiple object types found in instruction with output syntax")
+
     def _parseFuncParams(self, pattern: str, instruction: str) -> Tuple[List[str], str]:
-        paramsPattern = r'%s\(\s*(.*?)\s*\)' % re.escape(pattern)
-        paramsMatch = re.search(paramsPattern, instruction)
-        if not paramsMatch:
+        # 查找函数调用的起始位置
+        pattern_pos = instruction.find(pattern)
+        if pattern_pos == -1:
             return None, None
+        
+        # 查找参数列表开始的左括号
+        open_paren_pos = instruction.find('(', pattern_pos + len(pattern))
+        if open_paren_pos == -1:
+            return None, None
+        
+        # 手动寻找与左括号匹配的右括号，考虑嵌套括号和字符串字面量
+        bracket_count = 1
+        in_string = False
+        string_char = None
+        pos = open_paren_pos + 1
+        
+        while pos < len(instruction) and bracket_count > 0:
+            char = instruction[pos]
             
-        params_str = paramsMatch.group(1).strip()
+            # 处理字符串字面量开始/结束
+            if not in_string and char in ['"', "'"]:
+                # 检查三引号
+                if pos + 2 < len(instruction) and instruction[pos:pos+3] in ['"""', "'''"]:
+                    in_string = True
+                    string_char = instruction[pos:pos+3]
+                    pos += 3
+                    continue
+                else:
+                    in_string = True
+                    string_char = char
+                    pos += 1
+                    continue
+            elif in_string:
+                # 检查是否到达字符串结束
+                if (len(string_char) == 3 and pos + 2 < len(instruction) and 
+                        instruction[pos:pos+3] == string_char) or \
+                   (len(string_char) == 1 and char == string_char and 
+                        (pos == 0 or instruction[pos-1] != '\\')):
+                    in_string = False
+                    if len(string_char) == 3:
+                        pos += 3
+                        continue
+                pos += 1
+                continue
+            
+            # 只有不在字符串内部时才计数括号
+            if char == '(':
+                bracket_count += 1
+            elif char == ')':
+                bracket_count -= 1
+            
+            pos += 1
+        
+        if bracket_count != 0:
+            return None, None  # 没有找到匹配的右括号
+        
+        close_paren_pos = pos - 1
+        
+        # 提取参数字符串和完整的函数调用
+        params_str = instruction[open_paren_pos + 1:close_paren_pos].strip()
+        func_call_pattern = instruction[pattern_pos:close_paren_pos + 1]
+        
         if not params_str:
-            return [[], paramsMatch.group(0)]
+            return [], func_call_pattern
             
+        # 以下保持原来的参数分割和处理逻辑不变
         # 解析带引号的参数
         params = []
         i = 0
@@ -579,4 +689,4 @@ class SyntaxParser:
                 param = param[1:-1]
             cleaned_params.append(param)
             
-        return cleaned_params, paramsMatch.group(0)
+        return cleaned_params, func_call_pattern

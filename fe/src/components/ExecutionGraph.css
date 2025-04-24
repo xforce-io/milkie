@@ -1,0 +1,47 @@
+.execution-graph-container {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  overflow: hidden;
+}
+
+/* 确保 React Flow 的基础容器正确定位 */
+.execution-graph-container .react-flow {
+  position: absolute !important;
+  left: 0 !important;
+  top: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* 允许视口自由变换 */
+.execution-graph-container .react-flow__viewport {
+  position: absolute !important;
+  transform-origin: 0 0 !important;
+  transform: translate(var(--rf-translate-x, 0), var(--rf-translate-y, 0)) scale(var(--rf-scale, 1)) !important;
+}
+
+/* 确保节点可以自由定位 */
+.execution-graph-container .react-flow__node {
+  position: absolute !important;
+  transform-origin: 0 0 !important;
+}
+
+/* 确保节点容器不受限制 */
+.execution-graph-container .react-flow__nodes {
+  position: absolute !important;
+  width: 100% !important;
+  height: 100% !important;
+  pointer-events: none !important;
+}
+
+/* 单个节点允许事件 */
+.execution-graph-container .react-flow__node {
+  pointer-events: all !important;
+}
+
+/* 移除任何可能影响变换的限制 */
+.execution-graph-container .react-flow__viewport,
+.execution-graph-container .react-flow__node {
+  transition: none !important;
+} 

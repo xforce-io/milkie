@@ -5,13 +5,19 @@ from milkie.trace import stdout
 class AgentToolkit(Toolkit):
     def __init__(self, agent):
         super().__init__()
+        if agent is None:
+            raise ValueError("Agent cannot be None")
         self.agent = agent
         self.agentFunction = self._createAgentFunction()
 
     def getName(self) -> str:
+        if self.agent is None:
+            raise ValueError("Agent is None")
         return self.agent.name
 
     def getDesc(self) -> str:
+        if self.agent is None:
+            raise ValueError("Agent is None")
         return self.agent.desc
 
     def execute(self, query :str, args :dict = {}, **kwargs):

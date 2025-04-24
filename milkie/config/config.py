@@ -2,6 +2,7 @@ from abc import ABC
 from dataclasses import dataclass
 import json
 from typing import List
+import os
 
 import torch
 
@@ -27,9 +28,6 @@ class LLMType(Enum):
 
 class FRAMEWORK(Enum):
     NONE = 0
-    HUGGINGFACE = 1
-    VLLM = 2
-    LMDEPLOY = 3
 
 class EmbeddingType(Enum):
     HUGGINGFACE = 0
@@ -118,10 +116,12 @@ class LLMBasicConfig(BaseConfig):
             systemPrompt :str,
             defaultModel :str, 
             codeModel :list[str], 
+            skillModel :str,
             ctxLen :int):
         self.systemPrompt = systemPrompt
         self.defaultModel = defaultModel
         self.codeModel = codeModel
+        self.skillModel = skillModel if skillModel else defaultModel
         self.ctxLen = ctxLen
 
     def fromArgs(config :dict):
@@ -129,6 +129,7 @@ class LLMBasicConfig(BaseConfig):
             systemPrompt=config["system_prompt"],
             defaultModel=config["default_model"],
             codeModel=config["code_model"],
+            skillModel=config.get("skill_model", None),
             ctxLen=config["ctx_len"])
 
 class LLMModelArgs(BaseConfig):
@@ -646,6 +647,106 @@ class CloudConfig(BaseConfig):
     def getSourceConfig(self, source: str) -> CloudSourceConfig:
         return self.source_map.get(source)
 
+class VMConnectionType(Enum):
+    SSH = 0
+    DOCKER = 1
+
+class VMConfig(BaseConfig):
+    def __init__(
+            self, 
+            connectionType: VMConnectionType, 
+            host: str, 
+            port: int, 
+            username: str, 
+            encryptedPassword: str,
+            sshKeyPath: str = None,
+            timeout: int = 10,
+            retryCount: int = 3):
+        self.connectionType = connectionType
+        self.host = host
+        self.port = port
+        self.username = username
+        self.encryptedPassword = encryptedPassword
+        self.sshKeyPath = sshKeyPath
+        self.timeout = timeout
+        self.retryCount = retryCount
+
+    @staticmethod
+    def fromArgs(config: dict):
+        # 获取基本配置
+        connectionType = VMConnectionType.SSH if config["connection_type"] == "ssh" else VMConnectionType.DOCKER
+        host = config["host"]
+        port = config["port"]
+        username = config["username"]
+        encryptedPassword = config["encrypted_password"]
+        
+        # 获取可选配置
+        sshKeyPath = config.get("ssh_key_path", None)
+        timeout = config.get("timeout", 10)
+        retryCount = config.get("retry_count", 3)
+        
+        return VMConfig(
+            connectionType=connectionType,
+            host=host,
+            port=port,
+            username=username,
+            encryptedPassword=encryptedPassword,
+            sshKeyPath=sshKeyPath,
+            timeout=timeout,
+            retryCount=retryCount
+        )
+        
+    def validate(self) -> bool:
+        """验证配置是否有效
+        
+        Returns:
+            bool: 配置是否有效
+        """
+        # 验证基本参数
+        if not self.host or not isinstance(self.host, str):
+            return False
+        
+        if not isinstance(self.port, int) or self.port <= 0 or self.port > 65535:
+            return False
+            
+        if not self.username or not isinstance(self.username, str):
+            return False
+            
+        # 密码和SSH密钥至少要有一个
+        if not self.encryptedPassword and not self.sshKeyPath:
+            return False
+            
+        # 如果指定了SSH密钥路径，检查文件是否存在
+        if self.sshKeyPath and not os.path.exists(self.sshKeyPath):
+            return False
+            
+        return True
+        
+    def toDict(self) -> dict:
+        """将配置转换为字典
+        
+        Returns:
+            dict: 配置字典
+        """
+        return {
+            "connection_type": "ssh" if self.connectionType == VMConnectionType.SSH else "docker",
+            "host": self.host,
+            "port": self.port,
+            "username": self.username,
+            "encrypted_password": self.encryptedPassword,
+            "ssh_key_path": self.sshKeyPath,
+            "timeout": self.timeout,
+            "retry_count": self.retryCount
+        }
+        
+    def __str__(self) -> str:
+        """返回配置的字符串表示
+        
+        Returns:
+            str: 配置的字符串表示
+        """
+        return f"VMConfig(type={self.connectionType.name}, host={self.host}, port={self.port}, username={self.username})"
+
 class GlobalConfig(BaseConfig):
     instanceCnt = 0
     
@@ -683,8 +784,8 @@ class GlobalConfig(BaseConfig):
             else None
         )
         self.toolsConfig = ToolsConfig.fromArgs(config.get("tools", {}))
-        
-        # 统一处理配置间依赖关系
+        self.vmConfig = VMConfig.fromArgs(config.get("vm", {}))
+
         self._resolveConfigDependencies()
 
     def _resolveConfigDependencies(self):
@@ -738,3 +839,6 @@ class GlobalConfig(BaseConfig):
     
     def getEmailConfig(self) -> EmailConfig:
         return self.toolsConfig.getEmailConfig()
+    
+    def getVMConfig(self) -> VMConfig:
+        return self.vmConfig

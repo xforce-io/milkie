@@ -1,15 +1,16 @@
 from __future__ import annotations
+from abc import abstractmethod
 import re
 from typing import List
 from milkie.agent.base_block import BaseBlock
 from milkie.context import Context
 from milkie.config.config import GlobalConfig
 from milkie.functions.toolkits.toolkit import Toolkit
+from milkie.global_context import GlobalContext
 from milkie.response import Response
 from milkie.config.constant import InstFlagFunc, KeywordForStart
 import logging
 
-from milkie.trace import stdout
 from milkie.utils.data_utils import restoreVariablesInDict, restoreVariablesInStr
 
 logger = logging.getLogger(__name__)
@@ -21,14 +22,14 @@ class FuncBlock(BaseBlock):
             funcDefinition: str=None,
             funcName: str = None,
             params: List[str] = [],
-            context: Context = None,
+            globalContext: GlobalContext = None,
             config: str | GlobalConfig = None,
             toolkit: Toolkit = None,
             repoFuncs=None  # 添加 repoFuncs 参数
     ):
         super().__init__(
             agentName=agentName, 
-            context=context, 
+            globalContext=globalContext, 
             config=config, 
             toolkit=toolkit, 
             repoFuncs=repoFuncs
@@ -66,7 +67,7 @@ class FuncBlock(BaseBlock):
         from milkie.agent.flow_block import FlowBlock
         self.flowBlock = FlowBlock.create(
             agentName=self.agentName,
-            context=self.context,
+            globalContext=self.globalContext,
             config=self.config,
             toolkit=self.toolkit,
             flowCode=self.flowBlockCode,
@@ -139,12 +140,12 @@ class FuncBlock(BaseBlock):
             args = args + [None] * (len(self.params) - len(args))
 
         for param, value in zip(self.params, args):
-            self.setVarDictLocal(param, value)
+            self.setVarDictDataSegment(param, value)
 
     def execute(
             self, 
             context: Context,
-            query: str = None, 
+            query: str,
             args: dict = {}, 
             prevBlock: BaseBlock = None, 
             **kwargs) -> Response:
@@ -157,17 +158,20 @@ class FuncBlock(BaseBlock):
         
         params = self._restoreParams(args, self.params)
 
-        stdout(f"called func start: {self.funcName}, params: {params}", **kwargs)
+        self.context.genResp(f"called func start: {self.funcName}, params: {params}", **kwargs)
         response = self.flowBlock.execute(
             context=context,
-            query=query, 
             args=args, 
             prevBlock=prevBlock, 
             **kwargs)
-        stdout(f"called func end: {self.funcName}", **kwargs)
+        self.context.genResp(f"called func end: {self.funcName}", **kwargs)
 
         self.clearVarDictLocal(self.params)
         return response
+
+    @abstractmethod
+    def createFuncCall(self) -> FuncBlock:
+        pass
 
     def _restoreParams(self, args :dict, params :List[str]) -> dict:
         replaced = {}
@@ -184,7 +188,7 @@ class FuncBlock(BaseBlock):
             else:
                 raise ValueError(f"Unsupported type: {type(value)}")
 
-            if param in args: args[param] = replaced[param]
+            args[param] = replaced[param]
         
         for param, value in replaced.items():
             self.setVarDictLocal(param, value)

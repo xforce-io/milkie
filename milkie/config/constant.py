@@ -33,4 +33,5 @@ KeywordEnd = "_END_"
 
 ExprNoInfoToExtract = "无相关信息"
 
-SymbolEndSkill = "))"
+SymbolEndSkill = "```"
+SymbolStartSkill = "```"
