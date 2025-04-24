@@ -11,6 +11,7 @@ from llama_index.core.callbacks.base import CallbackManager
 from llama_index.core.indices.prompt_helper import DEFAULT_PADDING, PromptHelper
 
 from milkie.model_factory import ModelFactory
+from milkie.vm.vm import VMFactory
 
 def getNodeParser(
     chunk_size: int,
@@ -25,7 +26,7 @@ def getNodeParser(
         paragraph_separator="\n",
     )
 
-from milkie.config.config import SingleLLMConfig, LLMBasicConfig
+from milkie.config.config import LLMBasicConfig
 
 class CustomizedPromptHelper(PromptHelper):
 
@@ -83,6 +84,7 @@ class GlobalContext():
             self.memoryWithIndex = None
 
         self.env = None
+        self.vm = VMFactory.createVM(self.globalConfig.vmConfig)
 
     def setEnv(self, env):
         self.env = env

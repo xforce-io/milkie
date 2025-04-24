@@ -70,7 +70,7 @@ class BaseBlock(ABC):
         self.updateVarDictFromDict(args)
 
     def getEnv(self):
-        return self.context.getEnv()
+        return self.globalContext.getEnv()
 
     def getVarDict(self) -> VarDict:
         return self.context.varDict

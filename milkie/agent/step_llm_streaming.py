@@ -1,10 +1,11 @@
 import logging
 from enum import Enum
 from typing import List, Optional, Tuple
+import re
 
 from llama_index_client import ChatMessage, MessageRole
-from milkie.agent.exec_graph import ExecNodeLLM, ExecNodeSkill, ExecNodeTool
-from milkie.config.constant import SymbolEndSkill
+from milkie.agent.exec_graph import ExecNodeLLM, ExecNodeLabel, ExecNodeSkill, ExecNodeTool
+from milkie.config.constant import SymbolEndSkill, SymbolStartSkill
 from milkie.context import Context, History
 from milkie.functions.toolkits.agent_toolkit import AgentToolkit
 from milkie.functions.toolkits.skillset import Skillset
@@ -13,6 +14,7 @@ from milkie.llm.enhanced_llm import EnhancedLLM
 from milkie.llm.step_llm import StepLLM
 from milkie.log import INFO, WARNING
 from milkie.response import Response
+from milkie.types.object_type import ObjectType
 
 logger = logging.getLogger(__name__)
 
@@ -31,62 +33,77 @@ class InstAnalysisResult:
         self.funcExecRecords = funcExecRecords
         self.response = response
 
-def useSkill(
+class SkillTag:
+    def __init__(
+            self, 
+            start: int, 
+            end: int, 
+            skillName: str, 
+            query: str,
+            toolkit: Toolkit = None,
+            toolName: str = None):
+        self.start = start
+        self.end = end
+        self.skillName = skillName
+        self.query = query
+        self.toolkit = toolkit
+        self.toolName = toolName
+    
+    def isAgent(self):
+        return self.toolkit and isinstance(self.toolkit, AgentToolkit)
+
+def callSkill(
         context: Context,
         llm :EnhancedLLM,
         funcCall: str,
+        query: str,
         preContext: str,
-        **kwargs) -> Tuple[str, str]:
-    stepLLMToolcall = StepLLMStreaming()
-    globalSkillset = context.getGlobalContext().getEnv().getGlobalSkillset()
-    for toolkit in globalSkillset.skillset:
-        if isinstance(toolkit, AgentToolkit):
-            if not funcCall.startswith(toolkit.getName()) :
-                continue
+        skillTag: SkillTag,
+        **kwargs) -> str:
+    execNodeLLM = kwargs["execNode"].castTo(ExecNodeLLM)
+    if skillTag.isAgent():
+        execSkillNode = ExecNodeSkill.build(
+            execGraph=execNodeLLM.execGraph,
+            execNodeLLM=execNodeLLM,
+            skillName=skillTag.skillName,
+            query=funcCall.strip(),
+            skillResult=None,
+            label=ExecNodeLabel.AGENT)
+        response = skillTag.toolkit.agent.execute(
+            context=context,
+            query=funcCall.strip(), 
+            args=context.getVarDict().getGlobalDict(),
+            **{"execNode" : execSkillNode.getCalled()})
+        execSkillNode.setSkillResult(response.respStr)
+        return response.respStr
+    else:
+        history = History()
+        if preContext:
+            history.addUserPrompt(preContext)
 
-            execNode = ExecNodeSkill.build(
-                execNodeParent=kwargs["execNode"], 
-                skillName=toolkit.getName(),
-                query=funcCall[len(toolkit.getName()):].strip(),
-                skillArgs=context.getVarDict().getGlobalDict())
-            response = toolkit.agent.execute(
-                context=context,
-                query=funcCall[len(toolkit.agent.name):].strip(), 
-                args=context.getVarDict().getGlobalDict(),
-                **{"execNode" : execNode})
-            execNode.setSkillResult(response.respStr)
-            return toolkit.getName(), response.respStr
-        else:
-            for toolName, _ in toolkit.getToolDescs().items():
-                if not funcCall.startswith(toolName) and \
-                        not funcCall.startswith(f"{toolkit.getName()}.{toolName}") and \
-                        not funcCall.startswith(toolkit.getName()):
-                    continue
+        if skillTag.toolName and skillTag.toolkit.isQueryAsArg():
+            tool = skillTag.toolkit.getToolAsTools(skillTag.toolName)[0]
+            response = tool.func(query)
+            context.genResp(response, **kwargs)
+            return response
 
-                history = History()
-                history.addHistoryUserPrompt(preContext)
-
-                execNode = ExecNodeSkill.build(
-                    execNodeParent=kwargs["execNode"], 
-                    skillName=f"{toolkit.getName()}.{toolName}",
-                    query=funcCall[len(toolkit.getName()):].strip(),
-                    skillArgs=context.getVarDict().getGlobalDict())
-
-                kwargs = {
-                    "tools" : toolkit.getTools(), 
-                    "execNode" : execNode,
-                    "history" : history
-                }
-                stepLLMToolcall.setLLM(llm)
-                stepLLMToolcall.setContext(context)
-                stepLLMToolcall.setQuery(funcCall[len(toolkit.getName()):].strip())
-                stepLLMToolcall.setToolkit(toolkit)
-                stepLLMToolcall.setGlobalSkillset(globalSkillset)
-                response = stepLLMToolcall.streamAndFormat(**kwargs)
-
-                execNode.setSkillResult(response.response)
-                return toolkit.getName(), response.response
-    return None, ""
+        tools = skillTag.toolkit.getTools() if skillTag.toolName is None else skillTag.toolkit.getToolAsTools(skillTag.toolName)
+        kwargs = {
+            "tools" : tools, 
+            "execNode" : execNodeLLM,
+            "history" : history,
+            "toolDetect" : True
+        }
+        stepLLMToolcall = StepLLMStreaming()
+        stepLLMToolcall.setLLM(llm)
+        stepLLMToolcall.setContext(context)
+        stepLLMToolcall.setQuery(funcCall.strip())
+        stepLLMToolcall.setToolkit(skillTag.toolkit)
+        stepLLMToolcall.setGlobalSkillset(
+            context.getGlobalContext().getEnv().getGlobalSkillset()
+        )
+        response = stepLLMToolcall.streamAndFormat(**kwargs)
+        return response.response
 
 class StepLLMStreaming(StepLLM):
     
@@ -96,9 +113,13 @@ class StepLLMStreaming(StepLLM):
             llm=None)
 
         self.needToParse = False
+        self.objectTypes = None
     
     def setToolkit(self, toolkit: Toolkit):
         self.toolkit = toolkit
+
+    def setObjectTypes(self, objectTypes: List[ObjectType]):
+        self.objectTypes = objectTypes
 
     def setGlobalSkillset(self, globalSkillset: Skillset):
         self.globalSkillset = globalSkillset
@@ -124,29 +145,49 @@ class StepLLMStreaming(StepLLM):
         toolUsed, result = streamingProcessor.readFromGen(
             response=result,
             **kwargs)
-        if toolUsed:
+        if toolUsed and not self.objectTypes:
             funcExecRecords = self.toolkit.exec(
                 [(toolUsed, result)], 
                 allDict,
                 needToParse=self.needToParse)
             self.context.genResp(funcExecRecords[0].result, **kwargs)
 
-            ExecNodeTool.build(
-                execNodeParent=kwargs["execNode"], 
-                toolName=toolUsed, 
+            execNodeLLM = kwargs["execNode"]
+            assert execNodeLLM.label == ExecNodeLabel.LLM
+            
+            execNode = ExecNodeSkill.build(
+                execGraph=execNodeLLM.execGraph,
+                execNodeLLM=execNodeLLM,
+                skillName=toolUsed,
                 query=self.query,
-                toolArgs=result, 
-                toolResult=funcExecRecords[0].result)
+                skillResult=funcExecRecords[0].result,
+                label=ExecNodeLabel.TOOL)
             
             return InstAnalysisResult(
                 InstAnalysisResult.Result.TOOL,
                 funcExecRecords=funcExecRecords,
                 response=funcExecRecords[0].result)
 
+        self.context.genResp(result, end="", **kwargs)
         return InstAnalysisResult(
             InstAnalysisResult.Result.ANSWER,
             funcExecRecords=None,
             response=result)
+
+class QueryCntToCallSkill:
+    def __init__(self) -> None:
+        self.cnts = {}
+
+    def addQuery(self, query :str):
+        cnt = self.cnts.get(query)
+        if cnt == None:
+            self.cnts[query] = 1
+        else :
+            self.cnts[query] += 1
+
+    def checkValid(self, query :str) -> bool:
+        cnt = self.cnts.get(query)
+        return cnt is None or cnt < 3
 
 class StreamingProcessor:
     def __init__(self,
@@ -164,7 +205,7 @@ class StreamingProcessor:
         self.llm = llm
         self.messages = messages
         self.streamReset = False
-        self.sentences_to_detect_skill = []
+        self.queryCntToCallSkill = QueryCntToCallSkill()
 
     def readFromGen(
             self,
@@ -205,7 +246,7 @@ class StreamingProcessor:
                     elif hasattr(chunk.raw, "reasoning_content") and chunk.raw.reasoning_content:
                         content = chunk.raw.reasoning_content
 
-                    if content:
+                    if content and "toolDetect" not in kwargs:
                         skillResp = self.processDeltaContent(
                             deltaContent=content,
                             **kwargs)
@@ -217,13 +258,8 @@ class StreamingProcessor:
                     continue
 
                 if self.currentSentence:
-                    skillResp = self.processSentence(**kwargs)
-                    if not skillResp:
-                        break
-
-                    self.accuResults.append(skillResp)
-                else:
-                    break
+                    self._clearCurSentence(**kwargs)
+                break
 
         except Exception as e:
             logger.error(f"Error in readFromGen: {e}", exc_info=True)
@@ -239,100 +275,138 @@ class StreamingProcessor:
             self,
             deltaContent: str,
             **kwargs) -> str:
-        endIndex = -len(SymbolEndSkill)
-        while True:
-            startIndex = endIndex + len(SymbolEndSkill)
-            i = startIndex
-            endIndex = -1
-            while i < len(deltaContent):
-                if deltaContent[i:].startswith(SymbolEndSkill):
-                    endIndex = i
-                    break
-                i += 1
+        if not self.globalSkillset:
+            self._addCurSentence(deltaContent, **kwargs)
+            return None
+            
+        curSentenceWithDelta = self._getCurSentence() + deltaContent
+        skillTag = self._findSkillTag(curSentenceWithDelta, 0)
+        if not skillTag or not self.queryCntToCallSkill.checkValid(skillTag.query):
+            self._addCurSentence(deltaContent, **kwargs)
+            return None
 
-            skillResp = ""
-            if endIndex >= 0:
-                currentPart = deltaContent[startIndex:endIndex+len(SymbolEndSkill)]
-                self.currentSentence.append(currentPart)
-                self.context.genResp(currentPart, end="", **kwargs)
-                if kwargs["execNode"] and isinstance(kwargs["execNode"], ExecNodeLLM):
-                    kwargs["execNode"].addContent(currentPart)
-                
-                skillResp = self.processSentence(**kwargs)
-                if skillResp:
-                    return skillResp
-            else:
-                self.currentSentence.append(deltaContent[startIndex:])
-                self.context.genResp(deltaContent[startIndex:], end="", **kwargs)
-                if kwargs["execNode"] and isinstance(kwargs["execNode"], ExecNodeLLM):
-                    kwargs["execNode"].addContent(deltaContent[startIndex:])
-                return None
+        self.queryCntToCallSkill.addQuery(skillTag.query)
 
-    def processSentence(self, **kwargs) -> str:
-        sentence = "".join(self.currentSentence).strip()
+        self._addCurSentence(deltaContent, **kwargs)
+        
+        self._clearCurSentence(**kwargs)
+        return self._callSkillAndResetStream(
+            sentence=skillTag.query, 
+            preContext=curSentenceWithDelta[:skillTag.start], 
+            skillTag=skillTag,
+            **kwargs)
+
+    def _getCurSentence(self) -> str:
+        return "".join(self.currentSentence).strip()
+
+    def _getCurAccuResults(self) -> str:
+        return "".join(self.accuResults).strip()
+
+    def _addCurSentence(self, content: str, **kwargs):
+        self.currentSentence.append(content)
+        self.context.genResp(content, end="", **kwargs)
+        execNodeLLM = kwargs["execNode"].castTo(ExecNodeLLM)
+        execNodeLLM.addContent(content)
+
+    def _clearCurSentence(self, **kwargs):
+        sentence = self._getCurSentence()
         self.accuResults.append(sentence)
         self.currentSentence = []
-        if not self.globalSkillset:
-            return None
-        
-        startIndex = 0
-        while True:
-            idx = sentence.find("@", startIndex)
-            if idx == -1:
-                break
 
-            resp = self._processSentenceStartWithAt(
-                sentence=sentence[idx:], 
-                preContext=sentence[:idx], 
-                **kwargs)
-            if resp:
-                return resp
-
-            startIndex = idx + 1
-        return None
-
-    def _processSentenceStartWithAt(self, sentence: str, preContext: str, **kwargs) -> str:
-        if sentence in self.sentences_to_detect_skill:
-            INFO(logger, f"sentence[{sentence}] in sentences_to_detect_skill[{self.sentences_to_detect_skill}]")
-            return None
-
-        skillLlm = self.llm if not self.llm.reasoner_model else self.context.getGlobalContext().settings.llmDefault
-        skillName, skillResp = useSkill(
+    def _callSkillAndResetStream(
+            self, 
+            sentence: str, 
+            preContext: str, 
+            skillTag: SkillTag,
+            **kwargs) -> str:
+        skillLlm = self.context.getGlobalContext().settings.getLLMSkill()
+        skillResp = callSkill(
             context=self.context,
             llm=skillLlm,
-            funcCall=sentence[1:],
+            funcCall=sentence,
+            query=sentence,
             preContext=preContext,
+            skillTag=skillTag,
             **kwargs)
-        if not skillName:
-            return None
 
-        self.sentences_to_detect_skill.append(sentence)
-
-        endMark = f" @{skillName} END\n"
-        self.context.genResp(f"<<<{endMark.strip()}>>>\n", end="", **kwargs)
-
+        answer = f"<answer>{skillResp}</answer>"
+        resultWithEndMark = f"{self._getCurAccuResults()}{answer}"
         if not self.llm.prefix_complete:
-            self.messages += [
-                ChatMessage(                                                        
+            newMessage = resultWithEndMark + "我们继续"
+            if len(self.messages) > 0 and self.messages[-1].role == MessageRole.ASSISTANT:
+                self.messages[-1] = ChatMessage(
                     role=MessageRole.ASSISTANT, 
-                    content="".join(self.accuResults) + skillResp + endMark + "我们继续"),   
-            ]
+                    content=self.messages[-1].content + newMessage)
+            else:
+                self.messages += [
+                    ChatMessage(                                                        
+                        role=MessageRole.ASSISTANT, 
+                        content=newMessage),   
+                ]
         elif len(self.messages) > 1 and self.messages[-1].role == MessageRole.ASSISTANT:
             self.messages[-1] = ChatMessage(
                 role=MessageRole.ASSISTANT, 
-                content=self.messages[-1].content + "".join(self.accuResults) + skillResp + endMark, 
+                content=self.messages[-1].content + resultWithEndMark, 
                 additional_kwargs={"prefix" : True})
         else:
-            self.messages += [
-                ChatMessage(                                                        
+            if len(self.messages) > 0 and self.messages[-1].role == MessageRole.ASSISTANT:
+                self.messages[-1] = ChatMessage(
                     role=MessageRole.ASSISTANT, 
-                    content="".join(self.accuResults) + skillResp + endMark, 
-                    additional_kwargs={"prefix" : True}),   
-            ]
+                    content=self.messages[-1].content + resultWithEndMark,
+                    additional_kwargs={"prefix" : True})
+            else:
+                self.messages += [
+                    ChatMessage(                                                        
+                        role=MessageRole.ASSISTANT, 
+                        content=resultWithEndMark,
+                        additional_kwargs={"prefix" : True}),   
+                ]
         self.allResults.extend(self.accuResults)
-        self.allResults.extend([skillResp, endMark])
+        self.allResults.extend([answer])
         self.accuResults = []
 
         self.response.respGen = self.llm.stream(self.messages)
         self.streamReset = True
-        return skillResp + endMark
+        return answer
+
+    def _findSkillTag(
+            self, 
+            content: str, 
+            startIndex: int) -> Optional[SkillTag]:
+        pattern = r'<([\w\d._]+)>([\s\S]*)</[\w\d._]+>'
+        match = re.search(pattern, content[startIndex:])
+        if not match:
+            return None
+
+        skillName = match.group(1)
+        query = match.group(2)
+        globalSkillset = self.context.getGlobalContext().getEnv().getGlobalSkillset()
+        for toolkit in globalSkillset.skillset:
+            if isinstance(toolkit, AgentToolkit):
+                if skillName == toolkit.getName():
+                    return SkillTag(
+                        start=startIndex + match.start(),
+                        end=startIndex + match.end(),
+                        skillName=skillName,
+                        query=query,
+                        toolkit=toolkit)
+            else:
+                for toolName, _ in toolkit.getToolDescs().items():
+                    if skillName == toolName or \
+                            skillName == f"{toolkit.getName()}":
+                        return SkillTag(
+                            start=startIndex + match.start(),
+                            end=startIndex + match.end(),
+                            skillName=skillName,
+                            query=query,
+                            toolkit=toolkit)
+                    elif skillName == f"{toolkit.getName()}.{toolName}":
+                        return SkillTag(
+                            start=startIndex + match.start(),
+                            end=startIndex + match.end(),
+                            skillName=toolkit.getName(),
+                            toolName=toolName,
+                            query=query,
+                            toolkit=toolkit)
+        return None
+    

@@ -1,5 +1,6 @@
 from __future__ import annotations
 from enum import Enum
+from typing import List
 import uuid
 import json
 
@@ -7,10 +8,17 @@ from milkie.log import ERROR
 
 class ExecNodeType(Enum):
     ROOT = 0
+    COMMON = 1
+    SEQUENCE = 2
+    CALL = 3
+    FOR = 4
+
+class ExecNodeLabel(Enum):
+    ROOT = 0
     AGENT = 1
-    LLM = 2
-    SKILL = 3
-    ASSEMBLE = 4
+    BLOCK = 2
+    LLM = 3
+    SKILL = 4
     TOOL = 5
 
 class ExecNode:
@@ -18,11 +26,13 @@ class ExecNode:
     def __init__(
             self, 
             execGraph: ExecGraph,
-            nodeType: ExecNodeType,
+            type: ExecNodeType,
+            label: ExecNodeLabel = None,
             instructionId: str = None):
         self.execGraph = execGraph
-        self.nodeType = nodeType
-        self.nodeId = self.createNodeId()
+        self.type = type
+        self.label = label
+        self.id = self.createId()
         self.parentNode :ExecNode = None
         self.instructionId :str = instructionId
 
@@ -31,65 +41,169 @@ class ExecNode:
     def toDict(self) -> dict:
         """将节点转换为字典表示"""
         base = {
-            "id": self.nodeId,
-            "type": self.nodeType.name,
+            "id": self.id,
+            "type": self.type.name,
         }
+
+        if self.label:
+            base["label"] = self.label.name
+
         if self.instructionId:
-            base["instructionId"] = self.instructionId
+            base["instruction"] = self.instructionId
         return base
 
-    def createChildNode(self, nodeType: ExecNodeType):
-        childNode :ExecNode = None
-        if nodeType == ExecNodeType.AGENT:
-            childNode = ExecNodeAgent(self.execGraph)
-        elif nodeType == ExecNodeType.LLM:
-            childNode = ExecNodeLLM(self.execGraph)
-        elif nodeType == ExecNodeType.SKILL:
-            childNode = ExecNodeSkill(self.execGraph)
-        elif nodeType == ExecNodeType.ASSEMBLE:
-            childNode = ExecNodeAssemble(self.execGraph)
-        elif nodeType == ExecNodeType.TOOL:
-            childNode = ExecNodeTool(self.execGraph)
-        else:
-            raise ValueError(f"Invalid node type: {nodeType}")
-        
-        childNode.parentNode = self
-        return childNode
-
-    def createNodeId(self):
-        return f"{self.nodeType.name}_{uuid.uuid4()}"
+    def createId(self):
+        return f"{self.type.name}_{uuid.uuid4()}"
 
     def setInstructionId(self, instructionId: str):
         self.instructionId = instructionId
 
-    def getNodeId(self):
-        return self.nodeId
+    def getId(self):
+        return self.id
 
     def getInstructionId(self):
         return self.instructionId
+        
+    def castTo(self, cls: type[ExecNode]) -> cls:
+        assert isinstance(self, cls)
+        return self
 
 class ExecNodeRoot(ExecNode):
     def __init__(
             self, 
             execGraph: ExecGraph,
             query: str):
-        super().__init__(execGraph, ExecNodeType.ROOT)
+        super().__init__(
+            execGraph=execGraph, 
+            type=ExecNodeType.ROOT,
+            label=ExecNodeLabel.ROOT)
 
         self.query = query
+        self.agent :ExecNodeAgent = None
+
+    def setAgent(self, agent: ExecNodeAgent):
+        self.agent = agent
+
+    def getAgent(self):
+        return self.agent
 
     def toDict(self) -> dict:
         base = super().toDict()
         base["query"] = self.query
+        base["agent"] = self.agent.getId()
         return base
 
-class ExecNodeAgent(ExecNode):
+    @staticmethod
+    def build(
+            execGraph: ExecGraph,
+            query: str,
+            agent: ExecNodeAgent=None):
+        execNodeRoot :ExecNodeRoot = ExecNodeRoot(
+            execGraph=execGraph, 
+            query=query)
+        if agent:
+            execNodeRoot.setAgent(agent)
+        return execNodeRoot
+
+class ExecNodeCommon(ExecNode):
+    def __init__(
+            self, 
+            execGraph: ExecGraph,
+            label: ExecNodeLabel,
+            instructionId: str = None):
+        super().__init__(
+            execGraph=execGraph, 
+            type=ExecNodeType.COMMON,
+            label=label,
+            instructionId=instructionId)
+
+class ExecNodeSequence(ExecNode):
+    def __init__(
+            self, 
+            execGraph: ExecGraph,
+            label: ExecNodeLabel,
+            context: dict = {}):
+        super().__init__(
+            execGraph=execGraph, 
+            type=ExecNodeType.SEQUENCE,
+            label=label)
+        
+        self.instrs = []
+        self.context = context
+
+    def addInstruct(self, instruct: ExecNode):
+        self.instrs.append(instruct)
+
+    def getInstructs(self):
+        return self.instrs
+
+    def toDict(self) -> dict:
+        base = super().toDict()
+        base["instructions"] = [instruction.getId() for instruction in self.instrs]
+        base["context"] = self.context
+        return base
+
+    @staticmethod
+    def build(
+            execGraph: ExecGraph,
+            context: dict = {}):
+        return ExecNodeSequence(
+            execGraph=execGraph, 
+            label=ExecNodeLabel.BLOCK,
+            context=context)
+
+class ExecNodeCall(ExecNode):
+    def __init__(
+            self, 
+            execGraph: ExecGraph,
+            label: ExecNodeLabel):
+        super().__init__(
+            execGraph=execGraph, 
+            type=ExecNodeType.CALL,
+            label=label)
+        
+class ExecNodeFor(ExecNode):
+    def __init__(
+            self, 
+            execGraph: ExecGraph):
+        super().__init__(
+            execGraph=execGraph, 
+            type=ExecNodeType.FOR)
+
+        self.executes = []
+
+    def addExecute(self, execute: ExecNodeSequence):
+        self.executes.append(execute)
+
+    def getExecutes(self):
+        return self.executes
+
+    def toDict(self) -> dict:
+        base = super().toDict()
+        base["executes"] = [execute.getId() for execute in self.executes]
+        return base
+
+    @staticmethod
+    def build(
+            execGraph: ExecGraph,
+            execNodeAgent: ExecNodeAgent):
+        execNodeFor :ExecNodeFor = ExecNodeFor(execGraph)
+        execNodeAgent.addInstruct(execNodeFor)
+        return execNodeFor
+
+class ExecNodeAgent(ExecNodeSequence):
     def __init__(
             self, 
             execGraph: ExecGraph,
             name: str = None):
-        super().__init__(execGraph, ExecNodeType.AGENT)
+        super().__init__(
+            execGraph=execGraph,
+            label=ExecNodeLabel.AGENT)
 
         self.name = name
+
+    def addInstruct(self, instruct: ExecNode):
+        self.instrs.append(instruct)
 
     def toDict(self) -> dict:
         base = super().toDict()
@@ -98,25 +212,44 @@ class ExecNodeAgent(ExecNode):
 
     @staticmethod
     def build(
-            execNodeParent: ExecNode, 
+            execGraph: ExecGraph,
+            callee: ExecNodeRoot | ExecNodeSkill,
             name: str):
-        execNodeAgent :ExecNodeAgent = execNodeParent.createChildNode(ExecNodeType.AGENT)
-        execNodeAgent.name = name
+        execNodeAgent :ExecNodeAgent = ExecNodeAgent(execGraph, name=name)
+        if callee.label == ExecNodeLabel.ROOT:
+            callee.setAgent(execNodeAgent)
+        elif callee.label == ExecNodeLabel.SKILL:
+            callee.setCalled(execNodeAgent)
+        else:
+            raise RuntimeError(f"Invalid callee label[{callee.label}]")
         return execNodeAgent
 
-class ExecNodeLLM(ExecNode):
+class ExecNodeLLM(ExecNodeCommon):
     def __init__(
             self, 
             execGraph: ExecGraph,
             instructionId: str = None):
-        super().__init__(execGraph, ExecNodeType.LLM, instructionId)
+        super().__init__(
+            execGraph=execGraph,
+            label=ExecNodeLabel.LLM,
+            instructionId=instructionId)
         
+        self.curInstruct = ""
         self.content = ""
+        self.skills :List[ExecNodeSkill] = []
 
     def toDict(self) -> dict:
         base = super().toDict()
+        base["curInstruct"] = self.curInstruct
         base["content"] = self.content
+        base["skills"] = [skill.getId() for skill in self.skills]
         return base
+
+    def setCurInstruct(self, curInstruct: str):
+        self.curInstruct = curInstruct
+
+    def getCurInstruct(self):
+        return self.curInstruct
 
     def addContent(self, content: str):
         self.content += content
@@ -127,32 +260,36 @@ class ExecNodeLLM(ExecNode):
     def getContent(self):
         return self.content
 
+    def addSkill(self, skill: ExecNodeSkill):
+        self.skills.append(skill)
+
+    def getSkills(self):
+        return self.skills
+
     @staticmethod
     def build(
-            execNodeParent: ExecNode, 
-            instructionId: str):
-        execNodeLLM :ExecNodeLLM = execNodeParent.createChildNode(ExecNodeType.LLM)
-        execNodeLLM.setInstructionId(instructionId)
+            execGraph: ExecGraph,
+            execNodeSequence: ExecNodeSequence,
+            instructionId: str,
+            curInstruct: str = None):
+        execNodeLLM :ExecNodeLLM = ExecNodeLLM(execGraph, instructionId)
+        if curInstruct:
+            execNodeLLM.setCurInstruct(curInstruct)
+        execNodeSequence.addInstruct(execNodeLLM)
         return execNodeLLM
 
-class ExecNodeSkill(ExecNode):
+class ExecNodeSkill(ExecNodeCall):
     def __init__(
             self, 
             execGraph: ExecGraph):
-        super().__init__(execGraph, ExecNodeType.SKILL)
+        super().__init__(
+            execGraph=execGraph,
+            label=ExecNodeLabel.SKILL)
 
         self.skillName = ""
         self.query = ""
-        self.skillArgs = {}
         self.skillResult = ""
-
-    def toDict(self) -> dict:
-        base = super().toDict()
-        base["skillName"] = self.skillName
-        base["query"] = self.query
-        base["skillResult"] = self.skillResult
-        base["skillArgs"] = self.skillArgs
-        return base
+        self.called : ExecNodeAgent | ExecNodeTool = None
 
     def setSkillName(self, skillName: str):
         self.skillName = skillName
@@ -160,90 +297,74 @@ class ExecNodeSkill(ExecNode):
     def setQuery(self, query: str):
         self.query = query
 
-    def setSkillArgs(self, skillArgs: dict):
-        self.skillArgs = skillArgs
-
     def setSkillResult(self, skillResult: str):
         self.skillResult = skillResult
 
+    def setCalled(self, called: ExecNodeAgent | ExecNodeTool):
+        self.called = called
+
+    def getCalled(self):
+        return self.called
+
+    def toDict(self) -> dict:
+        base = super().toDict()
+        base["skillName"] = self.skillName
+        base["query"] = self.query
+        base["skillResult"] = self.skillResult
+        base["called"] = self.called.getId()
+        return base
+
     @staticmethod
     def build(
-            execNodeParent: ExecNode, 
+            execGraph: ExecGraph,
+            execNodeLLM: ExecNodeLLM,
             skillName: str, 
             query: str,
-            skillArgs: dict, 
-            skillResult: str = None):
-        execNodeSkill = execNodeParent.createChildNode(ExecNodeType.SKILL)
+            skillResult: str,
+            label: ExecNodeLabel):
+        execNodeSkill = ExecNodeSkill(execGraph)
         execNodeSkill.setSkillName(skillName)
         execNodeSkill.setQuery(query)
-        execNodeSkill.setSkillArgs(skillArgs)
         execNodeSkill.setSkillResult(skillResult)
+        if label == ExecNodeLabel.AGENT:
+            ExecNodeAgent.build(
+                execGraph=execGraph,
+                callee=execNodeSkill,
+                name=skillName)
+        elif label == ExecNodeLabel.TOOL:
+            ExecNodeTool.build(
+                execGraph=execGraph,
+                execNodeSkill=execNodeSkill,
+                name=skillName)
+
+        execNodeLLM.addSkill(execNodeSkill)
         return execNodeSkill
 
-class ExecNodeTool(ExecNode):
+class ExecNodeTool(ExecNodeCommon):
     def __init__(
             self, 
-            execGraph: ExecGraph):
-        super().__init__(execGraph, ExecNodeType.TOOL)
+            execGraph: ExecGraph,
+            name: str):
+        super().__init__(
+            execGraph=execGraph,
+            label=ExecNodeLabel.TOOL)
 
-        self.toolName = ""
-        self.query = ""
-        self.toolArgs = {}
-        self.toolResult = ""
+        self.name = name
 
     def toDict(self) -> dict:
         base = super().toDict()
-        base["toolName"] = self.toolName
-        base["query"] = self.query
-        base["toolArgs"] = self.toolArgs
-        base["toolResult"] = self.toolResult
+        base["name"] = self.name
         return base
-
-    def setToolName(self, toolName: str):
-        self.toolName = toolName
-
-    def setQuery(self, query: str):
-        self.query = query
-
-    def setToolArgs(self, toolArgs: dict):
-        self.toolArgs = toolArgs
-
-    def setToolResult(self, toolResult: str):
-        self.toolResult = toolResult
 
     @staticmethod
     def build(
-            execNodeParent: ExecNode, 
-            toolName: str, 
-            query: str, 
-            toolArgs: dict,
-            toolResult: str = None):
-        execNodeTool = execNodeParent.createChildNode(ExecNodeType.TOOL)
-        execNodeTool.setToolName(toolName)
-        execNodeTool.setQuery(query)
-        execNodeTool.setToolArgs(toolArgs)
-        execNodeTool.setToolResult(toolResult)
+            execGraph: ExecGraph,
+            execNodeSkill: ExecNodeSkill,
+            name: str):
+        execNodeTool = ExecNodeTool(execGraph, name)
+        execNodeSkill.setCalled(execNodeTool)
         return execNodeTool
 
-class ExecNodeAssemble(ExecNode):
-    
-    def __init__(
-            self, 
-            execGraph: ExecGraph):
-        super().__init__(execGraph, ExecNodeType.ASSEMBLE)
-        self.nodes = []
-
-    def toDict(self) -> dict:
-        base = super().toDict()
-        base["assembleNodes"] = [node.toDict() for node in self.nodes]
-        return base
-
-    def addNode(self, node: ExecNode):
-        self.nodes.append(node)
-        
-    def getNodes(self):
-        return self.nodes
-   
 class ExecGraph:
 
     def __init__(self):
@@ -252,10 +373,10 @@ class ExecGraph:
 
     def start(self, query: str):
         self.rootNode = ExecNodeRoot(self, query)
-        self.nodes[self.rootNode.getNodeId()] = self.rootNode
+        self.nodes[self.rootNode.getId()] = self.rootNode
 
     def addNode(self, node: ExecNode):
-        self.nodes[node.getNodeId()] = node
+        self.nodes[node.getId()] = node
 
     def getNode(self, nodeId: str):
         return self.nodes[nodeId]
@@ -267,33 +388,41 @@ class ExecGraph:
         """
         将执行图转换为JSON字符串，输出嵌套的树形结构。
         """
-        def build_tree(node_id, visited=None):
-            """递归构建树结构"""
-            if visited is None:
-                visited = set()
+        try:
+            nodesList = []
             
-            if node_id in visited:
-                return None
-                
-            visited.add(node_id)
-            node = self.nodes.get(node_id)
-            if not node:
-                return None
+            # 确保所有节点都有必要的字段
+            for nodeId, node in self.nodes.items():
+                try:
+                    nodeDict = node.toDict()
+                    
+                    # 确保每个节点至少有id和type
+                    if not nodeDict.get("id"):
+                        nodeDict["id"] = nodeId
+                    
+                    if not nodeDict.get("type"):
+                        nodeDict["type"] = "UNKNOWN"
+                        
+                    # 添加到结果列表
+                    nodesList.append(nodeDict)
+                except Exception as e:
+                    # 如果单个节点转换失败，记录错误但继续处理其他节点
+                    print(f"节点 {nodeId} 转换失败: {str(e)}")
             
-            result = node.toDict()
-            children = []
+            # 如果没有节点，添加一个占位节点避免前端显示空白
+            if len(nodesList) == 0 and self.rootNode:
+                rootDict = {
+                    "id": self.rootNode.getId(),
+                    "type": "ROOT",
+                    "label": "ROOT"
+                }
+                if hasattr(self.rootNode, "query"):
+                    rootDict["query"] = self.rootNode.query
+                nodesList.append(rootDict)
             
-            # 处理普通的父子关系
-            for child_id, child in self.nodes.items():
-                if hasattr(child, 'parentNode') and child.parentNode and child.parentNode.nodeId == node_id:
-                    child_tree = build_tree(child_id, visited)
-                    if child_tree:
-                        children.append(child_tree)
-            
-            if children:
-                result["children"] = children
-            
-            return result
-
-        tree = build_tree(self.rootNode.nodeId)
-        return json.dumps(tree, ensure_ascii=False, indent=2)
+            result = {"nodes": nodesList}
+            return json.dumps(result, ensure_ascii=False)
+        except Exception as e:
+            print(f"执行图转换JSON失败: {str(e)}")
+            # 返回基本结构确保前端不会崩溃
+            return json.dumps({"nodes": [], "error": str(e)}, ensure_ascii=False)

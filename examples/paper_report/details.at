@@ -13,19 +13,18 @@ emailAddr. "freeman.xu@aishu.cn"
 interestedFiles. #PY ```
 lines = open("{topic2paperPath}").readlines()
 
-[line.split(">>")[1].strip().replace(".digest", ".txt") for line in lines if line.split(">>")[0].strip() != "None"]
+return_value = [line.split(">>")[1].strip().replace(".digest", ".txt") for line in lines if line.split(">>")[0].strip() != "None"]
 ```
 
 clear. #PY```open("{reportFile}", "w")```
 FOR filelink in interestedFiles
-    content. #PY ```open("{filelink}").read()[:10 * 1000]```
-    title. #PY ```content.split("\n")[0]```
-    url.   #PY ```content.split("\n")[1].replace("/pdf/", "/html/")```
+    content. #PY ```return_value = open("{filelink}").read()[:10 * 1000]```
+    title. #PY ```return_value = content.split("\n")[0]```
+    url.   #PY ```return_value = content.split("\n")[1].replace("/pdf/", "/html/")```
     team.    对下面论文内容，然后提取论文涉及到的团队和组织，不超过 20 字： ``` {content} ``` 请直接给出：
-    digest.  对下面论文内容总结摘要，不超过 100 字： ``` {content} ``` 请直接给出：
-    problem. [v3] 阅读下面论文内容，然后总结文章试图解决的问题，以及解决问题的思路，分两段描述，不超过 300 字： ``` {content} ``` 请直接给出：
-    example. 阅读下面论文内容，然后用一个例子说明论文思路，不超过 100 字： ``` {content} ``` 请直接给出：
-    experiment. 阅读下面论文内容，然后总结文章的实验效果，不超过 100 字： ``` {content} ``` 请直接给出：
+    summary. [r1] 阅读下面论文内容，然后总结 ``` {content} ``` 请直接给出：
+    example. [v3]阅读下面论文内容，然后用一个例子说明论文思路 ``` {content} ``` 请直接给出：
+    experiment. 阅读下面论文内容，然后总结文章的实验效果 ``` {content} ``` 请直接给出：
     last. #PY ```
     open('{reportFile}', "a").write(f'''
 # {title}
@@ -38,11 +37,8 @@ FOR filelink in interestedFiles
 
 ## 📝 论文解读
 
-### 摘要
-{digest}
-
-### 研究问题与核心思路
-{problem}
+### 总结
+{summary}
 
 ### 举例说明
 {example}

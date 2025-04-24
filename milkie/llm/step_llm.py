@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from typing import Optional
 
 from llama_index_client import ChatMessage
+from milkie.functions.openai_function import OpenAIFunction
 from milkie.global_context import GlobalContext
 from milkie.llm.enhanced_llm import EnhancedLLM
 from milkie.prompt.prompt import Loader
@@ -106,7 +107,8 @@ class StepLLM(ABC):
             **kwargs)
 
         if "tools" in kwargs and kwargs["tools"] is not None and len(kwargs["tools"]) > 0:
-            kwargs["tools"] = getToolsSchemaForTools(kwargs["tools"])
+            if isinstance(kwargs["tools"][0], OpenAIFunction):
+                kwargs["tools"] = getToolsSchemaForTools(kwargs["tools"])
         else:
             kwargs.pop("tools", None)
 

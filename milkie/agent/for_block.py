@@ -2,7 +2,7 @@ import json
 import logging
 import re
 from milkie.agent.base_block import BaseBlock
-from milkie.agent.exec_graph import ExecNode
+from milkie.agent.exec_graph import ExecNode, ExecNodeAgent, ExecNodeFor, ExecNodeLabel, ExecNodeSequence, ExecNodeType
 from milkie.agent.llm_block.llm_block import LLMBlock
 from milkie.config.config import GlobalConfig
 from milkie.config.constant import DefaultUsePrevResult, KeywordForStart, KeyRet
@@ -135,6 +135,12 @@ class ForBlock(BaseBlock):
         else:
             items = enumerate(iterableValue)
 
+        assert execNodeParent.label == ExecNodeLabel.AGENT
+        execNodeAgent :ExecNodeAgent = execNodeParent
+        execNodeFor :ExecNodeFor = ExecNodeFor.build(
+            execGraph=execNodeAgent.execGraph,
+            execNodeAgent=execNodeAgent)
+
         for key, value in items:
             if self.loopType == dict:
                 self.setVarDictGlobal(
@@ -143,12 +149,20 @@ class ForBlock(BaseBlock):
             else:
                 self.setVarDictGlobal(self.loopVar, value)
 
+            execNodeSequence :ExecNodeSequence = ExecNodeSequence.build(
+                execGraph=execNodeFor.execGraph,
+                context={
+                    "loopVar": key,
+                    "loopValue": value
+                })
+            execNodeFor.addExecute(execNodeSequence)
+
             try:
                 result = self.loopBlock.execute(
                     context=context,
                     args=args,
                     prevBlock=prevBlock,
-                    execNodeParent=execNodeParent,
+                    execNodeParent=execNodeSequence,
                     **kwargs)
                 if result.resp != KeyRet:
                     results.append(result.resp)

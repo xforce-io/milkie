@@ -94,7 +94,6 @@ class Server:
         self.app.post("/v1/chat/completions")(self.chat_completion)
         self.app.post("/v1/agent/exec")(self.execute_agent)
         self.app.post("/v1/agent/infos")(self.get_agent_infos)
-        self.app.post("/v1/agent/query")(self.query_agent)
         self.app.get("/v1/agent/stream")(self.stream_agent)
        
     async def chat_completion(self, request: ChatCompletionRequest):
@@ -257,35 +256,6 @@ class Server:
                 )
             )
 
-    async def query_agent(self, request: AgentQueryRequest):
-        """执行代理查询的接口"""
-        try:
-            agent = self.engine.getAgent(request.agent)
-            if agent is None:
-                ERROR(logger, f"Agent {request.agent} not found")
-                raise HTTPException(status_code=400, detail="Agent not found")
-            
-            args = {
-                "query": request.query,
-                **request.args
-            }
-            response = self.engine.run(
-                agent=agent.agentName,
-                args=args
-            )
-            
-            return AgentQueryResponse(
-                errno=0,
-                errmsg="",
-                resp=str(response)
-            )
-        except Exception as e:
-            return AgentQueryResponse(
-                errno=1,
-                errmsg=str(e),
-                resp=""
-            )
-
     async def stream_agent(self, request: Request):
         """流式执行代理查询的接口"""
         try:
@@ -293,6 +263,7 @@ class Server:
             params = request.query_params
             agent_name = params.get("agent")
             query = params.get("query")
+            graph = params.get("graph")
             
             if not agent_name or not query:
                 raise HTTPException(status_code=400, detail="Missing agent or query parameter")
@@ -325,10 +296,16 @@ class Server:
             thread = threading.Thread(target=run_engine)
             thread.start()
             
-            return StreamingResponse(
-                self.create_agent_stream_response(response_id, context.getRespStream()),
-                media_type="text/event-stream"
-            )
+            if graph:
+                return StreamingResponse(
+                    self.create_agent_stream_response(response_id, context.getGraphStream()),
+                    media_type="text/event-stream"
+                )
+            else:
+                return StreamingResponse(
+                    self.create_agent_stream_response(response_id, context.getRespStream()),
+                    media_type="text/event-stream"
+                )
                 
         except Exception as e:
             ERROR(logger, f"Stream agent error: {str(e)}")
@@ -356,12 +333,34 @@ class Server:
                 if not chunk_str:
                     continue
                 
-                # 构建响应数据
-                chunk_data = {
-                    "errno": 0,
-                    "errmsg": "",
-                    "resp": chunk_str
-                }
+                # 判断是否为执行图数据
+                is_graph_data = False
+                try:
+                    # 尝试解析为JSON，看是否包含nodes字段
+                    parsed_data = json.loads(chunk_str)
+                    if "nodes" in parsed_data:
+                        is_graph_data = True
+                        # 直接发送执行图数据
+                        chunk_data = {
+                            "errno": 0,
+                            "errmsg": "",
+                            "nodes": parsed_data["nodes"]
+                        }
+                        print(f"发送执行图数据，节点数: {len(parsed_data['nodes'])}", flush=True)
+                    else:
+                        # 普通响应数据
+                        chunk_data = {
+                            "errno": 0,
+                            "errmsg": "",
+                            "resp": chunk_str
+                        }
+                except json.JSONDecodeError:
+                    # 不是有效的JSON，当作普通响应文本处理
+                    chunk_data = {
+                        "errno": 0,
+                        "errmsg": "",
+                        "resp": chunk_str
+                    }
                 
                 yield f"data: {json.dumps(chunk_data)}\n\n"
             

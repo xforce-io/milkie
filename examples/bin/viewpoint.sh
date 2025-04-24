@@ -5,4 +5,4 @@
     --agent viewpoint \
     --verbose \
     --date `date +%Y-%m-%d` \
-    --root "/home/ari"
+    --root "$HOME"

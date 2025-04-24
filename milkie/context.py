@@ -2,15 +2,18 @@ from __future__ import annotations
 from queue import Queue
 import copy
 from datetime import datetime
+import time
 from typing import Dict, Generator, List, Optional, Any
 from llama_index.core.base.response.schema import NodeWithScore
 from llama_index.core.base.llms.types import ChatMessage, MessageRole
 
 from milkie.agent.query_structure import QueryStructure, parseQuery
 from milkie.agent.exec_graph import ExecGraph
-from milkie.response import Response
-from milkie.utils.req_tracer import ReqTracer
 from milkie.global_context import GlobalContext
+from milkie.response import Response
+from milkie.trace import stdout
+from milkie.utils.req_tracer import ReqTracer
+from milkie.vm.vm import VMFactory
 
 class VarDict:
     """变量字典类，管理全局和局部变量"""
@@ -114,10 +117,10 @@ class History:
     def setSystemPrompt(self, systemPrompt: str) -> None:
         self.systemPrompt = systemPrompt
 
-    def addHistoryUserPrompt(self, userPrompt: str) -> None:
+    def addUserPrompt(self, userPrompt: str) -> None:
         self.history.append(ChatMessage(content=userPrompt, role=MessageRole.USER))
 
-    def addHistoryAssistantPrompt(self, assistantPrompt: str) -> None:
+    def addAssistantPrompt(self, assistantPrompt: str) -> None:
         self.history.append(ChatMessage(content=assistantPrompt, role=MessageRole.ASSISTANT))
 
     def getDialogue(self) -> List[ChatMessage]:
@@ -126,9 +129,15 @@ class History:
             return [ChatMessage(content=self.systemPrompt, role=MessageRole.SYSTEM)] + self.history
         return self.history
 
-    def getDialogueStr(self) -> str:
-        """获取对话历史的字符串形式"""
-        return "\n".join(msg.content for msg in self.history)
+    def getRecentDialogue(self) -> List[ChatMessage]:
+        """获取最近一次对话"""
+        if self.systemPrompt:
+            return [ChatMessage(content=self.systemPrompt, role=MessageRole.SYSTEM), self.history[-1]]
+        return [self.history[-1]]
+
+    def getRecentUserPrompt(self) -> Optional[str]:
+        """获取最近一次用户对话"""
+        return self.history[-1].content if len(self.history) > 0 else None
 
     def copy(self) -> History:
         return copy.deepcopy(self)
@@ -147,7 +156,9 @@ class Context:
         self.varDict = VarDict()
         self.history = History()
         self.respQueue = Queue()
+        self.graphQueue = Queue()
         self.execGraph = ExecGraph()
+        self.vm = self.globalContext.vm
 
     def getGlobalContext(self):
         return self.globalContext
@@ -187,11 +198,11 @@ class Context:
     def getVarDict(self) -> VarDict:
         return self.varDict
 
-    def addHistoryUserPrompt(self, userPrompt: str) -> None:
-        self.history.addHistoryUserPrompt(userPrompt)
+    def historyAddUserPrompt(self, userPrompt: str) -> None:
+        self.history.addUserPrompt(userPrompt)
         
-    def addHistoryAssistantPrompt(self, assistantPrompt: str) -> None:
-        self.history.addHistoryAssistantPrompt(assistantPrompt)
+    def historyAddAssistantPrompt(self, assistantPrompt: str) -> None:
+        self.history.addAssistantPrompt(assistantPrompt)
 
     def getHistory(self) -> History:
         return self.history
@@ -202,6 +213,30 @@ class Context:
             if item is None:
                 break
             yield item
+
+    def getGraphStream(self) -> Generator[str, None, None]:
+        while True:
+            try:
+                # 每次发送最新的执行图数据
+                execGraphData = self.execGraph.dump()
+                print(f"发送执行图数据 (大小: {len(execGraphData)}字节)", flush=True)
+                yield execGraphData
+            except Exception as e:
+                print(f"生成执行图数据时出错: {str(e)}", flush=True)
+            
+            # 检查是否有更新信号
+            if not self.graphQueue.empty():
+                signal = self.graphQueue.get()
+                if signal is None:  # 结束信号
+                    print("收到执行图流结束信号", flush=True)
+                    break
+            
+            # 短暂等待后再次发送更新
+            time.sleep(0.5)
+
+    def triggerGraphUpdate(self) -> None:
+        """触发执行图更新"""
+        self.graphQueue.put("update")
 
     def copy(self) -> Context:
         newContext = Context(self.globalContext)
@@ -214,6 +249,7 @@ class Context:
 
     def closeStream(self) -> None:
         self.respQueue.put(None)
+        self.graphQueue.put(None)
 
     @staticmethod
     def create(configPath: Optional[str] = None) -> Context:
@@ -224,8 +260,13 @@ class Context:
         Context.globalContext = GlobalContext.create(configPath)
         return Context(Context.globalContext)
 
-    def genResp(self, info :str, **kwargs):
+    def genResp(self, info, **kwargs):
         if "end" in kwargs:
-            self.respQueue.put(info + kwargs["end"])
+            self.respQueue.put(str(info) + kwargs["end"])
+            stdout(str(info), info=True, flush=True, end=kwargs["end"])
         else:
-            self.respQueue.put(info + "\n")
+            self.respQueue.put(str(info) + "\n")
+            stdout(str(info), info=True, flush=True)
+
+    def genExecGraph(self, **kwargs):
+        self.respQueue.put(self.execGraph.dump())

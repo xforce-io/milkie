@@ -25,7 +25,6 @@ from milkie.log import INFO
 from milkie.utils.data_utils import extractFromBlock, restoreVariablesInDict, unescape
 
 from ..openai_function import OpenAIFunction
-from milkie.functions.code_interpreter import CodeInterpreter
 
 logger = logging.getLogger(__name__)
 
@@ -56,8 +55,7 @@ class Toolkit():
     def __init__(self, globalContext=None) -> None:
         self.records = []
         self.globalContext = globalContext
-        if globalContext:
-            self.codeInterpreter = CodeInterpreter(self.globalContext)
+        self.queryAsArg = False
 
     @abstractmethod
     def getName(self) -> str:
@@ -65,6 +63,9 @@ class Toolkit():
 
     def getTools(self) -> List[OpenAIFunction]:
         raise NotImplementedError("Subclasses must implement this method.")
+
+    def getToolAsTools(self, toolName: str) -> List[OpenAIFunction]:
+        return [tool for tool in self.getTools() if tool.get_function_name() == toolName]
 
     def getCertainTools(self, toolNames: List[str]) -> List[OpenAIFunction]:
         return [tool for tool in self.getTools() if tool.get_function_name() in toolNames]
@@ -111,6 +112,9 @@ class Toolkit():
 
     def isEmpty(self) -> bool:
         return len(self.getTools()) == 0
+
+    def isQueryAsArg(self) -> bool:
+        return self.queryAsArg
 
     def extractToolFromMsg(
             self, 
@@ -167,31 +171,11 @@ class Toolkit():
         if needToParse:
             args = restoreVariablesInDict(args, allDict)
         result = tool.func(**args, **kwargs)
-        if not result or result.strip() == "":
+        if result == None:
             raise ValueError(f"funcCall func[{funcName}] args[{args}] result[{result}]")
 
         INFO(logger, f"funcCall func[{funcName}] args[{args}] result[{result[:MaxLenLog]}]")
         return FuncExecRecord((funcName, args), tool, result)
-
-    def genCodeAndRun(self, instruction: str, varDict: Optional[Dict[str, Any]] = None, **kwargs) -> str:
-        r"""根据指令生成代码，并且用代码解释器执行代码。
-
-        Args:
-            instruction (str): 要执行的指令。
-
-        Returns: 执行结果
-        """
-        return self.codeInterpreter.execute(instruction, varDict=varDict, **kwargs)
-
-    def runCode(self, code: str, varDict: Optional[Dict[str, Any]] = None) -> Any:
-        r"""直接执行代码解释器
-
-        Args:
-            code (str): 要执行的代码。
-
-        Returns: 执行结果
-        """
-        return self.codeInterpreter.executeCode(code, varDict)
 
 class EmptyToolkit(Toolkit):
 

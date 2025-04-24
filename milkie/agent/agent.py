@@ -3,20 +3,24 @@ from sys import stdin
 from typing import List
 from milkie.agent.base_block import BaseBlock
 from milkie.agent.flow_block import FlowBlock
+from milkie.agent.func_block.code_and_run import CodeAndRun
 from milkie.agent.func_block.func_block import FuncBlock, RepoFuncs
 from milkie.agent.func_block.import_func import ImportFunc
 from milkie.agent.func_block.no_cache import NoCache
+from milkie.agent.func_block.python import Python
+from milkie.agent.func_block.read import Read
 from milkie.agent.func_block.reindex_from_local_block import ReindexFromLocalBlock
 from milkie.agent.func_block.retrieval_block import RetrievalBlock
 from milkie.agent.func_block.set_model import SetModel
 from milkie.agent.func_block.set_reasoning_self_consistency import SetReasoningSelfConsistency
 from milkie.agent.func_block.set_reasoning_self_critique import SetReasoningSelfCritique
 from milkie.agent.func_block.skill_func import SkillFunc
+from milkie.agent.func_block.write import Write
 from milkie.agent.llm_block.llm_block import LLMBlock
 from milkie.config.constant import KeywordFuncStart, KeywordFuncEnd
 from milkie.context import Context
 from milkie.config.config import GlobalConfig
-from milkie.agent.exec_graph import ExecNodeAgent
+from milkie.agent.exec_graph import ExecNodeAgent, ExecNodeLabel, ExecNodeType
 from milkie.functions.toolkits.toolkit import Toolkit
 from milkie.global_context import GlobalContext
 from milkie.response import Response
@@ -91,6 +95,26 @@ class Agent(BaseBlock):
             repoFuncs=self.repoFuncs
         ))
         self.repoFuncs.add("Skill", SkillFunc(
+            globalContext=globalContext,
+            config=self.config,
+            repoFuncs=self.repoFuncs
+        ))
+        self.repoFuncs.add("Write", Write(
+            globalContext=globalContext,
+            config=self.config,
+            repoFuncs=self.repoFuncs
+        ))
+        self.repoFuncs.add("Read", Read(
+            globalContext=globalContext,
+            config=self.config,
+            repoFuncs=self.repoFuncs
+        ))
+        self.repoFuncs.add("Python", Python(
+            globalContext=globalContext,
+            config=self.config,
+            repoFuncs=self.repoFuncs
+        ))
+        self.repoFuncs.add("CodeAndRun", CodeAndRun(
             globalContext=globalContext,
             config=self.config,
             repoFuncs=self.repoFuncs
@@ -220,21 +244,19 @@ class Agent(BaseBlock):
             history.resetUse()
             kwargs["history"] = history
 
-        execNode = ExecNodeAgent.build(
-            execNodeParent=kwargs["execNode"],
-            name=self.name)
+        execNodeAgent = kwargs["execNode"].castTo(ExecNodeAgent)
         for block in self.topBlocks:
             result = block.execute(
                 context=context,
                 query=query,
                 args=args,
                 prevBlock=lastBlock,
-                execNodeParent=execNode,
+                execNodeParent=execNodeAgent,
                 **{k: v for k, v in kwargs.items() if k != "top"}
             )
             lastBlock = block
 
-        self.context.addHistoryAssistantPrompt(result.respStr)
+        self.context.historyAddAssistantPrompt(result.respStr)
         return result
 
 class FakeAgentStdin(Agent):

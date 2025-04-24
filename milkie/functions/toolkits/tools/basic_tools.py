@@ -33,7 +33,7 @@ class ToolSearchWebFromZhipu(Tool):
     def execute(
         self,
         query: str, 
-        maxResults: int = 10
+        maxResults: int = 3
     ) -> str:
         r"""使用智谱AI搜索引擎在互联网上搜索信息
 
@@ -192,7 +192,7 @@ class ToolGetWebContentFromUrls(Tool):
         cleanTexts = []
         
         for url in urls:
-            stdout(f"Fetching content from {url}", info=True, flush=True, end="")
+            stdout(f"Fetching content from {url}", info=True, flush=True)
             try:
                 htmlContent = self._fetchUrl(url)
 
@@ -221,8 +221,6 @@ class ToolGetWebContentFromUrls(Tool):
                 errorMsg = f"Error processing the article from {url}: {str(e)}"
                 WARNING(logger, errorMsg)
                 cleanTexts.append(errorMsg)
-
-        stdout(f"Done fetching content", info=True, flush=True, end="")
         return "\n\n".join(cleanTexts)
 
     def _fetchUrl(self, url: str, headers: Dict[str, str] = None, timeout: int = 10) -> str:

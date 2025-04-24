@@ -63,10 +63,10 @@ class Chatroom(BaseBlock):
     
     def execute1v1Mode(self, context: Context, query: str, args: dict, **kwargs) -> Response:
         stdout(f"\nROLE[{self.host.name}] => \n{query}", info=True)
-        self.host.context.addHistoryAssistantPrompt(query)
+        self.host.context.historyAddAssistantPrompt(query)
         while True: 
             stdout(f"\n\nROLE[{self.onlyRole.name}] => ", info=True)
-            self.onlyRole.context.addHistoryUserPrompt(query)
+            self.onlyRole.context.historyAddUserPrompt(query)
             resp = self.onlyRole.execute(context, args, **kwargs)
             if resp.isEnd():
                 break
@@ -74,7 +74,7 @@ class Chatroom(BaseBlock):
             query = resp.respStr
 
             stdout(f"\n\nROLE[{self.host.name}] => ", info=True)
-            self.host.context.addHistoryUserPrompt(query)
+            self.host.context.historyAddUserPrompt(query)
             resp = self.host.execute(context, args, **kwargs)
             if resp.isEnd():
                 break

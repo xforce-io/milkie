@@ -1,5 +1,6 @@
 from typing import Optional
 from milkie.agent.agent import Agent, FakeAgentStdin
+from milkie.agent.exec_graph import ExecNodeAgent, ExecNodeLabel, ExecNodeRoot, ExecNodeSkill, ExecNodeType
 from milkie.chatroom.chatroom import Chatroom
 from milkie.config.config import GlobalConfig
 from milkie.context import Context
@@ -10,6 +11,7 @@ from milkie.runtime.agent_program import AgentProgram
 from milkie.runtime.chatroom_program import ChatroomProgram
 from milkie.runtime.datasource import DataSource
 from milkie.response import Response
+from milkie.types.object_type import ObjectTypeFactory
 
 class Env:
     def __init__(
@@ -18,7 +20,8 @@ class Env:
         config: str | GlobalConfig = None,
         agentPrograms: list[AgentProgram] = None,
         chatroomPrograms: list[ChatroomProgram] = None,
-        globalSkillset: Skillset = None
+        globalSkillset: Skillset = None,
+        globalObjectTypes: ObjectTypeFactory = None
     ) -> None:
         self.globalContext = globalContext
         self.config = config
@@ -35,6 +38,7 @@ class Env:
         self.chatrooms: dict[str, Chatroom] = {}
 
         self.globalSkillset = globalSkillset
+        self.globalObjectTypes = globalObjectTypes
 
         for agentProgram in agentPrograms:
             self.agents[agentProgram.name] = Agent(
@@ -123,17 +127,36 @@ class Env:
             return response
         elif agentName:
             context.genResp(f"\n <<< start of agent[{agentName}] with query {query} >>> ", **kwargs)
+
+            if kwargs["execNode"].label == ExecNodeLabel.ROOT:
+                execNodeRoot :ExecNodeRoot = kwargs["execNode"]
+                execNodeAgent = ExecNodeAgent.build(
+                    execGraph=context.getExecGraph(),
+                    callee=execNodeRoot,
+                    name=agentName)
+            elif kwargs["execNode"].label == ExecNodeLabel.SKILL:
+                execNodeSkill :ExecNodeSkill = kwargs["execNode"]
+                execNodeAgent = ExecNodeAgent.build(
+                    execGraph=context.getExecGraph(),
+                    callee=execNodeSkill,
+                    name=agentName)
+            else:
+                raise RuntimeError(f"Invalid execNode label[{kwargs['execNode'].label}]")
+
             response = self.agents[agentName].execute(
                 context=context,
                 query=query,
                 args=args, 
                 top=True, 
-                **kwargs)
+                **{**kwargs, "execNode" : execNodeAgent})
             context.genResp(f"\n <<< end of agent[{agentName}] >>>\n", **kwargs)
             return response
 
     def getGlobalSkillset(self) -> Skillset:
         return self.globalSkillset
+
+    def getGlobalObjectTypes(self) -> ObjectTypeFactory:
+        return self.globalObjectTypes
 
     def getDataSource(self) -> DataSource:
         return self.dataSource

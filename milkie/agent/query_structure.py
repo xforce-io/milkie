@@ -13,6 +13,9 @@ class QueryStructure:
         self.query = query
 
 def parseQuery(query :str) -> QueryStructure:
+    if not query:
+        return None
+    
     #if query start with "@filepath:", parse as FILEPATH type
     if query.startswith(QueryStructure.PatternFilepath):
         return QueryStructure(QueryType.FILEPATH, query[len(QueryStructure.PatternFilepath):])

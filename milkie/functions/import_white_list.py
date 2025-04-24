@@ -1,6 +1,8 @@
 WhiteListImport = [
     "os",
     "os.path",
+    "pathlib",
+    "pathlib.Path",
     "math",
     "random",
     "typing",
@@ -19,8 +21,3 @@ PreImport = [
     "datetime",
     "json",
 ]
-
-def addPreImport(code :str):
-    for preImport in PreImport:
-        code = f"import {preImport}\n" + code
-    return code

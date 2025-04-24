@@ -21,13 +21,12 @@ filelinksJson. #CODE
     (3) 输出 result，请注意冒号可能是全角 => c```type(_CUR_) == list and len(_CUR_) > 0```
 FOR filelink in filelinksJson
     content. #CODE 读取文件{{filelink.path}}文件内容
-    digest. 对下面内容进行投资和财经角度的解读，然后总结内容摘要，不超过 50 字： ``` {content} ``` 请给出内容摘要：
-    viewpoint. 对下面内容进行投资和财经角度的解读，然后总结核心观点，不超过 50 字： ``` {content} ``` 请给出观点：
+    viewpoint. 对下面内容进行投资和财经角度的解读，然后总结内容摘要和核心观点，不超过 80 字： ``` {content} ``` 请给出观点：
     last. #PY ```
-    open('{viewpointDir}/{filelink.title}', "w").write(f'''路径：\t{filelink.path}\n摘要：\t{digest}\n观点：\t{viewpoint}''')
+    open('{viewpointDir}/{filelink.title}', "w").write(f'''路径：\t{filelink.path}\n摘要观点：\t{viewpoint}''')
     ```
 
-    ret. #RET {{"title": "{{filelink.title}}", "link": "{{filelink.path}}", "digest": "{{digest}}", "viewpoint": "{{viewpoint}}"}}
+    ret. #RET {{"title": "{{filelink.title}}", "link": "{{filelink.path}}", "viewpoint": "{{viewpoint}}"}}
 END -> briefs
 
-writeBriefs. #PY ```import json;open("{briefsFilepath}", "w").write(json.dumps({briefs}));len({briefs})```
+writeBriefs. #PY ```import json;open("{briefsFilepath}", "w").write(json.dump({briefs}, ensure_ascii=False));len({briefs})```
