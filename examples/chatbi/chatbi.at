@@ -1,0 +1,28 @@
+@name chatbi
+
+@desc
+针对一个问题，结合本体内容进行分析、洞察，得出结论
+@desc
+
+@skills
+    concepts
+    SQLToolkit
+@skills
+
+conceptDescs. @Skill("concepts", {query})
+conceptNames. @Python('[concept["concept"] for concept in {conceptInfos}]')
+datasources. @DataSources('{conceptNames}')
+sql. @Skill("sql_gen", "要求是{query}, 用到的 schemas 是 {schemas} sampledData 是 {sampledData}", "no_cache")
+
+result. [v3] 请一步步思考，并计算sql 结果
+datasource:
+```
+{datasources.0}
+```
+
+sql: 
+```
+{sql}
+```
+
+如果执行出现错误，请调整 sql 并重新进行生成和执行。现在请开始：

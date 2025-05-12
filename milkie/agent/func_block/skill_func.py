@@ -14,7 +14,7 @@ class SkillFunc(FuncBlock):
             repoFuncs=repoFuncs)
 
         self.funcName = "Skill"
-        self.params = ["skill", "args"]
+        self.params = ["skill", "args", "no_cache"]
 
     def execute(
             self, 
@@ -43,6 +43,9 @@ class SkillFunc(FuncBlock):
             toolkit=context.getGlobalContext().getEnv().getGlobalSkillset().getSkill(skillName),
             toolName=toolName
         )
+
+        if "no_cache" in args and args["no_cache"]:
+            kwargs["no_cache"] = True
 
         resp = callSkill(
             context=context,

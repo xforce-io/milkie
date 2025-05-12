@@ -1,5 +1,5 @@
 import os
-from typing import Generator, Optional
+from typing import Optional
 from milkie.agent.agent import Agent
 from milkie.chatroom.chatroom import Chatroom
 from milkie.context import Context

@@ -28,15 +28,13 @@ class Python(FuncBlock):
 
         self._restoreParams(args, self.params)
         code = args["code"]
-        formattedCode = restoreVariablesInStr(
-            code, 
-            self.context.varDict.getGlobalDict())
         result = self.context.vm.execPython(
-            code=f"print({preprocessPyCode(formattedCode)})",
+            code=f"print({preprocessPyCode(code)})",
             varDict=self.context.varDict.getAllDict(),
             **kwargs)
         kwargs["execNode"].castTo(ExecNodeLLM).addContent(str(result))
         result = VM.deserializePythonResult(result)
+        self.context.genResp(result, **kwargs)
         return Response.buildFrom(result if result else "")
         
     def createFuncCall(self):

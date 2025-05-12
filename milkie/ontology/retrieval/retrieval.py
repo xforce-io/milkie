@@ -14,12 +14,12 @@ from milkie.agent.query_structure import QueryType
 from milkie.config.config import ChunkAugmentType, GlobalConfig, RerankPosition, RetrievalConfig
 from milkie.context import Context
 from milkie.custom_refine_program import CustomProgramFactory
-from milkie.memory.memory_with_index import MemoryWithIndex
+from milkie.ontology.memory.memory_with_index import MemoryWithIndex
 from milkie.prompt.test_prompts import candidateTextQAPromptSel, candidateRefinePromptSel, candidateTextQAPromptImpl, candidateRefinePromptImpl
-from milkie.retrieval.chunk_augment import ChunkAugment
-from milkie.retrieval.position_reranker import PositionReranker
-from milkie.retrieval.reranker import Reranker
-from milkie.retrieval.retrievers import HybridRetriever
+from milkie.ontology.retrieval.chunk_augment import ChunkAugment
+from milkie.ontology.retrieval.position_reranker import PositionReranker
+from milkie.ontology.retrieval.reranker import Reranker
+from milkie.ontology.retrieval.retrievers import HybridRetriever
 
 logger = logging.getLogger(__name__)
 

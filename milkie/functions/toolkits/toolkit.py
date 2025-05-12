@@ -174,7 +174,7 @@ class Toolkit():
         if result == None:
             raise ValueError(f"funcCall func[{funcName}] args[{args}] result[{result}]")
 
-        INFO(logger, f"funcCall func[{funcName}] args[{args}] result[{result[:MaxLenLog]}]")
+        INFO(logger, f"funcCall func[{funcName}] args[{args}] result[{str(result)[:MaxLenLog]}]")
         return FuncExecRecord((funcName, args), tool, result)
 
 class EmptyToolkit(Toolkit):

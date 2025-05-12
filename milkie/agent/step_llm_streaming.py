@@ -4,8 +4,7 @@ from typing import List, Optional, Tuple
 import re
 
 from llama_index_client import ChatMessage, MessageRole
-from milkie.agent.exec_graph import ExecNodeLLM, ExecNodeLabel, ExecNodeSkill, ExecNodeTool
-from milkie.config.constant import SymbolEndSkill, SymbolStartSkill
+from milkie.agent.exec_graph import ExecNodeLLM, ExecNodeLabel, ExecNodeSkill
 from milkie.context import Context, History
 from milkie.functions.toolkits.agent_toolkit import AgentToolkit
 from milkie.functions.toolkits.skillset import Skillset
@@ -69,11 +68,16 @@ def callSkill(
             query=funcCall.strip(),
             skillResult=None,
             label=ExecNodeLabel.AGENT)
+        
+        kwargsAgent = {"execNode" : execSkillNode.getCalled()}
+        if "no_cache" in kwargs and kwargs["no_cache"]:
+            kwargsAgent["no_cache"] = True
+
         response = skillTag.toolkit.agent.execute(
             context=context,
             query=funcCall.strip(), 
             args=context.getVarDict().getGlobalDict(),
-            **{"execNode" : execSkillNode.getCalled()})
+            **kwargsAgent)
         execSkillNode.setSkillResult(response.respStr)
         return response.respStr
     else:
@@ -304,7 +308,6 @@ class StreamingProcessor:
 
     def _addCurSentence(self, content: str, **kwargs):
         self.currentSentence.append(content)
-        self.context.genResp(content, end="", **kwargs)
         execNodeLLM = kwargs["execNode"].castTo(ExecNodeLLM)
         execNodeLLM.addContent(content)
 

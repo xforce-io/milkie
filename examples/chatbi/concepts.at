@@ -1,0 +1,36 @@
+@name concepts
+
+@desc
+根据 query 中的要求，查询 ontology 中相关的 concepts 有哪些，作为 json list 返回
+@desc
+
+@skills
+    OntologyToolkit
+@skills
+
+allConcepts. @Skill("OntologyToolkit", "getAllConcepts")
+
+conceptInfos. 根据要解决问题的描述以及concepts描述，返回需要用到的 concepts 信息
+
+要解决的问题：
+```
+{query}
+```
+
+concepts描述：
+```
+{allConcepts}
+``` 
+
+返回例如：
+```
+[
+    {{"concept": "Examination", "members": [{{"id": "NUMBER"}}, {{"examinationDate":"DATETIME"}}]}}, 
+    ...
+    {{"concept": "Patient", "members": [{{"id": "NUMBER"}}, {{"sex":"STRING"}}]}}
+]
+```
+=> jsonl
+
+sampledData. @Skill("OntologyToolkit", "获取抽样数据: {conceptInfos}")
+schemas. @Skill("OntologyToolkit", "获取 DataSourceSchemas: {conceptInfos}")

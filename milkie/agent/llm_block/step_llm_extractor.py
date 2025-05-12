@@ -1,4 +1,3 @@
-from milkie.llm.enhanced_llm import EnhancedLLM
 from milkie.llm.step_llm import StepLLM
 from milkie.global_context import GlobalContext
 from milkie.response import Response

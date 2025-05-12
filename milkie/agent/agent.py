@@ -4,6 +4,7 @@ from typing import List
 from milkie.agent.base_block import BaseBlock
 from milkie.agent.flow_block import FlowBlock
 from milkie.agent.func_block.code_and_run import CodeAndRun
+from milkie.agent.func_block.datasources import DataSources
 from milkie.agent.func_block.func_block import FuncBlock, RepoFuncs
 from milkie.agent.func_block.import_func import ImportFunc
 from milkie.agent.func_block.no_cache import NoCache
@@ -20,7 +21,7 @@ from milkie.agent.llm_block.llm_block import LLMBlock
 from milkie.config.constant import KeywordFuncStart, KeywordFuncEnd
 from milkie.context import Context
 from milkie.config.config import GlobalConfig
-from milkie.agent.exec_graph import ExecNodeAgent, ExecNodeLabel, ExecNodeType
+from milkie.agent.exec_graph import ExecNodeAgent
 from milkie.functions.toolkits.toolkit import Toolkit
 from milkie.global_context import GlobalContext
 from milkie.response import Response
@@ -115,6 +116,11 @@ class Agent(BaseBlock):
             repoFuncs=self.repoFuncs
         ))
         self.repoFuncs.add("CodeAndRun", CodeAndRun(
+            globalContext=globalContext,
+            config=self.config,
+            repoFuncs=self.repoFuncs
+        ))
+        self.repoFuncs.add("DataSources", DataSources(
             globalContext=globalContext,
             config=self.config,
             repoFuncs=self.repoFuncs

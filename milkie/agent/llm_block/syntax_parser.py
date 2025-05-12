@@ -311,7 +311,7 @@ class InstrOutput:
                     stepLLMExtractor=stepLLMExtractor, 
                     varDict=varDict,
                     vm=vm)
-                if not processedOutput or \
+                if processedOutput is None or \
                         (type(processedOutput) == str and processedOutput.strip() == ExprNoInfoToExtract):
                     self._currentResult.addError(
                         storeVar=outputStruct.storeVar,

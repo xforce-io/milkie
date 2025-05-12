@@ -747,6 +747,93 @@ class VMConfig(BaseConfig):
         """
         return f"VMConfig(type={self.connectionType.name}, host={self.host}, port={self.port}, username={self.username})"
 
+class DataSourceType(Enum):
+    MYSQL = 0
+    # 可以在未来添加更多数据源类型
+
+class DataSourceConfig(BaseConfig):
+    def __init__(
+            self, 
+            name: str,
+            type: DataSourceType,
+            host: str,
+            port: int,
+            username: str,
+            password: str,
+            database: str,
+            additional_params: dict = None):
+        self.name = name
+        self.type = type
+        self.host = host
+        self.port = port
+        self.username = username
+        self.password = password
+        self.database = database
+        self.additional_params = additional_params or {}
+
+    @classmethod
+    def fromArgs(cls, config: dict):
+        if not config:
+            return None
+            
+        name = config.get("name")
+        typeStr = config.get("type")
+        
+        if not name or not typeStr:
+            raise Exception("数据源配置缺少必要字段: name 或 type")
+            
+        # 将类型字符串转换为 DataSourceType 枚举
+        try:
+            dataSourceType = DataSourceType[typeStr.upper()]
+        except KeyError:
+            raise Exception(f"不支持的数据源类型: {typeStr}")
+            
+        # 获取基本配置
+        host = config.get("host")
+        port = config.get("port")
+        username = config.get("username")
+        password = config.get("password")
+        database = config.get("database")
+        
+        # 获取其他可能的参数
+        additional_params = {}
+        for key, value in config.items():
+            if key not in ["name", "type", "host", "port", "username", "password", "database"]:
+                additional_params[key] = value
+                
+        return cls(
+            name=name,
+            type=dataSourceType,
+            host=host,
+            port=port,
+            username=username,
+            password=password,
+            database=database,
+            additional_params=additional_params
+        )
+
+class DataSourcesConfig(BaseConfig):
+    def __init__(self, dataSourceConfigs: List[DataSourceConfig]):
+        self.dataSourceConfigs = dataSourceConfigs
+        self.source_map = {ds.name: ds for ds in dataSourceConfigs} if dataSourceConfigs else {}
+    
+    @classmethod
+    def fromArgs(cls, config: list):
+        if not config:
+            return cls([])
+            
+        sources = []
+        for source_config in config:
+            sources.append(DataSourceConfig.fromArgs(source_config))
+            
+        return cls(sources)
+    
+    def getSourceConfig(self, name: str) -> DataSourceConfig:
+        return self.source_map.get(name)
+
+    def getAllSourceConfigs(self) -> List[DataSourceConfig]:
+        return self.dataSourceConfigs
+
 class GlobalConfig(BaseConfig):
     instanceCnt = 0
     
@@ -785,6 +872,7 @@ class GlobalConfig(BaseConfig):
         )
         self.toolsConfig = ToolsConfig.fromArgs(config.get("tools", {}))
         self.vmConfig = VMConfig.fromArgs(config.get("vm", {}))
+        self.dataSourcesConfig = DataSourcesConfig.fromArgs(config.get("datasources", []))
 
         self._resolveConfigDependencies()
 
@@ -842,3 +930,11 @@ class GlobalConfig(BaseConfig):
     
     def getVMConfig(self) -> VMConfig:
         return self.vmConfig
+
+    def getDataSourcesConfig(self) -> DataSourcesConfig:
+        """获取所有数据源配置"""
+        return self.dataSourcesConfig
+
+    def getDataSourceConfig(self, name: str) -> DataSourceConfig:
+        """获取特定名称的数据源配置"""
+        return self.dataSourcesConfig.getSourceConfig(name)

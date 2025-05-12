@@ -3,7 +3,7 @@ from llama_index.core.indices.vector_store.base import VectorStoreIndex
 
 from milkie.config.config import IndexConfig, LongTermMemorySource, MemoryConfig, MemoryTermConfig, MemoryType
 from milkie.index.index import Index
-from milkie.memory.memory import Memory
+from milkie.ontology.memory.memory import Memory
 from milkie.settings import Settings
 
 class MemoryWithIndex():

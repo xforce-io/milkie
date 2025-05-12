@@ -11,6 +11,7 @@ from llama_index.core.callbacks.base import CallbackManager
 from llama_index.core.indices.prompt_helper import DEFAULT_PADDING, PromptHelper
 
 from milkie.model_factory import ModelFactory
+from milkie.ontology.ontology_manager import OntologyManager
 from milkie.vm.vm import VMFactory
 
 def getNodeParser(
@@ -48,7 +49,7 @@ class CustomizedPromptHelper(PromptHelper):
         return chunks[:2]
 
 from milkie.config.config import GlobalConfig
-from milkie.memory.memory_with_index import MemoryWithIndex
+from milkie.ontology.memory.memory_with_index import MemoryWithIndex
 from milkie.settings import Settings
 
 class GlobalContext():
@@ -85,12 +86,17 @@ class GlobalContext():
 
         self.env = None
         self.vm = VMFactory.createVM(self.globalConfig.vmConfig)
+        self.ontologyManager = OntologyManager(
+            globalConfig=self.globalConfig)
 
     def setEnv(self, env):
         self.env = env
         
     def getEnv(self):
         return self.env
+
+    def getOntology(self):
+        return self.ontologyManager.getOntology()
 
     @staticmethod
     def create(configPath :str = None):

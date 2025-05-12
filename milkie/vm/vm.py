@@ -220,7 +220,6 @@ class VMSSH(VM):
             
             if error:
                 logger.warning(f"命令执行产生错误: {error}")
-                import pdb; pdb.set_trace()
                 return f"输出: {output}\n错误: {error}"
             
             return output

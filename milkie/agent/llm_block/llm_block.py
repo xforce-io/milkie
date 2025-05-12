@@ -5,6 +5,7 @@ import json
 import logging
 import re
 import time
+import traceback
 from typing import Any, Callable
 import uuid
 
@@ -76,9 +77,9 @@ class StepLLMInstrAnalysis(StepLLMStreaming):
                     for toolName, toolDesc in skill.getToolDescs().items():
                         systemPrompt += f"{name}.{toolName} -> \n{toolDesc}\n"
             systemPrompt += '''```\n
-            如果需要使用技能，请使用 "<skillname> 技能参数</skillname>" 来调用技能。
-            例如，"<tool1> 参数1, 参数2</tool1>" 
-                 "<tool2> 参数3</tool2>"
+            如果需要使用技能，请使用 "<skillname> 技能参数集合 </skillname>" 来调用技能。
+            例如，"<tool1> 参数1 / 参数2</tool1>" 
+                 "<tool2> 参数1</tool2>"
             '''
         return systemPrompt
         
@@ -242,7 +243,6 @@ class Instruction:
         return f"Instruction({self.label}): {self.formattedInstruct}"
         
     def _processNaiveType(self, args: dict, **kwargs):
-        self._getContext().genResp(self.formattedInstruct, **kwargs)
         kwargs["execNode"].castTo(ExecNodeLLM).addContent(str(self.formattedInstruct))
         return self._createResult(
             response=self.formattedInstruct,
@@ -459,7 +459,7 @@ class Instruction:
                     **{**kwargs, "curInstruction": self})
                 if curInstruct.strip() == funcBlock.getFuncCallPattern().strip():
                     self.onlyFuncCall = True
-                    self.formattedInstruct = resp.resp
+                    self.formattedInstruct = resp.resp if resp.resp else ""
                     return
 
                 try:
@@ -473,7 +473,7 @@ class Instruction:
                 curInstruct, 
                 allArgs)
         except Exception as e:
-            raise RuntimeError(f"fail restore variables in [{curInstruct}]")
+            raise RuntimeError(f"fail restore variables in [{curInstruct}] traceback[{traceback.format_exc()}]")
             
         if self.syntaxParser.flag == SyntaxParser.Flag.NONE:
             naiveType = Instruction._isNaiveType(self.formattedInstruct)
@@ -551,7 +551,7 @@ class TaskEngine:
                     curInstruction.syntaxParser.flag == SyntaxParser.Flag.RET:
                 break
 
-            self.context.genResp(f"\n{curInstruction.label} -> ", **kwargs)
+            self.context.genResp(f"\n{self.llmBlock.agentName}.{curInstruction.label} -> ", **kwargs)
 
             curInstruction.syntaxParser.reset()
 

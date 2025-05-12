@@ -2,8 +2,10 @@ from typing import List
 from milkie.functions.toolkits.agent_toolkit import AgentToolkit
 from milkie.functions.toolkits.basic_toolkit import BasicToolkit
 from milkie.functions.toolkits.filesys_toolkit import FilesysToolkit
+from milkie.functions.toolkits.ontology_toolkit import OntologyToolkit
 from milkie.functions.toolkits.search_toolkit import SearchToolkit
 from milkie.functions.toolkits.skillset import Skillset
+from milkie.functions.toolkits.sql_toolkit import SQLToolkit
 from milkie.functions.toolkits.toolkit import Toolkit
 from milkie.functions.toolkits.test_toolkit import TestToolkit
 from milkie.functions.toolkits.vm_toolkit import VMToolkit
@@ -20,6 +22,8 @@ class GlobalSkills(object):
             TestToolkit(self.globalContext),
             VMToolkit(self.globalContext),
             FTPToolkit(self.globalContext),
+            OntologyToolkit(self.globalContext),
+            SQLToolkit(self.globalContext),
         ]
 
         self.toolkits = {

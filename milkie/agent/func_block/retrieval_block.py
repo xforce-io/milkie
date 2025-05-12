@@ -4,9 +4,9 @@ from milkie.agent.base_block import BaseBlock
 from milkie.agent.func_block.func_block import FuncBlock
 from milkie.context import Context
 from milkie.global_context import GlobalContext
-from milkie.memory.memory_with_index import MemoryWithIndex
+from milkie.ontology.memory.memory_with_index import MemoryWithIndex
+from milkie.ontology.retrieval.retrieval import RetrievalModule
 from milkie.response import Response
-from milkie.retrieval.retrieval import RetrievalModule
 from milkie.runtime.datasource import DataSource
 
 class RetrievalBlock(FuncBlock):

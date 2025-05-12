@@ -1,6 +1,5 @@
 from milkie.config.config import GlobalConfig
-from milkie.retrieval.retrieval import RetrievalModule
-
+from milkie.ontology.retrieval.retrieval import RetrievalModule
 
 class DataSource:
     def __init__(self, globalConfig: GlobalConfig):
