@@ -1,14 +1,34 @@
 @name sql_gen
 
 @desc
-这是一个 sql 生成器，根据请求及本体模型生成 sql
+这是一个 sql 生成器，根据输入的数据源和请求生成 sql
 @desc
 
-result. 写一条 sql
+result. [qwen-plus] 写一条 sql
 
-要求是：
+请求是：
 ```
 {query}
+```
+
+datasource:
+```
+{datasources}
+```
+
+schema:
+```
+{schemas}
+```
+
+sampledData:
+```
+{sampledData}
+```
+
+关于数据的提示：
+```
+{dataHints}
 ```
 
 请先一步步思考，然后给出结果，请直接生成 sql 本身，不要输出任何额外字符。

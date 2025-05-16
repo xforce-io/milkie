@@ -342,7 +342,7 @@ class DataSourceMysql(DataSourceSql):
                     if col_name and col_type_obj is not None: # 确保列名和类型存在
                         # 将 SQLAlchemy 类型对象转换为字符串表示形式
                         # 例如：VARCHAR(length=50), INTEGER(), NUMERIC(precision=10, scale=2)
-                        col_type_str = str(col_type_obj)
+                        col_type_str = str(col_type_obj).replace(' COLLATE "utf8mb4_unicode_ci"', '')
                         current_table_cols.append({'name': col_name, 'type': col_type_str})
                     elif col_name: # 类型未知，但列名存在
                         current_table_cols.append({'name': col_name, 'type': 'UNKNOWN'}) # 或者记录一个默认值

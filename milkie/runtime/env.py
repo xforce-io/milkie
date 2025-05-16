@@ -27,6 +27,8 @@ class Env:
         self.config = config
         self.globalContext.setEnv(self)
         self.dataSource = DataSource(self.globalContext.globalConfig)
+        self.globalSkillset = globalSkillset
+        self.globalObjectTypes = globalObjectTypes
 
         self.agents: dict[str, Agent] = {
             "stdin": FakeAgentStdin(
@@ -35,11 +37,8 @@ class Env:
                 config=self.config
             )
         }
+
         self.chatrooms: dict[str, Chatroom] = {}
-
-        self.globalSkillset = globalSkillset
-        self.globalObjectTypes = globalObjectTypes
-
         for agentProgram in agentPrograms:
             self.agents[agentProgram.name] = Agent(
                 agentName=agentProgram.name,

@@ -172,7 +172,6 @@ class StepLLMStreaming(StepLLM):
                 funcExecRecords=funcExecRecords,
                 response=funcExecRecords[0].result)
 
-        self.context.genResp(result, end="", **kwargs)
         return InstAnalysisResult(
             InstAnalysisResult.Result.ANSWER,
             funcExecRecords=None,
@@ -279,6 +278,7 @@ class StreamingProcessor:
             self,
             deltaContent: str,
             **kwargs) -> str:
+        self.context.genResp(deltaContent, end="")
         if not self.globalSkillset:
             self._addCurSentence(deltaContent, **kwargs)
             return None

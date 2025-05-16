@@ -56,6 +56,9 @@ class FuncBlock(BaseBlock):
     def getFuncCallPattern(self):
         return self.funcCallPattern
 
+    def getParams(self):
+        return self.params
+
     def compile(self):
         if not self.funcDefinition:
             return
@@ -133,13 +136,16 @@ class FuncBlock(BaseBlock):
         return '\n'.join(processedLines)
 
     def setParams(self, args :List[str]):
-        if len(args) > len(self.params):
-            raise ValueError(f"Expected arguments[{self.params}], but got[{args}]")
-
         if len(args) < len(self.params):
             args = args + [None] * (len(self.params) - len(args))
+            lenArgs = len(self.params)
+        elif len(args) > len(self.params):
+            lenArgs = len(self.params) - 1
+            self.setVarDictDataSegment(self.params[-1], args[lenArgs:])
+        else:
+            lenArgs = len(args)
 
-        for param, value in zip(self.params, args):
+        for param, value in zip(self.params[:lenArgs], args[:lenArgs]):
             self.setVarDictDataSegment(param, value)
 
     def execute(

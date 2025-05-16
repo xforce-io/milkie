@@ -13,14 +13,23 @@ class SQLToolkit(Toolkit):
 
     def executeSQL(self, datasource: str, sql: str) -> str:
         """
-        在指定的数据源中执行SQL语句
+        在指定的数据源中执行SQL语句，并返回结果。
+        调用格式为
+        ```
+            datasource: 数据源名称
+            sql: SQL语句
+        ```
 
         Args:
             datasource (str): 数据源名称
             sql (str): SQL语句
         """
+        theDataSource = self.globalContext.getOntology().getDataSource(datasource)
+        if theDataSource is None:
+            return f"数据源 {datasource} 不存在"
+
         try:
-            return self.globalContext.getOntology().getDataSource(datasource).executeQuery(sql)
+            return theDataSource.executeQuery(sql)
         except Exception as e:
             return f"执行SQL语句失败: {e}"
 

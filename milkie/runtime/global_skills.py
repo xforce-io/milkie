@@ -1,4 +1,5 @@
 from typing import List
+from milkie.functions.openai_function import OpenAIFunction
 from milkie.functions.toolkits.agent_toolkit import AgentToolkit
 from milkie.functions.toolkits.basic_toolkit import BasicToolkit
 from milkie.functions.toolkits.filesys_toolkit import FilesysToolkit
@@ -47,6 +48,12 @@ class GlobalSkills(object):
             return AgentToolkit(agent)
         
         raise RuntimeError(f"Skill not found: {name} (Available skills: {', '.join(self.getSkillNames())})")
+
+    def getSkillTool(self, skillName: str, toolName: str) -> OpenAIFunction:
+        skill = self.getSkill(skillName)
+        if skill:
+            return skill.getToolByName(toolName)
+        return None
 
     def getSkillNames(self):
         return list(self.toolkits.keys()) + list(self.agents.keys())

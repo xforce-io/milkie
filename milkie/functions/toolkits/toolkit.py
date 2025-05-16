@@ -70,6 +70,12 @@ class Toolkit():
     def getCertainTools(self, toolNames: List[str]) -> List[OpenAIFunction]:
         return [tool for tool in self.getTools() if tool.get_function_name() in toolNames]
 
+    def getToolByName(self, toolName: str) -> OpenAIFunction:
+        for tool in self.getTools():
+            if tool.get_function_name() == toolName:
+                return tool
+        return None
+
     @staticmethod
     def getToolsWithSingleFunc(func :Callable) -> List[OpenAIFunction]:
         return [OpenAIFunction(func)]
@@ -149,7 +155,11 @@ class Toolkit():
             needToParse :bool = False) -> List[FuncExecRecord]:
         records = []
         for toolCall in toolCalls:
-            args = json.loads(unescape(toolCall[1]))
+            try:
+                args = json.loads(unescape(toolCall[1]))
+            except Exception:
+                import pdb; pdb.set_trace()
+
             record = self.execFromJson(
                 toolCall[0], 
                 args, 

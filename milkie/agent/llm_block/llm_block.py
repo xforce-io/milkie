@@ -78,8 +78,8 @@ class StepLLMInstrAnalysis(StepLLMStreaming):
                         systemPrompt += f"{name}.{toolName} -> \n{toolDesc}\n"
             systemPrompt += '''```\n
             如果需要使用技能，请使用 "<skillname> 技能参数集合 </skillname>" 来调用技能。
-            例如，"<tool1> 参数1 / 参数2</tool1>" 
-                 "<tool2> 参数1</tool2>"
+            例如，"<skill1> 参数1 / 参数2</skill1>" 
+                 "<skill2> 参数1</skill2>"
             '''
         return systemPrompt
         

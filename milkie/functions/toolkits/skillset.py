@@ -1,5 +1,6 @@
 from __future__ import annotations
 from typing import List, Optional
+from milkie.functions.openai_function import OpenAIFunction
 from milkie.functions.toolkits.toolkit import Toolkit
 
 class Skillset(Toolkit):
@@ -24,6 +25,12 @@ class Skillset(Toolkit):
 
     def getTools(self):
         return [tool for skill in self.skillset for tool in skill.getTools()]
+
+    def getTool(self, skillName :str, toolName :str) -> OpenAIFunction:
+        skill = self.getSkill(skillName)
+        if skill:
+            return skill.getToolByName(toolName)
+        return None
 
     @staticmethod
     def createSkillset(globalSkillset :Skillset, skillNames :Optional[List[str]]=None):

@@ -245,7 +245,7 @@ class Ontology:
             data[conceptName] = dataSource.get_schema()
         return data
 
-    def sampleData(self, conceptNames: List[str], count: int = 3) -> Dict[str, Any]:
+    def sampleData(self, conceptNames: List[str], count: int = 1) -> Dict[str, Any]:
         """根据概念获取样本数据"""
         data = {}
         for conceptName in conceptNames:

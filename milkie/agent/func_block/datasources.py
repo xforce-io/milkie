@@ -20,8 +20,13 @@ class DataSources(FuncBlock):
         self._restoreParams(args, self.params)
         concepts = args["concepts"]
         dataSources = self.globalContext.ontologyManager.getDataSourcesFromConcepts(concepts)
-        self.context.genResp(dataSources, **kwargs)
-        return Response.buildFrom(dataSources)
+        dedupedDataSources = []
+        for dataSource in dataSources:
+            if dataSource not in dedupedDataSources:
+                dedupedDataSources.append(dataSource)
+                
+        self.context.genResp(dedupedDataSources, **kwargs)
+        return Response.buildFrom(dedupedDataSources)
     
     def createFuncCall(self):
         newFuncCall = DataSources(
