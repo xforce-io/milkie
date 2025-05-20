@@ -68,6 +68,8 @@ def callSkill(
             query=funcCall.strip(),
             skillResult=None,
             label=ExecNodeLabel.AGENT)
+        if not execSkillNode:
+            return "duplicated, 我需要重新思考"
         
         kwargsAgent = {"execNode" : execSkillNode.getCalled()}
         if "no_cache" in kwargs and kwargs["no_cache"]:
@@ -166,6 +168,11 @@ class StepLLMStreaming(StepLLM):
                 query=self.query,
                 skillResult=funcExecRecords[0].result,
                 label=ExecNodeLabel.TOOL)
+            if not execNode:
+                return InstAnalysisResult(
+                    InstAnalysisResult.Result.ANSWER,
+                    funcExecRecords=funcExecRecords,
+                    response="duplicated, 我需要重新思考")
             
             return InstAnalysisResult(
                 InstAnalysisResult.Result.TOOL,

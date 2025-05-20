@@ -336,8 +336,7 @@ class SyntaxParser:
         IF = 4
         GOTO = 5
         PY = 6
-        CALL = 7
-        THOUGHT = 8
+        THOUGHT = 7
 
     class TypeCall(Enum):
         STDIN = 1
@@ -476,7 +475,6 @@ class SyntaxParser:
             InstFlagIf: self._handleIfFlag,
             InstFlagGoto: self._handleGotoFlag,
             InstFlagPy: self._handlePyFlag,
-            InstFlagCall: self._handleCallFlag,
         }
 
         flagsFound = [flag for flag in flagHandlers.keys() if flag in self.instruction]
@@ -511,25 +509,6 @@ class SyntaxParser:
         self.flag = SyntaxParser.Flag.PY
         pyCode = self._extractPyCode()
         self.instruction = pyCode if pyCode else self.instruction.replace(InstFlagPy, "").strip()
-
-    def _handleCallFlag(self):
-        self.flag = SyntaxParser.Flag.CALL
-        callParts = self.instruction.split(InstFlagCall)
-
-        self.callObj = callParts[1].split()[0].strip()
-        if self.callObj.startswith("@"):
-            self.typeCall = SyntaxParser.TypeCall.Agent
-            self.callObj = self.callObj[1:]
-        else:
-            raise Exception(f"Invalid call object: {self.callObj}")
-
-        callArgPattern = r'%s\s+(["\'])((?:(?!\1).)*)\1' % re.escape(self.callObj)
-        callArgMatch = re.search(callArgPattern, self.instruction)
-        if callArgMatch:
-            self.callArg = callArgMatch.group(2)
-            self.instruction = self.instruction.replace(InstFlagCall, "").replace(callArgMatch.group(0), "")
-        else:
-            raise SyntaxError(f"function[{self.callObj}] params not found or not properly quoted")
 
     def _extractPyCode(self):
         def _extractCode(text):

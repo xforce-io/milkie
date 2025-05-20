@@ -3,8 +3,9 @@ from enum import Enum
 from typing import List
 import uuid
 import json
+import logging
 
-from milkie.log import ERROR
+logger = logging.getLogger(__name__)
 
 class ExecNodeType(Enum):
     ROOT = 0
@@ -67,6 +68,9 @@ class ExecNode:
     def castTo(self, cls: type[ExecNode]) -> cls:
         assert isinstance(self, cls)
         return self
+
+    def __str__(self):
+        return f"ExecNode(id={self.id}, type={self.type}, label={self.label})"
 
 class ExecNodeRoot(ExecNode):
     def __init__(
@@ -266,6 +270,9 @@ class ExecNodeLLM(ExecNodeCommon):
     def getSkills(self):
         return self.skills
 
+    def __str__(self):
+        return f"ExecNodeLLM(type={self.type}, label={self.label}, curInstruct={self.curInstruct})"
+
     @staticmethod
     def build(
             execGraph: ExecGraph,
@@ -314,6 +321,9 @@ class ExecNodeSkill(ExecNodeCall):
         base["called"] = self.called.getId()
         return base
 
+    def __str__(self):
+        return f"ExecNodeSkill(type={self.type}, label={self.label}, skillName={self.skillName}, query={self.query})"
+
     @staticmethod
     def build(
             execGraph: ExecGraph,
@@ -337,7 +347,9 @@ class ExecNodeSkill(ExecNodeCall):
                 execNodeSkill=execNodeSkill,
                 name=skillName)
 
-        execNodeLLM.addSkill(execNodeSkill)
+        if not execNodeLLM.addSkill(execNodeSkill):
+            logger.warning(f"ExecNodeSkill[{str(execNodeSkill)}] duplicate")
+            return None
         return execNodeSkill
 
 class ExecNodeTool(ExecNodeCommon):
@@ -370,13 +382,19 @@ class ExecGraph:
     def __init__(self):
         self.nodes = {}
         self.rootNode :ExecNodeRoot = None
+        self.nodeStrs = []
 
     def start(self, query: str):
         self.rootNode = ExecNodeRoot(self, query)
         self.nodes[self.rootNode.getId()] = self.rootNode
 
-    def addNode(self, node: ExecNode):
+    def addNode(self, node: ExecNode) -> bool:
+        if str(node) in self.nodeStrs:
+            return False
+        
         self.nodes[node.getId()] = node
+        self.nodeStrs.append(str(node))
+        return True
 
     def getNode(self, nodeId: str):
         return self.nodes[nodeId]

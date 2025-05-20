@@ -191,8 +191,6 @@ class Instruction:
             return self._processGenCode(logType="if", args=args, **kwargs)
         elif self.syntaxParser.flag == SyntaxParser.Flag.PY:
             return self._processPyCode(args=args, **kwargs)
-        elif self.syntaxParser.flag == SyntaxParser.Flag.CALL:
-            return self._processCall(args=args, **kwargs)
         elif self.syntaxParser.flag == SyntaxParser.Flag.RET and self.syntaxParser.returnVal:
             return self._processRet(args=args, **kwargs)
 

@@ -158,7 +158,11 @@ class Toolkit():
             try:
                 args = json.loads(unescape(toolCall[1]))
             except Exception:
-                import pdb; pdb.set_trace()
+                try:
+                    args = json.loads(unescape(toolCall[1][:-1]))
+                except Exception:
+                    import pdb; pdb.set_trace()
+                    raise ValueError(f"Error parsing tool call: {toolCall}")
 
             record = self.execFromJson(
                 toolCall[0], 

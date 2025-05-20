@@ -140,8 +140,10 @@ class Engine:
         except Exception as e:
             print(f"Engine run error: {str(e)}", flush=True)
             raise
-
-        #print(context.getExecGraph().dump())
+        
+        with open("log/exec_graph.txt", "w") as f:
+            execGraph = context.getExecGraph().dump()
+            f.write(execGraph)
         return context
 
     def executeAgent(

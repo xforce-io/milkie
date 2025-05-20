@@ -29,7 +29,7 @@ class SQLToolkit(Toolkit):
             return f"数据源 {datasource} 不存在"
 
         try:
-            return theDataSource.executeQuery(sql)
+            return str(theDataSource.executeQuery(sql))
         except Exception as e:
             return f"执行SQL语句失败: {e}"
 
