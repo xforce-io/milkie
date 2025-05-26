@@ -2,10 +2,17 @@ import logging, sys
 
 MaxLenLog = 4096
 
-logging.basicConfig(
-    level=logging.DEBUG, 
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[logging.FileHandler('log/milkie.log')])
+def setup_logging():
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.DEBUG)
+
+    root_logger.handlers = []
+    
+    file_handler = logging.FileHandler('log/milkie.log')
+    file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+    root_logger.addHandler(file_handler)
+
+setup_logging()
 
 def INFO(logger :logging.Logger, log :str): logger.info(extractLogExpr(log))
 def DEBUG(logger :logging.Logger, log :str): logger.debug(extractLogExpr(log))

@@ -1,7 +1,7 @@
 from typing import List
 from milkie.functions.openai_function import OpenAIFunction
 from milkie.functions.toolkits.toolkit import Toolkit
-from milkie.functions.toolkits.tools.basic_tools import ToolGetWebContentFromUrls, ToolSearchWebFromDuckDuckGo, ToolSearchWebFromZhipu
+from milkie.functions.toolkits.tools.basic_tools import ToolGetWebContentFromUrls, ToolSearchWebFromZhipu
 from milkie.global_context import GlobalContext
 
 class SearchToolkit(Toolkit):

@@ -23,7 +23,7 @@ class ChunkAugment(BaseNodePostprocessor):
             if node not in newList: 
                 newList.append(node)
 
-            nextNode = self._context.getGlobalMemory().getNextNode(node.node)
+            nextNode = self._context.getGlobalDocset().getNextNode(node.node)
             if nextNode and nextNode not in newList: 
                 newList.append(NodeWithScore(node=nextNode))
         return newList

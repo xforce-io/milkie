@@ -80,6 +80,12 @@ def extractBlock(blockType: str, blockContent: str) -> str | None:
 
 def extractJsonBlock(blockContent: str) -> dict | None:
     blockContent = blockContent.strip()
+
+    if blockContent.startswith("```jsonl"):
+        blockContent = extractBlock("jsonl", blockContent)
+    elif blockContent.startswith("```json"):
+        blockContent = extractBlock("json", blockContent)
+    
     if not blockContent.startswith("[") and not blockContent.startswith("{"):
         blockContent = extractBlock("json", blockContent)
 

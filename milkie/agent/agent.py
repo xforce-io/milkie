@@ -263,6 +263,7 @@ class Agent(BaseBlock):
             lastBlock = block
 
         self.context.historyAddAssistantPrompt(result.respStr)
+        self.context.memory.extract(self.context.history)
         return result
 
 class FakeAgentStdin(Agent):

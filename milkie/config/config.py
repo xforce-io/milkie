@@ -15,10 +15,10 @@ class BaseConfig(ABC):
 
 from enum import Enum
 
-class MemoryType(Enum):
+class DocsetType(Enum):
     LONG_TERM = 0
 
-class LongTermMemorySource(Enum):
+class LongTermDocsetSource(Enum):
     LOCAL = 0
 
 class LLMType(Enum):
@@ -69,36 +69,35 @@ class QuantType(Enum):
     INT8 = 1
     INT4 = 2
 
-class QuantMethod(Enum):
-    NONE = 0
-    GPTQ = 1
-    AWQ = 2
+class StorageType(Enum):
+    FILE = 0
+    REDIS = 1
 
-class MemoryTermConfig(BaseConfig):
+class DocsetTermConfig(BaseConfig):
     def __init__(
             self, 
-            type :MemoryType, 
-            source :LongTermMemorySource,
+            type :DocsetType, 
+            source :LongTermDocsetSource,
             path :str):
         self.type = type 
         self.source = source
         self.path = path
     
     def fromArgs(config :dict):
-        if config["type"] == MemoryType.LONG_TERM.name:
-            if config["source"] == LongTermMemorySource.LOCAL.name:
-                return MemoryTermConfig(
-                    type=MemoryType.LONG_TERM,
-                    source=LongTermMemorySource.LOCAL,
+        if config["type"] == DocsetType.LONG_TERM.name:
+            if config["source"] == LongTermDocsetSource.LOCAL.name:
+                return DocsetTermConfig(
+                    type=DocsetType.LONG_TERM,
+                    source=LongTermDocsetSource.LOCAL,
                     path=config["path"])
             else:
                 raise Exception(f"Long term memory source not supported[{config['source']}]")
         else:
-            raise Exception(f"Memory type not supported[{config['type']}]")
+            raise Exception(f"Docset type not supported[{config['type']}]")
 
-class MemoryConfig(BaseConfig):
-    def __init__(self, memoryConfig :List[MemoryTermConfig]):
-        self.memoryConfig = memoryConfig
+class DocsetConfig(BaseConfig):
+    def __init__(self, docsetConfig :List[DocsetTermConfig]):
+        self.docsetConfig = docsetConfig
 
     def fromArgs(config :dict):
         if not config:
@@ -106,9 +105,9 @@ class MemoryConfig(BaseConfig):
         
         configs = []
         for singleConfig in config:
-            memoryTermConfig = MemoryTermConfig.fromArgs(singleConfig)
-            configs.append(memoryTermConfig)
-        return MemoryConfig(memoryConfig=configs)
+            docsetTermConfig = DocsetTermConfig.fromArgs(singleConfig)
+            configs.append(docsetTermConfig)
+        return DocsetConfig(docsetConfig=configs)
 
 class LLMBasicConfig(BaseConfig):
     def __init__(
@@ -506,81 +505,59 @@ class RetrievalConfig(BaseConfig):
             chunkAugmentType=chunkAugmentType,
             rerankerConfig=reranker)
 
-class AgentType(Enum):
-    QA = 0
-    PROMPT = 1
-
-class SingleAgentConfig(BaseConfig):
+class StorageConfig(BaseConfig):
     def __init__(
             self, 
-            config :str, 
-            type :AgentType,
-            prompt :str):
-        self.config = config
+            type: StorageType, 
+            mempath: str,
+            flushIntervalSec: int):
         self.type = type
-        self.prompt = prompt
+        self.mempath = mempath
+        self.flushIntervalSec = flushIntervalSec
 
-class PromptAgentConfig(SingleAgentConfig):
+    def fromArgs(config :dict):
+        type = None
+        if config["type"] == StorageType.FILE.name:
+            type = StorageType.FILE
+        elif config["type"] == StorageType.REDIS.name:
+            type = StorageType.REDIS
+        else:
+            raise Exception(f"Storage type not supported[{config['type']}]")
+
+        return StorageConfig(
+            type=type, 
+            mempath=config["mempath"],
+            flushIntervalSec=config["flush_interval_sec"])
+
+class KnowhowConfig(BaseConfig):
+    def __init__(self, maxNum: int):
+        self.maxNum = maxNum
+
+    def fromArgs(config :dict):
+        return KnowhowConfig(maxNum=config["max_num"])
+
+class ExperienceConfig(BaseConfig):
+    def __init__(self, maxNum: int):
+        self.maxNum = maxNum
+
+    def fromArgs(config :dict):
+        return ExperienceConfig(maxNum=config["max_num"])
+
+class MemoryConfig(BaseConfig):
     def __init__(
             self, 
-            config: str, 
-            type: AgentType,
-            prompt :str):
-        super().__init__(config, type, prompt)
+            storageConfig: StorageConfig,
+            knowhowConfig: KnowhowConfig,
+            experienceConfig: ExperienceConfig):
+        self.storageConfig = storageConfig
+        self.knowhowConfig = knowhowConfig
+        self.experienceConfig = experienceConfig
 
     def fromArgs(config :dict):
-        return PromptAgentConfig(
-            config=config["config"],
-            prompt=config["prompt"] if "prompt" in config else None,
-            type=AgentType.PROMPT)
-
-class QAAgentConfig(SingleAgentConfig):
-    def __init__(
-            self, 
-            config :str,
-            type :AgentType,
-            prompt :str,
-            memoryConfig :MemoryConfig,
-            indexConfig :IndexConfig,
-            retrievalConfig :RetrievalConfig):
-        super().__init__(config, type, prompt)
-        self.memoryConfig = memoryConfig
-        self.indexConfig = indexConfig
-        self.retrievalConfig = retrievalConfig
-
-    def fromArgs(config :dict):
-        return QAAgentConfig(
-            config=config["config"],
-            type=AgentType.QA,
-            prompt=config["prompt"] if "prompt" in config else None,
-            memoryConfig=MemoryConfig.fromArgs(config["memory"]) if "memory" in config else None,
-            indexConfig=IndexConfig.fromArgs(config["index"]) if "index" in config else None,
-            retrievalConfig=RetrievalConfig.fromArgs(config["retrieval"]) if "retrieval" in config else None)
-
-def createAgentConfig(config :dict):
-    if config["type"] == AgentType.QA.name:
-        return QAAgentConfig.fromArgs(config)
-    elif config["type"] == AgentType.PROMPT.name:
-        return PromptAgentConfig.fromArgs(config)
-    else:
-        raise Exception("Agent type not supported")
-
-class AgentsConfig(BaseConfig):
-    def __init__(self, agentConfigs :List[SingleAgentConfig]):
-        self.agentConfigs = agentConfigs
-        self.agentMap = {}
-        for agentConfig in agentConfigs:
-            self.agentMap[agentConfig.config] = agentConfig
-    
-    def fromArgs(config :dict):
-        configs = []
-        for singleConfig in config:
-            agentConfig = createAgentConfig(singleConfig)
-            configs.append(agentConfig)
-        return AgentsConfig(configs)
-
-    def getConfig(self, config :str) -> SingleAgentConfig:
-        return self.agentMap.get(config)
+        return MemoryConfig(
+            storageConfig=StorageConfig.fromArgs(config["storage"]),
+            knowhowConfig=KnowhowConfig.fromArgs(config["knowhow"]),
+            experienceConfig=ExperienceConfig.fromArgs(config["experience"]))
 
 class EmailConfig(BaseConfig):
     def __init__(self, smtp_server: str, smtp_port: int, username: str, password: str):
@@ -862,30 +839,17 @@ class GlobalConfig(BaseConfig):
             else None
         )
         
-        self.agentsConfig = AgentsConfig.fromArgs(config["agents"])
-        self.memoryConfig = MemoryConfig.fromArgs(config.get("memory", []))
+        self.docsetConfig = DocsetConfig.fromArgs(config.get("docset", []))
         self.indexConfig = IndexConfig.fromArgs(config.get("index", {}))
         self.retrievalConfig = (
             RetrievalConfig.fromArgs(config["retrieval"]) 
             if "retrieval" in config 
             else None
         )
+        self.memoryConfig = MemoryConfig.fromArgs(config.get("memory", {}))
         self.toolsConfig = ToolsConfig.fromArgs(config.get("tools", {}))
         self.vmConfig = VMConfig.fromArgs(config.get("vm", {}))
         self.dataSourcesConfig = DataSourcesConfig.fromArgs(config.get("datasources", []))
-
-        self._resolveConfigDependencies()
-
-    def _resolveConfigDependencies(self):
-        """统一处理配置项之间的依赖关系"""
-        for agentConfig in self.agentsConfig.agentConfigs:
-            if agentConfig.type == AgentType.QA:
-                if agentConfig.memoryConfig is None:
-                    agentConfig.memoryConfig = self.memoryConfig
-                if agentConfig.indexConfig is None:
-                    agentConfig.indexConfig = self.indexConfig
-                if agentConfig.retrievalConfig is None:
-                    agentConfig.retrievalConfig = self.retrievalConfig
 
     def getCloudConfig(self, source: str) -> CloudSourceConfig:
         """获取特定云服务提供商的配置"""
@@ -909,18 +873,18 @@ class GlobalConfig(BaseConfig):
 
     def getEmbeddingConfig(self) -> EmbeddingConfig:
         return self.embeddingConfig
-    
-    def getAgentConfig(self, config :str) -> SingleAgentConfig:
-        return self.agentsConfig.getConfig(config)
 
-    def getMemoryConfig(self) -> MemoryConfig:
-        return self.memoryConfig
+    def getDocsetConfig(self) -> DocsetConfig:
+        return self.docsetConfig
 
     def getIndexConfig(self) -> IndexConfig:
         return self.indexConfig
 
     def getRetrievalConfig(self) -> RetrievalConfig:
         return self.retrievalConfig
+    
+    def getMemoryConfig(self) -> MemoryConfig:
+        return self.memoryConfig
 
     def getToolsConfig(self) -> ToolsConfig:
         return self.toolsConfig

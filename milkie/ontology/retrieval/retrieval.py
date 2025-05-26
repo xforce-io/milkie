@@ -14,7 +14,7 @@ from milkie.agent.query_structure import QueryType
 from milkie.config.config import ChunkAugmentType, GlobalConfig, RerankPosition, RetrievalConfig
 from milkie.context import Context
 from milkie.custom_refine_program import CustomProgramFactory
-from milkie.ontology.memory.memory_with_index import MemoryWithIndex
+from milkie.ontology.docset.docset_with_index import DocsetWithIndex
 from milkie.prompt.test_prompts import candidateTextQAPromptSel, candidateRefinePromptSel, candidateTextQAPromptImpl, candidateRefinePromptImpl
 from milkie.ontology.retrieval.chunk_augment import ChunkAugment
 from milkie.ontology.retrieval.position_reranker import PositionReranker
@@ -31,10 +31,10 @@ class RetrievalModule:
             self, 
             globalConfig :GlobalConfig,
             retrievalConfig :RetrievalConfig,
-            memoryWithIndex :MemoryWithIndex):
+            docsetWithIndex :DocsetWithIndex):
         self.globalConfig = globalConfig
         self.retrievalConfig = retrievalConfig
-        self.memoryWithIndex = memoryWithIndex
+        self.docsetWithIndex = docsetWithIndex
 
         self._buildRetriever()
 
@@ -53,7 +53,7 @@ class RetrievalModule:
             self.nodePostProcessors.append(self.chunkAugment)
         
     def rebuildFromLocalDir(self, localDir :str):
-        self.memoryWithIndex.rebuildFromLocalDir(localDir)
+        self.docsetWithIndex.rebuildFromLocalDir(localDir)
         self._buildRetriever()
         
     def retrieve(self, context :Context, query :str, **kwargs) -> List[NodeWithScore]:
@@ -85,9 +85,9 @@ class RetrievalModule:
             return content
 
         responseSynthesizer = get_response_synthesizer(
-            service_context=self.memoryWithIndex.serviceContext,
+            service_context=self.docsetWithIndex.serviceContext,
             program_factory=CustomProgramFactory(
-                self.memoryWithIndex.settings.llmDefault, 
+                self.docsetWithIndex.settings.llmDefault, 
                 **kwargs),
             structured_answer_filtering=True,
             text_qa_template=candidateTextQAPromptSel(
@@ -99,7 +99,7 @@ class RetrievalModule:
         self.engine = RetrieverQueryEngine.from_args(
             retriever=self.hybridRetriever,
             node_postprocessors=self.nodePostProcessors,
-            service_context=self.memoryWithIndex.serviceContext,
+            service_context=self.docsetWithIndex.serviceContext,
             response_mode=ResponseMode.COMPACT,
             text_qa_template=candidateTextQAPromptImpl("qa_init"),
             refine_template=candidateRefinePromptImpl("qa_refine"),
@@ -110,11 +110,11 @@ class RetrievalModule:
         return result
 
     def _buildRetriever(self):
-        self.denseRetriever = self.memoryWithIndex.getIndex().denseIndex.as_retriever(
+        self.denseRetriever = self.docsetWithIndex.getIndex().denseIndex.as_retriever(
             similarity_top_k=self.retrievalConfig.channelRecall)
 
         self.sparseRetriever = BM25Retriever.from_defaults(
-            docstore=self.memoryWithIndex.getMemory().storageContext.docstore,
+            docstore=self.docsetWithIndex.getDocset().storageContext.docstore,
             similarity_top_k=self.retrievalConfig.channelRecall,
             tokenizer=chineseTokenizer)
 

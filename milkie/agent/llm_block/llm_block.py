@@ -24,7 +24,7 @@ from milkie.llm.reasoning.reasoning import Reasoning
 from milkie.prompt.prompt import Loader
 from milkie.log import INFO, DEBUG
 from milkie.response import Response
-from milkie.types.object_type import ObjectType, ObjectTypeFactory
+from milkie.types.object_type import ObjectTypeFactory
 from milkie.utils.commons import addDict
 from milkie.utils.data_utils import codeToLines, preprocessPyCode, restoreVariablesInDict, restoreVariablesInStr
 
@@ -78,9 +78,20 @@ class StepLLMInstrAnalysis(StepLLMStreaming):
                         systemPrompt += f"{name}.{toolName} -> \n{toolDesc}\n"
             systemPrompt += '''```\n
             如果需要使用技能，请使用 "<skillname> 技能参数集合 </skillname>" 来调用技能。
-            例如，"<skill1> 参数1 / 参数2</skill1>" 
-                 "<skill2> 参数1</skill2>"
+            例如，"<skill1> 参数1 / 参数2 </skill1>" 
+                 "<skill2> 参数1 </skill2>"
             '''
+        
+        knowhows = self.context.memory.getKnowhow().get()
+        if knowhows:
+            systemPrompt += f"""
+            注意：经验知识如下(knowhow -> confidence)
+            ```
+            """
+            for knowhow in knowhows:
+                systemPrompt += f"{knowhow['knowhow']} -> {knowhow['confidence']}\n"
+            systemPrompt += '''```\n'''
+
         return systemPrompt
         
     def makePrompt(self, useTool: bool = False, **args) -> str:

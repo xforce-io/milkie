@@ -1,8 +1,6 @@
 import logging
-from typing import Any, Dict, Optional
-from llama_index.core import ChatPromptTemplate
 from llama_index.core.base.llms.types import ChatMessage, MessageRole
-from milkie.context import History
+from milkie.agent.memory.history import makeMessageTemplates
 from milkie.llm.enhanced_llm import EnhancedLLM
 from milkie.log import DEBUG, ERROR
 from milkie.response import Response
@@ -88,19 +86,3 @@ def failChat(
         messages :list[ChatMessage],
         **kwargs):
     llm.fail(messages, **kwargs)
-
-def makeMessageTemplates(
-        systemPrompt :str, 
-        history :Optional[History], 
-        prompt :str,
-        reasoningModel :bool) -> ChatPromptTemplate:
-    messageTemplates = []
-    if history and history.use():
-        history.setSystemPrompt(systemPrompt)
-        history.addUserPrompt(prompt)
-        messageTemplates = history.getRecentDialogue()
-    else:
-        if systemPrompt and not reasoningModel:
-            messageTemplates += [ChatMessage(content=systemPrompt, role=MessageRole.SYSTEM)]    
-        messageTemplates += [ChatMessage(content=prompt, role=MessageRole.USER)]
-    return ChatPromptTemplate(message_templates=messageTemplates)

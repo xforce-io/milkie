@@ -11,6 +11,7 @@ from llama_index.core.callbacks.base import CallbackManager
 from llama_index.core.indices.prompt_helper import DEFAULT_PADDING, PromptHelper
 
 from milkie.model_factory import ModelFactory
+from milkie.ontology.docset.docset_with_index import DocsetWithIndex
 from milkie.ontology.ontology_manager import OntologyManager
 from milkie.vm.vm import VMFactory
 
@@ -49,7 +50,6 @@ class CustomizedPromptHelper(PromptHelper):
         return chunks[:2]
 
 from milkie.config.config import GlobalConfig
-from milkie.ontology.memory.memory_with_index import MemoryWithIndex
 from milkie.settings import Settings
 
 class GlobalContext():
@@ -75,14 +75,14 @@ class GlobalContext():
                 chunk_overlap=globalConfig.indexConfig.chunkOverlap,
             ))
 
-        if globalConfig.memoryConfig and globalConfig.indexConfig:
-            self.memoryWithIndex = MemoryWithIndex(
+        if globalConfig.docsetConfig and globalConfig.indexConfig:
+            self.docsetWithIndex = DocsetWithIndex(
                 settings=self.settings,
-                memoryConfig=self.globalConfig.memoryConfig,
+                docsetConfig=self.globalConfig.docsetConfig,
                 indexConfig=self.globalConfig.indexConfig,
                 serviceContext=self.serviceContext)
         else:
-            self.memoryWithIndex = None
+            self.docsetWithIndex = None
 
         self.env = None
         self.vm = VMFactory.createVM(self.globalConfig.vmConfig)

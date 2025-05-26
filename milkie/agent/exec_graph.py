@@ -37,8 +37,6 @@ class ExecNode:
         self.parentNode :ExecNode = None
         self.instructionId :str = instructionId
 
-        self.execGraph.addNode(self)
-
     def toDict(self) -> dict:
         """将节点转换为字典表示"""
         base = {
@@ -107,7 +105,7 @@ class ExecNodeRoot(ExecNode):
             query=query)
         if agent:
             execNodeRoot.setAgent(agent)
-        return execNodeRoot
+        return execGraph.addNode(execNodeRoot)
 
 class ExecNodeCommon(ExecNode):
     def __init__(
@@ -151,10 +149,11 @@ class ExecNodeSequence(ExecNode):
     def build(
             execGraph: ExecGraph,
             context: dict = {}):
-        return ExecNodeSequence(
+        execNodeSequence :ExecNodeSequence = ExecNodeSequence(
             execGraph=execGraph, 
             label=ExecNodeLabel.BLOCK,
             context=context)
+        return execGraph.addNode(execNodeSequence)
 
 class ExecNodeCall(ExecNode):
     def __init__(
@@ -193,7 +192,7 @@ class ExecNodeFor(ExecNode):
             execNodeAgent: ExecNodeAgent):
         execNodeFor :ExecNodeFor = ExecNodeFor(execGraph)
         execNodeAgent.addInstruct(execNodeFor)
-        return execNodeFor
+        return execGraph.addNode(execNodeFor)
 
 class ExecNodeAgent(ExecNodeSequence):
     def __init__(
@@ -226,7 +225,7 @@ class ExecNodeAgent(ExecNodeSequence):
             callee.setCalled(execNodeAgent)
         else:
             raise RuntimeError(f"Invalid callee label[{callee.label}]")
-        return execNodeAgent
+        return execGraph.addNode(execNodeAgent)
 
 class ExecNodeLLM(ExecNodeCommon):
     def __init__(
@@ -271,7 +270,7 @@ class ExecNodeLLM(ExecNodeCommon):
         return self.skills
 
     def __str__(self):
-        return f"ExecNodeLLM(type={self.type}, label={self.label}, curInstruct={self.curInstruct})"
+        return f"ExecNodeLLM(id={self.id}, type={self.type}, label={self.label}, curInstruct={self.curInstruct})"
 
     @staticmethod
     def build(
@@ -283,7 +282,7 @@ class ExecNodeLLM(ExecNodeCommon):
         if curInstruct:
             execNodeLLM.setCurInstruct(curInstruct)
         execNodeSequence.addInstruct(execNodeLLM)
-        return execNodeLLM
+        return execGraph.addNode(execNodeLLM)
 
 class ExecNodeSkill(ExecNodeCall):
     def __init__(
@@ -347,10 +346,8 @@ class ExecNodeSkill(ExecNodeCall):
                 execNodeSkill=execNodeSkill,
                 name=skillName)
 
-        if not execNodeLLM.addSkill(execNodeSkill):
-            logger.warning(f"ExecNodeSkill[{str(execNodeSkill)}] duplicate")
-            return None
-        return execNodeSkill
+        execNodeLLM.addSkill(execNodeSkill)
+        return execGraph.addNode(execNodeSkill)
 
 class ExecNodeTool(ExecNodeCommon):
     def __init__(
@@ -375,7 +372,7 @@ class ExecNodeTool(ExecNodeCommon):
             name: str):
         execNodeTool = ExecNodeTool(execGraph, name)
         execNodeSkill.setCalled(execNodeTool)
-        return execNodeTool
+        return execGraph.addNode(execNodeTool)
 
 class ExecGraph:
 
@@ -388,16 +385,16 @@ class ExecGraph:
         self.rootNode = ExecNodeRoot(self, query)
         self.nodes[self.rootNode.getId()] = self.rootNode
 
-    def addNode(self, node: ExecNode) -> bool:
+    def addNode(self, node: ExecNode) -> ExecNode:
         if str(node) in self.nodeStrs:
-            return False
+            return None
         
         self.nodes[node.getId()] = node
         self.nodeStrs.append(str(node))
-        return True
+        return node
 
     def getNode(self, nodeId: str):
-        return self.nodes[nodeId]
+        return self.nodes.get(nodeId)
 
     def getRootNode(self):
         return self.rootNode

@@ -5,15 +5,15 @@ from datetime import datetime
 import time
 from typing import Dict, Generator, List, Optional, Any
 from llama_index.core.base.response.schema import NodeWithScore
-from llama_index.core.base.llms.types import ChatMessage, MessageRole
 
+from milkie.agent.memory.history import History
+from milkie.agent.memory.memory import Memory
 from milkie.agent.query_structure import QueryStructure, parseQuery
 from milkie.agent.exec_graph import ExecGraph
 from milkie.global_context import GlobalContext
 from milkie.response import Response
 from milkie.trace import stdout
 from milkie.utils.req_tracer import ReqTracer
-from milkie.vm.vm import VMFactory
 
 class VarDict:
     """变量字典类，管理全局和局部变量"""
@@ -98,50 +98,6 @@ class VarDict:
     def __iter__(self):
         return iter(self.globalDict)
 
-class History:
-    """对话历史管理类"""
-    def __init__(self):
-        self.systemPrompt: Optional[str] = None
-        self.history: List[ChatMessage] = []
-        self.resetUse()
-
-    def resetUse(self) -> None:
-        self.activate = True
-
-    def use(self) -> bool:
-        """历史记录在单个agent运行中只能使用一次"""
-        value = self.activate
-        self.activate = False
-        return value
-
-    def setSystemPrompt(self, systemPrompt: str) -> None:
-        self.systemPrompt = systemPrompt
-
-    def addUserPrompt(self, userPrompt: str) -> None:
-        self.history.append(ChatMessage(content=userPrompt, role=MessageRole.USER))
-
-    def addAssistantPrompt(self, assistantPrompt: str) -> None:
-        self.history.append(ChatMessage(content=assistantPrompt, role=MessageRole.ASSISTANT))
-
-    def getDialogue(self) -> List[ChatMessage]:
-        """获取完整对话历史，包括系统提示"""
-        if self.systemPrompt:
-            return [ChatMessage(content=self.systemPrompt, role=MessageRole.SYSTEM)] + self.history
-        return self.history
-
-    def getRecentDialogue(self) -> List[ChatMessage]:
-        """获取最近一次对话"""
-        if self.systemPrompt:
-            return [ChatMessage(content=self.systemPrompt, role=MessageRole.SYSTEM), self.history[-1]]
-        return [self.history[-1]]
-
-    def getRecentUserPrompt(self) -> Optional[str]:
-        """获取最近一次用户对话"""
-        return self.history[-1].content if len(self.history) > 0 else None
-
-    def copy(self) -> History:
-        return copy.deepcopy(self)
-
 class Context:
     """上下文管理类"""
     globalContext = None
@@ -154,11 +110,14 @@ class Context:
         self.decisionResult: Optional[Response] = None
         self.instructions: List[Any] = []
         self.varDict = VarDict()
-        self.history = History()
+        self.memory = Memory(
+            self.globalContext.globalConfig.memoryConfig,
+            self.globalContext)
         self.respQueue = Queue()
         self.graphQueue = Queue()
         self.execGraph = ExecGraph()
         self.vm = self.globalContext.vm
+        self.history = History()
 
     def getGlobalContext(self):
         return self.globalContext
@@ -166,9 +125,9 @@ class Context:
     def getEnv(self):
         return self.globalContext.env
 
-    def getGlobalMemory(self):
-        memoryWithIndex = self.globalContext.memoryWithIndex
-        return memoryWithIndex.memory if memoryWithIndex else None
+    def getGlobalDocset(self):
+        docsetWithIndex = self.globalContext.docsetWithIndex
+        return docsetWithIndex.memory if docsetWithIndex else None
     
     def getExecGraph(self) -> ExecGraph:
         return self.execGraph
@@ -185,6 +144,9 @@ class Context:
 
     def getInstructions(self) -> List[Any]:
         return self.instructions
+
+    def getHistory(self) -> History:
+        return self.history
 
     def setRetrievalResult(self, retrievalResult: List[NodeWithScore]) -> None:
         self.retrievalResult = retrievalResult
@@ -203,9 +165,6 @@ class Context:
         
     def historyAddAssistantPrompt(self, assistantPrompt: str) -> None:
         self.history.addAssistantPrompt(assistantPrompt)
-
-    def getHistory(self) -> History:
-        return self.history
 
     def getRespStream(self) -> Generator[str, None, None]:
         while True:

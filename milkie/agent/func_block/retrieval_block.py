@@ -4,7 +4,7 @@ from milkie.agent.base_block import BaseBlock
 from milkie.agent.func_block.func_block import FuncBlock
 from milkie.context import Context
 from milkie.global_context import GlobalContext
-from milkie.ontology.memory.memory_with_index import MemoryWithIndex
+from milkie.ontology.docset.docset_with_index import DocsetWithIndex
 from milkie.ontology.retrieval.retrieval import RetrievalModule
 from milkie.response import Response
 from milkie.runtime.datasource import DataSource
@@ -25,14 +25,14 @@ class RetrievalBlock(FuncBlock):
         self.funcName = "Retrieval"
         self.params = ["query"]
         
-        if self.config.memoryConfig and self.config.indexConfig:
-            self.memoryWithIndex = MemoryWithIndex(
+        if self.config.docsetConfig and self.config.indexConfig:
+            self.docsetWithIndex = DocsetWithIndex(
                 globalContext.settings,
-                self.config.memoryConfig,
+                self.config.docsetConfig,
                 self.config.indexConfig,
                 globalContext.serviceContext)
         else:
-            self.memoryWithIndex = globalContext.memoryWithIndex
+            self.docsetWithIndex = globalContext.docsetWithIndex
 
         self.dataSource :DataSource = globalContext.getEnv().getDataSource()
 
@@ -43,7 +43,7 @@ class RetrievalBlock(FuncBlock):
         self.dataSource.setMainRetriever(RetrievalModule(
             globalConfig=self.globalContext.globalConfig,
             retrievalConfig=self.config.retrievalConfig,
-            memoryWithIndex=self.memoryWithIndex))
+            docsetWithIndex=self.docsetWithIndex))
 
         self.isCompiled = True
 

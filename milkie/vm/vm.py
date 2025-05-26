@@ -3,18 +3,15 @@ import ast
 import os
 import paramiko
 import logging
-from typing import Any, Dict, Optional, Tuple, List
+from typing import Any, Dict, Optional, List
 import tempfile
 import random
 import string
-import reprlib
 
 from milkie.config.config import VMConfig, VMConnectionType
 from milkie.functions.import_white_list import PreImport
 from milkie.utils.security import SecurityUtils
 
-# 配置日志
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 class VM:

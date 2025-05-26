@@ -1,52 +1,52 @@
 from llama_index.core.service_context import ServiceContext
 from llama_index.core.indices.vector_store.base import VectorStoreIndex
 
-from milkie.config.config import IndexConfig, LongTermMemorySource, MemoryConfig, MemoryTermConfig, MemoryType
+from milkie.config.config import IndexConfig, LongTermDocsetSource, DocsetConfig, DocsetTermConfig, DocsetType
 from milkie.index.index import Index
-from milkie.ontology.memory.memory import Memory
+from milkie.ontology.docset.docset import Docset
 from milkie.settings import Settings
 
-class MemoryWithIndex():
+class DocsetWithIndex():
 
     def __init__(
             self,
             settings :Settings,
-            memoryConfig :MemoryConfig,
+            docsetConfig :DocsetConfig,
             indexConfig :IndexConfig,
             serviceContext :ServiceContext):
         self.settings = settings
-        self.memoryConfig = memoryConfig
+        self.docsetConfig = docsetConfig
         self.indexConfig = indexConfig
         self.serviceContext = serviceContext
         self.index = None
-        self.memory = None
+        self.docset = None
 
     def rebuildFromLocalDir(self, localDir :str):
-        self.memoryConfig = MemoryConfig([
-            MemoryTermConfig(
-                type=MemoryType.LONG_TERM,
-                source=LongTermMemorySource.LOCAL,
+        self.docsetConfig = DocsetConfig([
+            DocsetTermConfig(
+                type=DocsetType.LONG_TERM,
+                source=LongTermDocsetSource.LOCAL,
                 path=localDir)
         ])
-        self.memory = None
+        self.docset = None
 
     def getIndex(self):
         self._lazyBuildIndex()
         return self.index
 
-    def getMemory(self):
+    def getDocset(self):
         self._lazyBuildIndex()
-        return self.memory
+        return self.docset
 
     def _lazyBuildIndex(self):
-        if self.memory is None:
-            self.memory = Memory(
-                memoryTermConfigs=self.memoryConfig.memoryConfig, 
+        if self.docset is None:
+            self.docset = Docset(
+                docsetTermConfigs=self.docsetConfig.docsetConfig, 
                 serviceContext=self.serviceContext)
 
             denseIndex = VectorStoreIndex(
-                self.memory.nodes,
-                storage_context=self.memory.storageContext,
+                self.docset.nodes,
+                storage_context=self.docset.storageContext,
                 service_context=self.serviceContext)
             
             self.index = Index(denseIndex)

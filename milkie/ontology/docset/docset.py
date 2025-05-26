@@ -5,21 +5,21 @@ from llama_index.readers.file.unstructured.base import UnstructuredReader
 from llama_index.core.storage.storage_context import StorageContext
 from llama_index.core.schema import BaseNode
 
-from milkie.config.config import LongTermMemorySource, MemoryTermConfig, MemoryType
+from milkie.config.config import LongTermDocsetSource, DocsetTermConfig, DocsetType
 
 
-class Memory(object):
+class Docset(object):
     def __init__(
             self, 
-            memoryTermConfigs :List[MemoryTermConfig],
+            docsetTermConfigs :List[DocsetTermConfig],
             serviceContext :ServiceContext):
         self.docSet = []
-        for memoryTermConfig in memoryTermConfigs:
-            if memoryTermConfig.source == LongTermMemorySource.LOCAL:
-                docs = self.__buildDocsFromLongTermLocal(memoryTermConfig)
+        for docsetTermConfig in docsetTermConfigs:
+            if docsetTermConfig.source == LongTermDocsetSource.LOCAL:
+                docs = self.__buildDocsFromLongTermLocal(docsetTermConfig)
                 self.docSet.append(docs)
             else:
-                raise Exception(f"Not supported long term memory type[{memoryTermConfig.source}]")
+                raise Exception(f"Not supported long term docset type[{docsetTermConfig.source}]")
 
         self.serviceContext = serviceContext
         self.nodes = self.serviceContext.node_parser.get_nodes_from_documents(self.docSet[0])
@@ -41,19 +41,19 @@ class Memory(object):
     def getPrevNode(self, node :BaseNode) -> BaseNode:
         return self.getNodeFromId(node.prev_node.node_id) if node.prev_node else None
     
-    def __buildDocsFromLongTermLocal(self, memoryTermConfig :MemoryTermConfig):
-        loader = SimpleDirectoryReader(memoryTermConfig.path, file_extractor={
+    def __buildDocsFromLongTermLocal(self, docsetTermConfig :DocsetTermConfig):
+        loader = SimpleDirectoryReader(docsetTermConfig.path, file_extractor={
             ".txt" : UnstructuredReader()
         })
         return loader.load_data()
 
 if __name__ == "__main__":
-    memoryTermConfig = MemoryTermConfig(
-        MemoryType.LONG_TERM,
-        LongTermMemorySource.LOCAL,
+    docsetTermConfig = DocsetTermConfig(
+        DocsetType.LONG_TERM,
+        LongTermDocsetSource.LOCAL,
         "data/santi/",
     )
 
-    memory = Memory([memoryTermConfig], ServiceContext.from_defaults())
+    docset = Docset([docsetTermConfig], ServiceContext.from_defaults())
     import pdb; pdb.set_trace()
-    print(len(memory.nodes))
+    print(len(docset.nodes))

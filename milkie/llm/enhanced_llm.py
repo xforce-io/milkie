@@ -26,8 +26,6 @@ from llama_index.core.llms.custom import CustomLLM
 from llama_index.core.base.llms.types import LLMMetadata
 from llama_index.core.base.llms.types import CompletionResponseGen
 
-from milkie.config.config import QuantMethod
-
 logger = logging.getLogger(__name__)
 
 class LLMApi(CustomLLM):
@@ -140,14 +138,6 @@ class EnhancedLLM(object):
 
     def getNumParams(self) -> int:
         return 0
-
-    def getQuantMethod(modelName :str) -> QuantMethod:
-        if modelName.lower().find("gptq") >= 0:
-            return QuantMethod.GPTQ
-        elif modelName.lower().find("awq") >= 0:
-            return QuantMethod.AWQ
-        else:
-            return QuantMethod.NONE
 
     #get memory bandwidth utilization
     def getMBU(self, tokensPerSec :float, memBandwidth :float) -> float:

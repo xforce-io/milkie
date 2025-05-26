@@ -5,7 +5,8 @@ import re
 
 from llama_index_client import ChatMessage, MessageRole
 from milkie.agent.exec_graph import ExecNodeLLM, ExecNodeLabel, ExecNodeSkill
-from milkie.context import Context, History
+from milkie.agent.memory.history import History
+from milkie.context import Context
 from milkie.functions.toolkits.agent_toolkit import AgentToolkit
 from milkie.functions.toolkits.skillset import Skillset
 from milkie.functions.toolkits.toolkit import FuncExecRecord, Toolkit
@@ -130,7 +131,7 @@ class StepLLMStreaming(StepLLM):
     def setGlobalSkillset(self, globalSkillset: Skillset):
         self.globalSkillset = globalSkillset
 
-    def setContext(self, context: Context):
+    def setContext(self, context: 'Context'):
         self.globalContext = context.globalContext
         self.context = context
 
