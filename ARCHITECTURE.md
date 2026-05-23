@@ -53,15 +53,29 @@ as implemented.
   invocation, clock read, and UUID generation through it. Current
   `DefaultIOPort` is a passthrough; recording / cache / replay variants
   are target. (`src/runtime/IOPort.ts`)
+- **Agent Trace event log (basic)** — `Event` / `IEventStore` / `RecordingIOPort`
+  in `src/trace/`. When an `eventStore` is supplied to `Milkie`, every LLM
+  and tool I/O is recorded as paired `requested` / `responded` events with
+  `causedBy` chains. MemoryEventStore and JsonlEventStore implementations
+  provided. Scope is Phase 2: LLM + tool I/O only; lifecycle events, FSM
+  transitions, and content-addressed cache are target. (`src/trace/`)
 - **State stores for checkpoint/resume** — MemoryStore / SQLiteStore /
   RedisStore for interrupt/resume scenarios. (`src/store/`)
 
 ### Target only (not yet in code)
 
-- **Event-sourced Agent Trace** — Including content-addressed response
-  cache, non-determinism log, deterministic replay, fork, structural diff,
-  and event-log-based lineage. Current Trajectory is span-based; event log
-  is target.
+- **Content-addressed response cache** — request hash → cached response;
+  required for deterministic replay. Phase 3.
+- **Non-determinism log** — recorded clock reads, UUIDs, random values, and
+  external tool I/O outcomes; replay reads from log rather than re-sampling.
+  Phase 4.
+- **Replay and Fork engines** — fold log → identical state; branch at any
+  event with shared prefix from cache. Phases 3 + 5.
+- **Structural diff** — typed comparison of two event logs / projected
+  graphs. Phase 5.
+- **Lineage-by-typed-relations** — current event log only records I/O;
+  lineage requires emitting `object.created` / `relation.created` and
+  traversing causedBy chains as a graph. Phase 6 or later.
 - **External Context Layer / Data / Execution / Foundation** — These
   infrastructure layers are described as outside the milkie boundary.
   Today they are partially internal (`src/context/ContextLayer.ts`) or

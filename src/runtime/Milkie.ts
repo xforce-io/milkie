@@ -12,13 +12,25 @@ import { InMemoryRecorder } from '../trajectory/InMemoryRecorder.js'
 import { TrajectoryStore } from '../trajectory/TrajectoryStore.js'
 import { createGateway } from '../gateway/GatewayFactory.js'
 import { AgentRuntime } from './AgentRuntime.js'
-import { DefaultIOPort } from './IOPort.js'
+import { DefaultIOPort, type IIOPort } from './IOPort.js'
+import type { IEventStore } from '../trace/EventStore.js'
+import { RecordingIOPort } from '../trace/RecordingIOPort.js'
 
 export interface MilkieOptions {
   stateStore?:      IStateStore
   gateway?:         IModelGateway   // override all agents; if omitted, each agent uses its own adapter
   tools?:           ToolDefinition[]
   trajectoryStore?: TrajectoryStore
+  /**
+   * Optional Agent Trace event store. When provided, every agent run is
+   * recorded as an append-only event stream (LLM and tool I/O paired
+   * requested/responded events). The stored events are the run's source
+   * of truth for replay/fork/diff/lineage operations.
+   *
+   * When omitted, runs execute with no event log; Trajectory remains the
+   * only observability surface (Phase 2 behavior).
+   */
+  eventStore?:      IEventStore
 }
 
 export class Milkie {
@@ -26,6 +38,7 @@ export class Milkie {
   private readonly gatewayOverride: IModelGateway | null
   private readonly extraTools:      ToolDefinition[]
   private readonly trajectoryStore: TrajectoryStore | null
+  private readonly eventStore:      IEventStore | null
 
   private readonly agents:   Map<string, AgentConfig> = new Map()
 
@@ -34,6 +47,14 @@ export class Milkie {
     this.gatewayOverride = opts.gateway          ?? null
     this.extraTools      = opts.tools            ?? []
     this.trajectoryStore = opts.trajectoryStore  ?? null
+    this.eventStore      = opts.eventStore       ?? null
+  }
+
+  private wrapIOPort(gateway: IModelGateway, runId: string): IIOPort {
+    const base = new DefaultIOPort(gateway)
+    return this.eventStore
+      ? new RecordingIOPort(base, this.eventStore, runId)
+      : base
   }
 
   registerTool(tool: ToolDefinition): void {
@@ -100,7 +121,7 @@ export class Milkie {
       agentRunId,
       stateStore:      this.stateStore,
       recorder,
-      ioPort:          new DefaultIOPort(gateway),
+      ioPort:          this.wrapIOPort(gateway, agentRunId),
       extraTools:      this.extraTools,
       subAgentConfigs: this.agents,  // all registered agents are available as sub-agents
       childRecorderFactory,
@@ -160,7 +181,7 @@ export class Milkie {
       contextId,
       stateStore: this.stateStore,
       recorder,
-      ioPort:          new DefaultIOPort(gateway),
+      ioPort:          this.wrapIOPort(gateway, agentRunId),
       extraTools:      this.extraTools,
       subAgentConfigs: this.agents,
       childRecorderFactory,
