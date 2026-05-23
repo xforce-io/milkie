@@ -1,0 +1,43 @@
+{
+  "name": "milkie",
+  "version": "0.1.0",
+  "description": "TypeScript Agent framework — Agent = FSM",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "npm run test:unit && npm run test:e2e:deterministic",
+    "test:unit": "jest src/__tests__/AgentRuntime.test.ts src/__tests__/FSMEngine.test.ts src/__tests__/MemoryStore.test.ts src/__tests__/WorkingMemory.test.ts --runInBand",
+    "test:all": "jest",
+    "test:smoke": "jest src/__tests__/volcengine.smoke.test.ts --runInBand",
+    "test:watch": "jest --watch",
+    "test:e2e": "npm run test:e2e:deterministic",
+    "test:e2e:all": "jest --testPathPattern=e2e",
+    "test:e2e:deterministic": "jest tests/e2e/deterministic.test.ts tests/e2e/case6.test.ts --testNamePattern=\"Deterministic|Path D\" --runInBand",
+    "test:e2e:live": "jest tests/e2e/case1.test.ts tests/e2e/case2.test.ts tests/e2e/case3.test.ts tests/e2e/case4.test.ts tests/e2e/case5.test.ts tests/e2e/case6.test.ts --runInBand",
+    "test:e2e:redis": "sh tests/e2e/run-redis-e2e.sh",
+    "lint": "eslint src --ext .ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.52.0",
+    "better-sqlite3": "^11.0.0",
+    "gray-matter": "^4.0.3",
+    "ioredis": "^5.3.2",
+    "openai": "^6.38.0",
+    "uuid": "^10.0.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.11",
+    "@types/jest": "^29.5.12",
+    "@types/node": "^20.0.0",
+    "@types/uuid": "^10.0.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.1.5",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

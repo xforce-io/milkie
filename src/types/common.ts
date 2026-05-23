@@ -1,0 +1,47 @@
+export type JSONValue = string | number | boolean | null | JSONValue[] | { [k: string]: JSONValue }
+export type JSONObject = Record<string, JSONValue>
+export type JSONSchema = Record<string, unknown>
+
+export interface Message {
+  role: 'user' | 'assistant' | 'tool'
+  content: MessageContent[]
+}
+
+export type MessageContent =
+  | { type: 'text'; text: string }
+  | { type: 'tool_use'; id: string; name: string; input: unknown }
+  | { type: 'tool_result'; tool_use_id: string; content: string; is_error?: boolean }
+
+export type TaskResult =
+  | { status: 'success'; result: string }
+  | { status: 'error'; reason: string; retryable?: boolean }
+  | { status: 'interrupted'; checkpointId: string }
+
+export interface AgentInvokeRequest {
+  agentId: string
+  goal: string
+  input: string
+  contextId?: string
+}
+
+export interface AgentResult {
+  agentRunId:  string
+  contextId:   string
+  output:      string
+  status:      'completed' | 'interrupted' | 'error'
+  checkpointId?: string
+}
+
+export class InterruptSignal extends Error {
+  constructor() {
+    super('Agent interrupted')
+    this.name = 'InterruptSignal'
+  }
+}
+
+export class MaxIterationsError extends Error {
+  constructor(state: string, max: number) {
+    super(`State "${state}" exceeded max_iterations (${max})`)
+    this.name = 'MaxIterationsError'
+  }
+}
