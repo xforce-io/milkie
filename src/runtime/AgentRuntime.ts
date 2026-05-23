@@ -1,18 +1,17 @@
-import { v4 as uuid } from 'uuid'
 import type { AgentConfig, FSMState } from '../types/agent.js'
 import type { AgentResult } from '../types/common.js'
 import { MaxIterationsError } from '../types/common.js'
 import type { IStateStore, AgentCheckpoint, ChildAgentRecord } from '../types/store.js'
 import type { ITrajectoryRecorder, Span } from '../types/trajectory.js'
 import type { ToolDefinition, ToolContext, ToolResult } from '../types/tool.js'
-import type { IModelGateway } from '../types/model.js'
-import type { Message, MessageContent } from '../types/common.js'
+import type { MessageContent } from '../types/common.js'
 import { FSMEngine } from '../fsm/FSMEngine.js'
 import { ContextLayer } from '../context/ContextLayer.js'
 import { ToolRegistry } from '../tools/ToolRegistry.js'
 import { WorkingMemory } from '../store/WorkingMemory.js'
 import { CheckpointManager } from '../store/CheckpointManager.js'
 import { AgentFactory, type AgentSpawnOptions } from './AgentFactory.js'
+import type { IIOPort } from './IOPort.js'
 import { cognitiveTools } from '../tools/cognitive.js'
 import { systemTools } from '../tools/system.js'
 import type { InMemoryRecorder } from '../trajectory/InMemoryRecorder.js'
@@ -26,7 +25,7 @@ export interface AgentRuntimeOptions {
   parentId?:         string
   stateStore:        IStateStore
   recorder:          ITrajectoryRecorder
-  gateway:           IModelGateway
+  ioPort:            IIOPort
   extraTools?:       ToolDefinition[]
   subAgentConfigs?:  Map<string, AgentConfig>  // agentId → config, for spawning
   childRecorderFactory?: (config: AgentConfig, contextId: string, traceId: string) => ITrajectoryRecorder
@@ -40,7 +39,7 @@ export class AgentRuntime {
   private readonly parentId?:        string
   private readonly stateStore:       IStateStore
   private readonly recorder:         ITrajectoryRecorder
-  private readonly gateway:          IModelGateway
+  private readonly ioPort:           IIOPort
   private readonly subAgentConfigs?: Map<string, AgentConfig>
   private readonly childRecorderFactory?: (config: AgentConfig, contextId: string, traceId: string) => ITrajectoryRecorder
   private readonly extraTools:      ToolDefinition[]
@@ -61,14 +60,14 @@ export class AgentRuntime {
   private lastTextOutput: string = ''
 
   constructor(opts: AgentRuntimeOptions) {
+    this.ioPort          = opts.ioPort
     this.config          = opts.config
     this.goal            = opts.goal
-    this.contextId       = opts.contextId ?? uuid()
-    this.agentRunId      = opts.agentRunId ?? uuid()
+    this.contextId       = opts.contextId ?? this.ioPort.uuid()
+    this.agentRunId      = opts.agentRunId ?? this.ioPort.uuid()
     this.parentId        = opts.parentId
     this.stateStore      = opts.stateStore
     this.recorder        = opts.recorder
-    this.gateway         = opts.gateway
     this.subAgentConfigs = opts.subAgentConfigs
     this.childRecorderFactory = opts.childRecorderFactory
     this.extraTools      = opts.extraTools ?? []
@@ -139,10 +138,10 @@ export class AgentRuntime {
           throw new Error(`Sub-agent config not found: ${agentId}. Pass subAgentConfigs to AgentRuntime.`)
         }
 
-        const childTraceId = uuid()
-        const childContextId = uuid()
+        const childTraceId = this.ioPort.uuid()
+        const childContextId = this.ioPort.uuid()
         const childRecorder = this.childRecorderFactory?.(subConfig, childContextId, childTraceId) ?? this.recorder
-        const taskId = uuid()
+        const taskId = this.ioPort.uuid()
         const spawnSpan = this.recorder.startSpan('agent.spawn', {
           childAgentId: agentId,
           taskId,
@@ -166,7 +165,7 @@ export class AgentRuntime {
             agentRunId:   this.agentRunId,
             stateStore:  this.stateStore,
             recorder:    childRecorder,
-            gateway:     this.gateway,
+            ioPort:      this.ioPort,
             extraTools:  this.extraTools,
           })
           const childCheckpoint = result.status === 'interrupted'
@@ -292,7 +291,7 @@ export class AgentRuntime {
         agentId:       this.config.agentId,
         agentRunId:    this.agentRunId,
         parentAgentId: this.parentId,
-        timestamp:     Date.now(),
+        timestamp:     this.ioPort.now(),
         traceId:       (this.recorder as Partial<InMemoryRecorder>).traceId ?? '',
         contextId:      this.contextId,
       },
@@ -419,7 +418,7 @@ export class AgentRuntime {
         contextEpoch: this.context.getContextEpoch(),
       })
 
-      const response = await this.gateway.complete(request)
+      const response = await this.ioPort.invokeLLM(request)
 
       this.recorder.recordEvent(llmSpan, 'usage', {
         inputTokens:  response.usage?.inputTokens,
@@ -531,7 +530,7 @@ export class AgentRuntime {
   ): Promise<ToolResult[]> {
     const tools    = this.registry.getForState(allowedTools)
     const toolMap  = new Map(tools.map(t => [t.name, t]))
-    const batchId  = uuid()
+    const batchId  = this.ioPort.uuid()
 
     const parallel: typeof calls = []
     const serial:   typeof calls = []
@@ -577,7 +576,7 @@ export class AgentRuntime {
     const maxRetries = 3
 
     for (let attempt = 0; attempt < maxRetries; attempt++) {
-      const start = Date.now()
+      const start = this.ioPort.now()
       const span  = this.recorder.startSpan('tool.call', {
         toolName:        call.name,
         toolCallId:      call.id,
@@ -588,16 +587,20 @@ export class AgentRuntime {
       })
 
       try {
-        const output   = await this.registry.execute(call.name, call.input, ctx)
+        const output   = await this.ioPort.invokeTool(
+          call.name,
+          call.input,
+          () => this.registry.execute(call.name, call.input, ctx),
+        )
         span.attributes['output'] = output
-        const duration = Date.now() - start
+        const duration = this.ioPort.now() - start
         this.recorder.recordEvent(span, 'tool.result', { output })
         this.recorder.endSpan(span, 'ok')
         return { toolCallId: call.id, toolName: call.name, output, isError: false, duration }
       } catch (err) {
         const retryable = (err as { retryable?: boolean }).retryable === true
         const isLastAttempt = attempt === maxRetries - 1
-        const duration      = Date.now() - start
+        const duration      = this.ioPort.now() - start
 
         if (!retryable || isLastAttempt) {
           const error = err instanceof Error ? err.message : String(err)

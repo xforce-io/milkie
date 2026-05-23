@@ -3,7 +3,7 @@ import type { AgentInvokeRequest, AgentResult } from '../types/common.js'
 import type { IStateStore } from '../types/store.js'
 import type { ITrajectoryRecorder } from '../types/trajectory.js'
 import type { ToolDefinition } from '../types/tool.js'
-import type { IModelGateway } from '../types/model.js'
+import type { IIOPort } from './IOPort.js'
 
 export interface AgentSpawnOptions {
   config:      AgentConfig
@@ -14,7 +14,7 @@ export interface AgentSpawnOptions {
   parentId?:   string
   stateStore:  IStateStore
   recorder:    ITrajectoryRecorder
-  gateway:     IModelGateway
+  ioPort:      IIOPort
   extraTools?: ToolDefinition[]
 }
 

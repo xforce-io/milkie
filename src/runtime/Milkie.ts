@@ -12,6 +12,7 @@ import { InMemoryRecorder } from '../trajectory/InMemoryRecorder.js'
 import { TrajectoryStore } from '../trajectory/TrajectoryStore.js'
 import { createGateway } from '../gateway/GatewayFactory.js'
 import { AgentRuntime } from './AgentRuntime.js'
+import { DefaultIOPort } from './IOPort.js'
 
 export interface MilkieOptions {
   stateStore?:      IStateStore
@@ -99,7 +100,7 @@ export class Milkie {
       agentRunId,
       stateStore:      this.stateStore,
       recorder,
-      gateway,
+      ioPort:          new DefaultIOPort(gateway),
       extraTools:      this.extraTools,
       subAgentConfigs: this.agents,  // all registered agents are available as sub-agents
       childRecorderFactory,
@@ -159,7 +160,7 @@ export class Milkie {
       contextId,
       stateStore: this.stateStore,
       recorder,
-      gateway,
+      ioPort:          new DefaultIOPort(gateway),
       extraTools:      this.extraTools,
       subAgentConfigs: this.agents,
       childRecorderFactory,

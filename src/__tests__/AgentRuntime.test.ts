@@ -1,4 +1,5 @@
 import { AgentRuntime } from '../runtime/AgentRuntime'
+import { DefaultIOPort } from '../runtime/IOPort'
 import { Milkie } from '../runtime/Milkie'
 import { MemoryStore } from '../store/MemoryStore'
 import { InMemoryRecorder } from '../trajectory/InMemoryRecorder'
@@ -113,7 +114,7 @@ describe('AgentRuntime', () => {
         input:      'hi',
         stateStore: new MemoryStore(),
         recorder,
-        gateway,
+        ioPort: new DefaultIOPort(gateway),
       })
 
       const result = await runtime.run('hi')
@@ -130,7 +131,7 @@ describe('AgentRuntime', () => {
         input:      'hi',
         stateStore: new MemoryStore(),
         recorder,
-        gateway,
+        ioPort: new DefaultIOPort(gateway),
       })
 
       await runtime.run('hi')
@@ -159,7 +160,7 @@ describe('AgentRuntime', () => {
         input:      'search for test',
         stateStore: new MemoryStore(),
         recorder,
-        gateway,
+        ioPort: new DefaultIOPort(gateway),
         extraTools: [toolDef],
       })
 
@@ -211,7 +212,7 @@ describe('AgentRuntime', () => {
         input:      'hello',
         stateStore: new MemoryStore(),
         recorder,
-        gateway,
+        ioPort: new DefaultIOPort(gateway),
         extraTools: [classifyTool],
       })
 
@@ -244,7 +245,7 @@ describe('AgentRuntime', () => {
         input:      'run fail',
         stateStore: new MemoryStore(),
         recorder,
-        gateway,
+        ioPort: new DefaultIOPort(gateway),
         extraTools: [failingTool],
       })
 
@@ -265,7 +266,7 @@ describe('AgentRuntime', () => {
         contextId:  'ctx-interrupt',
         stateStore,
         recorder:   new InMemoryRecorder('trace-interrupt', 'test-agent'),
-        gateway:    new SequentialGateway([textResponse('should not be called')]),
+        ioPort:     new DefaultIOPort(new SequentialGateway([textResponse('should not be called')])),
       })
 
       runtime.interrupt()

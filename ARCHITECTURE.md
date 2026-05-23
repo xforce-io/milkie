@@ -48,16 +48,16 @@ as implemented.
   for `llm.call`, `tool.call`, `fsm.transition`, etc. This is the
   predecessor of the event-sourced Agent Trace described below.
   (`src/trajectory/`)
-- **Direct LLM / tool execution** — LLM calls go through `gateway.complete()`;
-  tools are registered with the runtime. No IOPort abstraction yet.
+- **IOPort as non-determinism boundary** — `IIOPort` / `DefaultIOPort`
+  in `src/runtime/IOPort.ts`. Agent Runtime routes every LLM call, tool
+  invocation, clock read, and UUID generation through it. Current
+  `DefaultIOPort` is a passthrough; recording / cache / replay variants
+  are target. (`src/runtime/IOPort.ts`)
 - **State stores for checkpoint/resume** — MemoryStore / SQLiteStore /
   RedisStore for interrupt/resume scenarios. (`src/store/`)
 
 ### Target only (not yet in code)
 
-- **IOPort as universal non-determinism boundary** — Currently LLM, clock
-  (`Date.now()`), UUID (`uuid()`), random, and tool I/O are called directly.
-  The IOPort contract is target architecture.
 - **Event-sourced Agent Trace** — Including content-addressed response
   cache, non-determinism log, deterministic replay, fork, structural diff,
   and event-log-based lineage. Current Trajectory is span-based; event log
@@ -82,9 +82,10 @@ as implemented.
   `src/context/ContextLayer.ts` is treated as a local adapter / shim that
   anticipates the external interface. When external infrastructure exists,
   responsibilities migrate outward.
-- **`gateway.complete()` → IOPort + Execution operator**: Direct LLM calls
-  are wrapped by IOPort, which routes to Execution's LLM operator (itself
-  delegating to Foundation / Model Factory).
+- **IOPort → Execution operator**: IOPort currently passes through to
+  the gateway directly. The target is to route invocations through an
+  Execution layer operator (which itself delegates to Foundation /
+  Model Factory).
 
 This section is the source of truth for "what works today." When code lands
 that closes a gap, update this section before claiming the gap is closed
