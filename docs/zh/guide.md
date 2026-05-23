@@ -1,5 +1,10 @@
 # milkie 使用指南
 
+本指南描述 milkie **当前实现**的用法。完整 target 架构——包括
+run-as-product 立场、event-sourced Agent Trace、IOPort、Evolution、
+以及 cross-cutting invariants——见
+[ARCHITECTURE.md](../../ARCHITECTURE.md)。
+
 - [1. 核心概念](#1-核心概念)
 - [2. Agent 配置](#2-agent-配置)
 - [3. State Store](#3-state-store)

@@ -1,5 +1,10 @@
 # milkie Usage Guide
 
+This guide describes how to use milkie as it works today. For the target
+architecture — including the run-as-product stance, event-sourced Agent
+Trace, IOPort, Evolution, and cross-cutting invariants — see
+[ARCHITECTURE.md](../../ARCHITECTURE.md).
+
 - [1. Core Concepts](#1-core-concepts)
 - [2. Agent Configuration](#2-agent-configuration)
 - [3. State Stores](#3-state-stores)

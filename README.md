@@ -1,18 +1,22 @@
 # milkie
 
-**TypeScript Agent framework — Agent = FSM**
+**A TypeScript library for LLM agents — where every run is a first-class engineering artifact.**
 
-[![npm](https://img.shields.io/npm/v/milkie)](https://www.npmjs.com/package/milkie)
-[![build](https://img.shields.io/github/actions/workflow/status/milkie/milkie/ci.yml)](https://github.com/milkie/milkie/actions)
-[![license](https://img.shields.io/badge/license-MIT-blue)](#license)
+milkie is a TypeScript library for building LLM-powered agents. Its central
+commitment: **every agent run — the full reasoning trajectory, not just
+the output — is a first-class engineering product**: addressable,
+reproducible, forkable, comparable, and attributable.
 
-milkie is a TypeScript framework for building LLM-powered agents. Its core insight: **every agent pattern is a Finite State Machine (FSM)**. ReAct loops, intent routing, slot filling, multi-turn conversations — all are different FSM configurations running on the same runtime.
+Under the hood, every agent pattern (dialog, ReAct, multi-state workflows,
+multi-agent orchestration) is a finite state machine on one thin runtime.
+The runtime, an event-sourced **Agent Trace**, and a deterministic
+**Evolution** experiment subsystem together form three peer subsystems.
 
-[中文文档](./README_CN.md) · [Usage Guide](./docs/en/guide.md)
+[中文文档](./README_CN.md) · [Usage Guide](./docs/en/guide.md) · [Architecture](./ARCHITECTURE.md)
 
 ---
 
-## Features
+## Features (implemented today)
 
 - **Agent = FSM** — two state types (`llm` / `action`) compose every agent pattern without special-casing
 - **Intra-agent parallelism** — LLM emits multiple `tool_use` blocks in one response; runtime executes them concurrently with `allSettled` join
@@ -21,6 +25,12 @@ milkie is a TypeScript framework for building LLM-powered agents. Its core insig
 - **Multi-turn conversations** — share a `contextId` across `invoke()` calls to accumulate history
 - **Pluggable backends** — swap state stores (Memory / SQLite / Redis) and trajectory recorders (JSONL / in-memory / console) without touching agent logic
 - **Provider-agnostic** — Anthropic and any OpenAI-compatible endpoint out of the box
+
+**Target capabilities** under development — event-sourced Agent Trace
+(replay / fork / diff / lineage), IOPort non-determinism boundary,
+Evolution experiment subsystem. See
+[ARCHITECTURE.md → Implementation Status](./ARCHITECTURE.md#implementation-status)
+for what's in code today vs. what's target architecture.
 
 ---
 
@@ -140,6 +150,25 @@ handler: async (input, ctx) => {
 ```
 
 See the [Usage Guide](./docs/en/guide.md) for multi-agent orchestration, interrupt/resume, and the full API reference.
+
+---
+
+## Architecture
+
+milkie is structured as three peer subsystems:
+
+- **Agent Runtime** — execution engine that puts LLM-driven autonomy inside FSM structure
+- **Agent Trace** — preserves every agent run as a first-class object; supports inspection, replay, fork, diff, and lineage as deterministic projections over the event log
+- **Evolution** — deterministic experiment subsystem for iterating agent configurations
+
+The full target architecture, cross-cutting invariants, and an
+[Implementation Status](./ARCHITECTURE.md#implementation-status) section
+calibrating current code vs. target are documented in
+[ARCHITECTURE.md](./ARCHITECTURE.md).
+
+User-facing scenarios are tracked under [docs/stories/](./docs/stories/) with
+their own [README](./docs/stories/README.md) and
+[INDEX](./docs/stories/INDEX.md).
 
 ---
 
