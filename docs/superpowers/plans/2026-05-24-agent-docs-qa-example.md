@@ -1468,7 +1468,187 @@ git commit -m "feat(examples): SSE /conversation/:id/stream — past events + li
 
 ---
 
-## Task 9: Frontend HTML/CSS skeleton + conversation picker
+## Task 9: E2E — skill loading through HTTP server (automated)
+
+**Files:**
+- Test: `examples/agent-docs-qa/__tests__/server.test.ts` (extend with new `describe('e2e: skill loading', ...)` block)
+
+The single most important automated assertion in this example: a user expressing doubt causes the agent to `skill_request('verifier')`, and the **next** LLM call within the same invoke sees the verifier instructions in its system prompt. Manual Task 11 still walks through this in the browser, but this task locks the behavior into CI so regressions can't sneak in.
+
+The mechanism we exercise:
+1. POST /chat with input that the system prompt classifies as "doubt expression"
+2. Stub gateway returns a `tool_use` response invoking `skill_request({ name: 'verifier' })`
+3. Agent runtime dispatches → returns `{ status: 'pending_next_epoch' }` → applyPendingSkills() runs at the next FSM iteration
+4. Stub gateway responds again — this time its received `ModelRequest.messages` should include verifier instructions in the system message
+5. Stub gateway returns a final text response; invoke completes
+6. The recorded `llm.requested` event after the `tool.responded(skill_request)` event has system text containing "verifier"
+
+- [ ] **Step 1: Write failing test**
+
+Append to `examples/agent-docs-qa/__tests__/server.test.ts`:
+
+```typescript
+describe('e2e: skill loading through full chat flow', () => {
+  let server: Server
+  let baseUrl: string
+  let exampleDir: string
+
+  // A stub gateway that records each ModelRequest it receives so the
+  // test can later inspect what the agent actually saw in its system prompt.
+  class RecordingStubGateway implements IModelGateway {
+    public requests: ModelRequest[] = []
+    constructor(private readonly responses: ModelResponse[]) {}
+    async complete(req: ModelRequest): Promise<ModelResponse> {
+      this.requests.push(req)
+      const r = this.responses.shift()
+      if (!r) throw new Error('RecordingStubGateway exhausted')
+      return r
+    }
+    async *stream(_req: ModelRequest): AsyncIterable<never> { yield* [] }
+  }
+
+  const toolUseSkillRequest = (verifierName: string): ModelResponse => ({
+    content: [{ type: 'text', text: 'loading verifier for the next epoch...' }],
+    toolCalls: [{
+      id:        'tc-skill-1',
+      name:      'skill_request',
+      arguments: { name: verifierName },
+    }],
+    finishReason: 'tool_use',
+  })
+
+  const textOnly = (s: string): ModelResponse => ({
+    content: [{ type: 'text', text: s }], toolCalls: [], finishReason: 'end_turn',
+  })
+
+  beforeEach(async () => {
+    exampleDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-docs-qa-skillload-'))
+    fs.mkdirSync(path.join(exampleDir, '.milkie', 'runs'), { recursive: true })
+  })
+  afterEach(async () => {
+    if (server) await stopServer(server)
+    fs.rmSync(exampleDir, { recursive: true, force: true })
+  })
+
+  it('user doubt triggers skill_request → next llm.requested system prompt contains verifier', async () => {
+    const stub = new RecordingStubGateway([
+      toolUseSkillRequest('verifier'),       // LLM call 1: emits skill_request tool call
+      textOnly('verifier loaded; final answer.'),  // LLM call 2: post-load
+    ])
+
+    server = await startServer({
+      port: 0, exampleDir, gateway: stub,
+      agentFile:  path.join(__dirname, '..', 'agents', 'sanguo-researcher.md'),
+      corpusRoot: path.join(__dirname, '..', 'corpus'),
+    })
+    const addr = server.address() as { port: number }
+    baseUrl = `http://localhost:${addr.port}`
+
+    const chatResp = await postJson(`${baseUrl}/chat`, { input: '你确定吗？' })
+    expect(chatResp.status).toBe(200)
+    const body = JSON.parse(chatResp.body) as { contextId: string; status: string }
+    expect(body.status).toBe('completed')
+
+    // Two LLM calls were made
+    expect(stub.requests).toHaveLength(2)
+
+    // Inspect what the agent SAW in its second LLM call's system message —
+    // this is the proof that skill loading took effect mid-invoke.
+    const secondCallSystemMessages = (stub.requests[1]!.messages ?? [])
+      .filter(m => m.role === 'system')
+    const allSystemText = secondCallSystemMessages
+      .flatMap(m => m.content)
+      .map(c => (c as { type: string; text?: string }).text ?? '')
+      .join('\n')
+
+    // The verifier skill's instructions text (from agents/sanguo-researcher.md)
+    // contains the literal phrase '你已进入 verifier 模式' which is highly
+    // specific and won't be in the base prompt.
+    expect(allSystemText).toContain('verifier')
+    expect(allSystemText).toContain('你已进入 verifier 模式')
+
+    // ALSO verify via the EVENT log (the trace) that the skill_request
+    // tool call was recorded, since the UI reads from the event log:
+    const eventsResp = await get(`${baseUrl}/conversation/${body.contextId}/events`)
+    const events = (JSON.parse(eventsResp.body) as { events: Array<{ type: string; payload: unknown }> }).events
+    const toolReqs = events.filter(e => e.type === 'tool.requested')
+    const skillReqCalls = toolReqs.filter(e =>
+      (e.payload as { toolName: string }).toolName === 'skill_request')
+    expect(skillReqCalls).toHaveLength(1)
+  }, 10_000)
+
+  it('agent does NOT load verifier when user does not express doubt', async () => {
+    const stub = new RecordingStubGateway([
+      textOnly('here is your answer'),       // simple text-only, no tool calls
+    ])
+
+    server = await startServer({
+      port: 0, exampleDir, gateway: stub,
+      agentFile:  path.join(__dirname, '..', 'agents', 'sanguo-researcher.md'),
+      corpusRoot: path.join(__dirname, '..', 'corpus'),
+    })
+    const addr = server.address() as { port: number }
+    baseUrl = `http://localhost:${addr.port}`
+
+    const chatResp = await postJson(`${baseUrl}/chat`, { input: '介绍一下赤壁之战' })
+    expect(chatResp.status).toBe(200)
+    const body = JSON.parse(chatResp.body) as { contextId: string }
+
+    // Only one LLM call; no skill_request issued
+    expect(stub.requests).toHaveLength(1)
+
+    const eventsResp = await get(`${baseUrl}/conversation/${body.contextId}/events`)
+    const events = (JSON.parse(eventsResp.body) as { events: Array<{ type: string; payload: unknown }> }).events
+    const skillReqCalls = events.filter(e =>
+      e.type === 'tool.requested' &&
+      (e.payload as { toolName: string }).toolName === 'skill_request',
+    )
+    expect(skillReqCalls).toHaveLength(0)
+
+    // System message of the single LLM call must NOT contain verifier text
+    const systemText = (stub.requests[0]!.messages ?? [])
+      .filter(m => m.role === 'system')
+      .flatMap(m => m.content)
+      .map(c => (c as { type: string; text?: string }).text ?? '')
+      .join('\n')
+    expect(systemText).not.toContain('你已进入 verifier 模式')
+  }, 10_000)
+})
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `npx jest examples/agent-docs-qa/__tests__/server.test.ts -t "e2e: skill loading"`
+Expected: Initial failure can be one of several modes:
+- The agent runtime's stub gateway flow may need additional canned responses if tool dispatch causes another LLM iteration we didn't anticipate (`'RecordingStubGateway exhausted'` error). Inspect the error; add canned responses to match what the FSM actually requests.
+- The `skill_request` tool may not be in the runtime's tool registry (it's a system tool per `src/tools/system.ts`, should be automatically available — but verify by reading the tool dispatch path).
+- The verifier instructions may not appear in the system prompt as exact text "你已进入 verifier 模式"; if the text gets word-wrapped or reformatted, adjust assertion to look for "verifier" + "supported by text" together.
+
+**If any of these surface unexpected behavior** — STOP and report DONE_WITH_CONCERNS describing what the actual gateway request sequence was. The controller can then advise on whether to: (a) adjust stub responses, (b) revise the agent's tool list, (c) loosen the assertion shape.
+
+- [ ] **Step 3: If failures are stub-sequence shape issues, adjust the canned responses**
+
+After observing the actual LLM call count and shapes from step 2, set the stub to produce exactly that many responses. Common adjustments:
+- Add a third `textOnly` if the FSM does one more LLM call before completing
+- Tweak the `toolCalls` arguments shape if the agent's tool dispatch expects a different JSON shape
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `npx jest examples/agent-docs-qa/__tests__/server.test.ts -t "e2e: skill loading"`
+Expected: PASS (2 tests).
+
+Full server test file: PASS (11 tests — 9 prior + 2 new).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add examples/agent-docs-qa/__tests__/server.test.ts
+git commit -m "test(examples): e2e — skill loading verified through HTTP + event log + system prompt inspection"
+```
+
+---
+
+## Task 10: Frontend HTML/CSS skeleton + conversation picker
 
 **Files:**
 - Modify: `examples/agent-docs-qa/public/index.html` (replace placeholder with real UI)
@@ -1603,7 +1783,7 @@ git commit -m "feat(examples): frontend HTML/CSS skeleton — chat + trace + pay
 
 ---
 
-## Task 10: Frontend JS — wire chat input, conversation picker, trace render, skill-load highlight
+## Task 11: Frontend JS — wire chat input, conversation picker, trace render, skill-load highlight
 
 **Files:**
 - Modify: `examples/agent-docs-qa/public/index.html` (fill the `<script>` block)
@@ -1871,7 +2051,7 @@ git commit -m "feat(examples): frontend JS — chat input + conversation picker 
 
 ---
 
-## Task 11: README walkthrough + manual E2E verification
+## Task 12: README walkthrough + manual E2E verification
 
 **Files:**
 - Modify: `examples/agent-docs-qa/README.md`
@@ -2043,19 +2223,19 @@ git commit -m "docs(examples): agent-docs-qa README — walkthrough + scope + ar
 | §4 server.ts | Tasks 7 (REST) + 8 (SSE) |
 | §4 BroadcastingEventStore | Task 5 |
 | §4 工具沙箱限定 corpus 根 | Task 3 (tested via "outside corpus" assertions) |
-| §4 index.html | Tasks 9 (skeleton) + 10 (JS) |
-| §5 trace timeline 渲染 | Task 10 (renderEvent + skill-loaded highlight) |
-| §5 loadedSkills 高亮 | Task 10 (`div.classList.add('skill-loaded')`) |
-| §5 payload detail click | Task 10 (`div.addEventListener('click', …)`) |
+| §4 index.html | Tasks 10 (skeleton) + 11 (JS) |
+| §5 trace timeline 渲染 | Task 11 (renderEvent + skill-loaded highlight) |
+| §5 loadedSkills 高亮 | Task 11 (`div.classList.add('skill-loaded')`) |
+| §5 payload detail click | Task 11 (`div.addEventListener('click', …)`) |
 | §6 不变量 1 (multi-turn same-context) | Verified empirically during brainstorming; tested in Task 7 "POST /chat with same contextId" |
-| §6 不变量 2 (skill_request → loadedSkills changed) | Manual E2E Task 11 step 4 |
-| §6 不变量 3 (verifier 真进 system prompt) | Manual E2E Task 11 step 4 (trace payload inspection) |
+| §6 不变量 2 (skill_request → loadedSkills changed) | **Automated** Task 9 (event log assertion) + manual Task 12 |
+| §6 不变量 3 (verifier 真进 system prompt) | **Automated** Task 9 (second LLM call's system message inspection) + manual Task 12 |
 | §6 不变量 4 (BroadcastingEventStore 双写) | Task 5 test |
 | §6 不变量 5 (SSE 按 contextId 隔离) | Task 5 test "different contextId not delivered" + Task 8 SSE wiring |
 | §6 不变量 6 (工具沙箱) | Task 3 tests "rejects path outside corpus" |
-| §7 测试策略 unit / integration / E2E manual | Tasks 3, 5, 6 (unit); Task 7, 8 (integration); Task 11 (manual E2E) |
-| §8 落地次序 15 步 | Reduced to 11 tasks by merging closely related steps; no skipping |
-| §9 范围外 / 未来扩展 | Documented in Task 11 README "What this does NOT do" |
+| §7 测试策略 unit / integration / E2E | Tasks 3, 5, 6 (unit); Task 7, 8 (integration); **Task 9 (automated e2e)**; Task 12 (manual UI E2E) |
+| §8 落地次序 | Reduced to 12 tasks; no skipping |
+| §9 范围外 / 未来扩展 | Documented in Task 12 README "What this does NOT do" |
 | 附录 corpus 选章 | Task 2 fetches the 5 chapters listed |
 
 No gaps.
@@ -2064,13 +2244,13 @@ No gaps.
 
 - No "TBD" / "implement later" / "add error handling" / "similar to Task N".
 - Task 2 step 1 says "fetch from Wikisource and clean wiki markup" — this is a content task, not a code task; the spec provides URLs and explicit cleaning rules. Acceptable.
-- Task 11 step 1 is a manual checklist for human verification — explicit pass/fail steps, not vague.
-- One stretch: Task 7 step 5 says "If issues: the gateway can return additional canned responses to satisfy the FSM" — this anticipates a possible failure mode without prescribing a fix. Acceptable because the failure is empirically unlikely for the stub agent path (no tools issued by stub gateway).
+- Task 12 step 1 is a manual checklist for human verification — explicit pass/fail steps, not vague.
+- Task 9 step 2-3 anticipates "stub sequence shape issues" with an empirical adjustment protocol. This is intentional honesty about the gateway+agent flow being not-fully-knowable from the design alone; the escape hatch is "stop and report DONE_WITH_CONCERNS" rather than open-ended debugging.
 
 **3. Type consistency:**
 
 - `BroadcastingEventStore` signature: `constructor(inner: IEventStore)` + `subscribe(contextId, cb) → unsubscribe()`. Defined Task 5; consumed Tasks 7, 8.
-- `ConversationSummary` shape `{ contextId, agentId, startedAt, status, runIds, eventCount }`. Defined Task 6; consumed Tasks 7 (GET /conversations response) and 10 (picker render).
+- `ConversationSummary` shape `{ contextId, agentId, startedAt, status, runIds, eventCount }`. Defined Task 6; consumed Tasks 7 (GET /conversations response) and 11 (picker render).
 - `scanConversations(runsDir): Promise<ConversationSummary[]>` and `readEventsForContext(runsDir, contextId): Promise<Event[]>` — defined Task 6, called Task 7 + Task 8.
 - `makeCorpusToolDefinitions(corpusRoot): ToolDefinition[]` — defined Task 3, called Task 7.
 - `startServer(config: ServerConfig): Promise<Server>` and `stopServer(server: Server): Promise<void>` — defined Task 7, used Tasks 7 + 8 tests.
