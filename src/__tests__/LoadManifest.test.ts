@@ -123,6 +123,18 @@ test prompt`
     }
   })
 
+  it('listAgents returns the ids of every registered agent', async () => {
+    writeAgentFile('router.md',   'router')
+    writeAgentFile('verifier.md', 'verifier')
+    const manifestPath = writeManifest([
+      { id: 'router',   file: '../agents/router.md' },
+      { id: 'verifier', file: '../agents/verifier.md' },
+    ])
+    const milkie = new Milkie()
+    await milkie.loadManifest(manifestPath)
+    expect(milkie.listAgents().sort()).toEqual(['router', 'verifier'])
+  })
+
   it('throws when the manifest is not valid JSON', async () => {
     const manifestPath = path.join(tmpDir, '.milkie', 'agents.json')
     fs.writeFileSync(manifestPath, '{ not valid json')

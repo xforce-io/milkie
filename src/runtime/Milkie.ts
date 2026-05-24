@@ -83,6 +83,10 @@ export class Milkie {
     return this.agents.get(agentId)
   }
 
+  listAgents(): string[] {
+    return Array.from(this.agents.keys())
+  }
+
   /**
    * Load every agent declared in a manifest file (`.milkie/agents.json`).
    *

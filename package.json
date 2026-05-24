@@ -4,6 +4,9 @@
   "description": "TypeScript Agent framework — Agent = FSM",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "bin": {
+    "milkie": "dist/cli/index.js"
+  },
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
@@ -22,6 +25,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.52.0",
     "better-sqlite3": "^11.0.0",
+    "commander": "^14.0.3",
     "gray-matter": "^4.0.3",
     "ioredis": "^5.3.2",
     "openai": "^6.38.0",
