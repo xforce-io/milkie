@@ -137,16 +137,57 @@ export async function main(argv: string[]): Promise<MainResult> {
   trace
     .command('inspect <runId>')
     .description('Print every event in a recorded run as JSONL')
+    .option('--include-children', 'also emit events from descendant sub-agent runs')
+    .action(async (runId: string, opts: { includeChildren?: boolean }) => {
+      const milkieDir = findMilkieDir(process.cwd())
+      if (!milkieDir) {
+        throw new Error('no .milkie/ directory found upward from cwd')
+      }
+      const runsDir = path.join(milkieDir, 'runs')
+      const eventStore = new JsonlEventStore(runsDir)
+
+      const runIds = [runId]
+      if (opts.includeChildren) {
+        const { findDescendantRuns } = await import('../trace/render/children.js')
+        runIds.push(...(await findDescendantRuns(runsDir, runId)))
+      }
+      for (const id of runIds) {
+        for (const event of await eventStore.readByRunId(id)) {
+          stdout.push(JSON.stringify(event) + '\n')
+        }
+      }
+    })
+
+  trace
+    .command('render-html')
+    .description('Render trace JSONL into a self-contained HTML report (reads --input file, writes HTML to stdout)')
+    .requiredOption('--input <path>', 'JSONL file produced by `trace inspect` (or any equivalent source)')
+    .action(async (opts: { input: string }) => {
+      const { renderHtml } = await import('../trace/render/html.js')
+      const content = fs.readFileSync(opts.input, 'utf-8')
+      const events = content.split('\n')
+        .filter(l => l.length > 0)
+        .map(l => JSON.parse(l))
+      stdout.push(renderHtml(events))
+    })
+
+  trace
+    .command('report <runId>')
+    .description('Render <runId> (and any descendant sub-agent runs) as a self-contained HTML report to stdout')
     .action(async (runId: string) => {
       const milkieDir = findMilkieDir(process.cwd())
       if (!milkieDir) {
         throw new Error('no .milkie/ directory found upward from cwd')
       }
-      const eventStore = new JsonlEventStore(path.join(milkieDir, 'runs'))
-      const events = await eventStore.readByRunId(runId)
-      for (const event of events) {
-        stdout.push(JSON.stringify(event) + '\n')
-      }
+      const runsDir = path.join(milkieDir, 'runs')
+      const eventStore = new JsonlEventStore(runsDir)
+      const { findDescendantRuns } = await import('../trace/render/children.js')
+      const { renderHtml } = await import('../trace/render/html.js')
+
+      const runIds = [runId, ...(await findDescendantRuns(runsDir, runId))]
+      const events = []
+      for (const id of runIds) events.push(...(await eventStore.readByRunId(id)))
+      stdout.push(renderHtml(events))
     })
 
   trace

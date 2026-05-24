@@ -1,0 +1,5 @@
+{
+  "agents": [
+    { "id": "echo", "file": "../agents/echo.md" }
+  ]
+}
