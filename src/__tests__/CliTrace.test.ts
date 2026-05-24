@@ -93,6 +93,41 @@ sys`
     }
   })
 
+  it('inspect outputs JSONL of every event in the run', async () => {
+    const runId = 'demo-run-1'
+    const events = [
+      { id: 'e1', runId, type: 'agent.run.started', actor: 'runtime', timestamp: 1, payload: { agentId: 'r', goal: 'g', input: 'i', contextId: 'c' } },
+      { id: 'e2', runId, type: 'llm.requested',    actor: 'runtime', timestamp: 2, payload: { request: {}, requestHash: 'h1' } },
+    ]
+    fs.writeFileSync(
+      path.join(tmpDir, '.milkie', 'runs', `${runId}.jsonl`),
+      events.map(e => JSON.stringify(e)).join('\n') + '\n',
+    )
+
+    const cwdSpy = jest.spyOn(process, 'cwd').mockReturnValue(tmpDir)
+    try {
+      const result = await main(['trace', 'inspect', runId])
+      expect(result.exitCode).toBe(0)
+      const lines = result.stdout.trim().split('\n').filter((l: string) => l.length > 0)
+      expect(lines).toHaveLength(2)
+      expect(JSON.parse(lines[0]!)).toMatchObject({ id: 'e1', type: 'agent.run.started' })
+      expect(JSON.parse(lines[1]!)).toMatchObject({ id: 'e2', type: 'llm.requested' })
+    } finally {
+      cwdSpy.mockRestore()
+    }
+  })
+
+  it('inspect outputs empty stdout for a runId with no events', async () => {
+    const cwdSpy = jest.spyOn(process, 'cwd').mockReturnValue(tmpDir)
+    try {
+      const result = await main(['trace', 'inspect', 'nonexistent'])
+      expect(result.exitCode).toBe(0)
+      expect(result.stdout).toBe('')
+    } finally {
+      cwdSpy.mockRestore()
+    }
+  })
+
   it('exits non-zero with diagnostic when runId is not found', async () => {
     writeAgentMd('router.md', 'router')
     writeManifest([{ id: 'router', file: '../agents/router.md' }])

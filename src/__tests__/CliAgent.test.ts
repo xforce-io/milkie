@@ -83,4 +83,78 @@ test`
       cwdSpy.mockRestore()
     }
   })
+
+  describe('run / resume / interrupt (need .milkie/ + state)', () => {
+    function writeAgentFile(name: string, agentId: string): void {
+      const content = `---
+agentId: ${agentId}
+fsm:
+  states: []
+model:
+  provider: stub
+  model: stub
+  adapter: openai-compatible
+---
+sys`
+      fs.writeFileSync(path.join(tmpDir, 'agents', name), content)
+    }
+
+    function writeManifest(agents: { id: string, file: string }[]): void {
+      fs.writeFileSync(
+        path.join(tmpDir, '.milkie', 'agents.json'),
+        JSON.stringify({ agents }),
+      )
+    }
+
+    it('agent run exits non-zero when the agentId is not in the manifest', async () => {
+      writeAgentFile('router.md', 'router')
+      writeManifest([{ id: 'router', file: '../agents/router.md' }])
+
+      const cwdSpy = jest.spyOn(process, 'cwd').mockReturnValue(tmpDir)
+      try {
+        const result = await main(['agent', 'run', 'unknown-agent', '--input', 'hi'])
+        expect(result.exitCode).not.toBe(0)
+        expect(result.stderr).toMatch(/unknown-agent|Agent not found/i)
+      } finally {
+        cwdSpy.mockRestore()
+      }
+    })
+
+    it('agent interrupt writes an interrupt flag for the contextId', async () => {
+      writeAgentFile('router.md', 'router')
+      writeManifest([{ id: 'router', file: '../agents/router.md' }])
+
+      const cwdSpy = jest.spyOn(process, 'cwd').mockReturnValue(tmpDir)
+      try {
+        const result = await main(['agent', 'interrupt', 'ctx-abc'])
+        expect(result.exitCode).toBe(0)
+        expect(JSON.parse(result.stdout.trim())).toEqual({
+          contextId: 'ctx-abc',
+          status:    'interrupt-signaled',
+        })
+        // Verify the flag actually persisted to SQLite
+        const { SQLiteStore } = await import('../store/SQLiteStore')
+        const ss = new SQLiteStore({ path: path.join(tmpDir, '.milkie', 'state.sqlite') })
+        await ss.init()
+        const flag = await ss.get('context:ctx-abc:interrupt')
+        expect(flag).toBe(true)
+      } finally {
+        cwdSpy.mockRestore()
+      }
+    })
+
+    it('agent resume exits non-zero when no checkpoint exists for the contextId', async () => {
+      writeAgentFile('router.md', 'router')
+      writeManifest([{ id: 'router', file: '../agents/router.md' }])
+
+      const cwdSpy = jest.spyOn(process, 'cwd').mockReturnValue(tmpDir)
+      try {
+        const result = await main(['agent', 'resume', 'no-such-context'])
+        expect(result.exitCode).not.toBe(0)
+        expect(result.stderr).toMatch(/no checkpoint|no-such-context/i)
+      } finally {
+        cwdSpy.mockRestore()
+      }
+    })
+  })
 })

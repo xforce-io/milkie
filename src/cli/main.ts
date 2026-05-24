@@ -3,6 +3,8 @@ import fs from 'fs'
 import path from 'path'
 import { Milkie } from '../runtime/Milkie.js'
 import { JsonlEventStore } from '../trace/JsonlEventStore.js'
+import { SQLiteStore } from '../store/SQLiteStore.js'
+import type { AgentCheckpoint } from '../types/store.js'
 
 function findMilkieDir(startDir: string): string | undefined {
   let dir = startDir
@@ -13,6 +15,24 @@ function findMilkieDir(startDir: string): string | undefined {
     if (parent === dir) return undefined
     dir = parent
   }
+}
+
+/**
+ * Build a Milkie instance with CLI defaults: persistent SQLite stateStore
+ * (interrupt / resume survive across CLI processes), JsonlEventStore on
+ * `.milkie/runs/`, and manifest auto-loaded.
+ */
+async function buildCliMilkie(): Promise<{ milkie: Milkie, milkieDir: string, stateStore: SQLiteStore }> {
+  const milkieDir = findMilkieDir(process.cwd())
+  if (!milkieDir) {
+    throw new Error('no .milkie/ directory found upward from cwd')
+  }
+  const stateStore = new SQLiteStore({ path: path.join(milkieDir, 'state.sqlite') })
+  await stateStore.init()
+  const eventStore = new JsonlEventStore(path.join(milkieDir, 'runs'))
+  const milkie = new Milkie({ stateStore, eventStore })
+  await milkie.loadManifest(path.join(milkieDir, 'agents.json'))
+  return { milkie, milkieDir, stateStore }
 }
 
 export interface MainResult {
@@ -59,7 +79,75 @@ export async function main(argv: string[]): Promise<MainResult> {
       }
     })
 
+  agent
+    .command('run <agentId>')
+    .description('Execute an agent and record its run')
+    .option('--input <text>',      'inline input')
+    .option('--input-file <path>', 'read input from file')
+    .option('--goal <text>',       'agent goal (defaults to input)')
+    .option('--context-id <id>',   'context id for later resume / interrupt')
+    .action(async (agentId: string, opts: { input?: string, inputFile?: string, goal?: string, contextId?: string }) => {
+      const input = opts.input ?? (opts.inputFile ? fs.readFileSync(opts.inputFile, 'utf-8') : '')
+      const goal  = opts.goal  ?? input
+      const { milkie } = await buildCliMilkie()
+      const result = await milkie.invoke({
+        agentId,
+        goal,
+        input,
+        contextId: opts.contextId,
+      })
+      stdout.push(JSON.stringify({
+        runId:      result.agentRunId,
+        contextId:  result.contextId,
+        status:     result.status,
+        lastOutput: result.output,
+      }) + '\n')
+    })
+
+  agent
+    .command('resume <contextId>')
+    .description('Resume a paused agent from its latest checkpoint')
+    .action(async (contextId: string) => {
+      const { milkie, stateStore } = await buildCliMilkie()
+      const cpKey = `context:${contextId}:checkpoint:latest`
+      const checkpoint = await stateStore.get(cpKey) as AgentCheckpoint | null
+      if (!checkpoint) {
+        throw new Error(`no checkpoint found for contextId "${contextId}"`)
+      }
+      const result = await milkie.resume(cpKey, checkpoint.meta.agentId, checkpoint.goal, '')
+      stdout.push(JSON.stringify({
+        runId:      result.agentRunId,
+        contextId,
+        status:     result.status,
+        lastOutput: result.output,
+      }) + '\n')
+    })
+
+  agent
+    .command('interrupt <contextId>')
+    .description('Signal a running agent to pause at its next turn boundary')
+    .action(async (contextId: string) => {
+      const { milkie } = await buildCliMilkie()
+      await milkie.interrupt(contextId)
+      stdout.push(JSON.stringify({ contextId, status: 'interrupt-signaled' }) + '\n')
+    })
+
   const trace = program.command('trace')
+
+  trace
+    .command('inspect <runId>')
+    .description('Print every event in a recorded run as JSONL')
+    .action(async (runId: string) => {
+      const milkieDir = findMilkieDir(process.cwd())
+      if (!milkieDir) {
+        throw new Error('no .milkie/ directory found upward from cwd')
+      }
+      const eventStore = new JsonlEventStore(path.join(milkieDir, 'runs'))
+      const events = await eventStore.readByRunId(runId)
+      for (const event of events) {
+        stdout.push(JSON.stringify(event) + '\n')
+      }
+    })
 
   trace
     .command('replay <runId>')
