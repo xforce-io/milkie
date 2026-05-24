@@ -14,7 +14,7 @@ Last updated: 2026-05-24 (Phase 3: cache + structural replay implemented; s-005 
 | [s-002](./s-002-inspect-a-completed-run.md) | Inspect a completed agent run | draft | agent-trace | `tests/e2e/s-002-inspect-a-completed-run.e2e.test.ts` |
 | [s-003](./s-003-explain-a-decision-with-context.md) | Explain an agent decision with its full context | draft | agent-trace | `tests/e2e/s-003-explain-a-decision-with-context.e2e.test.ts` |
 | [s-004](./s-004-lineage-from-artifact-to-source.md) | Trace lineage from an artifact back to its source | draft | agent-trace | `tests/e2e/s-004-lineage-from-artifact-to-source.e2e.test.ts` |
-| [s-005](./s-005-deterministic-replay.md) | Deterministically replay a recorded agent run | draft | agent-trace · agent-runtime | `tests/e2e/s-005-deterministic-replay.e2e.test.ts` |
+| [s-005](./s-005-deterministic-replay.md) | Deterministically replay a recorded agent run | active | agent-trace · agent-runtime | `tests/e2e/s-005-deterministic-replay.e2e.test.ts` |
 | [s-006](./s-006-fork-at-event-for-what-if.md) | Fork a run at an event to explore a counterfactual | draft | agent-trace · agent-runtime | `tests/e2e/s-006-fork-at-event-for-what-if.e2e.test.ts` |
 | [s-007](./s-007-inter-agent-parallel-code-review.md) | Inter-agent parallel via named sub-agent tools | draft | agent-runtime · agent-trace | `tests/e2e/s-007-inter-agent-parallel-code-review.e2e.test.ts` |
 | [s-008](./s-008-long-task-interrupt-and-resume.md) | Interrupt a long-running agent and resume from checkpoint | draft | agent-runtime · agent-trace | `tests/e2e/s-008-long-task-interrupt-and-resume.e2e.test.ts` |

@@ -25,7 +25,9 @@ related:
 
 ## 场景叙事
 
-用户拿一份完整的 agent run trace（event log + response cache + non-determinism log），让 milkie 重新跑一遍，**得到与原 run 完全相同的 state**。没有任何 LLM 实调用、没有新的随机性、没有时间差异——所有非确定性出口都被 trace 里记录的值替代。
+用户拿一份完整的 agent run trace（event log + response cache + non-determinism log），让 milkie 重新跑一遍，**得到与原 run 完全相同的 state**。
+（Phase 3 已实现结构等价：status / output / 关键事件序列一致；byte-identical 时间戳与 UUID 仍依赖 Phase 4 的 non-determinism log。）
+没有任何 LLM 实调用、没有新的随机性、没有时间差异——所有非确定性出口都被 trace 里记录的值替代。
 
 典型用法：本地复现一个生产故障；examples / demo 在无 API key 环境下能 ship；regression test 把昨日的 run 当今日的 baseline。
 
