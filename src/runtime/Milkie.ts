@@ -1,6 +1,7 @@
 import { v4 as uuid } from 'uuid'
 import matter from 'gray-matter'
 import fs from 'fs'
+import path from 'path'
 import type { AgentConfig, FSMDefinition } from '../types/agent.js'
 import type { AgentInvokeRequest, AgentResult } from '../types/common.js'
 import type { ChildAgentRecord, IStateStore, AgentCheckpoint } from '../types/store.js'
@@ -80,6 +81,73 @@ export class Milkie {
 
   getAgent(agentId: string): AgentConfig | undefined {
     return this.agents.get(agentId)
+  }
+
+  /**
+   * Load every agent declared in a manifest file (`.milkie/agents.json`).
+   *
+   * Manifest schema:
+   *   { "agents": [ { "id": "...", "file": "<path relative to manifest>" } ] }
+   *
+   * Each entry's `file` is resolved relative to the manifest's own location;
+   * each is loaded via `loadAgentFile()`. Returns the ids successfully loaded
+   * and the ids skipped with reasons (duplicates, missing files,
+   * frontmatter `agentId` mismatch).
+   *
+   * See `docs/superpowers/specs/2026-05-24-agent-registration-design.md`.
+   */
+  async loadManifest(manifestPath?: string): Promise<{
+    loaded:  string[],
+    skipped: { id: string, reason: string }[],
+  }> {
+    const resolvedPath = manifestPath ?? this.findManifestUpward(process.cwd())
+    if (!resolvedPath) {
+      return { loaded: [], skipped: [] }
+    }
+    const raw = fs.readFileSync(resolvedPath, 'utf-8')
+    const manifest = JSON.parse(raw) as { agents: Array<{ id: string, file: string }> }
+    const manifestDir = path.dirname(resolvedPath)
+    const loaded:  string[] = []
+    const skipped: { id: string, reason: string }[] = []
+    const seen = new Set<string>()
+    for (const entry of manifest.agents) {
+      if (seen.has(entry.id)) {
+        skipped.push({ id: entry.id, reason: 'duplicate id in manifest' })
+        continue
+      }
+      seen.add(entry.id)
+      const agentPath = path.resolve(manifestDir, entry.file)
+      let config: AgentConfig
+      try {
+        config = this.loadAgentFile(agentPath)
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err)
+        skipped.push({ id: entry.id, reason })
+        continue
+      }
+      if (config.agentId !== entry.id) {
+        // loadAgentFile registered under the frontmatter id; revert it
+        this.agents.delete(config.agentId)
+        skipped.push({
+          id: entry.id,
+          reason: `agentId mismatch: manifest "${entry.id}" vs frontmatter "${config.agentId}"`,
+        })
+        continue
+      }
+      loaded.push(entry.id)
+    }
+    return { loaded, skipped }
+  }
+
+  private findManifestUpward(startDir: string): string | undefined {
+    let dir = startDir
+    while (true) {
+      const candidate = path.join(dir, '.milkie', 'agents.json')
+      if (fs.existsSync(candidate)) return candidate
+      const parent = path.dirname(dir)
+      if (parent === dir) return undefined
+      dir = parent
+    }
   }
 
   async invoke(request: AgentInvokeRequest): Promise<AgentResult> {
