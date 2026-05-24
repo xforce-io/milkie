@@ -38,6 +38,14 @@ Last updated: 2026-05-24
   with zero LLM calls.
 - **Evolution and Lineage-by-typed-relations are deferred** — there are
   open architectural questions before code work starts on either.
+- **Reference UI projection is now an explicit target, deferred.**
+  ARCHITECTURE.md promotes UI from "optional" to "deferred reference
+  projection" — the product thesis *runs as the primary engineering
+  product* needs a visual surface for runs to be perceptible as objects.
+  Form is TBD; full design waits for Phase 5 (so five of the six
+  capabilities have real data structures to render). One near-term probe
+  is scoped: a static HTML `trace report` for `s-002`, driven entirely
+  by CLI JSON output.
 
 ---
 
@@ -199,6 +207,32 @@ attributes outcomes over).
 `Evolution: Experiment Registry`. The skill-epoch portion is already green
 in code; full story validation waits for Evolution to land.
 
+### Reference UI projection (deferred)
+
+ARCHITECTURE.md commits to a reference UI projection for milkie — without
+one, the product thesis *runs as the primary engineering product* is not
+verifiable in practice by humans. Timelines, lineage DAGs, fork trees,
+structural diffs, and suite replay tables don't afford discovery from a
+CLI alone; visual surface is what makes a run perceptible as an object
+rather than as a stream of JSONL records. Form is TBD (local web viewer
+/ static HTML report generator / IDE extension) and deliberately not
+picked yet.
+
+**Kickoff condition.** Phase 5 capabilities (fork / diff / suite replay)
+land in code, so the UI is designed against real data structures rather
+than speculation; CLI output contracts stabilize so the projection
+isn't tracking a moving substrate.
+
+**Only thing happening before then.** The `s-002` static HTML
+`trace report` probe listed under cross-cutting work — single capability,
+zero framework, zero form commitment, single-digit-day cost.
+
+**Hard constraint when it does ship.** Per ARCHITECTURE.md
+`## User-facing surfaces`, a UI must remain a **projection** over CLI /
+SDK output: it does not own its own query logic, fork algorithm, or
+state. The moment a UI answers a question the CLI cannot, it has
+turned into a parallel facade and violates invariant 12.
+
 ### External Context Layer / Data / Execution / Foundation (target)
 
 Today `src/context/ContextLayer.ts` is an internal class. The target
@@ -259,6 +293,20 @@ These don't block any phase but pay back continuously.
   paths only; the happy path against a real LLM adapter is exercised by
   the existing e2e suite (s-001 / s-009 / s-011) but not yet through the
   CLI. A small CLI-level live test would close the loop.
+- **Static HTML trace report (s-002 probe).** Single command
+  (`milkie trace report <runId> > report.html`) that renders an event
+  timeline for one completed run, driven entirely by
+  `trace inspect --format json` output. Static HTML + CSS + minimal
+  vanilla JS for fold / unfold; no framework, no app shell, no state,
+  no server. Purpose is to validate two architectural claims cheaply:
+  (a) visual rendering meaningfully changes trace affordance vs. CLI
+  output alone, (b) the CLI JSON contract is rich enough to drive a
+  projection. Scope is intentionally one capability (Observable) and
+  one story (`s-002`) — does not pre-commit a UI form (local viewer /
+  IDE extension / hosted product), does not touch Phase 5 data
+  structures. Outputs are immediately usable as README screenshots and
+  example artifacts even if no further UI work follows; if the probe
+  shows CLI gaps or affordance fails to materialize, it deletes cheaply.
 
 ---
 

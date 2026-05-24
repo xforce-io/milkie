@@ -117,6 +117,13 @@ as implemented.
 - **Capability vocabulary in full** — observable / diagnosable / lineage /
   replay / fork / diff are described as a 6-capability surface; today only
   basic span query exists via TrajectoryStore.
+- **Reference UI projection** — none today; deferred until CLI output
+  contracts stabilize. Form TBD (local viewer / static report generator /
+  IDE extension). The product thesis "runs as the primary engineering
+  product" requires a visual surface for humans to perceive runs as
+  objects — without it the thesis is unverifiable in practice. The library
+  is incomplete without a reference projection, but premature commitment
+  to a specific form would couple it to one presentation.
 
 ### Migration intentions (not commitments)
 
@@ -237,8 +244,17 @@ surface a user reaches when they need behavior the facades do not expose.
 shell, integrate into application code, drop to raw types for custom plumbing.
 Documentation, examples, and onboarding should mirror this path.
 
-**UI** is optional and must remain a **projection** over CLI / SDK output, not
-a fourth facade. A UI may render trace timelines, lineage graphs, diff views,
+**UI** is a deferred reference projection that milkie will ship — not a
+fourth facade. The product thesis "runs as the primary engineering product"
+requires a visual surface for humans to perceive runs (timelines, lineage
+DAGs, fork trees, structural diffs, suite replay tables) as objects;
+CLI / SDK alone do not afford the discovery these data structures need.
+Form is TBD (local viewer / static report generator / IDE extension) and
+the deliverable is deferred until the CLI output contracts stabilize, so
+the UI is not pinned to a moving substrate.
+
+The constraint is invariant: a UI must remain a **projection** over CLI /
+SDK output. A UI may render trace timelines, lineage graphs, diff views,
 suite replay results, etc.; user actions in the UI translate to CLI commands
 or SDK calls — the UI does not own its own query logic, fork algorithm, or
 state. Drift warning: when the UI starts answering questions the CLI cannot,
@@ -558,12 +574,34 @@ typically signals a structural mistake, not a tradeoff.
 
 ## Representative scenarios
 
-Concrete uses each Agent Trace primitive is designed to enable. One entry
-per capability (the 6-capability surface — observable / diagnosable /
-lineage / replay / fork / diff) plus the cross-cutting usage patterns that
-combine them under invariants 12–13. Stories under `docs/stories/` are the
-authoritative spec; this section keeps the architecture self-explanatory
-without depending on the story system to load.
+Concrete uses each subsystem is designed to enable. Two entries for the
+Agent Runtime substrate (the FSM-driven execution that emits everything
+downstream observes), one entry per Agent Trace capability (the
+6-capability surface — observable / diagnosable / lineage / replay / fork
+/ diff), and the cross-cutting patterns that combine traces under
+invariants 12–13. Stories under `docs/stories/` are the authoritative
+spec; this section keeps the architecture self-explanatory without
+depending on the story system to load.
+
+### Runtime — ReAct agent with intra-agent parallel tools
+
+A single agent runs a plan-and-act loop: the LLM emits a multi-step plan
+that issues several `tool_use` blocks in one response; Agent Runtime
+dispatches them concurrently and merges observations before the next FSM
+step. The canonical exercise of FSM Core + intra-agent parallelism +
+cognitive toolbox state on `workingMemory`, without sub-agents.
+Story: [s-001](docs/stories/s-001-react-with-intra-agent-parallel-tools.md).
+
+### Runtime — interrupt a long-running agent and resume from checkpoint
+
+Mid-run an external interrupt signal reaches Agent Runtime at the next
+yield point: state is checkpointed to the State Store, FSM moves to
+`paused`, and `InterruptSignal` propagates through the supervisor tree
+to any in-flight sub-agents. `milkie.resume(checkpointId)` continues
+from the checkpoint as a single trajectory across the interrupt, with no
+work duplicated. The canonical exercise of yield points + state stores +
+supervisor-tree interrupt propagation.
+Story: [s-008](docs/stories/s-008-long-task-interrupt-and-resume.md).
 
 ### Observable — inspect a completed run
 
