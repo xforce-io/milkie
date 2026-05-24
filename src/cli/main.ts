@@ -1,5 +1,19 @@
 import { Command } from 'commander'
+import fs from 'fs'
+import path from 'path'
 import { Milkie } from '../runtime/Milkie.js'
+import { JsonlEventStore } from '../trace/JsonlEventStore.js'
+
+function findMilkieDir(startDir: string): string | undefined {
+  let dir = startDir
+  while (true) {
+    const candidate = path.join(dir, '.milkie')
+    if (fs.existsSync(candidate)) return candidate
+    const parent = path.dirname(dir)
+    if (parent === dir) return undefined
+    dir = parent
+  }
+}
 
 export interface MainResult {
   stdout:   string
@@ -26,7 +40,7 @@ export async function main(argv: string[]): Promise<MainResult> {
   const program = new Command()
   program
     .name('milkie')
-    .exitOverride((err) => { exitCode = err.exitCode })
+    .exitOverride()   // commander throws CommanderError; we catch below
     .configureOutput({
       writeOut: (s) => { stdout.push(s) },
       writeErr: (s) => { stderr.push(s) },
@@ -45,10 +59,35 @@ export async function main(argv: string[]): Promise<MainResult> {
       }
     })
 
+  const trace = program.command('trace')
+
+  trace
+    .command('replay <runId>')
+    .description('Replay a recorded run from .milkie/runs/<runId>.jsonl')
+    .action(async (runId: string) => {
+      const milkieDir = findMilkieDir(process.cwd())
+      if (!milkieDir) {
+        throw new Error('no .milkie/ directory found upward from cwd')
+      }
+      const eventStore = new JsonlEventStore(path.join(milkieDir, 'runs'))
+      const milkie = new Milkie({ eventStore })
+      await milkie.loadManifest(path.join(milkieDir, 'agents.json'))
+      const result = await milkie.replay(runId)
+      stdout.push(JSON.stringify({
+        newRunId: runId,
+        status:   result.status,
+        output:   result.output,
+      }) + '\n')
+    })
+
   try {
     await program.parseAsync(argv, { from: 'user' })
   } catch (err) {
-    if (exitCode === 0) {
+    if (err && typeof err === 'object' && 'exitCode' in err) {
+      // CommanderError from --help / --version / unknown command / bad arg.
+      // commander already wrote help or error text through writeOut/writeErr.
+      exitCode = (err as { exitCode: number }).exitCode
+    } else {
       const msg = err instanceof Error ? err.message : String(err)
       stderr.push(JSON.stringify({ error: { code: 'CLI_ERROR', message: msg } }) + '\n')
       exitCode = 1

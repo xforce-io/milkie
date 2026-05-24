@@ -59,6 +59,19 @@ test`
     }
   })
 
+  it('--help prints usage and exits 0', async () => {
+    const result = await main(['--help'])
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toMatch(/Usage: milkie/)
+    expect(result.stdout).toMatch(/agent/)
+  })
+
+  it('unknown command exits non-zero with diagnostic on stderr', async () => {
+    const result = await main(['bogus'])
+    expect(result.exitCode).not.toBe(0)
+    expect(result.stderr).toMatch(/bogus|unknown/i)
+  })
+
   it('outputs nothing and exits 0 when no manifest is found upward from cwd', async () => {
     const isolatedDir = fs.mkdtempSync(path.join(tmpDir, 'isolated-'))
     const cwdSpy = jest.spyOn(process, 'cwd').mockReturnValue(isolatedDir)
