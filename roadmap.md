@@ -23,6 +23,11 @@ Last updated: 2026-05-24
   stories all depend on Phase 4–6 capabilities that haven't shipped yet.
 - **Next big rock:** Phase 4 non-determinism log → unlocks byte-identical
   replay → unlocks Phase 5 fork / diff / suite replay.
+- **Invariants 12–13 landed** — Agent Trace is **agent-first**; **CLI is
+  the canonical agent-facing protocol facade**. The CLI verb surface is
+  drafted at `docs/superpowers/specs/2026-05-24-cli-surface-design.md`;
+  an **agent registration spec** is queued next to close the CLI's
+  foundational gap (no `agent run` = no entry point).
 - **Evolution and Lineage-by-typed-relations are deferred** — there are
   open architectural questions before code work starts on either.
 
@@ -65,11 +70,25 @@ Full readiness view: `docs/stories/INDEX.md`.
 
 ## In progress
 
-There is no code work actively in flight at this moment. The most recent
-session closed the gap audit (ARCHITECTURE.md ↔ code ↔ stories), promoted
-the stories whose E2E tests are green to `active`, and added hermetic
-`s-002` / `s-003` tests against the Phase 3 event log. The next phase
-boundary (Phase 4) has not been started.
+**Design wave (just landed in this session, code work pending):**
+ARCHITECTURE.md gained invariants 12–13 (agent-first / CLI as protocol
+facade), a `## User-facing surfaces` section (CLI / SDK / API + UI as
+projection), a `## Representative scenarios` section (one entry per
+6-capability surface item plus cross-cutting), and an expanded
+Implementation Status with `Suite definition + batch replay` and
+`In-flight trace query API` as Phase 5 targets. Four new agent-first
+stories drafted (`s-012` / `s-013` / `s-014` / `s-015`). The CLI surface
+design spec was written.
+
+**Immediate next:** agent registration design spec (closes CLI spec §9 OQ
+#1, unblocks `agent run / list` implementation), then `examples/`
+scaffold starting from `s-005` (replay-only, no API key needed).
+
+**Code work** is not in flight yet. The earlier session closed the gap
+audit (ARCHITECTURE.md ↔ code ↔ stories), promoted the stories whose
+E2E tests are green to `active`, and added hermetic `s-002` / `s-003`
+tests against the Phase 3 event log. The next phase boundary (Phase 4)
+has not been started.
 
 ---
 
@@ -183,9 +202,25 @@ These don't block any phase but pay back continuously.
   whether to project Trajectory from the event log or retire it. Don't
   duplicate sources of truth long-term.
 - **Public API documentation.** ARCHITECTURE.md is silent on the
-  concrete public library facade by design. Once Phase 5 lands the
-  agent-first surfaces (CLI for `fork`, `replay`, `diff`, in-flight
-  trace query), write the design docs `ARCHITECTURE.md` defers to.
+  concrete public library facade by design. The first such design doc
+  has landed:
+  `docs/superpowers/specs/2026-05-24-cli-surface-design.md` defines the
+  agent-facing CLI verb surface across `agent` / `trace` / `suite`
+  domains. Implementation lands incrementally: P0 verbs
+  (`agent run/resume/interrupt`, `trace inspect/replay`) can start after
+  the agent registration spec closes; P1+ verbs (`trace fork / diff`,
+  `suite *`) follow Phase 5.
+- **Agent registration design** (immediate next design checkpoint). The
+  CLI spec assumes a registry exists but does not define how it gets
+  populated — baseline (A) registered-name form is locked in; the
+  mechanism (config scan / explicit `register()` / file convention /
+  plugin discovery) needs a spec before `agent run / list` can ship.
+- **`examples/` scaffold.** Stories are spec, tests are contract,
+  **examples are pedagogy**. Each example pairs an SDK invocation with
+  the equivalent CLI invocation against a frozen fixture (no API key).
+  Start with `s-005` (replay) which is already implemented; add
+  `s-006` / `s-012` / `s-013` / `s-015` as their Phase 5 capabilities
+  land.
 
 ---
 
