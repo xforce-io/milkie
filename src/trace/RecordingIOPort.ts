@@ -8,8 +8,14 @@ import type {
   ToolRespondedPayload,
   AgentRunStartedPayload,
   AgentRunCompletedPayload,
+  ClockReadPayload,
+  UuidGeneratedPayload,
 } from './types.js'
 import { hashModelRequest, hashToolCall } from './hash.js'
+
+type PendingNondet =
+  | { kind: 'clock'; value: number }
+  | { kind: 'uuid';  value: string }
 
 /**
  * RecordingIOPort — decorates an inner IOPort to emit Agent Trace events.
@@ -19,10 +25,16 @@ import { hashModelRequest, hashToolCall } from './hash.js'
  *  - attach()/detach() emit agent.run.started/completed lifecycle events
  *  - Tool errors are recorded as structured payloads (preserve retryable/code/name)
  *
- * Clock (now()) and UUID generation pass through to inner — non-determinism
- * log is Phase 4.
+ * Phase 4 additions:
+ *  - now() / uuid() record clock.read / uuid.generated events via a pending
+ *    buffer that is flushed at the entry of every async method. This preserves
+ *    ordering: nondet events appear in the log before the next recorded event
+ *    that consumed them, without requiring async infrastructure in the sync
+ *    now/uuid methods.
  */
 export class RecordingIOPort implements IIOPort {
+  private readonly pendingNondet: PendingNondet[] = []
+
   constructor(
     private readonly inner: IIOPort,
     private readonly store: IEventStore,
@@ -30,7 +42,43 @@ export class RecordingIOPort implements IIOPort {
     private readonly actor: string = 'runtime',
   ) {}
 
+  /**
+   * Drain pending nondet records to the store in input order. Called at
+   * every async method entry so that agent-facing port.now/port.uuid
+   * calls observe the invariant: nondet events appear before the next
+   * recorded event that consumes them.
+   *
+   * Each emitted event's own `id` and `timestamp` fields use inner.uuid /
+   * inner.now directly — they are infrastructure bookkeeping, not part
+   * of agent-observable non-determinism, and recording them would recurse.
+   */
+  private async flushPendingNondet(): Promise<void> {
+    while (this.pendingNondet.length > 0) {
+      const item = this.pendingNondet.shift()!
+      if (item.kind === 'clock') {
+        await this.store.append({
+          id:        this.inner.uuid(),
+          runId:     this.runId,
+          type:      'clock.read',
+          actor:     this.actor,
+          timestamp: this.inner.now(),
+          payload:   { value: item.value } satisfies ClockReadPayload,
+        })
+      } else {
+        await this.store.append({
+          id:        this.inner.uuid(),
+          runId:     this.runId,
+          type:      'uuid.generated',
+          actor:     this.actor,
+          timestamp: this.inner.now(),
+          payload:   { value: item.value } satisfies UuidGeneratedPayload,
+        })
+      }
+    }
+  }
+
   async attach(payload: AgentRunStartedPayload): Promise<void> {
+    await this.flushPendingNondet()
     await this.store.append({
       id:        this.inner.uuid(),
       runId:     this.runId,
@@ -42,6 +90,7 @@ export class RecordingIOPort implements IIOPort {
   }
 
   async detach(payload: AgentRunCompletedPayload): Promise<void> {
+    await this.flushPendingNondet()
     await this.store.append({
       id:        this.inner.uuid(),
       runId:     this.runId,
@@ -53,6 +102,7 @@ export class RecordingIOPort implements IIOPort {
   }
 
   async invokeLLM(request: ModelRequest): Promise<ModelResponse> {
+    await this.flushPendingNondet()
     const requestHash = hashModelRequest(request)
     const reqEventId  = this.inner.uuid()
     await this.store.append({
@@ -84,6 +134,7 @@ export class RecordingIOPort implements IIOPort {
     input: unknown,
     execute: () => Promise<unknown>,
   ): Promise<unknown> {
+    await this.flushPendingNondet()
     const requestHash = hashToolCall(toolName, input)
     const reqEventId  = this.inner.uuid()
     await this.store.append({
@@ -131,10 +182,14 @@ export class RecordingIOPort implements IIOPort {
   }
 
   now(): number {
-    return this.inner.now()
+    const value = this.inner.now()
+    this.pendingNondet.push({ kind: 'clock', value })
+    return value
   }
 
   uuid(): string {
-    return this.inner.uuid()
+    const value = this.inner.uuid()
+    this.pendingNondet.push({ kind: 'uuid', value })
+    return value
   }
 }

@@ -50,23 +50,27 @@ as implemented.
   (`src/trajectory/`)
 - **IOPort as non-determinism boundary** — `IIOPort` / `DefaultIOPort`
   in `src/runtime/IOPort.ts`. Agent Runtime routes every LLM call, tool
-  invocation, clock read, and UUID generation through it. Current
-  `DefaultIOPort` is a passthrough; recording / cache / replay variants
-  are target. (`src/runtime/IOPort.ts`)
-- **Agent Trace event log (basic)** — `Event` / `IEventStore` / `RecordingIOPort`
+  invocation, clock read, and UUID generation through it. `DefaultIOPort`
+  is the live-passthrough leaf; `RecordingIOPort` and `ReplayingIOPort`
+  are the record/replay decorators. (`src/runtime/IOPort.ts`,
+  `src/trace/RecordingIOPort.ts`, `src/trace/ReplayingIOPort.ts`)
+- **Agent Trace event log** — `Event` / `IEventStore` / `RecordingIOPort`
   in `src/trace/`. When an `eventStore` is supplied to `Milkie`, every LLM
   and tool I/O is recorded as paired `requested` / `responded` events with
-  `causedBy` chains. MemoryEventStore and JsonlEventStore implementations
-  provided. Scope is Phase 2: LLM + tool I/O only; lifecycle events, FSM
-  transitions, and content-addressed cache are target. (`src/trace/`)
-- **Content-addressed cache + structural replay** — `CacheIndex` projects an
-  event log into FIFO response queues keyed by canonical request hash;
-  `ReplayingIOPort` serves LLM and tool calls from it. `Milkie.replay(runId)`
-  re-runs a recorded run with zero live LLM/tool calls; cache miss = strict
-  `ReplayDivergenceError`. Phase 3 scope: same-host / same-code /
-  same-registered-agent replay; timestamps and UUIDs not byte-identical
-  (Phase 4 non-determinism log). (`src/trace/CacheIndex.ts`,
-  `src/trace/ReplayingIOPort.ts`, `src/runtime/Milkie.ts:replay`)
+  `causedBy` chains, plus `agent.run.started` / `agent.run.completed`
+  lifecycle events and `clock.read` / `uuid.generated` non-determinism
+  events. MemoryEventStore and JsonlEventStore implementations provided.
+  (`src/trace/`)
+- **Content-addressed cache + byte-identical replay** — `CacheIndex`
+  projects an event log into per-hash FIFO queues for llm/tool, plus
+  position-FIFO queues for clock/uuid. `ReplayingIOPort` serves every
+  IIOPort method from the cache (live `inner` never called during
+  replay). `Milkie.replay(runId)` re-runs a recorded run with zero
+  live LLM/tool calls and byte-identical agent-observable nondet;
+  strict P-wide divergence — over-consume throws immediately,
+  under-consume across any of the four queues throws at the tail.
+  (`src/trace/CacheIndex.ts`, `src/trace/ReplayingIOPort.ts`,
+  `src/runtime/Milkie.ts:replay`)
 - **State stores for checkpoint/resume** — MemoryStore / SQLiteStore /
   RedisStore for interrupt/resume scenarios. (`src/store/`) All three implement
   `IStateStore` (`src/types/store.ts`); SQLite and Redis variants require
@@ -87,9 +91,16 @@ as implemented.
 
 ### Target only (not yet in code)
 
-- **Non-determinism log** — recorded clock reads, UUIDs, random values, and
-  external tool I/O outcomes; replay reads from log rather than re-sampling.
-  Phase 4.
+- **`random.consumed` non-determinism record** — Phase 4 ships
+  `clock.read` and `uuid.generated`; `Math.random` has zero call sites
+  in `src/` today, so the third variant is deferred until a real
+  consumer appears. External non-LLM tool I/O outcomes beyond the
+  already-recorded `tool.responded` event are similarly deferred —
+  Phase 4 records what `port.now()` / `port.uuid()` return and
+  ReplayingIOPort serves them strictly, but file I/O / network I/O
+  from operator implementations are still served via the existing
+  `tool.responded` cache (no operator-specific policy hook yet —
+  see Phase 5 fork follow-up).
 - **Fork engine** — branch a run at any event with shared prefix from cache
   (no new model calls for the shared history). Phase 5.
 - **Structural diff** — typed comparison of two event logs / projected

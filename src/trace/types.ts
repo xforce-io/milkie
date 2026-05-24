@@ -13,6 +13,8 @@ export type EventKind =
   | 'tool.responded'
   | 'agent.run.started'
   | 'agent.run.completed'
+  | 'clock.read'
+  | 'uuid.generated'
 
 export interface Event<P = unknown> {
   id: string
@@ -75,6 +77,18 @@ export interface AgentRunCompletedPayload {
   error?:           string
 }
 
+// ---- Non-determinism payloads (Phase 4) ----
+
+export interface ClockReadPayload {
+  /** Epoch ms returned by the underlying clock at the time agent code called port.now(). */
+  value: number
+}
+
+export interface UuidGeneratedPayload {
+  /** UUID string returned by the underlying generator at the time agent code called port.uuid(). */
+  value: string
+}
+
 // ---- Typed event aliases ----
 
 export type LlmRequestedEvent       = Event<LlmRequestedPayload>       & { type: 'llm.requested' }
@@ -83,6 +97,8 @@ export type ToolRequestedEvent      = Event<ToolRequestedPayload>      & { type:
 export type ToolRespondedEvent      = Event<ToolRespondedPayload>      & { type: 'tool.responded' }
 export type AgentRunStartedEvent    = Event<AgentRunStartedPayload>    & { type: 'agent.run.started' }
 export type AgentRunCompletedEvent  = Event<AgentRunCompletedPayload>  & { type: 'agent.run.completed' }
+export type ClockReadEvent          = Event<ClockReadPayload>          & { type: 'clock.read' }
+export type UuidGeneratedEvent      = Event<UuidGeneratedPayload>      & { type: 'uuid.generated' }
 
 export type AnyEvent =
   | LlmRequestedEvent
@@ -91,3 +107,5 @@ export type AnyEvent =
   | ToolRespondedEvent
   | AgentRunStartedEvent
   | AgentRunCompletedEvent
+  | ClockReadEvent
+  | UuidGeneratedEvent

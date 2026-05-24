@@ -29,7 +29,7 @@ const mkToolResponded = (hash: string, output?: unknown, error?: NonNullable<Too
 describe('CacheIndex', () => {
   it('fromEvents builds empty index for empty events', () => {
     const idx = CacheIndex.fromEvents([])
-    expect(idx.remaining()).toEqual({ llm: 0, tool: 0 })
+    expect(idx.remaining()).toEqual({ llm: 0, tool: 0, clock: 0, uuid: 0 })
   })
 
   it('consumeLLM serves cached responses in FIFO order per hash', () => {
@@ -41,7 +41,7 @@ describe('CacheIndex', () => {
     expect(idx.consumeLLM('h1').content[0]).toMatchObject({ text: 'first' })
     expect(idx.consumeLLM('h1').content[0]).toMatchObject({ text: 'second' })
     expect(idx.consumeLLM('h2').content[0]).toMatchObject({ text: 'other' })
-    expect(idx.remaining()).toEqual({ llm: 0, tool: 0 })
+    expect(idx.remaining()).toEqual({ llm: 0, tool: 0, clock: 0, uuid: 0 })
   })
 
   it('consumeLLM throws when queue exhausted', () => {
@@ -82,9 +82,9 @@ describe('CacheIndex', () => {
       mkLlmResponded('h1', 'b'),
       mkToolResponded('h2', 'out'),
     ])
-    expect(idx.remaining()).toEqual({ llm: 2, tool: 1 })
+    expect(idx.remaining()).toEqual({ llm: 2, tool: 1, clock: 0, uuid: 0 })
     idx.consumeLLM('h1')
-    expect(idx.remaining()).toEqual({ llm: 1, tool: 1 })
+    expect(idx.remaining()).toEqual({ llm: 1, tool: 1, clock: 0, uuid: 0 })
   })
 
   it('allHashes returns all unique hashes seen', () => {

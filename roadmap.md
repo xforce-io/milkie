@@ -14,15 +14,23 @@ Last updated: 2026-05-24
 
 ## TL;DR
 
-- **Phase 1–3 are landed.** FSM Runtime, working context, Trajectory
-  observability, IOPort, Agent Trace event log (LLM + tool I/O + lifecycle),
-  content-addressed cache, and structural replay are all in code. State
+- **Phase 1–4 are landed.** FSM Runtime, working context, Trajectory
+  observability, IOPort, Agent Trace event log (LLM + tool I/O + lifecycle +
+  clock / uuid), content-addressed cache, structural replay, and
+  **byte-identical replay via non-determinism log** are all in code. State
   stores (Memory / SQLite / Redis) ship. Sub-agent as named tool, interrupt
   signal, supervisor-tree propagation, skill epoch loading are verified.
 - **8 of 15 stories are `active`** (have green E2E tests). The 7 `draft`
-  stories all depend on Phase 4–6 capabilities that haven't shipped yet.
-- **Next big rock:** Phase 4 non-determinism log → unlocks byte-identical
-  replay → unlocks Phase 5 fork / diff / suite replay.
+  stories all depend on Phase 5–6 capabilities that haven't shipped yet.
+- **Phase 4 landed.** `clock.read` / `uuid.generated` event kinds; every
+  agent-facing `port.now()` / `port.uuid()` call recorded via a pending
+  buffer flushed at each async method entry; replay consumes from FIFO
+  queues on `CacheIndex`; `Milkie.replay()` enforces strict P-wide
+  divergence (over-consume **and** under-consume) across all four queues
+  (clock / uuid / llm / tool). s-005 e2e upgraded; s-002 example fixture
+  re-recorded.
+- **Next big rock:** Phase 5 fork / diff / suite replay. Phase 4 was its
+  prerequisite for honest fork semantics.
 - **Invariants 12–13 landed and shipped to code.** Agent Trace is
   **agent-first**; **CLI is the canonical agent-facing protocol facade**.
   CLI surface spec
@@ -49,7 +57,7 @@ Last updated: 2026-05-24
 
 ---
 
-## Completed (Phase 1–3)
+## Completed (Phase 1–4)
 
 Already in code; see `ARCHITECTURE.md` → `Implementation Status` for
 file pointers.
@@ -71,8 +79,19 @@ file pointers.
   re-run with strict `ReplayDivergenceError` on cache miss. Sub-agent
   as named tool, parent interrupt → supervisor-tree propagation, and
   interrupt-and-resume across stateStores are all working.
+- **Phase 4 — Non-determinism log + byte-identical replay.** New event
+  kinds `clock.read` / `uuid.generated`. `RecordingIOPort` records every
+  agent-facing `port.now()` / `port.uuid()` call via an internal pending
+  buffer flushed at each async method entry (infrastructure-use bypasses
+  the buffer to prevent recursion). `ReplayingIOPort` consumes from per-
+  runId FIFO queues on `CacheIndex`. `Milkie.replay()` enforces strict
+  P-wide under-consume check across clock / uuid / llm / tool (any
+  unconsumed event → `ReplayDivergenceError`). `s-005` e2e upgraded
+  from structural-only to "Phase 4 byte-identical" (asserts nondet
+  events captured + 3× repeat-replay produces identical results);
+  example fixtures re-recorded.
 
-### Stories validated by Phase 1–3 (active)
+### Stories validated by Phase 1–4 (active)
 
 `s-001` ReAct + intra-agent parallel · `s-002` Inspect a completed run ·
 `s-003` Explain a decision with context · `s-005` Deterministic replay
@@ -107,12 +126,10 @@ end-to-end:
   CLI scripts plus a shipped fixture; demonstrates the SDK ↔ CLI parity
   invariants 12–13 require.
 
-**Most natural next pickup** is the cross-cutting work itemized below
-(more examples following the s-005 pattern; a brief in-flight semantics
-spec for `inspect` / `lineage` on a still-running run) rather than the
-next phase boundary. The earlier session also closed the gap audit
-(ARCHITECTURE.md ↔ code ↔ stories) and added hermetic `s-002` / `s-003`
-tests. Phase 4 (non-determinism log) has not been started.
+**Most natural next pickup** after Phase 4 land is Phase 5 (fork / diff
+/ suite). The cross-cutting work below stays valid in parallel. The
+earlier sessions closed the gap audit (ARCHITECTURE.md ↔ code ↔ stories)
+and added hermetic `s-002` / `s-003` tests.
 
 ---
 
@@ -121,25 +138,6 @@ tests. Phase 4 (non-determinism log) has not been started.
 Phases are listed in the order capabilities unblock each other. Each
 phase ships a coherent capability surface; within a phase, items can move
 in parallel.
-
-### Phase 4 — Non-determinism log → byte-identical replay
-
-**Goal.** Replay produces a state that is byte-identical to the original,
-not just structurally equivalent. Today timestamps and UUIDs are re-sampled
-on replay; clock reads, UUIDs, random values, and non-LLM external I/O
-need to be recorded and replayed from the log.
-
-**Scope.**
-- Extend the event log with a positional non-determinism record (clock /
-  uuid / random / external I/O outcomes).
-- `RecordingIOPort` records observed values; `ReplayingIOPort` serves
-  them in append order.
-- `replay()` becomes byte-identical for in-scope values; out-of-scope
-  external side effects need an explicit replay policy (skip / mock /
-  reinvoke / require-confirmation — see Open questions).
-
-**Unblocks.** Closes `s-005` (currently active but acknowledged as
-structural-only); is a prerequisite for honest fork semantics in Phase 5.
 
 ### Phase 5 — Fork, structural diff, suite / batch replay
 
@@ -200,8 +198,8 @@ lineage).
 
 Experiment Registry, Traffic Splitter, Outcome Collector, Promotion Gate.
 Targeted but **not the next priority** — there is more upstream value in
-landing Phase 4–5 first (replay/fork/diff is the substrate Evolution
-attributes outcomes over).
+landing Phase 5 first (Phase 4 done; fork / diff are the remaining
+substrate Evolution attributes outcomes over).
 
 `s-010` currently sits in `draft` because its `requires` lists
 `Evolution: Experiment Registry`. The skill-epoch portion is already green
@@ -248,7 +246,7 @@ the external interface shape. Until then the internal shim stays.
 These don't block any phase but pay back continuously.
 
 - **Story coverage for already-implemented capabilities.** The remaining
-  `draft` stories all need Phase 4–6 work; no current implementation gaps
+  `draft` stories all need Phase 5–6 work; no current implementation gaps
   are missing tests. As capabilities land, write the story's E2E in the
   same PR per the README lifecycle.
 - **CI infra for Redis-gated tests.** `tests/e2e/run-redis-e2e.sh`
@@ -256,10 +254,11 @@ These don't block any phase but pay back continuously.
   of `s-008` / `s-009` without skipping by default. Currently both
   stories run against `MemoryStore` for hermetic correctness.
 - **TrajectoryStore retirement decision.** ARCHITECTURE.md flags
-  TrajectoryStore as the predecessor of the event-sourced log. When
-  Phase 4 lands and the event log covers every span use-case, decide
-  whether to project Trajectory from the event log or retire it. Don't
-  duplicate sources of truth long-term.
+  TrajectoryStore as the predecessor of the event-sourced log. Phase 4
+  has landed and the event log now covers LLM / tool / lifecycle /
+  clock / uuid — every span use-case TrajectoryStore handled. Decide
+  whether to project Trajectory from the event log or retire it
+  outright. Don't duplicate sources of truth long-term.
 - **Public API documentation.** ARCHITECTURE.md is silent on the
   concrete public library facade by design. The first such design doc
   landed —
@@ -314,15 +313,18 @@ These don't block any phase but pay back continuously.
 
 These need a decision **before** the corresponding phase starts.
 
-- **Replay side-effect policy** (Phase 4). When a recorded run made an
-  external side effect (e.g. wrote a file, hit an API), what does replay
-  do? Skip / mock / reinvoke / require-confirmation are all plausible
-  depending on the operator; we need a per-operator policy hook.
+- **Replay side-effect policy** (Phase 5 prerequisite). Phase 4 declared
+  the simple all-from-cache policy: replay never re-invokes operators
+  with live side effects. The per-operator hook (some operators served
+  from cache, others re-invoked against live state for variant search)
+  is to be designed alongside Phase 5 fork. Not blocking until fork
+  implementation begins.
 - **Deterministic-flow placement** (cross-cutting). `ARCHITECTURE.md`
   invariant #10 forbids a Workflow System. Deterministic business flows
   must either be a specific FSM configuration or live outside milkie.
-  The event schema may need to distinguish LLM-driven runs from purely
-  deterministic FSM runs — TBD before Phase 4 freezes the event format.
+  Phase 4 landed without distinguishing LLM-driven vs purely deterministic
+  runs in the event schema — the question is therefore open but no longer
+  blocking. Revisit if Evolution or Phase 5 fork needs the distinction.
 - **Evolution outcome attribution under sub-agent fan-out** (Evolution).
   When a variant spawns sub-agents, do outcomes attribute to the parent
   variant only, or roll up from the whole subtree? Needs an explicit

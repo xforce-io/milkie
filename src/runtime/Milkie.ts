@@ -287,19 +287,22 @@ export class Milkie {
   }
 
   /**
-   * Re-run a recorded agent run from its event log; all LLM/tool I/O
-   * is served from the event-derived CacheIndex — no live calls. Result
-   * is structurally equivalent to the original run (status, output);
-   * timestamps and UUIDs are not guaranteed identical (byte-identical
-   * replay is Phase 4).
+   * Re-run a recorded agent run from its event log. Every IIOPort method
+   * (LLM, tool, port.now, port.uuid) is served from the event-derived
+   * CacheIndex — no live calls. Replay is byte-identical for any value
+   * the agent observes through the port: paired req/resp matched by
+   * canonical request hash for LLM/tool, position-FIFO for clock/uuid.
    *
-   * Phase 3 constraints:
+   * Strict P-wide divergence:
+   *  - over-consume on any queue → ReplayDivergenceError immediately
+   *  - under-consume on any queue at replay tail → ReplayDivergenceError
+   *
+   * Constraints:
    *  - Requires this Milkie has an eventStore configured
    *  - Requires this Milkie has the original agentId registered
    *  - Throws ReplayError on structural failures (missing run, missing
    *    lifecycle event, unknown agentId)
-   *  - Throws ReplayDivergenceError when the replayed agent issues an
-   *    LLM/tool call whose hash is not in the recorded cache
+   *  - Throws ReplayDivergenceError on any LLM/tool/clock/uuid divergence
    */
   async replay(runId: string): Promise<AgentResult> {
     if (!this.eventStore) {
@@ -342,8 +345,20 @@ export class Milkie {
           throw err
         }
       },
-      now:  () => ioPort.now(),
-      uuid: () => ioPort.uuid(),
+      now: () => {
+        try { return ioPort.now() }
+        catch (err) {
+          if (err instanceof ReplayDivergenceError) divergenceError = err
+          throw err
+        }
+      },
+      uuid: () => {
+        try { return ioPort.uuid() }
+        catch (err) {
+          if (err instanceof ReplayDivergenceError) divergenceError = err
+          throw err
+        }
+      },
     }
 
     const runtime = new AgentRuntime({
@@ -363,6 +378,22 @@ export class Milkie {
 
     const result = await runtime.run(snapshot.input)
     if (divergenceError) throw divergenceError
+
+    // P-wide strict under-consume check: any recorded event the replay
+    // failed to consume signals divergence (the run took a different path
+    // than recording, or recording captured events the runtime no longer
+    // emits). Check all four queues.
+    const remaining = cache.remaining()
+    for (const kind of ['clock', 'uuid', 'llm', 'tool'] as const) {
+      const n = remaining[kind]
+      if (n > 0) {
+        throw new ReplayDivergenceError(
+          kind, '',
+          `${n} ${kind} event(s) unconsumed after replay completed`,
+          []
+        )
+      }
+    }
     return result
   }
 
