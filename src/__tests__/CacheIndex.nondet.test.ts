@@ -101,3 +101,29 @@ describe('CacheIndex — clock/uuid queues', () => {
     expect(cache.consumeUuid()).toBe('b')
   })
 })
+
+import { ReplayDivergenceError } from '../trace/ReplayDivergenceError'
+
+describe('ReplayDivergenceError — clock/uuid kinds', () => {
+  it('accepts clock kind and produces a hash-free message', () => {
+    const err = new ReplayDivergenceError('clock', '', 'clock queue exhausted after 3 consumed', [])
+    expect(err.kind).toBe('clock')
+    expect(err.message).toContain('clock')
+    expect(err.message).toContain('clock queue exhausted after 3 consumed')
+    expect(err.message).not.toMatch(/hash\s+…/)
+  })
+
+  it('accepts uuid kind', () => {
+    const err = new ReplayDivergenceError('uuid', '', '1 uuid event(s) unconsumed', [])
+    expect(err.kind).toBe('uuid')
+    expect(err.message).toContain('uuid')
+    expect(err.message).toContain('1 uuid event(s) unconsumed')
+  })
+
+  it('preserves existing llm/tool message format with truncated hash', () => {
+    const err = new ReplayDivergenceError('llm', 'abc123def456hash999', 'last user: hello', ['hash-a'])
+    expect(err.kind).toBe('llm')
+    expect(err.message).toContain('abc123def456')
+    expect(err.message).toContain('last user: hello')
+  })
+})
