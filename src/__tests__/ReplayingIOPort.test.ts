@@ -38,6 +38,7 @@ describe('ReplayingIOPort', () => {
   })
 
   it('divergence error carries kind and actualHash', async () => {
+    expect.assertions(4)
     const req: ModelRequest = { model: 'm', messages: [], system: '', tools: [] }
     const port = new ReplayingIOPort(CacheIndex.fromEvents([]), innerNeverCalled())
     try {
@@ -47,6 +48,7 @@ describe('ReplayingIOPort', () => {
       expect(e.kind).toBe('llm')
       expect(e.actualHash).toBe(hashModelRequest(req))
       expect(e).toBeInstanceOf(ReplayDivergenceError)
+      expect(e.message).toMatch(/^Replay divergence \(llm\):/)
     }
   })
 
@@ -65,6 +67,7 @@ describe('ReplayingIOPort', () => {
   })
 
   it('tool error rethrows with retryable preserved', async () => {
+    expect.assertions(2)
     const input = { x: 1 }
     const h = hashToolCall('t', input)
     const ev: Event<ToolRespondedPayload> = {
@@ -78,6 +81,20 @@ describe('ReplayingIOPort', () => {
       const e = err as Error & { retryable?: boolean }
       expect(e.message).toBe('boom')
       expect(e.retryable).toBe(true)
+    }
+  })
+
+  it('throws ReplayDivergenceError on tool cache miss', async () => {
+    expect.assertions(3)
+    const input = { x: 1 }
+    const port = new ReplayingIOPort(CacheIndex.fromEvents([]), innerNeverCalled())
+    try {
+      await port.invokeTool('t', input, async () => 'unused')
+    } catch (err) {
+      const e = err as ReplayDivergenceError
+      expect(e).toBeInstanceOf(ReplayDivergenceError)
+      expect(e.kind).toBe('tool')
+      expect(e.actualHash).toBe(hashToolCall('t', input))
     }
   })
 

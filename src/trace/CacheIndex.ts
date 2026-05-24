@@ -26,9 +26,11 @@ export class CacheIndex {
     for (const ev of events) {
       if (ev.type === 'llm.responded') {
         const p = ev.payload as LlmRespondedPayload
+        if (!p.requestHash) continue   // Phase 2 events; skip
         push(llm, p.requestHash, p.response)
       } else if (ev.type === 'tool.responded') {
         const p = ev.payload as ToolRespondedPayload
+        if (!p.requestHash) continue   // Phase 2 events; skip
         push(tool, p.requestHash, { output: p.output, error: p.error })
       }
     }
@@ -38,13 +40,13 @@ export class CacheIndex {
 
   consumeLLM(hash: string): ModelResponse {
     const q = this.llm.get(hash)
-    if (!q || q.length === 0) throw new Error(`CacheIndex: LLM queue empty for hash ${hash}`)
+    if (!q || q.length === 0) throw new CacheIndexEmptyError(`CacheIndex: LLM queue empty for hash ${hash}`)
     return q.shift()!
   }
 
   consumeTool(hash: string): unknown {
     const q = this.tool.get(hash)
-    if (!q || q.length === 0) throw new Error(`CacheIndex: tool queue empty for hash ${hash}`)
+    if (!q || q.length === 0) throw new CacheIndexEmptyError(`CacheIndex: tool queue empty for hash ${hash}`)
     const outcome = q.shift()!
     if (outcome.error) {
       const err = new Error(outcome.error.message) as Error & { retryable?: boolean; code?: string }
@@ -77,4 +79,18 @@ function push<K, V>(map: Map<K, V[]>, key: K, value: V): void {
   const q = map.get(key)
   if (q) q.push(value)
   else   map.set(key, [value])
+}
+
+/**
+ * Thrown by CacheIndex.consumeLLM / consumeTool when the FIFO queue for a
+ * given hash is empty (i.e. the replay has consumed all recorded responses).
+ * Using a named class lets callers distinguish "queue exhausted" from a
+ * reconstructed tool error (which is also an Error) without fragile
+ * message-prefix matching.
+ */
+export class CacheIndexEmptyError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'CacheIndexEmptyError'
+  }
 }

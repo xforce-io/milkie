@@ -1,6 +1,6 @@
 import type { IIOPort } from '../runtime/IOPort.js'
 import type { ModelRequest, ModelResponse } from '../types/model.js'
-import type { CacheIndex } from './CacheIndex.js'
+import { CacheIndex, CacheIndexEmptyError } from './CacheIndex.js'
 import { hashModelRequest, hashToolCall } from './hash.js'
 import { ReplayDivergenceError } from './ReplayDivergenceError.js'
 
@@ -20,14 +20,17 @@ export class ReplayingIOPort implements IIOPort {
     const hash = hashModelRequest(request)
     try {
       return this.cache.consumeLLM(hash)
-    } catch {
-      const lastUserMessage = request.messages
-        .filter(m => m.role === 'user')
-        .flatMap(m => m.content)
-        .map(c => c.type === 'text' ? c.text : `[${c.type}]`)
-        .pop() ?? ''
-      const summary = `model=${request.model} lastUser=${lastUserMessage.slice(0, 80)}`
-      throw new ReplayDivergenceError('llm', hash, summary, this.cache.allHashes().llm.slice(0, 5))
+    } catch (err) {
+      if (err instanceof CacheIndexEmptyError) {
+        const lastUserMessage = request.messages
+          .filter(m => m.role === 'user')
+          .flatMap(m => m.content)
+          .map(c => c.type === 'text' ? c.text : `[${c.type}]`)
+          .pop() ?? ''
+        const summary = `model=${request.model} lastUser=${lastUserMessage.slice(0, 80)}`
+        throw new ReplayDivergenceError('llm', hash, summary, this.cache.allHashes().llm.slice(0, 5))
+      }
+      throw err
     }
   }
 
@@ -40,9 +43,9 @@ export class ReplayingIOPort implements IIOPort {
     try {
       return this.cache.consumeTool(hash)
     } catch (err) {
-      // consumeTool throws a normal Error for "queue empty"; rethrows reconstructed
-      // tool errors for recorded failures. Distinguish by message prefix.
-      if (err instanceof Error && err.message.startsWith('CacheIndex: tool queue empty')) {
+      // consumeTool throws CacheIndexEmptyError for "queue empty"; rethrows
+      // reconstructed tool errors for recorded failures. Distinguish structurally.
+      if (err instanceof CacheIndexEmptyError) {
         const summary = `toolName=${toolName} input=${JSON.stringify(input).slice(0, 80)}`
         throw new ReplayDivergenceError('tool', hash, summary, this.cache.allHashes().tool.slice(0, 5))
       }
