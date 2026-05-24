@@ -38,14 +38,14 @@ Last updated: 2026-05-24
   with zero LLM calls.
 - **Evolution and Lineage-by-typed-relations are deferred** — there are
   open architectural questions before code work starts on either.
-- **Reference UI projection is now an explicit target, deferred.**
-  ARCHITECTURE.md promotes UI from "optional" to "deferred reference
-  projection" — the product thesis *runs as the primary engineering
-  product* needs a visual surface for runs to be perceptible as objects.
-  Form is TBD; full design waits for Phase 5 (so five of the six
-  capabilities have real data structures to render). One near-term probe
-  is scoped: a static HTML `trace report` for `s-002`, driven entirely
-  by CLI JSON output.
+- **Reference UI projection — first probe landed.** ARCHITECTURE.md
+  promotes UI from "optional" to "deferred reference projection". The
+  s-002 static HTML probe is now shipped: `milkie trace report <runId>`
+  (with `trace render-html` as the underlying pure-projection primitive
+  and `trace inspect --include-children` for sub-agent fan-out) renders
+  a completed run as a single self-contained HTML file. Full UI form
+  remains TBD until Phase 5 capabilities (fork / diff / suite) land and
+  CLI output contracts stabilize.
 
 ---
 
@@ -278,14 +278,15 @@ These don't block any phase but pay back continuously.
   implements it; CLI auto-loads at every startup. Follow-up: a
   `milkie init` ergonomics command to scaffold `.milkie/agents.json` +
   default `.gitignore` for a new project (separate spec when needed).
-- **`examples/` buildout.** First example (`examples/s-005-replay/`)
-  landed and demonstrates the SDK ↔ CLI parity pattern: paired
-  `record.ts` / `replay-sdk.ts` / `replay-cli.sh` against a frozen
-  JSONL fixture, no API key. Each new example follows the same shape.
-  Likely next: `s-002` (inspect) using the new `trace inspect` verb —
-  no Phase 5 dependency. Phase-5-gated examples: `s-006` (fork) /
-  `s-012` (suite replay + classify) / `s-013` (variant search) /
-  `s-015` (sub-agent in-flight trace consumption).
+- **`examples/` buildout.** Two examples landed:
+  `examples/s-005-replay/` (paired `record.ts` / `replay-sdk.ts` /
+  `replay-cli.sh` against a frozen JSONL fixture) demonstrates SDK ↔
+  CLI parity for replay; `examples/s-002-inspect/` (`record.ts` +
+  `report.sh`) demonstrates `trace report` rendering a recorded run to
+  self-contained HTML. Each new example follows the same shape.
+  Phase-5-gated examples: `s-006` (fork) / `s-012` (suite replay +
+  classify) / `s-013` (variant search) / `s-015` (sub-agent in-flight
+  trace consumption).
 - **In-flight semantics spec.** `inspect` / `lineage` on a still-running
   run — return-at-snapshot vs block-until-done vs cursor-based polling.
   CLI surface spec §9 still has this open; relevant when s-015 lands.
@@ -293,20 +294,19 @@ These don't block any phase but pay back continuously.
   paths only; the happy path against a real LLM adapter is exercised by
   the existing e2e suite (s-001 / s-009 / s-011) but not yet through the
   CLI. A small CLI-level live test would close the loop.
-- **Static HTML trace report (s-002 probe).** Single command
-  (`milkie trace report <runId> > report.html`) that renders an event
-  timeline for one completed run, driven entirely by
-  `trace inspect --format json` output. Static HTML + CSS + minimal
-  vanilla JS for fold / unfold; no framework, no app shell, no state,
-  no server. Purpose is to validate two architectural claims cheaply:
-  (a) visual rendering meaningfully changes trace affordance vs. CLI
-  output alone, (b) the CLI JSON contract is rich enough to drive a
-  projection. Scope is intentionally one capability (Observable) and
-  one story (`s-002`) — does not pre-commit a UI form (local viewer /
-  IDE extension / hosted product), does not touch Phase 5 data
-  structures. Outputs are immediately usable as README screenshots and
-  example artifacts even if no further UI work follows; if the probe
-  shows CLI gaps or affordance fails to materialize, it deletes cheaply.
+- **Static HTML trace report (s-002 probe) — landed.** Three commands
+  shipped: `trace inspect --include-children` (descendant scan),
+  `trace render-html --input <file>` (pure JSONL → HTML projection,
+  architectural firewall: no event-store access), `trace report <runId>`
+  (sugar wrapping both). Renders one completed run as a self-contained
+  HTML timeline — paired `*.requested`/`*.responded` collapsed to one
+  entry via `causedBy`, sub-agent fan-out nested recursively, inline
+  CSS + vanilla JS, raw events embedded as `<script
+  type="application/json" id="trace-data">` so the file is its own
+  re-renderable archive. `examples/s-002-inspect/` demonstrates the
+  end-to-end flow. Follow-ups deferred: CLI surface spec update for the
+  three new verbs; richer in-flight badge styling; an s-007-shape
+  integration test (3 sub-agent fan-out).
 
 ---
 

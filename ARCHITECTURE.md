@@ -117,13 +117,16 @@ as implemented.
 - **Capability vocabulary in full** — observable / diagnosable / lineage /
   replay / fork / diff are described as a 6-capability surface; today only
   basic span query exists via TrajectoryStore.
-- **Reference UI projection** — none today; deferred until CLI output
-  contracts stabilize. Form TBD (local viewer / static report generator /
-  IDE extension). The product thesis "runs as the primary engineering
+- **Reference UI projection** — first probe shipped: `milkie trace report
+  <runId>` renders a completed run as a self-contained HTML timeline
+  (single agent + recursive sub-agent nesting via Observable). Full form
+  TBD — local viewer / static report generator / IDE extension are still
+  open, and Phase-5 capabilities (fork / diff / lineage / suite) have no
+  visual surface yet. The product thesis "runs as the primary engineering
   product" requires a visual surface for humans to perceive runs as
-  objects — without it the thesis is unverifiable in practice. The library
-  is incomplete without a reference projection, but premature commitment
-  to a specific form would couple it to one presentation.
+  objects; the probe validates that CLI JSON output is rich enough to
+  drive a projection, but the library is still incomplete without a UI
+  story for the Phase 5–6 capabilities.
 
 ### Migration intentions (not commitments)
 

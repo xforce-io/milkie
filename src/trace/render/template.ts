@@ -11,6 +11,7 @@ export const STYLES = `
            background: #e8f5e8; color: #2d6a2d; }
   .badge.error { background: #fde8e8; color: #a13; }
   .badge.interrupted { background: #fff4e0; color: #8a5a00; }
+  .badge.in-flight { background: #e8f0fe; color: #1a56db; }
   .entry { display: flex; gap: 8px; padding: 6px 0; border-bottom: 1px solid #f0f0f2;
            cursor: pointer; }
   .entry:last-child { border-bottom: none; }
