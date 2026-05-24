@@ -30,8 +30,8 @@ export class RecordingIOPort implements IIOPort {
     private readonly actor: string = 'runtime',
   ) {}
 
-  attach(payload: AgentRunStartedPayload): void {
-    void this.store.append({
+  async attach(payload: AgentRunStartedPayload): Promise<void> {
+    await this.store.append({
       id:        this.inner.uuid(),
       runId:     this.runId,
       type:      'agent.run.started',
@@ -41,8 +41,8 @@ export class RecordingIOPort implements IIOPort {
     })
   }
 
-  detach(payload: AgentRunCompletedPayload): void {
-    void this.store.append({
+  async detach(payload: AgentRunCompletedPayload): Promise<void> {
+    await this.store.append({
       id:        this.inner.uuid(),
       runId:     this.runId,
       type:      'agent.run.completed',
@@ -114,6 +114,7 @@ export class RecordingIOPort implements IIOPort {
       }
       if (typeof e.retryable === 'boolean') errorPayload.retryable = e.retryable
       if (typeof e.code === 'string')       errorPayload.code      = e.code
+      // 'Error' is the default name; omit it as it carries no information
       if (typeof e.name === 'string' && e.name !== 'Error') errorPayload.name = e.name
 
       await this.store.append({

@@ -301,16 +301,12 @@ describe('RecordingIOPort — Phase 3 additions', () => {
     const store = new MemoryEventStore()
     const port = new RecordingIOPort(new DefaultIOPort(new StubGateway([])), store, 'r1')
 
-    port.attach({
+    await port.attach({
       agentId:   'a1',
       goal:      'do the thing',
       input:     'go',
       contextId: 'ctx-1',
-      parentId:  undefined,
     })
-
-    // attach uses store.append (async); flush microtasks
-    await new Promise(resolve => setImmediate(resolve))
 
     const events = await store.readByRunId('r1')
     const started = events.find(e => e.type === 'agent.run.started')!
@@ -323,9 +319,8 @@ describe('RecordingIOPort — Phase 3 additions', () => {
     const store = new MemoryEventStore()
     const port = new RecordingIOPort(new DefaultIOPort(new StubGateway([])), store, 'r1')
 
-    port.attach({ agentId: 'a1', goal: 'g', input: 'i', contextId: 'c1' })
-    port.detach({ status: 'completed', lastTextOutput: 'done' })
-    await new Promise(resolve => setImmediate(resolve))
+    await port.attach({ agentId: 'a1', goal: 'g', input: 'i', contextId: 'c1' })
+    await port.detach({ status: 'completed', lastTextOutput: 'done' })
 
     const events = await store.readByRunId('r1')
     const completed = events.find(e => e.type === 'agent.run.completed')!

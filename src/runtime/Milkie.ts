@@ -133,26 +133,20 @@ export class Milkie {
       await runtime.loadCheckpoint(restoredCheckpoint)
     }
 
-    if (ioPort instanceof RecordingIOPort) {
-      ioPort.attach({
-        agentId:   config.agentId,
-        goal:      request.goal,
-        input:     request.input,
-        contextId,
-        parentId:  undefined,
-      })
-    }
+    const rec = ioPort instanceof RecordingIOPort ? ioPort : null
+    await rec?.attach({
+      agentId:   config.agentId,
+      goal:      request.goal,
+      input:     request.input,
+      contextId,
+    })
 
     try {
       const result = await runtime.run(request.input)
-      if (ioPort instanceof RecordingIOPort) {
-        ioPort.detach({ status: result.status, lastTextOutput: result.output })
-      }
+      await rec?.detach({ status: result.status, lastTextOutput: result.output })
       return result
     } catch (err) {
-      if (ioPort instanceof RecordingIOPort) {
-        ioPort.detach({ status: 'error', error: err instanceof Error ? err.message : String(err) })
-      }
+      await rec?.detach({ status: 'error', error: err instanceof Error ? err.message : String(err) })
       throw err
     }
   }
