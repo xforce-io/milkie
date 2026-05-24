@@ -287,19 +287,22 @@ export class Milkie {
   }
 
   /**
-   * Re-run a recorded agent run from its event log; all LLM/tool I/O
-   * is served from the event-derived CacheIndex — no live calls. Result
-   * is structurally equivalent to the original run (status, output);
-   * timestamps and UUIDs are not guaranteed identical (byte-identical
-   * replay is Phase 4).
+   * Re-run a recorded agent run from its event log. Every IIOPort method
+   * (LLM, tool, port.now, port.uuid) is served from the event-derived
+   * CacheIndex — no live calls. Replay is byte-identical for any value
+   * the agent observes through the port: paired req/resp matched by
+   * canonical request hash for LLM/tool, position-FIFO for clock/uuid.
    *
-   * Phase 3 constraints:
+   * Strict P-wide divergence:
+   *  - over-consume on any queue → ReplayDivergenceError immediately
+   *  - under-consume on any queue at replay tail → ReplayDivergenceError
+   *
+   * Constraints:
    *  - Requires this Milkie has an eventStore configured
    *  - Requires this Milkie has the original agentId registered
    *  - Throws ReplayError on structural failures (missing run, missing
    *    lifecycle event, unknown agentId)
-   *  - Throws ReplayDivergenceError when the replayed agent issues an
-   *    LLM/tool call whose hash is not in the recorded cache
+   *  - Throws ReplayDivergenceError on any LLM/tool/clock/uuid divergence
    */
   async replay(runId: string): Promise<AgentResult> {
     if (!this.eventStore) {
