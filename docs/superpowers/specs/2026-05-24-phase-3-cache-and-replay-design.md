@@ -139,7 +139,7 @@ export function extractRunSnapshot(events: Event[]): {
   input?:  unknown
   contextId: string
   parentId?: string
-  terminalStatus?: 'completed' | 'failed' | 'interrupted'
+  terminalStatus?: 'completed' | 'error' | 'interrupted'
 }
 ```
 
@@ -175,7 +175,7 @@ export class ReplayDivergenceError extends Error {
 
 ```typescript
 | 'agent.run.started'      // payload: { agentId, goal, input?, contextId, parentId? }
-| 'agent.run.completed'    // payload: { status: 'completed' | 'failed' | 'interrupted', lastTextOutput?, error? }
+| 'agent.run.completed'    // payload: { status: 'completed' | 'error' | 'interrupted', lastTextOutput?, error? }
 ```
 
 `agent.run.started.payload` 只携带 **lifecycle identity** 与 **run 入口参数**——不携带 `AgentConfig`、不携带 tool schemas、不携带 prompts。`Milkie.replay()` 用 `agentId` 从当前注册表查到 `AgentConfig`，复用当前 tool registry。
@@ -228,7 +228,8 @@ async replay(runId: string): Promise<AgentResult>
 
 ### `Milkie`（src/runtime/Milkie.ts）
 
-- `run()` / `runAgent()` 在 wrap RecordingIOPort 后立即调 `attach(...)`；结束后（finally）调 `detach(...)`
+- `invoke()` 在 wrap RecordingIOPort 后立即调 `attach(...)`；结束后（finally）调 `detach(...)`
+- `resume()` 的 record/replay 语义不纳入 Phase 3；后续与 checkpoint / non-determinism log 一起设计
 - 新增 `replay(runId)` 方法（见 §4）
 - `replay` 内部构造的 IOPort 是裸的 ReplayingIOPort，**不经过 wrapIOPort 装饰链**（replay 不写新事件）
 

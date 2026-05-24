@@ -630,7 +630,7 @@ In the `invoke` method (around line 116-134), replace the `const runtime = new A
     }
 ```
 
-Do the same change in the `resume` method (around line 176-192): hoist `ioPort` into a `const`, wrap the `runtime.run(input)` call with attach/detach.
+**Do NOT modify `resume`.** Per spec §5, Phase 3 only wraps `invoke()` with attach/detach. The `resume()` path will be handled in a later phase together with checkpoint / non-determinism log design.
 
 Note: `RecordingIOPort` is already imported in `src/runtime/Milkie.ts` from Phase 2. No new import needed for this task.
 
