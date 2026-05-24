@@ -172,6 +172,25 @@ export async function main(argv: string[]): Promise<MainResult> {
     })
 
   trace
+    .command('report <runId>')
+    .description('Render <runId> (and any descendant sub-agent runs) as a self-contained HTML report to stdout')
+    .action(async (runId: string) => {
+      const milkieDir = findMilkieDir(process.cwd())
+      if (!milkieDir) {
+        throw new Error('no .milkie/ directory found upward from cwd')
+      }
+      const runsDir = path.join(milkieDir, 'runs')
+      const eventStore = new JsonlEventStore(runsDir)
+      const { findDescendantRuns } = await import('../trace/render/children.js')
+      const { renderHtml } = await import('../trace/render/html.js')
+
+      const runIds = [runId, ...(await findDescendantRuns(runsDir, runId))]
+      const events = []
+      for (const id of runIds) events.push(...(await eventStore.readByRunId(id)))
+      stdout.push(renderHtml(events))
+    })
+
+  trace
     .command('replay <runId>')
     .description('Replay a recorded run from .milkie/runs/<runId>.jsonl')
     .action(async (runId: string) => {
