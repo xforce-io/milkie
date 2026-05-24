@@ -4,7 +4,7 @@ Projected view over every story in this directory. Conventions live in
 `README.md`. A regenerator script may overwrite the tables below; the
 **Notes** section is hand-maintained.
 
-Last updated: 2026-05-24 (Phase 2: basic Agent Trace event log implemented; cache/replay/fork still target)
+Last updated: 2026-05-24 (Phase 3: cache + structural replay implemented; s-005 active)
 
 ## By id
 
@@ -56,18 +56,18 @@ Cannot be validated until target infrastructure lands. Story content stands
 as design specification.
 
 - **s-004** Lineage — Event-sourced log ✓ basic recording exists; still needs Lineage query API (causedBy graph traversal + lineage projection)
-- **s-005** Deterministic replay — IOPort ✓, Event-sourced log ✓ (basic); still needs Response cache, Non-determinism log, Replay engine
+- **s-005** Deterministic replay — IOPort ✓, Event log ✓, Cache ✓, Replay engine ✓; still needs Non-determinism log for byte-identical replay
 - **s-006** Fork at event — IOPort ✓, Event-sourced log ✓ (basic); still needs Response cache, Fork primitive
 
 ## By status
 
 ### draft
 
-- s-001 through s-011 (all 11 stories)
+- s-001 through s-004, s-006 through s-011 (10 stories)
 
 ### active
 
-_(none yet — moving to active requires E2E test for Ready stories)_
+- s-005 (structural replay implemented; byte-identical pending Phase 4 non-determinism log)
 
 ### deprecated
 

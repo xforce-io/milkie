@@ -15,7 +15,7 @@
     "test:e2e": "npm run test:e2e:deterministic",
     "test:e2e:all": "jest --testPathPattern=e2e",
     "test:e2e:deterministic": "jest tests/e2e/deterministic.test.ts tests/e2e/s-011-multi-state-fsm-intent-routing-and-slot-filling.e2e.test.ts --testNamePattern=\"Deterministic|Path D\" --runInBand",
-    "test:e2e:live": "jest tests/e2e/s-001-react-with-intra-agent-parallel-tools.e2e.test.ts tests/e2e/s-007-inter-agent-parallel-code-review.e2e.test.ts tests/e2e/s-008-long-task-interrupt-and-resume.e2e.test.ts tests/e2e/s-009-multi-turn-with-tool-error-recovery.e2e.test.ts tests/e2e/s-010-skill-versioned-load-and-ab-experiment.e2e.test.ts tests/e2e/s-011-multi-state-fsm-intent-routing-and-slot-filling.e2e.test.ts --runInBand",
+    "test:e2e:live": "jest tests/e2e/s-001-react-with-intra-agent-parallel-tools.e2e.test.ts tests/e2e/s-005-deterministic-replay.e2e.test.ts tests/e2e/s-007-inter-agent-parallel-code-review.e2e.test.ts tests/e2e/s-008-long-task-interrupt-and-resume.e2e.test.ts tests/e2e/s-009-multi-turn-with-tool-error-recovery.e2e.test.ts tests/e2e/s-010-skill-versioned-load-and-ab-experiment.e2e.test.ts tests/e2e/s-011-multi-state-fsm-intent-routing-and-slot-filling.e2e.test.ts --runInBand",
     "test:e2e:redis": "sh tests/e2e/run-redis-e2e.sh",
     "lint": "eslint src --ext .ts"
   },

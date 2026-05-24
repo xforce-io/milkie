@@ -59,18 +59,24 @@ as implemented.
   `causedBy` chains. MemoryEventStore and JsonlEventStore implementations
   provided. Scope is Phase 2: LLM + tool I/O only; lifecycle events, FSM
   transitions, and content-addressed cache are target. (`src/trace/`)
+- **Content-addressed cache + structural replay** — `CacheIndex` projects an
+  event log into FIFO response queues keyed by canonical request hash;
+  `ReplayingIOPort` serves LLM and tool calls from it. `Milkie.replay(runId)`
+  re-runs a recorded run with zero live LLM/tool calls; cache miss = strict
+  `ReplayDivergenceError`. Phase 3 scope: same-host / same-code /
+  same-registered-agent replay; timestamps and UUIDs not byte-identical
+  (Phase 4 non-determinism log). (`src/trace/CacheIndex.ts`,
+  `src/trace/ReplayingIOPort.ts`, `src/runtime/Milkie.ts:replay`)
 - **State stores for checkpoint/resume** — MemoryStore / SQLiteStore /
   RedisStore for interrupt/resume scenarios. (`src/store/`)
 
 ### Target only (not yet in code)
 
-- **Content-addressed response cache** — request hash → cached response;
-  required for deterministic replay. Phase 3.
 - **Non-determinism log** — recorded clock reads, UUIDs, random values, and
   external tool I/O outcomes; replay reads from log rather than re-sampling.
   Phase 4.
-- **Replay and Fork engines** — fold log → identical state; branch at any
-  event with shared prefix from cache. Phases 3 + 5.
+- **Fork engine** — branch a run at any event with shared prefix from cache
+  (no new model calls for the shared history). Phase 5.
 - **Structural diff** — typed comparison of two event logs / projected
   graphs. Phase 5.
 - **Lineage-by-typed-relations** — current event log only records I/O;
@@ -108,8 +114,11 @@ elsewhere.
 ## Overview
 
 milkie is the **application layer** of an agent stack, packaged as a library.
-Its public API is the stable entrypoint for applications, CLIs, services, and
-test harnesses; CLI is a consumer of the library, not a core subsystem.
+The library exposes two parallel facades: the **SDK facade** for in-process /
+programmatic consumers (applications, services, test harnesses) and the **CLI
+facade** for agent consumers (sub-agents that read traces, meta-agents that
+propose variants). Both are thin export surfaces over the same library
+substrate.
 
 The library contains three peer subsystems (Agent Runtime, Agent Trace,
 Evolution) and sits on top of layered infrastructure (Context Layer → Data +
@@ -121,9 +130,10 @@ Applications / CLI / Services / Test Harnesses
                          ▼
 ┌──── milkie library ──────────────────────────────────────┐
 │                                                           │
-│   ┌──────────────────────────────────────────────────┐   │
-│   │              Public API / SDK Facade              │   │
-│   └────────────────────────┬─────────────────────────┘   │
+│   ┌────────────────────────┬─────────────────────────┐   │
+│   │     SDK Facade         │      CLI Facade         │   │
+│   │  (dev consumers)       │  (agent consumers)      │   │
+│   └────────────────────────┴─────────────────────────┘   │
 │                            ↓                              │
 │   ┌──────────────────────────────────────────────────┐   │
 │   │                  Evolution                        │   │
@@ -174,10 +184,11 @@ entrypoints call into the library, while infrastructure layers may be provided
 by milkie adapters or by an existing platform (e.g. a knowledge / serving stack
 already in place at the organization).
 
-The **Public API / SDK Facade** is an export surface, not a subsystem. It
-re-exports the library's stable types and entrypoints and routes calls to the
-three subsystems below it. It carries no logic of its own and has no separate
-section in this document; its concrete shape is a design-doc concern.
+The **SDK Facade** and **CLI Facade** are export surfaces, not subsystems.
+They re-export the library's stable entrypoints and route calls to the three
+subsystems below. Neither carries logic of its own. The CLI facade is
+load-bearing for agent consumers (see cross-cutting decisions 12–13); concrete
+shapes are a design-doc concern.
 
 ---
 
@@ -290,6 +301,17 @@ It records, serves, and queries; it does not summarize, judge, or learn. Its
 storage is provided by the Data layer; its event schema and access patterns
 belong to Agent Trace itself.
 
+**Consumers.** Agent Trace serves two consumer classes: humans (debugging,
+compliance review, dashboards) and agents (meta-agents that read traces and
+propose variants, sub-agents that fork prior runs as starting points). The
+API shape is **agent-first** — uniform, structured, composable operations on
+typed events — because agent consumers determine the system's scale ceiling,
+and humans can consume the same surface through projections (CLI output,
+dashboards). Agent consumers reach Agent Trace through the CLI facade (see
+cross-cutting decision 13); operations like `fork` and `replay` return
+run / event ids that subsequent operations key off, not in-memory state
+objects.
+
 **Implementation note.** The current codebase has `TrajectoryStore`
 (`src/trajectory/`), a span-based observability store. It collects
 `llm.call`, `tool.call`, `fsm.transition` spans for the run. This is the
@@ -324,9 +346,12 @@ description.
 What Evolution **does not** contain:
 
 - No Variant Proposer — proposing changes (prompt edits, FSM topology
-  changes, skill set changes) is external (human, script, or another
-  milkie agent that consumes Agent Trace and registers experiments).
-- No root-cause analysis — querying Agent Trace is the user's job.
+  changes, skill set changes) comes from outside Evolution. The proposer
+  can be a human, a script, or a **milkie meta-agent** that consumes
+  Agent Trace through the CLI facade and registers experiments
+  programmatically.
+- No root-cause analysis — querying Agent Trace is the consumer's job
+  (human or agent).
 - No learning memory store — Experiment declarations live in the Experiment
   Registry; agent outcomes are read from Agent Trace; promotion/rollback
   decisions may be written as Evolution audit events.
@@ -456,6 +481,17 @@ typically signals a structural mistake, not a tradeoff.
     sub-agent-as-named-tool pattern; it is not a special runtime
     construct. A sub-agent appears in the parent's Agent Trace as one
     event plus a nested sub-trace.
+12. **Agent Trace has two consumer classes.** Humans (debugging,
+    compliance, dashboards) and agents (meta-agents, sub-agents reading
+    prior runs). The API shape is agent-first — uniform, structured,
+    composable — because agent consumers determine the scale ceiling.
+    Human-facing views are projections over the same surface, not parallel
+    APIs.
+13. **CLI is the agent-facing facade.** Agent consumers reach milkie
+    capabilities (especially Agent Trace) through CLI commands, not bespoke
+    tool schemas. CLI is uniform, self-describing via `--help`, and
+    composable with shell pipelines. A new consumer-facing capability ships
+    with a CLI entry point, or it is not reachable by agent consumers.
 
 ---
 

@@ -1,7 +1,7 @@
 ---
 id: s-005
 title: Deterministically replay a recorded agent run
-status: draft
+status: active
 kind: scenario
 subsystems:
   - agent-trace
@@ -20,6 +20,8 @@ tests:
 related:
   - ARCHITECTURE.md#agent-trace
 ---
+
+> Phase 3 provides structural replay; byte-identical pending Phase 4 non-determinism log.
 
 ## 场景叙事
 
