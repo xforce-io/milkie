@@ -1,7 +1,7 @@
 ---
 id: s-011
 title: Multi-state FSM with intent routing, slot filling, and escalation
-status: draft
+status: active
 kind: scenario
 subsystems:
   - agent-runtime

@@ -7,16 +7,14 @@
 
 import type { AgentConfig } from '../../src/types/agent.js'
 import type { AgentResult } from '../../src/types/common.js'
-import type { AgentCheckpoint } from '../../src/types/store.js'
+import type { AgentCheckpoint, IStateStore } from '../../src/types/store.js'
 import type { Trajectory } from '../../src/types/trajectory.js'
 import type { ToolDefinition } from '../../src/types/tool.js'
 import { Milkie } from '../../src/runtime/Milkie.js'
 import { TrajectoryStore } from '../../src/trajectory/TrajectoryStore.js'
-import { RedisStore } from '../../src/store/RedisStore.js'
-import { createRedisStore } from './redis.js'
+import { MemoryStore } from '../../src/store/MemoryStore.js'
 
 const SKIP = !process.env['VOLCENGINE_TOKEN'] || !process.env['VOLCENGINE_API_BASE']
-const RUN_REDIS_E2E = process.env['REDIS_E2E_REQUIRED'] === '1'
 
 // ─────────────────────────────── Tool ────────────────────────────────────────
 
@@ -83,7 +81,7 @@ const orderAnalystConfig: AgentConfig = {
 describe('Case 4: 多轮对话与错误恢复', () => {
   let milkie: Milkie
   let trajectoryStore: TrajectoryStore
-  let stateStore: RedisStore
+  let stateStore: IStateStore
   let queryOrdersTool: ToolDefinition
   let getCallCount: () => number
 
@@ -103,7 +101,7 @@ describe('Case 4: 多轮对话与错误恢复', () => {
     getCallCount = getCount
 
     trajectoryStore = new TrajectoryStore({ jsonlDir: './test-output/trajectories' })
-    stateStore = await createRedisStore(15)
+    stateStore = new MemoryStore()
     milkie = new Milkie({ stateStore, trajectoryStore, tools: [queryOrdersTool] })
     milkie.registerAgent(orderAnalystConfig)
 
@@ -128,12 +126,7 @@ describe('Case 4: 多轮对话与错误恢复', () => {
     trajectory = await trajectoryStore.getByAgentId('order-analyst')
   }, 120_000)
 
-  afterAll(async () => {
-    await stateStore?.flushdb()
-    await stateStore?.disconnect()
-  })
-
-  const live = SKIP || !RUN_REDIS_E2E ? it.skip : it
+  const live = SKIP ? it.skip : it
 
   live('两次 invoke 均成功完成', () => {
     expect(run1.status).toBe('completed')

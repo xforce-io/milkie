@@ -1,7 +1,7 @@
 ---
 id: s-007
 title: Inter-agent parallel via named sub-agent tools
-status: draft
+status: active
 kind: scenario
 subsystems:
   - agent-runtime

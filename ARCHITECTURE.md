@@ -24,9 +24,9 @@ multi-state workflows, multi-agent orchestration); every run is
 deterministically reproducible despite LLM non-determinism; every shipped
 agent has a first-class path to measurably improve the runs it produces.
 
-**Value.** A milkie agent's product is the **run** — diagnosable,
-debuggable, auditable, and improvable as a first-class artifact. Outputs
-are views over runs, not vice versa. Agents that produce only outputs
+**Value.** A milkie agent's product is the **run** — machine-operable,
+diagnosable, debuggable, auditable, and improvable as a first-class artifact.
+Outputs are views over runs, not vice versa. Agents that produce only outputs
 become black boxes that work until they don't.
 
 ## Implementation Status
@@ -68,7 +68,22 @@ as implemented.
   (Phase 4 non-determinism log). (`src/trace/CacheIndex.ts`,
   `src/trace/ReplayingIOPort.ts`, `src/runtime/Milkie.ts:replay`)
 - **State stores for checkpoint/resume** — MemoryStore / SQLiteStore /
-  RedisStore for interrupt/resume scenarios. (`src/store/`)
+  RedisStore for interrupt/resume scenarios. (`src/store/`) All three implement
+  `IStateStore` (`src/types/store.ts`); SQLite and Redis variants require
+  `init()`, MemoryStore is constructor-ready.
+- **Yield point + interrupt signal** — FSM has a `paused` reserved state and
+  a global `interrupt` event handler. `Milkie.interrupt(contextId)` writes an
+  interrupt flag into stateStore that AgentRuntime polls on each turn boundary,
+  enqueuing an `interrupt` event that transitions the FSM into `paused`. The
+  paused checkpoint can be re-loaded by a later `invoke` with the same
+  `contextId`. (`src/fsm/FSMEngine.ts:11,61-62`,
+  `src/runtime/Milkie.ts:297-300`, `src/runtime/AgentRuntime.ts:238-242`)
+- **Supervisor tree (interrupt propagation)** — When a parent agent is
+  interrupted, every spawned sub-agent receives the interrupt and writes its
+  own checkpoint; the parent's checkpoint records each child's `checkpointId`
+  in its `children` array so the whole tree can be resumed together.
+  (`src/runtime/AgentRuntime.ts:141-186`,
+  `src/types/store.ts:45-51` for `ChildAgentRecord`)
 
 ### Target only (not yet in code)
 
@@ -81,7 +96,17 @@ as implemented.
   graphs. Phase 5.
 - **Lineage-by-typed-relations** — current event log only records I/O;
   lineage requires emitting `object.created` / `relation.created` and
-  traversing causedBy chains as a graph. Phase 6 or later.
+  traversing causedBy chains as a graph. Both **forward queries**
+  (artifact → source) and **reverse queries** (source → all dependents)
+  are in scope. Phase 6 or later.
+- **Suite definition + batch replay** — saved sets of runs (e.g.
+  `golden_v1`) replayable as a single operation against a new code version;
+  per-run divergence reported as structured output for batch analysis by
+  downstream consumers. Phase 5.
+- **In-flight trace query API** — query a run's event log while the run is
+  still active, so sub-agents can consume their parent's trace mid-run.
+  Today event stores are writable during a run; query semantics across
+  in-flight + completed runs need an explicit contract. Phase 5.
 - **External Context Layer / Data / Execution / Foundation** — These
   infrastructure layers are described as outside the milkie boundary.
   Today they are partially internal (`src/context/ContextLayer.ts`) or
@@ -189,6 +214,38 @@ They re-export the library's stable entrypoints and route calls to the three
 subsystems below. Neither carries logic of its own. The CLI facade is
 load-bearing for agent consumers (see cross-cutting decisions 12–13); concrete
 shapes are a design-doc concern.
+
+---
+
+## User-facing surfaces
+
+milkie presents three abstraction layers to users, plus an optional UI
+projection. They differ in audience and abstraction density, not in
+capability — the same operation can be reached through any of them.
+
+| Layer | What it is | Audience | Density |
+|---|---|---|---|
+| **CLI** | The verb-oriented command surface | New users, operators, agent consumers (per invariant 13) | Highest — one command per user intent |
+| **SDK** | The `Milkie` class and convenience exports | TypeScript developers integrating milkie into an application | Medium — typed, ergonomic |
+| **API** | Raw library exports: `IIOPort`, `IEventStore`, event types, all interfaces | Deep integrators replacing an IOPort, plugging in a storage backend, building a new event sink | Lowest — protocol contracts |
+
+The **CLI** and **SDK** are the two explicit facades (see Overview). The
+**API** is the library substrate beneath both — not a separate facade, but the
+surface a user reaches when they need behavior the facades do not expose.
+
+**Learning progression** is naturally CLI → SDK → API: try a command in a
+shell, integrate into application code, drop to raw types for custom plumbing.
+Documentation, examples, and onboarding should mirror this path.
+
+**UI** is optional and must remain a **projection** over CLI / SDK output, not
+a fourth facade. A UI may render trace timelines, lineage graphs, diff views,
+suite replay results, etc.; user actions in the UI translate to CLI commands
+or SDK calls — the UI does not own its own query logic, fork algorithm, or
+state. Drift warning: when the UI starts answering questions the CLI cannot,
+it has turned into a parallel facade and violates invariant 12.
+
+The concrete CLI verb surface (commands, args, output shapes) is a
+design-doc concern; see `docs/superpowers/specs/2026-05-24-cli-surface-design.md`.
 
 ---
 
@@ -301,14 +358,15 @@ It records, serves, and queries; it does not summarize, judge, or learn. Its
 storage is provided by the Data layer; its event schema and access patterns
 belong to Agent Trace itself.
 
-**Consumers.** Agent Trace serves two consumer classes: humans (debugging,
-compliance review, dashboards) and agents (meta-agents that read traces and
-propose variants, sub-agents that fork prior runs as starting points). The
-API shape is **agent-first** — uniform, structured, composable operations on
-typed events — because agent consumers determine the system's scale ceiling,
-and humans can consume the same surface through projections (CLI output,
-dashboards). Agent consumers reach Agent Trace through the CLI facade (see
-cross-cutting decision 13); operations like `fork` and `replay` return
+**Consumers.** Agent Trace serves agent / machine consumers first:
+meta-agents that read traces and propose variants, sub-agents that fork prior
+runs as starting points, replay engines, evaluators, and audit automation.
+The API shape is **agent-first** — uniform, structured, composable operations
+on typed events — because agent consumers determine the system's scale
+ceiling. Humans are indirect consumers of the same substrate through
+projections (CLI rendering, dashboards, reports), not a reason to create
+parallel core APIs. Agent consumers reach Agent Trace through the CLI facade
+(see cross-cutting decision 13); operations like `fork` and `replay` return
 run / event ids that subsequent operations key off, not in-memory state
 objects.
 
@@ -481,17 +539,97 @@ typically signals a structural mistake, not a tradeoff.
     sub-agent-as-named-tool pattern; it is not a special runtime
     construct. A sub-agent appears in the parent's Agent Trace as one
     event plus a nested sub-trace.
-12. **Agent Trace has two consumer classes.** Humans (debugging,
-    compliance, dashboards) and agents (meta-agents, sub-agents reading
-    prior runs). The API shape is agent-first — uniform, structured,
-    composable — because agent consumers determine the scale ceiling.
-    Human-facing views are projections over the same surface, not parallel
-    APIs.
-13. **CLI is the agent-facing facade.** Agent consumers reach milkie
-    capabilities (especially Agent Trace) through CLI commands, not bespoke
-    tool schemas. CLI is uniform, self-describing via `--help`, and
-    composable with shell pipelines. A new consumer-facing capability ships
-    with a CLI entry point, or it is not reachable by agent consumers.
+12. **milkie core is agent-first.** Non-UI milkie surfaces are designed for
+    machine / agent consumers first: typed events, stable ids, structured
+    inputs and outputs, deterministic operations, and composable commands.
+    Humans consume projections over this substrate (dashboards, reports,
+    pretty CLI rendering), not separate core APIs.
+13. **CLI is the canonical agent-facing protocol facade.** Agent consumers
+    reach milkie capabilities (especially Agent Trace) through CLI commands,
+    not bespoke tool schemas. The CLI contract is machine-readable,
+    non-interactive by default, id-oriented, bounded, and stable enough to
+    serve as a protocol surface. Data goes to stdout; diagnostics go to
+    stderr; structured output is the default for non-TTY consumers. Human
+    friendly rendering is an optional projection. A new consumer-facing
+    capability ships with a CLI entry point, or it is not reachable by agent
+    consumers.
+
+---
+
+## Representative scenarios
+
+Concrete uses each Agent Trace primitive is designed to enable. One entry
+per capability (the 6-capability surface — observable / diagnosable /
+lineage / replay / fork / diff) plus the cross-cutting usage patterns that
+combine them under invariants 12–13. Stories under `docs/stories/` are the
+authoritative spec; this section keeps the architecture self-explanatory
+without depending on the story system to load.
+
+### Observable — inspect a completed run
+
+Given a `runId`, return the timeline of every event (FSM transitions, LLM
+calls, tool calls, working context updates) with filters by event type and
+time window. Pure read, no replay, no causal traversal.
+Story: [s-002](docs/stories/s-002-inspect-a-completed-run.md).
+
+### Diagnosable — explain a specific decision
+
+For any decision point in any run, return the working context at that
+moment, the prompt sent to the LLM, the response received, and the
+capability bindings in scope. Answers "why did the agent do this" without
+re-execution.
+Story: [s-003](docs/stories/s-003-explain-a-decision-with-context.md).
+
+### Lineage — attribute an artifact (forward) and assess impact (reverse)
+
+**Forward**: given a claim, recommendation, or output, return the causal
+chain back to LLM calls, tool results, retrieved documents, and source
+versions. **Reverse**: given a source identifier (content hash, retracted
+document version), return every run whose lineage references it. Both
+directions are typed-graph queries, not log searches.
+Stories: [s-004](docs/stories/s-004-lineage-from-artifact-to-source.md)
+(forward), [s-014](docs/stories/s-014-reverse-reference-lineage-query.md)
+(reverse).
+
+### Replay — reproduce a production run deterministically
+
+Re-run a recorded run end-to-end with zero live LLM/tool calls; state
+after replay matches the original. Local repro of prod failures, examples
+that ship without API keys, regression baselines.
+Story: [s-005](docs/stories/s-005-deterministic-replay.md).
+
+### Fork — branch a run at any event
+
+Continue a run from an arbitrary event with one parameter changed (prompt,
+tool choice, configuration). Prefix is served from the response cache, so
+the shared history is paid for once across the parent and all forks. The
+single-fork building block for counterfactual analysis and variant search.
+Story: [s-006](docs/stories/s-006-fork-at-event-for-what-if.md).
+
+### Diff — structurally compare two runs at scale
+
+Typed comparison of two event logs / projected graphs. The substrate for
+suite replay: replay a saved suite of real production runs against a new
+code version and classify each divergence (regression / improvement /
+neutral) from structured output, not log diffing.
+Story: [s-012](docs/stories/s-012-batch-replay-suite-and-classify-divergences.md).
+
+### Cross-cutting — variant search at bounded cost
+
+Fork × diff applied across N variant configurations. Cost is amortized via
+the shared cache prefix: actual LLM calls scale as N × tail_size, not
+N × full_run. This is the bridge between Agent Trace and Evolution — the
+mechanism that makes systematic variant exploration economically viable.
+Story: [s-013](docs/stories/s-013-variant-search-with-bounded-cost.md).
+
+### Cross-cutting — runtime trace consumption by a sub-agent
+
+A sub-agent spawned mid-run queries its parent's **in-flight** trace
+through the CLI facade to verify, second-guess, or augment the parent's
+reasoning — without redoing retrieval or re-calling the LLM for evidence
+already produced. The canonical use of invariants 12–13: trace is a
+substrate operable by other agents, not an after-the-fact artifact.
+Story: [s-015](docs/stories/s-015-subagent-reads-parent-trace-runtime.md).
 
 ---
 

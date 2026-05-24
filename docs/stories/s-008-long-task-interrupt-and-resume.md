@@ -1,7 +1,7 @@
 ---
 id: s-008
 title: Interrupt a long-running agent and resume from checkpoint
-status: draft
+status: active
 kind: scenario
 subsystems:
   - agent-runtime

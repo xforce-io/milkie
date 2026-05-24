@@ -1,7 +1,7 @@
 ---
 id: s-001
 title: ReAct agent with intra-agent parallel tools (plan-and-act)
-status: draft
+status: active
 kind: scenario
 subsystems:
   - agent-runtime

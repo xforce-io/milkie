@@ -1,7 +1,7 @@
 ---
 id: s-009
 title: Multi-turn conversation with tool error recovery
-status: draft
+status: active
 kind: scenario
 subsystems:
   - agent-runtime
