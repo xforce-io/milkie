@@ -1,4 +1,10 @@
-import type { Event, LlmRespondedPayload, ToolRespondedPayload } from './types.js'
+import type {
+  Event,
+  LlmRespondedPayload,
+  ToolRespondedPayload,
+  ClockReadPayload,
+  UuidGeneratedPayload,
+} from './types.js'
 import type { ModelResponse } from '../types/model.js'
 
 /**
@@ -8,20 +14,28 @@ import type { ModelResponse } from '../types/model.js'
  * or the hash was never recorded.
  */
 export class CacheIndex {
-  private readonly llm:  Map<string, ModelResponse[]>
-  private readonly tool: Map<string, ToolOutcome[]>
+  private readonly llm:   Map<string, ModelResponse[]>
+  private readonly tool:  Map<string, ToolOutcome[]>
+  private readonly clock: number[]
+  private readonly uuid:  string[]
 
   private constructor(
-    llm:  Map<string, ModelResponse[]>,
-    tool: Map<string, ToolOutcome[]>,
+    llm:   Map<string, ModelResponse[]>,
+    tool:  Map<string, ToolOutcome[]>,
+    clock: number[],
+    uuid:  string[],
   ) {
-    this.llm  = llm
-    this.tool = tool
+    this.llm   = llm
+    this.tool  = tool
+    this.clock = clock
+    this.uuid  = uuid
   }
 
   static fromEvents(events: Event[]): CacheIndex {
-    const llm:  Map<string, ModelResponse[]> = new Map()
-    const tool: Map<string, ToolOutcome[]>   = new Map()
+    const llm:   Map<string, ModelResponse[]> = new Map()
+    const tool:  Map<string, ToolOutcome[]>   = new Map()
+    const clock: number[] = []
+    const uuid:  string[] = []
 
     for (const ev of events) {
       if (ev.type === 'llm.responded') {
@@ -32,10 +46,14 @@ export class CacheIndex {
         const p = ev.payload as ToolRespondedPayload
         if (!p.requestHash) continue   // Phase 2 events; skip
         push(tool, p.requestHash, { output: p.output, error: p.error })
+      } else if (ev.type === 'clock.read') {
+        clock.push((ev.payload as ClockReadPayload).value)
+      } else if (ev.type === 'uuid.generated') {
+        uuid.push((ev.payload as UuidGeneratedPayload).value)
       }
     }
 
-    return new CacheIndex(llm, tool)
+    return new CacheIndex(llm, tool, clock, uuid)
   }
 
   consumeLLM(hash: string): ModelResponse {
@@ -58,11 +76,21 @@ export class CacheIndex {
     return outcome.output
   }
 
-  remaining(): { llm: number; tool: number } {
+  consumeClock(): number {
+    if (this.clock.length === 0) throw new CacheIndexEmptyError('CacheIndex: clock queue empty')
+    return this.clock.shift()!
+  }
+
+  consumeUuid(): string {
+    if (this.uuid.length === 0) throw new CacheIndexEmptyError('CacheIndex: uuid queue empty')
+    return this.uuid.shift()!
+  }
+
+  remaining(): { llm: number; tool: number; clock: number; uuid: number } {
     let llmCount = 0, toolCount = 0
     for (const q of this.llm.values())  llmCount  += q.length
     for (const q of this.tool.values()) toolCount += q.length
-    return { llm: llmCount, tool: toolCount }
+    return { llm: llmCount, tool: toolCount, clock: this.clock.length, uuid: this.uuid.length }
   }
 
   allHashes(): { llm: string[]; tool: string[] } {
