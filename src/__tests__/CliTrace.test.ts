@@ -141,4 +141,31 @@ sys`
       cwdSpy.mockRestore()
     }
   })
+
+  it('inspect --include-children emits parent + descendant events as JSONL', async () => {
+    const parentId = 'parent-run'
+    const childId = 'child-run'
+    fs.writeFileSync(
+      path.join(tmpDir, '.milkie', 'runs', `${parentId}.jsonl`),
+      JSON.stringify({ id: 'p1', runId: parentId, type: 'agent.run.started', actor: 'runtime', timestamp: 1,
+        payload: { agentId: 'p', goal: 'g', input: 'i', contextId: parentId } }) + '\n',
+    )
+    fs.writeFileSync(
+      path.join(tmpDir, '.milkie', 'runs', `${childId}.jsonl`),
+      JSON.stringify({ id: 'c1', runId: childId, type: 'agent.run.started', actor: 'runtime', timestamp: 2,
+        payload: { agentId: 'c', goal: 'g', input: 'i', contextId: childId, parentId } }) + '\n',
+    )
+
+    const cwdSpy = jest.spyOn(process, 'cwd').mockReturnValue(tmpDir)
+    try {
+      const without = await main(['trace', 'inspect', parentId])
+      expect(without.stdout.trim().split('\n')).toHaveLength(1)
+
+      const withFlag = await main(['trace', 'inspect', parentId, '--include-children'])
+      const runIds = withFlag.stdout.trim().split('\n').map(l => (JSON.parse(l) as { runId: string }).runId)
+      expect(runIds.sort()).toEqual([childId, parentId])
+    } finally {
+      cwdSpy.mockRestore()
+    }
+  })
 })
