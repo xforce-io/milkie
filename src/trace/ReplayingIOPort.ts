@@ -5,10 +5,11 @@ import { hashModelRequest, hashToolCall } from './hash.js'
 import { ReplayDivergenceError } from './ReplayDivergenceError.js'
 
 /**
- * IOPort implementation that serves LLM/tool calls from a CacheIndex
- * built from a recorded run's events. Cache miss → ReplayDivergenceError.
- * inner is used only for now()/uuid() passthrough — its invokeLLM /
- * invokeTool are never called during replay.
+ * IOPort implementation that serves every IIOPort method from a CacheIndex
+ * built from a recorded run's events: LLM/tool calls keyed by request hash,
+ * clock/uuid by FIFO position. Cache miss → ReplayDivergenceError.
+ * `inner` is retained for type contract symmetry with RecordingIOPort but is
+ * never called during replay; touching it from this class is a bug.
  */
 export class ReplayingIOPort implements IIOPort {
   constructor(
