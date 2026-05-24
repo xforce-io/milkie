@@ -363,6 +363,22 @@ export class Milkie {
 
     const result = await runtime.run(snapshot.input)
     if (divergenceError) throw divergenceError
+
+    // P-wide strict under-consume check: any recorded event the replay
+    // failed to consume signals divergence (the run took a different path
+    // than recording, or recording captured events the runtime no longer
+    // emits). Check all four queues.
+    const remaining = cache.remaining()
+    for (const kind of ['clock', 'uuid', 'llm', 'tool'] as const) {
+      const n = remaining[kind]
+      if (n > 0) {
+        throw new ReplayDivergenceError(
+          kind, '',
+          `${n} ${kind} event(s) unconsumed after replay completed`,
+          []
+        )
+      }
+    }
     return result
   }
 
