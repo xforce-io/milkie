@@ -22,15 +22,9 @@ Last updated: 2026-05-24
   signal, supervisor-tree propagation, skill epoch loading are verified.
 - **8 of 15 stories are `active`** (have green E2E tests). The 7 `draft`
   stories all depend on Phase 5–6 capabilities that haven't shipped yet.
-- **Phase 4 landed.** `clock.read` / `uuid.generated` event kinds; every
-  agent-facing `port.now()` / `port.uuid()` call recorded via a pending
-  buffer flushed at each async method entry; replay consumes from FIFO
-  queues on `CacheIndex`; `Milkie.replay()` enforces strict P-wide
-  divergence (over-consume **and** under-consume) across all four queues
-  (clock / uuid / llm / tool). s-005 e2e upgraded; s-002 example fixture
-  re-recorded.
 - **Next big rock:** Phase 5 fork / diff / suite replay. Phase 4 was its
-  prerequisite for honest fork semantics.
+  prerequisite for honest fork semantics — fork can now share recorded
+  prefixes byte-for-byte across forks instead of structurally.
 - **Invariants 12–13 landed and shipped to code.** Agent Trace is
   **agent-first**; **CLI is the canonical agent-facing protocol facade**.
   CLI surface spec
@@ -95,7 +89,7 @@ file pointers.
 
 `s-001` ReAct + intra-agent parallel · `s-002` Inspect a completed run ·
 `s-003` Explain a decision with context · `s-005` Deterministic replay
-(structural) · `s-007` Inter-agent parallel via named sub-agent tools ·
+(byte-identical) · `s-007` Inter-agent parallel via named sub-agent tools ·
 `s-008` Interrupt + resume (incl. supervisor tree) · `s-009` Multi-turn +
 tool error recovery · `s-011` Multi-state FSM intent routing + slot filling.
 
@@ -105,31 +99,19 @@ Full readiness view: `docs/stories/INDEX.md`.
 
 ## In progress
 
-**Nothing code-side actively in flight at this exact moment.** The
-just-landed agent-first wave covered design + scaffold + first example
-end-to-end:
+**Nothing code-side actively in flight.** The Phase 4 non-determinism
+log just landed (PR #2 merged); earlier in the same session the s-002
+HTML report probe and the agent-first CLI wave landed too. All
+substrate work for Phase 5 fork is now in place.
 
-- ARCHITECTURE.md got invariants 12–13 (agent-first / CLI as protocol
-  facade), `## User-facing surfaces` (CLI / SDK / API + UI as projection),
-  `## Representative scenarios` (one entry per 6-capability surface item
-  plus cross-cutting), and an expanded Implementation Status with
-  `Suite definition + batch replay` and `In-flight trace query API` as
-  Phase 5 targets.
-- Four new agent-first stories drafted: `s-012` / `s-013` / `s-014` /
-  `s-015`.
-- Specs: CLI surface design + agent registration manifest convention.
-- Code: `Milkie.loadManifest()`, the `milkie` CLI binary with 6 P0 verbs
-  (`agent list / run / resume / interrupt`, `trace inspect / replay`),
-  SQLite-backed CLI default stateStore so interrupt / resume work across
-  CLI processes.
-- First runnable example: `examples/s-005-replay/` with paired SDK and
-  CLI scripts plus a shipped fixture; demonstrates the SDK ↔ CLI parity
-  invariants 12–13 require.
-
-**Most natural next pickup** after Phase 4 land is Phase 5 (fork / diff
-/ suite). The cross-cutting work below stays valid in parallel. The
-earlier sessions closed the gap audit (ARCHITECTURE.md ↔ code ↔ stories)
-and added hermetic `s-002` / `s-003` tests.
+**Most natural next pickup is Phase 5** (fork primitive + structural
+diff + suite replay + in-flight trace query API). The cross-cutting
+work below stays valid in parallel — particularly the smaller
+follow-ups inherited from earlier landings: CLI surface spec update
+for the three new `trace` verbs (`render-html` / `report` /
+`--include-children`); s-007-shape integration test for 3-sub-agent
+HTML rendering; routing `Milkie.invoke()`'s contextId/agentRunId
+through `ioPort.uuid()` to close the last byte-identical hole.
 
 ---
 
