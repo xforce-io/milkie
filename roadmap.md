@@ -160,6 +160,15 @@ parent's in-flight trace). These four stories represent the "Agent Trace
 as agent-first protocol" surface — cross-cutting invariants 12–13 in
 `ARCHITECTURE.md`.
 
+**Cost contract for `s-013`.** Fork's amortization is real only when the
+variant change applies to events at index N where N > 0 — typical
+cases: a mid-run tool override, a synthesis-prompt-only swap, a routing
+decision at a specific FSM state. **Changing anything in the system
+prompt or initial messages invalidates the cache from the first LLM
+request onward**, so variant search across full-prompt edits pays the
+same as a from-scratch re-run. `s-013`'s contract must encode this:
+its acceptance asserts a cost bound based on tail size, not raw N.
+
 ### Phase 6 — Lineage-by-typed-relations
 
 **Goal.** Every artifact produced by an agent traces back to the
