@@ -159,6 +159,19 @@ export async function main(argv: string[]): Promise<MainResult> {
     })
 
   trace
+    .command('render-html')
+    .description('Render trace JSONL into a self-contained HTML report (reads --input file, writes HTML to stdout)')
+    .requiredOption('--input <path>', 'JSONL file produced by `trace inspect` (or any equivalent source)')
+    .action(async (opts: { input: string }) => {
+      const { renderHtml } = await import('../trace/render/html.js')
+      const content = fs.readFileSync(opts.input, 'utf-8')
+      const events = content.split('\n')
+        .filter(l => l.length > 0)
+        .map(l => JSON.parse(l))
+      stdout.push(renderHtml(events))
+    })
+
+  trace
     .command('replay <runId>')
     .description('Replay a recorded run from .milkie/runs/<runId>.jsonl')
     .action(async (runId: string) => {
