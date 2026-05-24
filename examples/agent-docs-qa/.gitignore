@@ -1,0 +1,9 @@
+# Runtime state — re-created on demand
+.milkie/state.sqlite
+.milkie/state.sqlite-journal
+.milkie/state.sqlite-wal
+.milkie/state.sqlite-shm
+.milkie/runs/
+
+# Browser cached state (none today; future-proofing)
+*.log
