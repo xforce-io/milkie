@@ -342,8 +342,20 @@ export class Milkie {
           throw err
         }
       },
-      now:  () => ioPort.now(),
-      uuid: () => ioPort.uuid(),
+      now: () => {
+        try { return ioPort.now() }
+        catch (err) {
+          if (err instanceof ReplayDivergenceError) divergenceError = err
+          throw err
+        }
+      },
+      uuid: () => {
+        try { return ioPort.uuid() }
+        catch (err) {
+          if (err instanceof ReplayDivergenceError) divergenceError = err
+          throw err
+        }
+      },
     }
 
     const runtime = new AgentRuntime({
