@@ -15,6 +15,11 @@ import { AgentRuntime } from './AgentRuntime.js'
 import { DefaultIOPort, type IIOPort } from './IOPort.js'
 import type { IEventStore } from '../trace/EventStore.js'
 import { RecordingIOPort } from '../trace/RecordingIOPort.js'
+import { CacheIndex } from '../trace/CacheIndex.js'
+import { ReplayingIOPort } from '../trace/ReplayingIOPort.js'
+import { ReplayError } from '../trace/ReplayError.js'
+import { ReplayDivergenceError } from '../trace/ReplayDivergenceError.js'
+import { extractRunSnapshot } from '../trace/RunSnapshot.js'
 
 export interface MilkieOptions {
   stateStore?:      IStateStore
@@ -207,6 +212,86 @@ export class Milkie {
     await runtime.loadCheckpoint(checkpoint)
 
     return runtime.run(input)
+  }
+
+  /**
+   * Re-run a recorded agent run from its event log; all LLM/tool I/O
+   * is served from the event-derived CacheIndex — no live calls. Result
+   * is structurally equivalent to the original run (status, output);
+   * timestamps and UUIDs are not guaranteed identical (byte-identical
+   * replay is Phase 4).
+   *
+   * Phase 3 constraints:
+   *  - Requires this Milkie has an eventStore configured
+   *  - Requires this Milkie has the original agentId registered
+   *  - Throws ReplayError on structural failures (missing run, missing
+   *    lifecycle event, unknown agentId)
+   *  - Throws ReplayDivergenceError when the replayed agent issues an
+   *    LLM/tool call whose hash is not in the recorded cache
+   */
+  async replay(runId: string): Promise<AgentResult> {
+    if (!this.eventStore) {
+      throw new ReplayError('Milkie has no eventStore; cannot replay')
+    }
+
+    const events = await this.eventStore.readByRunId(runId)
+    const snapshot = extractRunSnapshot(events)
+
+    const config = this.agents.get(snapshot.agentId)
+    if (!config) {
+      throw new ReplayError(`agentId "${snapshot.agentId}" not registered on this Milkie instance`)
+    }
+
+    const cache  = CacheIndex.fromEvents(events)
+    const inner  = new DefaultIOPort(this.gatewayOverride ?? createGateway(config.model))
+    const ioPort = new ReplayingIOPort(cache, inner)
+
+    const recorder = new InMemoryRecorder(undefined, config.agentId)
+
+    // Capture any ReplayDivergenceError thrown by the ioPort so we can
+    // re-throw it after AgentRuntime.run() returns (run() swallows all
+    // errors into status:'error' results).
+    let divergenceError: ReplayDivergenceError | undefined
+
+    const proxyPort: IIOPort = {
+      async invokeLLM(req) {
+        try {
+          return await ioPort.invokeLLM(req)
+        } catch (err) {
+          if (err instanceof ReplayDivergenceError) divergenceError = err
+          throw err
+        }
+      },
+      async invokeTool(name, input, execute) {
+        try {
+          return await ioPort.invokeTool(name, input, execute)
+        } catch (err) {
+          if (err instanceof ReplayDivergenceError) divergenceError = err
+          throw err
+        }
+      },
+      now:  () => ioPort.now(),
+      uuid: () => ioPort.uuid(),
+    }
+
+    const runtime = new AgentRuntime({
+      config,
+      goal:            snapshot.goal,
+      input:           snapshot.input,
+      contextId:       snapshot.contextId,
+      agentRunId:      runId,
+      parentId:        snapshot.parentId,
+      stateStore:      new MemoryStore(),  // ephemeral
+      recorder,
+      ioPort:          proxyPort,            // NOT wrapped — replay writes no events
+      extraTools:      this.extraTools,
+      subAgentConfigs: this.agents,
+      childRecorderFactory: undefined,
+    })
+
+    const result = await runtime.run(snapshot.input)
+    if (divergenceError) throw divergenceError
+    return result
   }
 
   async interrupt(contextId: string): Promise<void> {
