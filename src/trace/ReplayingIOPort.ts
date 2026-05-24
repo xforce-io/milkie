@@ -54,10 +54,34 @@ export class ReplayingIOPort implements IIOPort {
   }
 
   now(): number {
-    return this.inner.now()
+    try {
+      return this.cache.consumeClock()
+    } catch (err) {
+      if (err instanceof CacheIndexEmptyError) {
+        const r = this.cache.remaining()
+        throw new ReplayDivergenceError(
+          'clock', '',
+          `clock.read queue exhausted (remaining llm=${r.llm} tool=${r.tool} uuid=${r.uuid})`,
+          [],
+        )
+      }
+      throw err
+    }
   }
 
   uuid(): string {
-    return this.inner.uuid()
+    try {
+      return this.cache.consumeUuid()
+    } catch (err) {
+      if (err instanceof CacheIndexEmptyError) {
+        const r = this.cache.remaining()
+        throw new ReplayDivergenceError(
+          'uuid', '',
+          `uuid.generated queue exhausted (remaining llm=${r.llm} tool=${r.tool} clock=${r.clock})`,
+          [],
+        )
+      }
+      throw err
+    }
   }
 }

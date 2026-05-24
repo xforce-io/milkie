@@ -98,9 +98,13 @@ describe('ReplayingIOPort', () => {
     }
   })
 
-  it('now/uuid passthrough to inner', () => {
+  it('now() throws ReplayDivergenceError when clock cache is empty', () => {
     const port = new ReplayingIOPort(CacheIndex.fromEvents([]), new DefaultIOPort(new FailingGateway()))
-    expect(typeof port.now()).toBe('number')
-    expect(port.uuid()).toMatch(/^[0-9a-f-]{36}$/i)
+    expect(() => port.now()).toThrow(ReplayDivergenceError)
+  })
+
+  it('uuid() throws ReplayDivergenceError when uuid cache is empty', () => {
+    const port = new ReplayingIOPort(CacheIndex.fromEvents([]), new DefaultIOPort(new FailingGateway()))
+    expect(() => port.uuid()).toThrow(ReplayDivergenceError)
   })
 })
