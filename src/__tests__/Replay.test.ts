@@ -212,24 +212,24 @@ describe('Milkie.replay', () => {
     expect(replayGateway.callCount).toBe(0)
   }, 10_000)  // allow up to 10s for the 500ms retry delay × 2 runs
 
-  // ── Test #2: Same-hash multi-response served in FIFO order ───────────────
+  // ── Test #2: Replay serves the cached LLM response without live gateway ───
   //
-  // Verifies that when the same LLM request hash appears multiple times in
-  // the event log, replay serves them in FIFO order (not by overwriting).
-  // We construct this scenario directly at the boundary: manually append two
-  // llm.responded events with identical requestHash to the store, then replay.
-  it('serves same-hash LLM responses in FIFO order during replay', async () => {
+  // Verifies the integration-level cache lookup: a recorded run's LLM response
+  // is served from the event log on replay, and the live gateway is never
+  // invoked. Multi-response same-hash FIFO ordering — which used to be
+  // exercised here by injecting a phantom second llm.responded — is now
+  // unit-tested in CacheIndex.test.ts; integration-level FIFO across multiple
+  // genuine recorded calls requires a multi-step agent fixture, which we
+  // don't have today (and would be a stretch for what the integration test
+  // adds beyond the unit test).
+  it('serves a cached LLM response without invoking the live gateway', async () => {
     const store = new MemoryEventStore()
 
-    // First do a normal record run so we get a valid agent.run.started event
-    // and a known agentId/goal/input in the snapshot.
     const recordGateway = new SequentialGateway([text('first-response')])
     const recordMilkie = new Milkie({ stateStore: new MemoryStore(), gateway: recordGateway, eventStore: store })
     recordMilkie.registerAgent(oneShotAgent('fifo-agent'))
     const original = await recordMilkie.invoke({ agentId: 'fifo-agent', goal: 'fifo-goal', input: 'fifo-input' })
 
-    // Replay should serve the recorded response from the cache.
-    // This test verifies that basic FIFO cache lookup works correctly.
     const replayGateway = new SequentialGateway([])
     const replayMilkie = new Milkie({ stateStore: new MemoryStore(), gateway: replayGateway, eventStore: store })
     replayMilkie.registerAgent(oneShotAgent('fifo-agent'))
