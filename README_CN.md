@@ -21,12 +21,14 @@ Agent run（完整推理轨迹，不只是最终 output）是一等工程产品*
 - **Inter-agent 并行** — 子 Agent 以具名 tool 形式暴露给 Orchestrator，跨独立 FSM + Context 并发启动
 - **中断与恢复** — 协作式 yield point 自动存档，任意中断的运行都能从原点续跑
 - **多轮对话** — 跨 `invoke()` 复用同一 `contextId`，历史自动保留
+- **Event-sourced Agent Trace** — append-only event log 记录每次 LLM / tool I/O，带 `causedBy` 因果链；`Milkie.replay(runId)` 从 log 重跑已记录的 run，**零真实 LLM 调用**（Phase 3 结构等价 replay）
+- **`milkie` CLI** — `agent list / run / resume / interrupt` + `trace inspect / replay`，基于 `.milkie/agents.json` manifest；默认持久化 SQLite state store，interrupt / resume 跨 CLI 进程也能跑。CLI 是 agent 消费者的 canonical surface（ARCHITECTURE.md invariants 12–13），每个 verb 跟 SDK 调用 1:1 对应
 - **可插拔后端** — 按需切换 State Store（Memory / SQLite / Redis）和 Trajectory Recorder（JSONL / 内存 / 控制台）
 - **多 Provider** — 开箱支持 Anthropic 和所有 OpenAI-compatible 接口
 
-**Target 能力**（开发中）—— event-sourced Agent Trace（replay / fork /
-diff / lineage）、IOPort 非确定性边界、Evolution 实验子系统。当前实现
-vs. target 架构的对账详见
+**仍在开发的 Target 能力** —— fork / diff / lineage 作为 event log 上的
+一等操作、用于 byte-identical replay 的 non-determinism log、以及
+Evolution 实验子系统。当前实现 vs. target 架构的对账详见
 [ARCHITECTURE.md → Implementation Status](./ARCHITECTURE.md#implementation-status)。
 
 ---
@@ -98,6 +100,42 @@ console.log(result.output)
 
 ---
 
+## CLI
+
+包装好之后，同一个 agent 也可以直接从 shell 跑。把 manifest 放在
+`.milkie/agents.json` 里，从项目内任意目录调 CLI：
+
+```bash
+$ cat .milkie/agents.json
+{ "agents": [{ "id": "researcher", "file": "../agents/researcher.md" }] }
+
+# 1. 列已注册 agents（启动时 auto-load manifest）
+$ milkie agent list
+{"id":"researcher","source":"manifest"}
+
+# 2. 执行 agent —— 记录到 .milkie/runs/<runId>.jsonl
+$ milkie agent run researcher --input "TypeScript 5.0 有哪些新特性？"
+{"runId":"...","contextId":"...","status":"completed","lastOutput":"..."}
+
+# 3. Replay 已记录的 run —— 零真实 LLM 调用
+$ milkie trace replay <runId>
+{"newRunId":"...","status":"completed","output":"..."}
+
+# 4. 按 JSONL 输出 run 里的每一个 event
+$ milkie trace inspect <runId>
+{"id":"...","runId":"...","type":"agent.run.started",...}
+{"id":"...","runId":"...","type":"llm.requested",...}
+...
+```
+
+可用 verbs：`agent list / run / resume / interrupt`、
+`trace inspect / replay`。完整契约见
+[CLI surface design](./docs/superpowers/specs/2026-05-24-cli-surface-design.md)，
+`.milkie/agents.json` manifest 约定见
+[agent registration design](./docs/superpowers/specs/2026-05-24-agent-registration-design.md)。
+
+---
+
 ## 核心概念：Agent = FSM
 
 每个 Agent 由一组 **状态（state）** 描述。只有两种状态类型：
@@ -165,6 +203,17 @@ milkie 由三个 peer 子系统构成：
 用户场景以 stories 形式跟踪，见 [docs/stories/](./docs/stories/)，
 约定见 [README](./docs/stories/README.md)，索引见
 [INDEX](./docs/stories/INDEX.md)。
+
+---
+
+## Examples
+
+可跑的 demo 跟对应 story 配对放在 [examples/](./examples/) 下。每个 example
+都有一份 SDK 脚本和一份等价 CLI 调用，跑在固化 fixture 上，**无需 API key**。
+
+- [`s-005-replay`](./examples/s-005-replay/) — 确定性 replay（Phase 3）：
+  用 in-process stub gateway 录一个 run，然后 replay 两遍（一次 SDK、
+  一次 CLI），输出完全一致，**零真实 LLM 调用**。
 
 ---
 

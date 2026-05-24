@@ -23,12 +23,14 @@ The runtime, an event-sourced **Agent Trace**, and a deterministic
 - **Inter-agent parallelism** — sub-agents declared as named tools; orchestrators spawn them in parallel across independent FSM + context instances
 - **Interrupt / Resume** — cooperative yield points save checkpoints; any interrupted run resumes from the exact state
 - **Multi-turn conversations** — share a `contextId` across `invoke()` calls to accumulate history
+- **Event-sourced Agent Trace** — append-only event log records every LLM / tool I/O with `causedBy` chains; `Milkie.replay(runId)` re-runs a recorded run from the log with zero live LLM calls (Phase 3 structural replay)
+- **`milkie` CLI** — `agent list / run / resume / interrupt` and `trace inspect / replay` over a `.milkie/agents.json` manifest; SQLite-backed default state store so interrupt / resume work across CLI processes. The CLI is the canonical agent-facing surface (ARCHITECTURE.md invariants 12–13) and every verb maps 1:1 to an SDK call
 - **Pluggable backends** — swap state stores (Memory / SQLite / Redis) and trajectory recorders (JSONL / in-memory / console) without touching agent logic
 - **Provider-agnostic** — Anthropic and any OpenAI-compatible endpoint out of the box
 
-**Target capabilities** under development — event-sourced Agent Trace
-(replay / fork / diff / lineage), IOPort non-determinism boundary,
-Evolution experiment subsystem. See
+**Target capabilities** still in development — fork / diff / lineage as
+first-class operations over the event log, a non-determinism log for
+byte-identical replay, and the Evolution experiment subsystem. See
 [ARCHITECTURE.md → Implementation Status](./ARCHITECTURE.md#implementation-status)
 for what's in code today vs. what's target architecture.
 
@@ -101,6 +103,44 @@ console.log(result.output)
 
 ---
 
+## CLI
+
+Once the package is installed, the same agent runs from the shell. Drop a
+manifest under `.milkie/agents.json` and call the CLI from any directory
+inside the project:
+
+```bash
+$ cat .milkie/agents.json
+{ "agents": [{ "id": "researcher", "file": "../agents/researcher.md" }] }
+
+# 1. List registered agents (auto-loads the manifest on startup)
+$ milkie agent list
+{"id":"researcher","source":"manifest"}
+
+# 2. Run an agent — records to .milkie/runs/<runId>.jsonl
+$ milkie agent run researcher --input "What's new in TypeScript 5.0?"
+{"runId":"...","contextId":"...","status":"completed","lastOutput":"..."}
+
+# 3. Replay the recorded run — zero live LLM calls
+$ milkie trace replay <runId>
+{"newRunId":"...","status":"completed","output":"..."}
+
+# 4. Inspect every event in the run as JSONL
+$ milkie trace inspect <runId>
+{"id":"...","runId":"...","type":"agent.run.started",...}
+{"id":"...","runId":"...","type":"llm.requested",...}
+...
+```
+
+Available verbs: `agent list / run / resume / interrupt`,
+`trace inspect / replay`. See
+[CLI surface design](./docs/superpowers/specs/2026-05-24-cli-surface-design.md)
+for the full contract and
+[agent registration design](./docs/superpowers/specs/2026-05-24-agent-registration-design.md)
+for the `.milkie/agents.json` manifest convention.
+
+---
+
 ## Core Concept: Agent = FSM
 
 Every agent is described by a list of **states**. There are only two state types:
@@ -169,6 +209,19 @@ calibrating current code vs. target are documented in
 User-facing scenarios are tracked under [docs/stories/](./docs/stories/) with
 their own [README](./docs/stories/README.md) and
 [INDEX](./docs/stories/INDEX.md).
+
+---
+
+## Examples
+
+Runnable demos paired with their stories live under
+[examples/](./examples/). Each example ships an SDK script and the
+equivalent CLI invocation over a frozen fixture — no API key required.
+
+- [`s-005-replay`](./examples/s-005-replay/) — deterministic replay
+  (Phase 3): record a run with an in-process stub gateway, then replay
+  the recorded run twice (once via SDK, once via CLI) and observe
+  identical output with zero live LLM calls.
 
 ---
 
