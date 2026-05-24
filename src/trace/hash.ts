@@ -14,6 +14,10 @@ function normalize(value: unknown): unknown {
   if (value === null) return null
   if (Array.isArray(value)) return value.map(normalize)
   if (typeof value === 'object') {
+    const proto = Object.getPrototypeOf(value)
+    if (proto !== null && proto !== Object.prototype) {
+      throw new TypeError(`canonicalize: unsupported type ${(value as object).constructor?.name ?? typeof value}`)
+    }
     const out: Record<string, unknown> = {}
     const keys = Object.keys(value as object).sort()
     for (const k of keys) {

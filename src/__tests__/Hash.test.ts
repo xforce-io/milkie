@@ -19,6 +19,11 @@ describe('canonicalize', () => {
   it('distinguishes null from missing', () => {
     expect(canonicalize({ a: null })).not.toBe(canonicalize({}))
   })
+
+  it('throws on unsupported types (Date, Map, etc.)', () => {
+    expect(() => canonicalize(new Date(0))).toThrow(/unsupported type/i)
+    expect(() => canonicalize(new Map())).toThrow(/unsupported type/i)
+  })
 })
 
 const reqA = (): ModelRequest => ({
@@ -69,5 +74,11 @@ describe('hashToolCall', () => {
     const a = hashToolCall('t', { x: 1, y: 2 })
     const b = hashToolCall('t', { y: 2, x: 1 })
     expect(a).toBe(b)
+  })
+
+  it('produces a stable known digest (regression guard)', () => {
+    // Pinned: any change to the canonicalize algorithm or SHA-256 plumbing
+    // will break this assertion. Update only with intentional algorithm change.
+    expect(hashToolCall('grep', { pattern: 'x' })).toBe('5850a24803a595aeaafe553129f5830550e196fa19cc3673e339865132e94434')
   })
 })
