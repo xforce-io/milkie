@@ -58,4 +58,36 @@ describe('renderHtml', () => {
     expect(html.startsWith('<!doctype html>')).toBe(true)
     expect(html).toContain('</html>')
   })
+
+  it('renders the original event payload inside each entry for click-to-expand', () => {
+    const events: Event[] = [
+      e({ id: 's', runId: 'r1', type: 'agent.run.started', timestamp: 1,
+          payload: { agentId: 'echo', goal: 'g', input: 'i', contextId: 'r1' } }),
+      e({ id: 'q', runId: 'r1', type: 'llm.requested', timestamp: 2,
+          payload: { request: { messages: [{ role: 'user', content: 'hello-payload-marker' }] }, requestHash: 'h-marker' } }),
+      e({ id: 'a', runId: 'r1', type: 'llm.responded', timestamp: 3, causedBy: 'q',
+          payload: { response: { content: [{ type: 'text', text: 'response-marker' }] }, requestHash: 'h-marker' } }),
+    ]
+    const html = renderHtml(events)
+    // payload <pre> exists inside an entry
+    expect(html).toMatch(/<pre class="payload">[\s\S]*?<\/pre>/)
+    // both request and response payload content reachable in the rendered output
+    expect(html).toContain('hello-payload-marker')
+    expect(html).toContain('response-marker')
+  })
+
+  it('whitelists badge class and escapes status text to block attribute-breakout XSS', () => {
+    const malicious = '" onerror="alert(1)" x="'
+    const events: Event[] = [
+      e({ id: 's', runId: 'r1', type: 'agent.run.started', timestamp: 1,
+          payload: { agentId: 'echo', goal: 'g', input: 'i', contextId: 'r1' } }),
+      e({ id: 'c', runId: 'r1', type: 'agent.run.completed', timestamp: 9,
+          payload: { status: malicious } }),
+    ]
+    const html = renderHtml(events)
+    // attribute breakout must not happen — no raw onerror= reaches the document
+    expect(html).not.toContain('onerror="alert(1)"')
+    // the status string when rendered as text content is escaped
+    expect(html).not.toContain('class="badge ' + malicious)
+  })
 })

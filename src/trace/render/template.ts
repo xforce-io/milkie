@@ -12,9 +12,10 @@ export const STYLES = `
   .badge.error { background: #fde8e8; color: #a13; }
   .badge.interrupted { background: #fff4e0; color: #8a5a00; }
   .badge.in-flight { background: #e8f0fe; color: #1a56db; }
-  .entry { display: flex; gap: 8px; padding: 6px 0; border-bottom: 1px solid #f0f0f2;
+  .entry { display: block; padding: 6px 0; border-bottom: 1px solid #f0f0f2;
            cursor: pointer; }
   .entry:last-child { border-bottom: none; }
+  .entry-head { display: flex; gap: 8px; align-items: baseline; }
   .entry .icon { width: 16px; text-align: center; }
   .entry.llm .icon { color: #5b3ec9; }
   .entry.tool .icon { color: #2563eb; }

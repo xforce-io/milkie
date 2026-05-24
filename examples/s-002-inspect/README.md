@@ -66,7 +66,9 @@ $ open examples/s-002-inspect/report.html
 - Event timeline: one entry per LLM call / tool call / lifecycle event;
   paired `*.requested` / `*.responded` events collapse to a single entry
   via their `causedBy` chain.
-- Click any entry to toggle its expanded state.
+- Click any entry to expand its payload — for LLM/tool entries the raw
+  request and response JSON; for lifecycle entries the started/completed
+  payload (agent id, goal, parentId, status, last text output).
 - Type-filter chips (LLM / tool / lifecycle) at the top.
 - Sub-agent runs (when present) nest under their parent as indented
   child timelines — same layout, recursively.
