@@ -113,6 +113,8 @@ export class Milkie {
       })
       : new InMemoryRecorder(undefined, config.agentId)
 
+    const ioPort = this.wrapIOPort(gateway, agentRunId)
+
     const runtime = new AgentRuntime({
       config,
       goal:            request.goal,
@@ -121,9 +123,9 @@ export class Milkie {
       agentRunId,
       stateStore:      this.stateStore,
       recorder,
-      ioPort:          this.wrapIOPort(gateway, agentRunId),
+      ioPort,
       extraTools:      this.extraTools,
-      subAgentConfigs: this.agents,  // all registered agents are available as sub-agents
+      subAgentConfigs: this.agents,
       childRecorderFactory,
     })
 
@@ -131,7 +133,28 @@ export class Milkie {
       await runtime.loadCheckpoint(restoredCheckpoint)
     }
 
-    return runtime.run(request.input)
+    if (ioPort instanceof RecordingIOPort) {
+      ioPort.attach({
+        agentId:   config.agentId,
+        goal:      request.goal,
+        input:     request.input,
+        contextId,
+        parentId:  undefined,
+      })
+    }
+
+    try {
+      const result = await runtime.run(request.input)
+      if (ioPort instanceof RecordingIOPort) {
+        ioPort.detach({ status: result.status, lastTextOutput: result.output })
+      }
+      return result
+    } catch (err) {
+      if (ioPort instanceof RecordingIOPort) {
+        ioPort.detach({ status: 'error', error: err instanceof Error ? err.message : String(err) })
+      }
+      throw err
+    }
   }
 
   /**

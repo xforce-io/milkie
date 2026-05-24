@@ -18,6 +18,20 @@ import type {
 import type { IModelGateway, ModelRequest, ModelResponse } from '../types/model'
 import type { AgentConfig } from '../types/agent'
 
+function minimalAgentConfig(agentId: string): AgentConfig {
+  return {
+    agentId,
+    version:      '0.0.0',
+    systemPrompt: 'system',
+    fsm: {
+      states: [
+        { name: 'react', type: 'llm', instructions: 'reply hello', tools: [] },
+      ],
+    },
+    model: { provider: 'stub', model: 'stub', adapter: 'stub' },
+  }
+}
+
 // ---- Helpers ----
 
 function makeEvent(over: Partial<Event> = {}): Event {
@@ -181,7 +195,7 @@ describe('RecordingIOPort', () => {
 
     const events = await store.readByRunId('run-3')
     expect(events.map(e => e.type)).toEqual(['tool.requested', 'tool.responded'])
-    expect((events[1]?.payload as ToolRespondedPayload).error).toBe('boom')
+    expect((events[1]?.payload as ToolRespondedPayload).error?.message).toBe('boom')
     expect((events[1]?.payload as ToolRespondedPayload).output).toBeUndefined()
   })
 
@@ -244,5 +258,95 @@ describe('Milkie eventStore integration', () => {
     })
     expect(result.status).toBe('completed')
     // No store to inspect — just verify the run still works without recording
+  })
+})
+
+// ---- Phase 3 additions ----
+
+describe('RecordingIOPort — Phase 3 additions', () => {
+  it('LLM events carry requestHash matching hashModelRequest(request)', async () => {
+    const { hashModelRequest } = await import('../trace/hash')
+    const store = new MemoryEventStore()
+    const gateway = new StubGateway([textResponse('hi')])
+    const port = new RecordingIOPort(new DefaultIOPort(gateway), store, 'r1')
+
+    const req: ModelRequest = {
+      model:    'm1',
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
+      system:   'sys',
+      tools:    [],
+    }
+    await port.invokeLLM(req)
+
+    const events = await store.readByRunId('r1')
+    const requested = events.find(e => e.type === 'llm.requested')!
+    expect((requested.payload as { requestHash: string }).requestHash)
+      .toBe(hashModelRequest(req))
+  })
+
+  it('tool error is recorded as structured payload preserving retryable/code/name', async () => {
+    const store = new MemoryEventStore()
+    const port = new RecordingIOPort(new DefaultIOPort(new StubGateway([])), store, 'r1')
+
+    const err = Object.assign(new Error('boom'), { retryable: true, code: 'EBUSY', name: 'BusyError' })
+    await expect(port.invokeTool('t', { x: 1 }, async () => { throw err })).rejects.toThrow('boom')
+
+    const events = await store.readByRunId('r1')
+    const responded = events.find(e => e.type === 'tool.responded')!
+    const payload = responded.payload as { error?: { message: string; retryable?: boolean; code?: string; name?: string } }
+    expect(payload.error).toEqual({ message: 'boom', retryable: true, code: 'EBUSY', name: 'BusyError' })
+  })
+
+  it('attach emits agent.run.started with lifecycle identity payload', async () => {
+    const store = new MemoryEventStore()
+    const port = new RecordingIOPort(new DefaultIOPort(new StubGateway([])), store, 'r1')
+
+    port.attach({
+      agentId:   'a1',
+      goal:      'do the thing',
+      input:     'go',
+      contextId: 'ctx-1',
+      parentId:  undefined,
+    })
+
+    // attach uses store.append (async); flush microtasks
+    await new Promise(resolve => setImmediate(resolve))
+
+    const events = await store.readByRunId('r1')
+    const started = events.find(e => e.type === 'agent.run.started')!
+    expect(started.payload).toEqual({
+      agentId: 'a1', goal: 'do the thing', input: 'go', contextId: 'ctx-1', parentId: undefined,
+    })
+  })
+
+  it('detach emits agent.run.completed with terminal status', async () => {
+    const store = new MemoryEventStore()
+    const port = new RecordingIOPort(new DefaultIOPort(new StubGateway([])), store, 'r1')
+
+    port.attach({ agentId: 'a1', goal: 'g', input: 'i', contextId: 'c1' })
+    port.detach({ status: 'completed', lastTextOutput: 'done' })
+    await new Promise(resolve => setImmediate(resolve))
+
+    const events = await store.readByRunId('r1')
+    const completed = events.find(e => e.type === 'agent.run.completed')!
+    expect(completed.payload).toEqual({ status: 'completed', lastTextOutput: 'done' })
+  })
+
+  it('Milkie.invoke wraps run with attach/detach around the run', async () => {
+    const store = new MemoryEventStore()
+    const milkie = new Milkie({
+      stateStore: new MemoryStore(),
+      gateway:    new StubGateway([textResponse('hello')]),
+      eventStore: store,
+    })
+    milkie.registerAgent(minimalAgentConfig('a1'))
+
+    const result = await milkie.invoke({ agentId: 'a1', goal: 'g', input: 'i' })
+
+    const events = await store.readByRunId(result.agentRunId)
+    const kinds = events.map(e => e.type)
+    expect(kinds[0]).toBe('agent.run.started')
+    expect(kinds[kinds.length - 1]).toBe('agent.run.completed')
+    expect((events[0]!.payload as { agentId: string }).agentId).toBe('a1')
   })
 })

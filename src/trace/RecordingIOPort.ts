@@ -6,27 +6,21 @@ import type {
   LlmRespondedPayload,
   ToolRequestedPayload,
   ToolRespondedPayload,
+  AgentRunStartedPayload,
+  AgentRunCompletedPayload,
 } from './types.js'
+import { hashModelRequest, hashToolCall } from './hash.js'
 
 /**
- * RecordingIOPort — decorates any inner IOPort to emit paired
- * `requested` / `responded` events for every LLM and tool call.
+ * RecordingIOPort — decorates an inner IOPort to emit Agent Trace events.
  *
- * Phase 2 scope: records LLM and tool I/O only. Clock (`now()`) and
- * UUID generation (`uuid()`) pass through to the inner port — they
- * will be recorded in Phase 4 (non-determinism log).
+ * Phase 3 additions:
+ *  - LLM/tool events carry requestHash (cache key)
+ *  - attach()/detach() emit agent.run.started/completed lifecycle events
+ *  - Tool errors are recorded as structured payloads (preserve retryable/code/name)
  *
- * The inner port can be any IIOPort implementation:
- *   - DefaultIOPort: live calls
- *   - (future) replay impls: cached responses
- *   - test mocks
- *
- * Per ARCHITECTURE.md cross-cutting invariants:
- *   "IOPort is part of Agent Runtime's design, not an Agent
- *    Trace-imposed hook."
- *
- * RecordingIOPort is the concrete realization of Agent Trace's
- * "decorator implementation of that port".
+ * Clock (now()) and UUID generation pass through to inner — non-determinism
+ * log is Phase 4.
  */
 export class RecordingIOPort implements IIOPort {
   constructor(
@@ -36,15 +30,38 @@ export class RecordingIOPort implements IIOPort {
     private readonly actor: string = 'runtime',
   ) {}
 
+  attach(payload: AgentRunStartedPayload): void {
+    void this.store.append({
+      id:        this.inner.uuid(),
+      runId:     this.runId,
+      type:      'agent.run.started',
+      actor:     this.actor,
+      timestamp: this.inner.now(),
+      payload,
+    })
+  }
+
+  detach(payload: AgentRunCompletedPayload): void {
+    void this.store.append({
+      id:        this.inner.uuid(),
+      runId:     this.runId,
+      type:      'agent.run.completed',
+      actor:     this.actor,
+      timestamp: this.inner.now(),
+      payload,
+    })
+  }
+
   async invokeLLM(request: ModelRequest): Promise<ModelResponse> {
-    const reqEventId = this.inner.uuid()
+    const requestHash = hashModelRequest(request)
+    const reqEventId  = this.inner.uuid()
     await this.store.append({
       id:        reqEventId,
       runId:     this.runId,
       type:      'llm.requested',
       actor:     this.actor,
       timestamp: this.inner.now(),
-      payload:   { request } satisfies LlmRequestedPayload,
+      payload:   { request, requestHash } satisfies LlmRequestedPayload,
     })
 
     const response = await this.inner.invokeLLM(request)
@@ -56,7 +73,7 @@ export class RecordingIOPort implements IIOPort {
       actor:     this.actor,
       causedBy:  reqEventId,
       timestamp: this.inner.now(),
-      payload:   { response } satisfies LlmRespondedPayload,
+      payload:   { response, requestHash } satisfies LlmRespondedPayload,
     })
 
     return response
@@ -67,14 +84,15 @@ export class RecordingIOPort implements IIOPort {
     input: unknown,
     execute: () => Promise<unknown>,
   ): Promise<unknown> {
-    const reqEventId = this.inner.uuid()
+    const requestHash = hashToolCall(toolName, input)
+    const reqEventId  = this.inner.uuid()
     await this.store.append({
       id:        reqEventId,
       runId:     this.runId,
       type:      'tool.requested',
       actor:     this.actor,
       timestamp: this.inner.now(),
-      payload:   { toolName, input } satisfies ToolRequestedPayload,
+      payload:   { toolName, input, requestHash } satisfies ToolRequestedPayload,
     })
 
     try {
@@ -86,10 +104,18 @@ export class RecordingIOPort implements IIOPort {
         actor:     this.actor,
         causedBy:  reqEventId,
         timestamp: this.inner.now(),
-        payload:   { toolName, output } satisfies ToolRespondedPayload,
+        payload:   { toolName, output, requestHash } satisfies ToolRespondedPayload,
       })
       return output
     } catch (err) {
+      const e = err as { message?: string; retryable?: boolean; code?: string; name?: string }
+      const errorPayload: NonNullable<ToolRespondedPayload['error']> = {
+        message: e.message ?? String(err),
+      }
+      if (typeof e.retryable === 'boolean') errorPayload.retryable = e.retryable
+      if (typeof e.code === 'string')       errorPayload.code      = e.code
+      if (typeof e.name === 'string' && e.name !== 'Error') errorPayload.name = e.name
+
       await this.store.append({
         id:        this.inner.uuid(),
         runId:     this.runId,
@@ -97,10 +123,7 @@ export class RecordingIOPort implements IIOPort {
         actor:     this.actor,
         causedBy:  reqEventId,
         timestamp: this.inner.now(),
-        payload:   {
-          toolName,
-          error: err instanceof Error ? err.message : String(err),
-        } satisfies ToolRespondedPayload,
+        payload:   { toolName, error: errorPayload, requestHash } satisfies ToolRespondedPayload,
       })
       throw err
     }
