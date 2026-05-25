@@ -8,7 +8,17 @@ import type { MessageContent } from '../types/common.js'
 import { FSMEngine } from '../fsm/FSMEngine.js'
 import { ContextLayer } from '../context/ContextLayer.js'
 import { ContextRegions } from '../context/ContextRegions.js'
-import { makeHeaderRegion, makeCurrentTurnRegion, makeScratchpadAssistantRegion, makeScratchpadToolResultRegion } from '../context/lifecycleEngine.js'
+import { assemble, type AssembleScope } from '../context/assemble.js'
+import {
+  makeHeaderRegion,
+  makeCurrentTurnRegion,
+  makeScratchpadAssistantRegion,
+  makeScratchpadToolResultRegion,
+  makeStateInstructionsRegion,
+  makeWmRegion,
+  makeToolSchemaRegion,
+} from '../context/lifecycleEngine.js'
+import type { ToolSchema } from '../types/model.js'
 import { ToolRegistry } from '../tools/ToolRegistry.js'
 import { WorkingMemory } from '../store/WorkingMemory.js'
 import { CheckpointManager } from '../store/CheckpointManager.js'
@@ -276,6 +286,34 @@ export class AgentRuntime {
     this.context.appendHistory({ role: 'tool', content })
   }
 
+  private refreshTransientRegions(state: FSMState, schemas: ToolSchema[]): void {
+    // State instructions — re-set every step so changes in state propagate.
+    // The state-scoped intraTurn filter (assemble's isActive) means only the
+    // current state's region is visible during assembly, but we still need
+    // to put it there.
+    if (state.instructions) {
+      this.regions.set(
+        `state-instr:${state.name}`,
+        makeStateInstructionsRegion(state.name, state.instructions),
+      )
+    }
+
+    // Working memory snapshot — written every step (deterministic key order in factory).
+    const wmJson = this.memory.toJSON() as { data: Record<string, unknown>; log: unknown[] }
+    const wmRegion = makeWmRegion(wmJson.data, wmJson.log)
+    if (wmRegion) this.regions.set('wm', wmRegion)
+    else this.regions.delete('wm')
+
+    // Tool schemas — re-set per step in case state.tools restricted the set.
+    // Clear existing tool regions first (only current schema set is valid).
+    for (const r of [...this.regions._allRegions()].filter(r => r.target === 'tool')) {
+      this.regions.delete(r.id)
+    }
+    for (const s of schemas) {
+      this.regions.set(`tool:${s.name}`, makeToolSchemaRegion(s))
+    }
+  }
+
   private async checkEvents(): Promise<void> {
     // Poll stateStore for external interrupt signal (set by Milkie.interrupt)
     const extInterrupt = await this.stateStore.get(`context:${this.contextId}:interrupt`)
@@ -436,17 +474,33 @@ export class AgentRuntime {
       }
       iterations++
 
-      const tools    = this.registry.getForState(state.tools)
-      const schemas  = this.registry.toSchemas(tools)
-      const request  = this.context.buildRequest(schemas, this.memory, state.instructions)
+      const tools   = this.registry.getForState(state.tools)
+      const schemas = this.registry.toSchemas(tools)
+
+      this.refreshTransientRegions(state, schemas)
+
+      const scope: AssembleScope = {
+        currentState:  state.name,
+        currentTurnId: `turn-${this.turnNumber}`,
+        currentEpoch:  this.regions.getEpoch(),
+      }
+      const assembled = assemble(this.regions, scope)
+      const request   = {
+        model:    this.config.model.model,
+        system:   assembled.system,
+        messages: assembled.messages,
+        ...(assembled.tools ? { tools: assembled.tools } : {}),
+      }
 
       const llmSpan = this.recorder.startSpan('llm.call', {
         provider:     this.config.model.provider,
         model:        this.config.model.model,
         turn:         this.turnNumber,
         state:        state.name,
-        loadedSkills: this.context.getLoadedInstructions(),
-        contextEpoch: this.context.getContextEpoch(),
+        loadedSkills: [...this.regions._allRegions()]
+          .filter(r => r.section === 'persistent-skills' || r.section === 'session-skills')
+          .map(r => (r.content as { name: string }).name),
+        contextEpoch: this.regions.getEpoch(),
       })
 
       const response = await this.ioPort.invokeLLM(request)
