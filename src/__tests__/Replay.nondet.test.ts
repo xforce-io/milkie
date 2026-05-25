@@ -149,7 +149,7 @@ describe('Milkie.replay — Phase 4 tail check (P-wide)', () => {
   // recording captures the clock, replay consumes it from cache, the tail
   // check sees zero remaining. We do NOT prove the stronger "byte-identical
   // because nondet flows into LLM request hash" property — no nondet value
-  // currently affects ContextLayer.buildRequest. Demonstrating that requires
+  // currently affects ContextRegions.assemble. Demonstrating that requires
   // either routing contextId/agentRunId through `ioPort.uuid()` (a small
   // runtime change worth doing as a Phase 5 follow-up) or a custom multi-step
   // tool fixture. Out of scope for this task.

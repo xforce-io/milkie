@@ -181,9 +181,14 @@ describe('Deterministic e2e: framework semantics', () => {
     const llmSpans = trajectory.spans.filter(s => s.name === 'llm.call')
 
     expect(result.status).toBe('completed')
-    expect(llmSpans[0]!.attributes['contextEpoch']).toBe(0)
     expect(llmSpans[0]!.attributes['loadedSkills']).toEqual([])
-    expect(llmSpans[1]!.attributes['contextEpoch']).toBe(1)
     expect(llmSpans[1]!.attributes['loadedSkills']).toEqual(['research'])
+    // contextEpoch now reflects every region mutation, not just skill loads.
+    // The substrate guarantee that matters: epoch is monotonically increasing
+    // across LLM calls within a run.
+    const epoch0 = llmSpans[0]!.attributes['contextEpoch'] as number
+    const epoch1 = llmSpans[1]!.attributes['contextEpoch'] as number
+    expect(typeof epoch0).toBe('number')
+    expect(epoch1).toBeGreaterThan(epoch0)
   })
 })

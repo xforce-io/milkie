@@ -36,14 +36,18 @@ async function readMeta(runsDir: string, file: string): Promise<RunMeta | null> 
     const lines = content.split('\n').filter(l => l.length > 0)
     if (lines.length === 0) return null
 
-    const first = JSON.parse(lines[0]!) as Event
-    if (first.type !== 'agent.run.started') return null
+    const parsed = lines.map(l => JSON.parse(l) as Event)
 
-    const startedPayload = first.payload as { agentId: string; contextId: string }
+    // Find agent.run.started — it may not be the very first event because
+    // clock.read / uuid.generated nondet events can be flushed before it.
+    const startedEvt = parsed.find(e => e.type === 'agent.run.started')
+    if (!startedEvt) return null
+
+    const startedPayload = startedEvt.payload as { agentId: string; contextId: string }
     let status: RunMeta['status'] = 'active'
 
-    for (let i = lines.length - 1; i >= 0; i--) {
-      const evt = JSON.parse(lines[i]!) as Event
+    for (let i = parsed.length - 1; i >= 0; i--) {
+      const evt = parsed[i]!
       if (evt.type === 'agent.run.completed') {
         const p = evt.payload as { status: string }
         status = (p.status as RunMeta['status']) ?? 'completed'
@@ -52,10 +56,10 @@ async function readMeta(runsDir: string, file: string): Promise<RunMeta | null> 
     }
 
     return {
-      runId:      first.runId,
+      runId:      startedEvt.runId,
       contextId:  startedPayload.contextId,
       agentId:    startedPayload.agentId,
-      startedAt:  first.timestamp,
+      startedAt:  startedEvt.timestamp,
       status,
       eventCount: lines.length,
     }

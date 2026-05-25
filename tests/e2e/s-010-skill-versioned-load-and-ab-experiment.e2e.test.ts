@@ -12,6 +12,9 @@ import type { ToolDefinition } from '../../src/types/tool.js'
 import { Milkie } from '../../src/runtime/Milkie.js'
 import { TrajectoryStore } from '../../src/trajectory/TrajectoryStore.js'
 import { MemoryStore } from '../../src/store/MemoryStore.js'
+import { ContextRegions } from '../../src/context/ContextRegions.js'
+import { makeSkillRegion, makeHeaderRegion } from '../../src/context/lifecycleEngine.js'
+import { assemble } from '../../src/context/assemble.js'
 import { lookupSearch } from './fixtures/search.js'
 import { type Experiment } from './helpers.js'
 
@@ -152,16 +155,23 @@ describe('Case 5: Skill A/B 版本对比', () => {
   })
 
   live('research skill 在后续 llm.call 的 contextEpoch 中生效', () => {
+    // New substrate: contextEpoch now increments on EVERY region mutation
+    // (not just on skill load/unload), so absolute epoch values are not
+    // meaningful. Assert the monotonic invariant instead:
+    //   epoch(first llm with research skill) > epoch(first llm without skill)
     for (const trajectory of [t1, t2]) {
       const llmSpans = trajectory.spans.filter(s => s.name === 'llm.call')
       const firstWithSkill = llmSpans.find(s =>
         (s.attributes['loadedSkills'] as string[] | undefined)?.includes('research')
       )
       expect(firstWithSkill).toBeDefined()
-      expect(firstWithSkill!.attributes['contextEpoch']).toBe(1)
       const firstLlm = llmSpans[0]!
       expect(firstLlm.attributes['loadedSkills']).toEqual([])
-      expect(firstLlm.attributes['contextEpoch']).toBe(0)
+      // Skill load bumps the epoch, so the first call that sees the skill
+      // must have a strictly higher epoch than the first call that did not.
+      const epochBefore = firstLlm.attributes['contextEpoch'] as number
+      const epochAfter  = firstWithSkill!.attributes['contextEpoch'] as number
+      expect(epochAfter).toBeGreaterThan(epochBefore)
     }
   })
 
@@ -205,35 +215,15 @@ describe('Case 5: Skill A/B 版本对比', () => {
 
 // ─────────────────────────────── Skill Epoch Test ────────────────────────────
 
-describe('Case 5: Instructions 动态加载（contextEpoch）', () => {
-  const live = SKIP ? it.skip : it
-
-  live('loadInstructions 递增 contextEpoch', () => {
-    // Unit-level test for ContextLayer epoch mechanism
-    const { ContextLayer } = require('../../src/context/ContextLayer.js')
-    const ctx = new ContextLayer({ systemPrompt: 'test', model: 'test' })
-
-    expect(ctx.getContextEpoch()).toBe(0)
-
-    ctx.loadInstructions('research', SKILL_V1)
-    expect(ctx.getContextEpoch()).toBe(1)
-
-    ctx.loadInstructions('research', SKILL_V2)
-    expect(ctx.getContextEpoch()).toBe(2)
-
-    ctx.unloadInstructions('research')
-    expect(ctx.getContextEpoch()).toBe(3)
-  })
-
-  live('已加载的 instructions 出现在 buildRequest system prompt 中', () => {
-    const { ContextLayer } = require('../../src/context/ContextLayer.js')
-    const { WorkingMemory } = require('../../src/store/WorkingMemory.js')
-    const ctx = new ContextLayer({ systemPrompt: 'base prompt', model: 'test' })
-    const mem = new WorkingMemory()
-
-    ctx.loadInstructions('research', SKILL_V1)
-    const request = ctx.buildRequest([], mem)
-    expect(request.system).toContain('Research Guidelines')
-    expect(request.system).toContain('v1.0')
-  })
-})
+// Case 5 (Instructions 动态加载 / contextEpoch) was removed as part of the
+// PR-C1 substrate refactor. ContextLayer no longer exists; the equivalent
+// invariants are now covered at the substrate level:
+//   - set/delete bump epoch          → src/__tests__/ContextRegions.test.ts
+//   - skill instructions in system   → src/__tests__/assemble.test.ts
+//                                      (section ordering + format) and the
+//                                      makeSkillRegion factory tests in
+//                                      src/__tests__/lifecycleEngine.test.ts
+// The full-agent skill-load path is still exercised by the Path D test in
+// tests/e2e/deterministic.test.ts ("loaded skill ends up in next LLM call's
+// system prompt"), which asserts on regions-driven contextEpoch + loadedSkills
+// span attributes.
