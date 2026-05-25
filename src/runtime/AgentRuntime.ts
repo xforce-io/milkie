@@ -11,6 +11,7 @@ import { ContextRegions } from '../context/ContextRegions.js'
 import { assemble, type AssembleScope } from '../context/assemble.js'
 import {
   makeHeaderRegion,
+  makeSkillRegion,
   makeCurrentTurnRegion,
   makeScratchpadAssistantRegion,
   makeScratchpadToolResultRegion,
@@ -66,7 +67,7 @@ export class AgentRuntime {
 
   private eventQueue:    Array<{ type: string; payload: unknown }> = []
   private pendingEvents: Array<{ type: string; payload: unknown }> = []
-  private pendingSkills: Set<string> = new Set()
+  private pendingSkillLoads: Array<{ name: string; instructions: string }> = []
   private childRecords: Map<string, ChildAgentRecord> = new Map()
   private rootSpan!:     Span
   private turnNumber:    number = 0
@@ -246,18 +247,22 @@ export class AgentRuntime {
     if (!version || !instructions) {
       return { requested: name, status: 'unavailable' }
     }
-    this.pendingSkills.add(normalized)
+    this.pendingSkillLoads.push({ name: normalized, instructions })
     return { requested: normalized, status: 'pending_next_epoch', version }
   }
 
   private applyPendingSkills(): void {
-    for (const name of this.pendingSkills) {
-      const instructions = this.config.skillInstructions?.[name]
-      if (instructions && !this.context.getLoadedInstructions().includes(name)) {
-        this.context.loadInstructions(name, instructions)
-      }
+    for (const { name, instructions } of this.pendingSkillLoads) {
+      const id = `skill:${name}`
+      // Already loaded? Skip (preserves createdAt; idempotent like Map.set upsert).
+      if (this.regions.get(id)) continue
+      // PR-C1 default: session-scope (matches old ContextLayer behavior).
+      // PR-C2 will introduce turn-scope as the new default + plumb scope through requestSkill.
+      this.regions.set(id, makeSkillRegion(name, instructions, 'session'))
+      // Keep ContextLayer in sync until Task 11 deletion.
+      this.context.loadInstructions(name, instructions)
     }
-    this.pendingSkills.clear()
+    this.pendingSkillLoads = []
   }
 
   private setCurrentTurn(input: string): void {
