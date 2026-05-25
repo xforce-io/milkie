@@ -178,3 +178,128 @@ describe('server — SSE stream', () => {
     expect(text).toBe('')
   }, 5_000)
 })
+
+describe('e2e: skill loading through full chat flow', () => {
+  let server: Server
+  let baseUrl: string
+  let exampleDir: string
+
+  // A stub gateway that records each ModelRequest it receives so the
+  // test can later inspect what the agent actually saw in its system prompt.
+  class RecordingStubGateway implements IModelGateway {
+    public requests: ModelRequest[] = []
+    constructor(private readonly responses: ModelResponse[]) {}
+    async complete(req: ModelRequest): Promise<ModelResponse> {
+      this.requests.push(req)
+      const r = this.responses.shift()
+      if (!r) throw new Error('RecordingStubGateway exhausted')
+      return r
+    }
+    async *stream(_req: ModelRequest): AsyncIterable<never> { yield* [] }
+  }
+
+  const toolUseSkillRequest = (verifierName: string): ModelResponse => ({
+    content: [{ type: 'text', text: 'loading verifier for the next epoch...' }],
+    toolCalls: [{
+      id:    'tc-skill-1',
+      name:  'skill_request',
+      input: { name: verifierName },
+    }],
+    finishReason: 'tool_use',
+  })
+
+  const textOnly = (s: string): ModelResponse => ({
+    content: [{ type: 'text', text: s }], toolCalls: [], finishReason: 'end_turn',
+  })
+
+  beforeEach(async () => {
+    exampleDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-docs-qa-skillload-'))
+    fs.mkdirSync(path.join(exampleDir, '.milkie', 'runs'), { recursive: true })
+  })
+  afterEach(async () => {
+    if (server) await stopServer(server)
+    fs.rmSync(exampleDir, { recursive: true, force: true })
+  })
+
+  it('user doubt triggers skill_request → next llm.requested system prompt contains verifier', async () => {
+    const stub = new RecordingStubGateway([
+      toolUseSkillRequest('verifier'),       // LLM call 1: emits skill_request tool call
+      textOnly('verifier loaded; final answer.'),  // LLM call 2: post-load
+    ])
+
+    server = await startServer({
+      port: 0, exampleDir, gateway: stub,
+      agentFile:  path.join(__dirname, '..', 'agents', 'sanguo-researcher.md'),
+      corpusRoot: path.join(__dirname, '..', 'corpus'),
+    })
+    const addr = server.address() as { port: number }
+    baseUrl = `http://localhost:${addr.port}`
+
+    const chatResp = await postJson(`${baseUrl}/chat`, { input: '你确定吗？' })
+    expect(chatResp.status).toBe(200)
+    const body = JSON.parse(chatResp.body) as { contextId: string; status: string }
+    expect(body.status).toBe('completed')
+
+    // Two LLM calls were made
+    expect(stub.requests).toHaveLength(2)
+
+    // Inspect what the agent SAW in its second LLM call's system prompt —
+    // this is the proof that skill loading took effect mid-invoke.
+    // ModelRequest.system carries the assembled system text (base + any
+    // loaded skill instructions).
+    const secondSystem = stub.requests[1]!.system ?? ''
+
+    // The verifier skill's instructions text (from agents/sanguo-researcher.md)
+    // contains the literal phrase '你已进入 verifier 模式' which is highly
+    // specific and won't be in the base prompt.
+    expect(secondSystem).toContain('verifier')
+    expect(secondSystem).toContain('你已进入 verifier 模式')
+
+    // Sanity: the FIRST call's system should NOT contain verifier text
+    // (skill loaded only after the first call's tool dispatch).
+    const firstSystem = stub.requests[0]!.system ?? ''
+    expect(firstSystem).not.toContain('你已进入 verifier 模式')
+
+    // ALSO verify via the EVENT log (the trace) that the skill_request
+    // tool call was recorded, since the UI reads from the event log:
+    const eventsResp = await get(`${baseUrl}/conversation/${body.contextId}/events`)
+    const events = (JSON.parse(eventsResp.body) as { events: Array<{ type: string; payload: unknown }> }).events
+    const toolReqs = events.filter(e => e.type === 'tool.requested')
+    const skillReqCalls = toolReqs.filter(e =>
+      (e.payload as { toolName: string }).toolName === 'skill_request')
+    expect(skillReqCalls).toHaveLength(1)
+  }, 10_000)
+
+  it('agent does NOT load verifier when user does not express doubt', async () => {
+    const stub = new RecordingStubGateway([
+      textOnly('here is your answer'),       // simple text-only, no tool calls
+    ])
+
+    server = await startServer({
+      port: 0, exampleDir, gateway: stub,
+      agentFile:  path.join(__dirname, '..', 'agents', 'sanguo-researcher.md'),
+      corpusRoot: path.join(__dirname, '..', 'corpus'),
+    })
+    const addr = server.address() as { port: number }
+    baseUrl = `http://localhost:${addr.port}`
+
+    const chatResp = await postJson(`${baseUrl}/chat`, { input: '介绍一下赤壁之战' })
+    expect(chatResp.status).toBe(200)
+    const body = JSON.parse(chatResp.body) as { contextId: string }
+
+    // Only one LLM call; no skill_request issued
+    expect(stub.requests).toHaveLength(1)
+
+    const eventsResp = await get(`${baseUrl}/conversation/${body.contextId}/events`)
+    const events = (JSON.parse(eventsResp.body) as { events: Array<{ type: string; payload: unknown }> }).events
+    const skillReqCalls = events.filter(e =>
+      e.type === 'tool.requested' &&
+      (e.payload as { toolName: string }).toolName === 'skill_request',
+    )
+    expect(skillReqCalls).toHaveLength(0)
+
+    // System prompt of the single LLM call must NOT contain verifier text
+    const systemText = stub.requests[0]!.system ?? ''
+    expect(systemText).not.toContain('你已进入 verifier 模式')
+  }, 10_000)
+})
