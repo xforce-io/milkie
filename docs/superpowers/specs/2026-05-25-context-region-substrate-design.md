@@ -66,6 +66,8 @@ milkie 现在的 `ContextLayer.buildRequest` 用 5 个硬编码字段（systemPr
 | scratchpad/history 分开 | history = inter-turn (user, finalAssistant) 对；scratchpad = intra-turn ReAct trail |
 | Cache breakpoint | Region 可声明 `cacheBreakpoint?: boolean` ；adapter 层翻译为 provider-specific cache_control |
 | 失败模式 | 非法 mutation（删除不存在 / 装配时 region 形状不合规）→ throw，不静默 |
+| Skill 寿命管理 | `skill_request` 接 `scope: 'turn' \| 'session'` 声明寿命；**不存在 `skill_release` 工具**；turn-end 引擎按 interTurn scope 自动结晶（详见 §4.3） |
+| Tool 结果策略 | `ToolResultStrategy` 三正交轴：`shape`（怎么变内容）/ `visibility`（何时进 LLM context）/ `target`（存哪里）；安全默认 `truncate(4000) + inline + scratchpad`（详见 §4.4） |
 
 ## 4. 数据结构
 
@@ -99,9 +101,10 @@ type IntraTurnScope =
 
 type InterTurnScope =
   | 'session-persistent'      // 跨轮持久；checkpoint 保存恢复
-  | 'turn-local'              // turn 结束自动 release
+  | 'turn-local'              // turn 结束自动 release（scratchpad / scope='turn' skill / current-turn）
   | { kind: 'ttl'; deadline: number }  // epoch ms 到了 release
   | 'summarize-on-overflow'   // budget 超额时压缩而非丢弃
+  | 'promote-to-wm'           // turn-end 时把该 region 转成 wm region（interTurn='session-persistent'）
 
 interface Region {
   id:         string
@@ -168,6 +171,183 @@ export class ContextRegions {
 - 时钟通过构造函数注入（保证 Phase 4 byte-identical 不被破坏——`clock` 从 IOPort 来 = 走 RecordingIOPort 的 nondet log）
 - `epoch++` 在每次结构变更时递增，trace 可以观察 epoch 进展
 - mutation 完全是 CRUD；没有 per-type 方法
+
+### 4.3 Skill 寿命模型（lifetime declaration + boundary crystallization）
+
+工具 surface 只有 `skill_request`，**没有 `skill_release`**。agent 不承担"我什么时候用完该卸载"的资源管理责任——那是 substrate 的事。
+
+```typescript
+// 系统级工具签名
+skill_request({
+  name:  string,
+  scope?: 'turn' | 'session'   // 默认 'turn'
+})
+```
+
+寿命语义：
+
+| `scope` | 对应 InterTurnScope | 装配 section | 何时清掉 |
+|---|---|---|---|
+| `'turn'`（默认） | `'turn-local'` | `session-skills` | turn-end 引擎自动 |
+| `'session'` | `'session-persistent'` | `persistent-skills` | 永不自动清（除非 budget 超额 evict） |
+
+**为什么没有 `skill_release`**：
+
+| 维度 | `skill_release` 模型 | 寿命声明 + 自动结晶 |
+|---|---|---|
+| Agent 心智负担 | 高（要记得 release） | 低（声明完就放下）|
+| 资源泄漏风险 | 高（忘 release 就泄漏） | 零（边界引擎兜底）|
+| LLM 反复 request+release 抖动 | 可能 | 不存在 |
+| 跨轮"知识沉淀" | 无机制 | 有（`promote-to-wm`）|
+| 工具表面积 | 2 个 | 1 个 |
+
+唯一让步：agent 不能在一个 turn 内"我现在不需要 verifier 了赶紧释放节省 token"。该场景实际罕见（一个 turn 通常聚焦一个问题），不值得为它引入完整 release 通道。
+
+**端到端路径（load `scope='session'` 为例）**：
+
+```
+agent LLM 输出 tool_call: skill_request({ name: 'verifier', scope: 'session' })
+        │
+        ▼
+src/tools/system.ts 的 skill_request handler:
+  ctx.queueSkillLoad?.(name, scope)
+  return { loaded: name, scope, status: 'pending_next_epoch' }
+        │
+        ▼
+ToolContext.queueSkillLoad → AgentRuntime:
+  pendingSets.push(makeSkillRegion(name, scope))
+        │
+        ▼
+下一次 FSM step 边界 → runIntraTurnEngine:
+  for (const r of pendingSets) regions.set(r.id, r)
+        │
+        ▼
+下次 assemble 时 persistent-skills section 包含 verifier
+        │
+        ▼
+turn-end → runInterTurnEngine 的 crystallization:
+  region.interTurn === 'session-persistent' → keep
+  （若是 scope='turn' 则 'turn-local' → drop）
+```
+
+`makeSkillRegion` 把寿命声明翻译为 Region：
+
+```typescript
+function makeSkillRegion(name: string, scope: 'turn' | 'session'): Region {
+  return {
+    id:        `skill:${normalize(name)}`,
+    target:    'system',
+    section:   scope === 'session' ? 'persistent-skills' : 'session-skills',
+    intraTurn: 'turn-persistent',
+    interTurn: scope === 'session' ? 'session-persistent' : 'turn-local',
+    stability: scope === 'session' ? 'session-stable' : 'turn-stable',
+    content:   loadSkillContent(name),
+    format:    c => `--- Skill: ${name} ---\n${c}\n`,
+  }
+}
+```
+
+注意：同一个 skill 被多次 `skill_request` 用不同 scope 调用 = 同一个 region id 被 `set` 覆盖，最后一次 scope 胜出。这是 `Map.set` 的自然 upsert 语义，不需要特殊处理。
+
+### 4.4 Tool result strategy（shape / visibility / target 三正交轴）
+
+不同工具的返回值形态完全不同：`list_dir` 返回 200 字符目录列表，`download_file` 返回 2MB 二进制，`grep` 返回带上下文的 50 个匹配。一刀切的处理策略必然在某一端失败——`verbatim` 让大返回值吃光 budget，`truncate` 让小返回值丢精度。
+
+策略是 **工具自身的属性**，在 `ToolDefinition` 上声明；AgentRuntime 在创建 scratchpad region 之前应用。
+
+```typescript
+type Shape =
+  | 'verbatim'                                              // 原样存
+  | { kind: 'truncate'; maxChars: number; tailHint?: boolean }  // 前 N 字符
+  | { kind: 'tail';     maxChars: number }                  // 后 N 字符（日志类）
+  | { kind: 'summarize' }                                   // LLM 总结（贵；Phase 2+）
+  | { kind: 'extract';  jsonPath: string }                  // JSON 字段提取
+  | { kind: 'transform'; fn: (raw: unknown) => unknown }    // 自定义
+
+type Visibility =
+  | 'inline'                                                // 默认：region 进下次装配
+  | 'stored-only'                                           // region 存在；不进装配；agent 用 context_fetch 拉
+  | { kind: 'first-call-then-reference' }                   // 第一次 inline；之后转 stored-only
+
+type Target = 'scratchpad' | 'wm' | 'discard'
+
+interface ToolResultStrategy {
+  shape:      Shape
+  visibility: Visibility
+  target:     Target
+  onError?:   Shape    // 失败时另用 shape，默认 'verbatim'（错误信息要完整给 agent）
+}
+
+interface ToolDefinition {
+  name:           string
+  description:    string
+  inputSchema:    JSONSchema
+  handler:        (input: unknown, ctx: ToolContext) => Promise<unknown>
+  resultStrategy?: ToolResultStrategy   // 缺省 = 安全默认（见下）
+}
+```
+
+**为什么三轴正交而不是单维 enum**：
+
+- `shape` 是"怎么把 raw 变成存储内容"——纯文本变换
+- `visibility` 是"这个内容如何/何时进 LLM context"——和 storage 独立
+- `target` 是"region 物理放哪个 section"——决定 lifecycle
+
+之前一稿把 `tail(500)` 当作"shape + visibility 复合"，结果是 `download_file` 这种"想存但不想 inline"的场景被硬塞进 shape 维度。三轴拆开后每个轴独立选择，组合自然覆盖所有场景。
+
+**安全默认值**：
+
+```typescript
+const DEFAULT_TOOL_RESULT_STRATEGY: ToolResultStrategy = {
+  shape:      { kind: 'truncate', maxChars: 4000 },   // ~1K tokens 上限
+  visibility: 'inline',
+  target:     'scratchpad',
+  onError:    'verbatim',
+}
+```
+
+默认是 `truncate(4000)` 而**不是** `'verbatim'`——大多数 agent 配置事故来自"忘记设上限"。让 `'verbatim'` 成为工具作者主动 opt-in 表达"我保证我不会很大"，比默认放任安全得多。
+
+**示例**：
+
+```typescript
+// 小返回值，verbatim
+{ name: 'list_dir',
+  resultStrategy: { shape: 'verbatim', visibility: 'inline', target: 'scratchpad' } }
+
+// 大日志，只看尾部
+{ name: 'tail_log',
+  resultStrategy: { shape: { kind: 'tail', maxChars: 500 }, visibility: 'inline', target: 'scratchpad' } }
+
+// 反思工具，结果直接学到 wm 长期保留
+{ name: 'self_critique',
+  resultStrategy: { shape: 'verbatim', visibility: 'inline', target: 'wm' } }
+
+// 大文件下载，存但不 inline（agent 想看用 context_fetch）
+{ name: 'download_file',
+  resultStrategy: { shape: 'verbatim', visibility: 'stored-only', target: 'scratchpad' } }
+
+// 纯 side-effect 工具
+{ name: 'audit_log',
+  resultStrategy: { shape: 'verbatim', visibility: 'inline', target: 'discard' } }
+
+// 结构化提取 + 失败时给完整 error
+{ name: 'http_get',
+  resultStrategy: {
+    shape:      { kind: 'extract', jsonPath: 'data.items[*].{id,title}' },
+    visibility: 'inline',
+    target:     'scratchpad',
+    onError:    'verbatim',
+  } }
+```
+
+**`stored-only` 的反向通道**：系统级工具 `context_fetch({ regionId })` 把 stored-only region 临时提升成下次 LLM 调用 inline（之后回到 stored-only）。
+
+**未来扩展（不在 Phase 1）**：
+- `aggregation`: 同工具多次调用归并到同一个 region
+- agent-per-call override: 让 agent 在 tool_use input 里临时改 shape
+- `{ kind: 'fit-budget'; maxFraction: 0.2 }`: shape 根据 context 剩余 budget 动态决定截断长度
+- `'first-call-then-reference'` visibility 的 Phase 1 实现细节（需要 region 上的"消费计数"）
 
 ## 5. 装配函数
 
@@ -367,45 +547,158 @@ function runIntraTurnEngine(regions: ContextRegions, scope: AssembleScope, ctx: 
 }
 ```
 
-### 7.3 Inter-turn 引擎（invoke 结束 / 下次 invoke 开始时跑）
+### 7.3 Inter-turn 引擎（invoke 结束 / 下次 invoke 开始时跑）—— Crystallization
+
+turn 边界是 **crystallization（结晶）** 决策点：每个 region 走自己的 `interTurn` 规则决定留不留、留什么。crystallization 不是机械清空，是 region 创建时的寿命声明在这里被兑现。
 
 ```typescript
 function runInterTurnEngine(regions: ContextRegions, ctx: {
-  boundary: 'turn-end' | 'turn-start'
-  currentTurn?: { userInput: string, finalAssistantContent: MessageContent[] }
+  boundary:    'turn-end' | 'turn-start'
+  currentTurn?: { userInput: string }
+  now:         number    // IOPort.now()，replay 可决定性
   subAgentId?: string
-}): { events: BoundaryDelta[] } {
+}): { events: BoundaryDelta[], crystallization?: CrystallizationSummary } {
   const events: BoundaryDelta[] = []
   
   if (ctx.boundary === 'turn-end') {
-    // 1. 把 scratchpad 的最终答案提取，连同 user input 一对作为 (user, assistant) 追加进 history
-    if (ctx.currentTurn) {
-      const turnPairId = `history:turn-${uuid()}`
-      regions.set(turnPairId, makeUserAssistantPair(ctx.currentTurn))
-      events.push({ kind: 'added', id: turnPairId, reason: 'turn-archived' })
+    const summary: CrystallizationSummary = {
+      kept: [], dropped: [], promoted: [], archivedPair: undefined,
     }
     
-    // 2. 释放所有 turn-local region（scratchpad 全部 / turn-local skill / 任何 inter='turn-local'）
-    for (const r of regions._allRegions()) {
+    // ──── Step 1: 提取最终答案，归档为 history pair region ────
+    //
+    // 规则：倒序扫 scratchpad section，找第一个满足
+    //   content.role === 'assistant' && 不含 tool_use
+    // 的 region —— 它是本轮 LLM 给出的最终文本答案。
+    //
+    // 把它和 current-turn region 的 user input combine 成一个 history pair region。
+    // 所有中间 tool_use / tool result region 在 step 2 被 'turn-local' 规则丢弃。
+    //
+    // 想让中间步骤的有用信息跨轮 → 工具用 target: 'wm' / 'discard'，
+    // 或 agent 在 turn 内主动调 wm_promote 工具，
+    // 或 region 创建时 interTurn: 'promote-to-wm'。
+    if (ctx.currentTurn) {
+      const finalAssistantText = extractFinalAssistantText(regions)
+      const turnPairId = `history:turn-${ctx.now}`
+      regions.set(turnPairId, {
+        target:    'message',
+        section:   'history',
+        intraTurn: 'turn-persistent',
+        interTurn: 'session-persistent',
+        stability: 'session-stable',
+        content: {
+          pair: [
+            { role: 'user',      content: ctx.currentTurn.userInput },
+            { role: 'assistant', content: finalAssistantText },
+          ],
+        },
+        format: (c: any) => c.pair as Message[],   // 展开成两条 message
+      })
+      events.push({ kind: 'added', id: turnPairId, reason: 'turn-archived' })
+      summary.archivedPair = turnPairId
+    }
+    
+    // ──── Step 2: 按 interTurn 规则逐个结晶 ────
+    for (const r of [...regions._allRegions()]) {
+      // 跳过刚归档的 pair（它已经是 session-persistent，留下即可）
+      if (r.section === 'history' && r.interTurn === 'session-persistent') {
+        summary.kept.push(r.id)
+        continue
+      }
+      
+      if (r.interTurn === 'session-persistent') {
+        summary.kept.push(r.id)
+        continue
+      }
+      
       if (r.interTurn === 'turn-local') {
+        // scratchpad / scope='turn' skill / current-turn user input 都属此类
         regions.delete(r.id)
         events.push({ kind: 'removed', id: r.id, reason: 'turn-local-released' })
+        summary.dropped.push(r.id)
+        continue
+      }
+      
+      if (typeof r.interTurn === 'object' && r.interTurn.kind === 'ttl') {
+        if (ctx.now > r.interTurn.deadline) {
+          regions.delete(r.id)
+          events.push({ kind: 'removed', id: r.id, reason: 'ttl-expired' })
+          summary.dropped.push(r.id)
+        } else {
+          summary.kept.push(r.id)
+        }
+        continue
+      }
+      
+      if (r.interTurn === 'promote-to-wm') {
+        // 转成 wm region（target='system', section='wm', interTurn='session-persistent'）
+        const promotedId = `wm:${r.id}`
+        regions.set(promotedId, {
+          ...r,
+          id:        promotedId,
+          target:    'system',
+          section:   'wm',
+          interTurn: 'session-persistent',
+          stability: 'session-stable',
+        })
+        regions.delete(r.id)
+        events.push({ kind: 'added',   id: promotedId, reason: 'promoted-to-wm' })
+        events.push({ kind: 'removed', id: r.id,       reason: 'promoted-source-removed' })
+        summary.promoted.push({ from: r.id, to: promotedId })
+        continue
+      }
+      
+      if (r.interTurn === 'summarize-on-overflow') {
+        // 检查整体 budget；超额时调用 summarize（Phase 2+）
+        // Phase 1: 视为 'session-persistent' 不动
+        summary.kept.push(r.id)
+        continue
       }
     }
     
-    // 3. summarize-on-overflow: 如果 history 总 token 超 budget，压缩最旧 N 条
-    // (实现细节在 §10)
+    return { events, crystallization: summary }
   }
   
   if (ctx.boundary === 'turn-start') {
-    // 1. 从 checkpoint 还原的 session-persistent regions 已经在 regions 里
-    // 2. 重新 set current-turn region
-    // 3. （首次） 触发 ContextLayer 已 ready
+    // 1. 从 checkpoint 还原的 session-persistent regions 已经在 regions Map 里
+    // 2. 把本轮 user input 注册成 current-turn region (interTurn='turn-local')
+    //    （由 AgentRuntime.invoke 在调用本函数后做，不在引擎内）
   }
   
   return { events }
 }
+
+interface CrystallizationSummary {
+  kept:         string[]
+  dropped:      string[]
+  promoted:     Array<{ from: string; to: string }>
+  archivedPair: string | undefined
+}
+
+// 辅助函数
+function extractFinalAssistantText(regions: ContextRegions): string {
+  const scratch = [...regions._allRegions()]
+    .filter(r => r.section === 'scratchpad')
+    .filter(r => (r.content as any)?.role === 'assistant')
+    .sort((a, b) => b.createdAt - a.createdAt)
+  for (const r of scratch) {
+    const msg = r.content as any
+    if (!msg.toolUse && msg.text) return msg.text
+  }
+  return ''
+}
 ```
+
+**关键设计要点**：
+
+- **agent 不需要在 turn 内显式 release**——寿命已在 region 创建时声明
+- scratchpad 中间步骤（tool_use / tool result）默认丢弃（属 `turn-local`）
+- 想保留中间信息有 **三条声明式通道**（不靠 turn-end 反思决定）：
+  1. 工具的 `resultStrategy.target = 'wm'`（结果直接进 wm，永远保留）
+  2. 工具的 `resultStrategy.target = 'scratchpad'` + `interTurn = 'promote-to-wm'`（turn-end 自动升级）
+  3. agent 调系统工具 `wm_promote({ regionId })` 把 region 的 `interTurn` 改成 `'promote-to-wm'`（agent 反思式标记）
+- crystallization 是 **可重放的纯函数**——同 regions Map + 同 ctx → 同 delta + 同 after-state
+- `ctx.now` 走 IOPort（和 Phase 4 决定性 invariant 一致）
 
 ### 7.4 边界引擎的 hook 点（对现有 AgentRuntime 的最小改动）
 
@@ -486,8 +779,31 @@ interface ContextBoundaryAppliedPayload {
     stability: string
     tokenEstimate?: number
   }>
+  // 仅 boundary='turn-end' 时存在
+  crystallization?: {
+    kept:         string[]
+    dropped:      string[]
+    promoted:     Array<{ from: string; to: string }>
+    archivedPair: string | undefined
+  }
+}
+
+// 工具响应（在既有 tool.responded 上扩展 appliedStrategy 字段）
+interface ToolRespondedPayload {
+  // 既有字段（toolCallId / toolName / result 等）...
+  appliedStrategy?: {
+    shapeKind:      'verbatim' | 'truncate' | 'tail' | 'summarize' | 'extract' | 'transform'
+    visibility:     'inline' | 'stored-only' | 'first-call-then-reference'
+    target:         'scratchpad' | 'wm' | 'discard'
+    originalBytes:  number   // raw 返回值长度
+    storedBytes:    number   // 应用策略后实际入 region 的长度（discard 时 = 0）
+    onErrorPath?:   boolean  // true = handler 抛错走了 onError 策略
+  }
 }
 ```
+
+trace inspect 直接能显示"`download_file` 返回 2MB，按 `tail(500)` 截到 500 字节存进 scratchpad"——agent 设计者立刻能发现"我应该改 `stored-only`"。
+
 
 ### 8.2 Cache 健康度
 
@@ -552,9 +868,10 @@ PR-A / PR-B 可并行做（互不依赖），PR-C 必须等两者都 land，PR-D
 
 带着这次设计的视角回看 PR3 demo 的几个具体问题：
 
-- **UI bug**：`loadedSkills` 字段不存在 → 现在用 region 模型，UI 应该 listen `region.added`/`region.removed` 而不是 diff `loadedSkills` 数组
-- **没 release**：example agent 永远 load 不卸 → 重构后 `skill_release` 工具自然存在，example 可以演示完整 load+release 循环
-- **scratchpad/history 不分**：example 跨轮跑时 history 累积本轮 noise → 重构后干净
+- **UI bug**：`loadedSkills` 字段不存在 → 现在用 region 模型，UI 应该 listen `region.added`/`region.removed`（section='session-skills' 或 'persistent-skills'），而不是 diff `loadedSkills` 数组
+- **skill 永不卸载**：example agent 永远 load 不卸 → 重构后**不存在 `skill_release`**（见 §4.3）；agent 用 `skill_request({ scope: 'turn' })` 让 substrate 自动在 turn-end 结晶清理；example 升级后演示的是完整 *load → use → turn-end auto-crystallize* 循环（verifier 在某轮 load 后 turn-end 自动释放，下轮 LLM 重新看不到——符合渐进式披露的本意）
+- **scratchpad/history 不分**：example 跨轮跑时 history 累积本轮 noise → 重构后 scratchpad 走 `'turn-local'` interTurn，turn-end 自动清；跨轮 history 只保留 (user, finalAssistant) pair
+- **tool 结果无上限**：example 的 `read_file` / `grep` 现在都 verbatim 入 history → 重构后受 `ToolResultStrategy` 管控（example agent.md 可以选择对 `read_file` 用 `truncate(2000)` 限上限，对 `grep` 保持 `verbatim`，对未来"下载附件"类工具用 `stored-only`）
 
 ### 10.2 PR3 的两条路
 
@@ -622,9 +939,23 @@ release) with correct UI observation.
 
 ## 13. 范围外 / 未来扩展
 
+**Region 层**：
 - **RAG region**：embedding 召回结果作为 turn-local region；需要先有 embedding 基础设施
 - **Cost-aware region**：实时告知 agent 剩余预算；需要 token counter 接 cache 数据
 - **Time-aware region**：时间戳 / 日期 region；one-shot scope
 - **Cross-agent region inheritance**：sub-agent 选择性继承父 agent 的某些 region；需要扩 sub-agent spawn 接口
 - **Region templating**：region 内容是 function-of-state（"当前是 N 步，已用 M tokens"）；扩 format 函数签名
-- **Multi-provider cache breakpoints**：今天只翻译 Anthropic 的 cache_control；OpenAI 自动 prefix cache 不需要 breakpoint
+
+**Tool result strategy 层**：
+- **`aggregation`**：同工具多次调用归并到同一个 region（trade-off：破坏"每次 LLM 调用 region 状态独立 snapshot"性质，且引发"同 region 多次 mutate 怎么记录到 trace"——需要先想清楚）
+- **agent-per-call override**：让 agent 在 tool_use input 里临时改 shape；增加 LLM 误用面，目前留给工具作者 owns
+- **`{ kind: 'fit-budget'; maxFraction: 0.2 }`**：shape 根据 context 剩余 budget 动态决定截断长度；需要装配层 expose budget
+- **`'first-call-then-reference'` visibility 完整实现**：需要 region 上的"消费计数"和"上次被 LLM 看见时间"
+
+**Cache 层**：
+- **Multi-provider cache breakpoints**：今天只翻译 Anthropic 的 `cache_control`；OpenAI 自动 prefix cache 不需要 breakpoint
+- **Adaptive cache-cut placement**：根据实际 cache hit rate 自动调整 SECTION_SCHEMA breakpoint 位置
+
+**Lifecycle 层**：
+- **`summarize-on-overflow` 实际实现**：Phase 1 视为 `session-persistent`；Phase 2 接 LLM 总结 budget 超额时压缩
+- **`wm_promote` 系统工具**：让 agent 在 turn 内主动把某个已有 region 的 interTurn 标记为 `'promote-to-wm'`
