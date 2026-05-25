@@ -7,6 +7,8 @@ import type { ToolDefinition, ToolContext, ToolResult } from '../types/tool.js'
 import type { MessageContent } from '../types/common.js'
 import { FSMEngine } from '../fsm/FSMEngine.js'
 import { ContextLayer } from '../context/ContextLayer.js'
+import { ContextRegions } from '../context/ContextRegions.js'
+import { makeHeaderRegion } from '../context/lifecycleEngine.js'
 import { ToolRegistry } from '../tools/ToolRegistry.js'
 import { WorkingMemory } from '../store/WorkingMemory.js'
 import { CheckpointManager } from '../store/CheckpointManager.js'
@@ -46,6 +48,7 @@ export class AgentRuntime {
 
   private readonly fsm:         FSMEngine
   private readonly context:     ContextLayer
+  private readonly regions:     ContextRegions
   private readonly registry:    ToolRegistry
   private readonly memory:      WorkingMemory
   private readonly checkpoints: CheckpointManager
@@ -78,6 +81,8 @@ export class AgentRuntime {
       systemPrompt: opts.config.systemPrompt,
       model:        opts.config.model.model,
     })
+    this.regions = new ContextRegions(() => this.ioPort.now())
+    this.regions.set('header', makeHeaderRegion(opts.config.systemPrompt))
     this.registry    = new ToolRegistry()
     this.checkpoints = new CheckpointManager(
       this.stateStore,
