@@ -99,7 +99,6 @@
     // ─── State ─────────────────────────────────────────────────────────
     let currentContextId = new URLSearchParams(location.search).get('context') || null
     let eventSource = null
-    let loadedSkillsByRun = {}  // runId → array of loadedSkills (latest snapshot)
     let seenEventIds = new Set()
 
     // ─── DOM ───────────────────────────────────────────────────────────
@@ -162,7 +161,6 @@
       $input.placeholder = '问《三国演义》相关问题...'
       $traceHd.textContent = 'Trace timeline (new conversation — send a message to start)'
       if (eventSource) { eventSource.close(); eventSource = null }
-      loadedSkillsByRun = {}
       seenEventIds = new Set()
     }
 
@@ -177,16 +175,14 @@
       const summary = summaryFor(event)
       div.innerHTML = `<span class="icon">${icon}</span>${esc(summary)}<span class="ts">${event.timestamp}</span>`
 
-      // Skill-loading highlight: agent.run.started events whose loadedSkills
-      // differs from the previous run's snapshot for this contextId.
-      if (event.type === 'agent.run.started') {
-        const skills = (event.payload && event.payload.loadedSkills) || []
-        const prevSkills = Object.values(loadedSkillsByRun).pop() || []
-        if (JSON.stringify(skills) !== JSON.stringify(prevSkills)) {
-          div.classList.add('skill-loaded')
-          div.title = `loadedSkills changed: [${prevSkills.join(', ')}] → [${skills.join(', ')}]`
-        }
-        loadedSkillsByRun[event.runId] = skills
+      // Skill-loading highlight: tool.requested where toolName === 'skill_request'
+      // is the agent invoking the system tool that loads a skill into context.
+      // The next FSM step folds the skill into the system prompt.
+      if (event.type === 'tool.requested'
+          && event.payload && event.payload.toolName === 'skill_request') {
+        const skillName = (event.payload.input && event.payload.input.name) || '?'
+        div.classList.add('skill-loaded')
+        div.title = `Skill load requested: ${skillName}`
       }
 
       // Click → show payload

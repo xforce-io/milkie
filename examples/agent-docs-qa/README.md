@@ -53,10 +53,10 @@ Open `http://localhost:7878` in a browser.
 
 After any answer, type **"你确定吗？"** (or "再确认下" / "真的吗")
 to trigger the verifier skill load. Watch the trace timeline: a yellow-
-highlighted `agent.run.started` entry appears with the badge showing
-`loadedSkills changed: [...] → [..., 'verifier']`. The next LLM call's
-system prompt will include the verifier instructions — click the
-`llm.requested` entry to inspect the raw payload and see for yourself.
+highlighted `tool.requested · skill_request` entry appears with the tooltip
+`Skill load requested: verifier`. The next LLM call's system prompt will
+include the verifier instructions — click the `llm.requested` entry to
+inspect the raw payload and see for yourself.
 
 ## What's in the corpus
 
@@ -139,9 +139,9 @@ After `npx tsx server.ts`, open `http://localhost:7878` and verify:
    fills as grep/read/LLM events stream in. Final answer mentions 周瑜/曹操.
 3. **Conversation continuity**: type "他们最后谁赢了？" → agent answers using
    prior context.
-4. **Skill loading**: type "你确定吗？" → trace shows
-   `tool.requested · skill_request` followed by a yellow-highlighted
-   `agent.run.started` entry indicating `loadedSkills` changed.
+4. **Skill loading**: type "你确定吗？" → trace shows a yellow-highlighted
+   `tool.requested · skill_request` entry (tooltip: `Skill load requested: verifier`);
+   the following `llm.requested` payload's `system` field includes verifier instructions.
 5. **Conversation switching**: click "+ new chat" → URL `?context=` drops →
    ask different question. Then open the picker — both conversations listed;
    click the first one — chat + trace restore from past events; input is
@@ -164,10 +164,39 @@ After `npx tsx server.ts`, open `http://localhost:7878` and verify:
 - **Custom corpus loading at runtime** — corpus path is hardcoded to
   `./corpus/`; replace files in that dir to change content.
 
+## Known substrate limitations (addressed in pending design)
+
+This example is built on milkie's current `ContextLayer`, which has several
+architecturally-incomplete behaviors. The example honestly exposes them
+rather than papering over them:
+
+- **No skill release path** — the agent can `skill_request` to load `verifier`,
+  but has no way to unload it. Once loaded, verifier stays in the system
+  prompt for the remainder of the conversation. Progressive disclosure is
+  one-way today.
+- **scratchpad and history are conflated** — the ReAct loop's
+  `assistant tool_use` / `tool` messages accumulate in the same `history`
+  array as cross-turn `(user, finalAssistant)` pairs. Across many turns the
+  intermediate tool-call noise crowds the LLM's context.
+- **Tool results have no upper bound** — `read_file` returns full chapter
+  bodies (10–20KB each) verbatim into history; nothing in the substrate
+  enforces a per-tool size policy.
+
+All three are addressed in:
+**`docs/superpowers/specs/2026-05-25-context-region-substrate-design.md`**
+
+After that substrate work lands (region abstraction + lifetime declaration +
+turn-end crystallization + `ToolResultStrategy`), this example's
+frontend + `agents/sanguo-researcher.agent.md` will be updated to demonstrate
+the full *load → use → auto-release at turn end* cycle and per-tool result
+shaping.
+
 ## Related
 
 - Story: [s-002](../../docs/stories/s-002-inspect-a-completed-run.md)
   (the static report this builds on)
 - Story: [s-010](../../docs/stories/s-010-skill-versioned-load-and-ab-experiment.md)
   (the skill-loading capability this exercises end-to-end)
+- Spec: [Context Region Substrate](../../docs/superpowers/specs/2026-05-25-context-region-substrate-design.md)
+  (the design that addresses the limitations listed above)
 - Architecture: [ARCHITECTURE.md](../../ARCHITECTURE.md) — "Reference UI projection"
