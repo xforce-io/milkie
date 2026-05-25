@@ -192,3 +192,84 @@ export function makeToolSchemaRegion(schema: ToolSchema): RegionInput {
     format:    (c) => c as ToolSchema,
   }
 }
+
+export interface InterTurnContext {
+  boundary:   'turn-end' | 'turn-start'
+  userInput?: string
+  now:        number
+}
+
+export interface CrystallizationSummary {
+  kept:         string[]
+  dropped:      string[]
+  promoted:     Array<{ from: string; to: string }>
+  archivedPair: string | undefined
+}
+
+export function runInterTurnEngine(
+  regions: ContextRegions,
+  ctx: InterTurnContext,
+): { crystallization?: CrystallizationSummary } {
+  if (ctx.boundary !== 'turn-end') return {}
+
+  const summary: CrystallizationSummary = {
+    kept: [], dropped: [], promoted: [], archivedPair: undefined,
+  }
+
+  // Step 1: archive final answer (if userInput available)
+  if (ctx.userInput !== undefined) {
+    const finalText = extractFinalAssistantText(regions)
+    const pairId = `history:turn-${ctx.now}`
+    regions.set(pairId, makeHistoryPairRegion(ctx.userInput, finalText))
+    summary.archivedPair = pairId
+  }
+
+  // Step 2: iterate snapshot of all regions, apply per-interTurn rule.
+  // Use a snapshot (`[...regions._allRegions()]`) because we mutate during iteration.
+  for (const r of [...regions._allRegions()]) {
+    if (r.id === summary.archivedPair) {
+      summary.kept.push(r.id)
+      continue
+    }
+    if (r.interTurn === 'session-persistent') {
+      summary.kept.push(r.id)
+      continue
+    }
+    if (r.interTurn === 'turn-local') {
+      regions.delete(r.id)
+      summary.dropped.push(r.id)
+      continue
+    }
+    if (typeof r.interTurn === 'object' && r.interTurn.kind === 'ttl') {
+      if (ctx.now > r.interTurn.deadline) {
+        regions.delete(r.id)
+        summary.dropped.push(r.id)
+      } else {
+        summary.kept.push(r.id)
+      }
+      continue
+    }
+    if (r.interTurn === 'promote-to-wm') {
+      const promotedId = `wm:${r.id}`
+      regions.set(promotedId, {
+        target:    'system',
+        section:   'wm',
+        intraTurn: 'turn-persistent',
+        interTurn: 'session-persistent',
+        stability: 'session-stable',
+        content:   r.content,
+        format:    r.format,
+      })
+      regions.delete(r.id)
+      summary.promoted.push({ from: r.id, to: promotedId })
+      continue
+    }
+    if (r.interTurn === 'summarize-on-overflow') {
+      // Phase 1: treat as session-persistent; budget summarization is future work.
+      summary.kept.push(r.id)
+      continue
+    }
+  }
+
+  return { crystallization: summary }
+}

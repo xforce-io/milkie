@@ -10,9 +10,10 @@ import {
   makeStateInstructionsRegion,
   makeWmRegion,
   makeToolSchemaRegion,
+  runInterTurnEngine,
 } from '../context/lifecycleEngine'
 import type { RegionInput } from '../context/Region'
-import type { MessageContent } from '../types/common.js'
+import type { MessageContent, Message } from '../types/common.js'
 import type { ToolSchema } from '../types/model.js'
 
 function scratchAssistantRegion(text: string, ordinal: number, hasToolUse = false): RegionInput {
@@ -152,5 +153,90 @@ describe('region factories', () => {
     expect(r.target).toBe('tool')
     expect(r.section).toBe('default')
     expect(r.format(r.content)).toBe(schema)
+  })
+})
+
+describe('runInterTurnEngine — turn-end crystallization', () => {
+  test('archives (user, finalAssistant) pair into a history region', () => {
+    const r = new ContextRegions(() => 100)
+    r.set('current', makeCurrentTurnRegion('what time?'))
+    r.set('s-final', makeScratchpadAssistantRegion(
+      [{ type: 'text', text: 'noon' }],
+      false,
+    ))
+    runInterTurnEngine(r, { boundary: 'turn-end', userInput: 'what time?', now: 999 })
+    const histIds = [...r._allRegions()]
+      .filter(x => x.section === 'history')
+      .map(x => x.id)
+    expect(histIds).toHaveLength(1)
+    const hist = r.get(histIds[0]!)!
+    const msgs = hist.format(hist.content) as Message[]
+    expect((msgs[0]!.content[0] as { text: string }).text).toBe('what time?')
+    expect((msgs[1]!.content[0] as { text: string }).text).toBe('noon')
+  })
+
+  test('drops all turn-local regions (scratchpad + current-turn + turn-scope skills)', () => {
+    const r = new ContextRegions(() => 0)
+    r.set('current', makeCurrentTurnRegion('q'))
+    r.set('s1', makeScratchpadAssistantRegion([{ type: 'text', text: 'a' }], false))
+    r.set('skill-turn', makeSkillRegion('v', 'I', 'turn'))
+    runInterTurnEngine(r, { boundary: 'turn-end', userInput: 'q', now: 1 })
+    expect(r.get('current')).toBeUndefined()
+    expect(r.get('s1')).toBeUndefined()
+    expect(r.get('skill-turn')).toBeUndefined()
+  })
+
+  test('keeps session-persistent regions (header, session skills, history)', () => {
+    const r = new ContextRegions(() => 0)
+    r.set('hdr', makeHeaderRegion('agent'))
+    r.set('skill-s', makeSkillRegion('s', 'I', 'session'))
+    r.set('current', makeCurrentTurnRegion('q'))
+    r.set('s1', makeScratchpadAssistantRegion([{ type: 'text', text: 'a' }], false))
+    runInterTurnEngine(r, { boundary: 'turn-end', userInput: 'q', now: 1 })
+    expect(r.get('hdr')).toBeDefined()
+    expect(r.get('skill-s')).toBeDefined()
+  })
+
+  test('TTL region dropped when now > deadline', () => {
+    const r = new ContextRegions(() => 0)
+    r.set('ttl', {
+      target: 'system', section: 'wm',
+      intraTurn: 'turn-persistent',
+      interTurn: { kind: 'ttl', deadline: 100 },
+      stability: 'volatile',
+      content: 'expires',
+      format: (c) => String(c),
+    })
+    runInterTurnEngine(r, { boundary: 'turn-end', userInput: 'q', now: 200 })
+    expect(r.get('ttl')).toBeUndefined()
+  })
+
+  test('promote-to-wm region transforms into wm region (target=system, section=wm)', () => {
+    const r = new ContextRegions(() => 0)
+    r.set('learn', {
+      target: 'message', section: 'scratchpad',
+      intraTurn: 'turn-persistent',
+      interTurn: 'promote-to-wm',
+      stability: 'volatile',
+      content: 'learned-fact',
+      format: (c) => ({ role: 'tool', content: [{ type: 'text', text: String(c) }] }),
+    })
+    runInterTurnEngine(r, { boundary: 'turn-end', userInput: 'q', now: 1 })
+    expect(r.get('learn')).toBeUndefined()
+    const promoted = [...r._allRegions()].filter(x => x.id.startsWith('wm:'))
+    expect(promoted).toHaveLength(1)
+    expect(promoted[0]!.target).toBe('system')
+    expect(promoted[0]!.section).toBe('wm')
+    expect(promoted[0]!.interTurn).toBe('session-persistent')
+  })
+
+  test('userInput is optional — no archive when missing (e.g. interrupt save)', () => {
+    const r = new ContextRegions(() => 0)
+    r.set('s1', makeScratchpadAssistantRegion([{ type: 'text', text: 'a' }], false))
+    runInterTurnEngine(r, { boundary: 'turn-end', now: 1 })
+    const histIds = [...r._allRegions()].filter(x => x.section === 'history').map(x => x.id)
+    expect(histIds).toEqual([])
+    // Scratchpad still cleared because it's turn-local.
+    expect(r.get('s1')).toBeUndefined()
   })
 })
