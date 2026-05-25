@@ -75,6 +75,41 @@ async function handleGetConversationEvents(
   sendJson(res, 200, { events })
 }
 
+async function handleSseStream(
+  req: IncomingMessage, res: ServerResponse, s: ServerState, contextId: string,
+): Promise<void> {
+  res.writeHead(200, {
+    'content-type':  'text/event-stream',
+    'cache-control': 'no-cache',
+    'connection':    'keep-alive',
+    'x-accel-buffering': 'no',
+  })
+
+  // 1. Catch-up: send all past events for this context
+  const past = await readEventsForContext(s.runsDir, contextId)
+  for (const e of past) {
+    res.write(`data: ${JSON.stringify(e)}\n\n`)
+  }
+
+  // If no past events AND no current active run for this contextId,
+  // close immediately so the client doesn't hang on an unknown contextId.
+  if (past.length === 0) {
+    res.end()
+    return
+  }
+
+  // 2. Subscribe to live events
+  const unsubscribe = s.eventStore.subscribe(contextId, (event) => {
+    if (!res.writableEnded) res.write(`data: ${JSON.stringify(event)}\n\n`)
+  })
+
+  // 3. Cleanup on client disconnect
+  req.on('close', () => {
+    unsubscribe()
+    if (!res.writableEnded) res.end()
+  })
+}
+
 async function serveStatic(res: ServerResponse, filePath: string): Promise<void> {
   try {
     const content = await fs.readFile(filePath, 'utf-8')
@@ -125,6 +160,11 @@ export async function startServer(config: ServerConfig): Promise<Server> {
       const convMatch = route.match(/^\/conversation\/([^/]+)\/events$/)
       if (req.method === 'GET' && convMatch) {
         return handleGetConversationEvents(res, state, decodeURIComponent(convMatch[1]!))
+      }
+
+      const sseMatch = route.match(/^\/conversation\/([^/]+)\/stream$/)
+      if (req.method === 'GET' && sseMatch) {
+        return handleSseStream(req, res, state, decodeURIComponent(sseMatch[1]!))
       }
 
       if (req.method === 'GET' && (route === '/' || route === '/index.html')) {

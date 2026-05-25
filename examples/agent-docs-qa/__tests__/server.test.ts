@@ -121,3 +121,60 @@ describe('server — REST endpoints', () => {
     expect(r.status).toBe(404)
   })
 })
+
+describe('server — SSE stream', () => {
+  let server: Server
+  let baseUrl: string
+  let exampleDir: string
+
+  beforeEach(async () => {
+    exampleDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-docs-qa-sse-'))
+    fs.mkdirSync(path.join(exampleDir, '.milkie', 'runs'), { recursive: true })
+    server = await startServer({
+      port: 0, exampleDir,
+      gateway: new StubGateway([text('first'), text('second')]),
+      agentFile:  path.join(__dirname, '..', 'agents', 'sanguo-researcher.md'),
+      corpusRoot: path.join(__dirname, '..', 'corpus'),
+    })
+    const addr = server.address()
+    baseUrl = `http://localhost:${(addr as { port: number }).port}`
+  })
+  afterEach(async () => {
+    await stopServer(server)
+    fs.rmSync(exampleDir, { recursive: true, force: true })
+  })
+
+  it('SSE delivers past events on connect for a completed conversation', async () => {
+    // Record a conversation first
+    const first = JSON.parse((await postJson(`${baseUrl}/chat`, { input: 'q1' })).body) as { contextId: string }
+
+    // Connect to SSE for this contextId
+    const res = await fetch(`${baseUrl}/conversation/${first.contextId}/stream`)
+    expect(res.headers.get('content-type')).toContain('text/event-stream')
+
+    const reader = res.body!.getReader()
+    const decoder = new TextDecoder()
+    let received = ''
+
+    const timeout = setTimeout(() => reader.cancel(), 1500)
+    while (true) {
+      const { value, done } = await reader.read()
+      if (done) break
+      received += decoder.decode(value)
+    }
+    clearTimeout(timeout)
+
+    const messages = received.split('\n\n').filter(s => s.startsWith('data:'))
+    expect(messages.length).toBeGreaterThan(0)
+    const events = messages.map(m => JSON.parse(m.replace(/^data: /, '')))
+    expect(events.some((e: { type: string }) => e.type === 'agent.run.started')).toBe(true)
+    expect(events.some((e: { type: string }) => e.type === 'agent.run.completed')).toBe(true)
+  }, 5_000)
+
+  it('SSE returns empty (closed immediately) for unknown contextId', async () => {
+    const res = await fetch(`${baseUrl}/conversation/nonexistent/stream`)
+    expect(res.status).toBe(200)
+    const text = await res.text()
+    expect(text).toBe('')
+  }, 5_000)
+})
