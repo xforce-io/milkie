@@ -8,7 +8,7 @@ import type { MessageContent } from '../types/common.js'
 import { FSMEngine } from '../fsm/FSMEngine.js'
 import { ContextLayer } from '../context/ContextLayer.js'
 import { ContextRegions } from '../context/ContextRegions.js'
-import { makeHeaderRegion } from '../context/lifecycleEngine.js'
+import { makeHeaderRegion, makeCurrentTurnRegion } from '../context/lifecycleEngine.js'
 import { ToolRegistry } from '../tools/ToolRegistry.js'
 import { WorkingMemory } from '../store/WorkingMemory.js'
 import { CheckpointManager } from '../store/CheckpointManager.js'
@@ -250,6 +250,18 @@ export class AgentRuntime {
     this.pendingSkills.clear()
   }
 
+  private setCurrentTurn(input: string): void {
+    this.regions.set('current-turn', makeCurrentTurnRegion(input))
+    // Keep ContextLayer in sync until Task 6 removes its history role.
+    this.context.setCurrentTurn(input)
+  }
+
+  private getCurrentTurn(): string | null {
+    const r = this.regions.get('current-turn')
+    if (!r) return null
+    return r.content as string
+  }
+
   private async checkEvents(): Promise<void> {
     // Poll stateStore for external interrupt signal (set by Milkie.interrupt)
     const extInterrupt = await this.stateStore.get(`context:${this.contextId}:interrupt`)
@@ -281,7 +293,7 @@ export class AgentRuntime {
     return this.checkpoints.save({
       sequence:    this.turnNumber,
       goal:        this.goal,
-      currentTurn: currentTurn ?? this.context.currentTurn ?? undefined,
+      currentTurn: currentTurn ?? this.getCurrentTurn() ?? undefined,
       fsm:         this.fsm.snapshot(resumeState),
       context: {
         history:              ctxSnapshot.history,
@@ -327,7 +339,7 @@ export class AgentRuntime {
       contextId: this.contextId,
     })
 
-    this.context.setCurrentTurn(`Goal: ${this.goal}\n\n${input}`)
+    this.setCurrentTurn(`Goal: ${this.goal}\n\n${input}`)
     this.turnNumber++
 
     try {
@@ -365,7 +377,7 @@ export class AgentRuntime {
 
   // Continue an existing session with new user input
   async continueTurn(input: string): Promise<AgentResult> {
-    this.context.setCurrentTurn(input)
+    this.setCurrentTurn(input)
     this.turnNumber++
     return this.run(input)
   }
@@ -511,7 +523,7 @@ export class AgentRuntime {
 
     const actionInput = {
       goal:  this.goal,
-      input: `Context: ${JSON.stringify(this.memory.toJSON())}\nCurrent turn: ${this.context.currentTurn ?? ''}`,
+      input: `Context: ${JSON.stringify(this.memory.toJSON())}\nCurrent turn: ${this.getCurrentTurn() ?? ''}`,
     }
 
     try {
