@@ -18,6 +18,7 @@ import {
   makeStateInstructionsRegion,
   makeWmRegion,
   makeToolSchemaRegion,
+  runInterTurnEngine,
 } from '../context/lifecycleEngine.js'
 import type { ToolSchema } from '../types/model.js'
 import { ToolRegistry } from '../tools/ToolRegistry.js'
@@ -291,6 +292,17 @@ export class AgentRuntime {
     this.context.appendHistory({ role: 'tool', content })
   }
 
+  private crystallizeTurn(userInput: string): void {
+    runInterTurnEngine(this.regions, {
+      boundary:  'turn-end',
+      userInput,
+      now:       this.ioPort.now(),
+    })
+    // Note: We intentionally do NOT mirror the (user, finalAssistant) pair back
+    // into ContextLayer.history. ContextLayer is on its way out (Task 11); the
+    // only remaining consumer is Replay.nondet.test.ts (rewritten in Task 12).
+  }
+
   private refreshTransientRegions(state: FSMState, schemas: ToolSchema[]): void {
     // State instructions — re-set every step so changes in state propagate.
     // The state-scoped intraTurn filter (assemble's isActive) means only the
@@ -396,12 +408,14 @@ export class AgentRuntime {
       contextId: this.contextId,
     })
 
-    this.setCurrentTurn(`Goal: ${this.goal}\n\n${input}`)
+    const turnInput = `Goal: ${this.goal}\n\n${input}`
+    this.setCurrentTurn(turnInput)
     this.turnNumber++
 
     try {
       await this.executeFSM()
-
+      // Turn completed successfully — crystallize.
+      this.crystallizeTurn(turnInput)
       this.recorder.endSpan(this.rootSpan, 'ok')
       return {
         agentRunId: this.agentRunId,
