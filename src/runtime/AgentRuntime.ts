@@ -6,7 +6,6 @@ import type { ITrajectoryRecorder, Span } from '../types/trajectory.js'
 import type { ToolDefinition, ToolContext, ToolResult } from '../types/tool.js'
 import type { MessageContent } from '../types/common.js'
 import { FSMEngine } from '../fsm/FSMEngine.js'
-import { ContextLayer } from '../context/ContextLayer.js'
 import { ContextRegions } from '../context/ContextRegions.js'
 import { assemble, type AssembleScope } from '../context/assemble.js'
 import {
@@ -59,7 +58,6 @@ export class AgentRuntime {
   private readonly extraTools:      ToolDefinition[]
 
   private readonly fsm:         FSMEngine
-  private readonly context:     ContextLayer
   private readonly regions:     ContextRegions
   private readonly registry:    ToolRegistry
   private readonly memory:      WorkingMemory
@@ -89,10 +87,6 @@ export class AgentRuntime {
 
     this.fsm     = new FSMEngine(opts.config.fsm)
     this.memory  = new WorkingMemory()
-    this.context = new ContextLayer({
-      systemPrompt: opts.config.systemPrompt,
-      model:        opts.config.model.model,
-    })
     this.regions = new ContextRegions(() => this.ioPort.now())
     this.regions.set('header', makeHeaderRegion(opts.config.systemPrompt))
     this.registry    = new ToolRegistry()
@@ -257,19 +251,14 @@ export class AgentRuntime {
       const id = `skill:${name}`
       // Already loaded? Skip (preserves createdAt; idempotent like Map.set upsert).
       if (this.regions.get(id)) continue
-      // PR-C1 default: session-scope (matches old ContextLayer behavior).
-      // PR-C2 will introduce turn-scope as the new default + plumb scope through requestSkill.
+      // PR-C2 will plumb scope through requestSkill; PR-C1 defaults to session.
       this.regions.set(id, makeSkillRegion(name, instructions, 'session'))
-      // Keep ContextLayer in sync until Task 11 deletion.
-      this.context.loadInstructions(name, instructions)
     }
     this.pendingSkillLoads = []
   }
 
   private setCurrentTurn(input: string): void {
     this.regions.set('current-turn', makeCurrentTurnRegion(input))
-    // Keep ContextLayer in sync until Task 6 removes its history role.
-    this.context.setCurrentTurn(input)
   }
 
   private getCurrentTurn(): string | null {
@@ -282,14 +271,11 @@ export class AgentRuntime {
     const id = `scratch:${this.ioPort.uuid()}`
     const hasToolUse = content.some(c => c.type === 'tool_use')
     this.regions.set(id, makeScratchpadAssistantRegion(content, hasToolUse))
-    // Keep ContextLayer in sync until Task 7 removes its buildRequest role.
-    this.context.appendHistory({ role: 'assistant', content })
   }
 
   private appendScratchpadToolResults(content: MessageContent[]): void {
     const id = `scratch:${this.ioPort.uuid()}`
     this.regions.set(id, makeScratchpadToolResultRegion(content))
-    this.context.appendHistory({ role: 'tool', content })
   }
 
   private crystallizeTurn(userInput: string): void {
@@ -298,9 +284,6 @@ export class AgentRuntime {
       userInput,
       now:       this.ioPort.now(),
     })
-    // Note: We intentionally do NOT mirror the (user, finalAssistant) pair back
-    // into ContextLayer.history. ContextLayer is on its way out (Task 11); the
-    // only remaining consumer is Replay.nondet.test.ts (rewritten in Task 12).
   }
 
   private refreshTransientRegions(state: FSMState, schemas: ToolSchema[]): void {
