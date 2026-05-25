@@ -8,7 +8,7 @@ import type { MessageContent } from '../types/common.js'
 import { FSMEngine } from '../fsm/FSMEngine.js'
 import { ContextLayer } from '../context/ContextLayer.js'
 import { ContextRegions } from '../context/ContextRegions.js'
-import { makeHeaderRegion, makeCurrentTurnRegion } from '../context/lifecycleEngine.js'
+import { makeHeaderRegion, makeCurrentTurnRegion, makeScratchpadAssistantRegion, makeScratchpadToolResultRegion } from '../context/lifecycleEngine.js'
 import { ToolRegistry } from '../tools/ToolRegistry.js'
 import { WorkingMemory } from '../store/WorkingMemory.js'
 import { CheckpointManager } from '../store/CheckpointManager.js'
@@ -262,6 +262,20 @@ export class AgentRuntime {
     return r.content as string
   }
 
+  private appendScratchpadAssistant(content: MessageContent[]): void {
+    const id = `scratch:${this.ioPort.uuid()}`
+    const hasToolUse = content.some(c => c.type === 'tool_use')
+    this.regions.set(id, makeScratchpadAssistantRegion(content, hasToolUse))
+    // Keep ContextLayer in sync until Task 7 removes its buildRequest role.
+    this.context.appendHistory({ role: 'assistant', content })
+  }
+
+  private appendScratchpadToolResults(content: MessageContent[]): void {
+    const id = `scratch:${this.ioPort.uuid()}`
+    this.regions.set(id, makeScratchpadToolResultRegion(content))
+    this.context.appendHistory({ role: 'tool', content })
+  }
+
   private async checkEvents(): Promise<void> {
     // Poll stateStore for external interrupt signal (set by Milkie.interrupt)
     const extInterrupt = await this.stateStore.get(`context:${this.contextId}:interrupt`)
@@ -444,7 +458,7 @@ export class AgentRuntime {
       this.recorder.endSpan(llmSpan, 'ok')
 
       // Append assistant turn to context
-      this.context.appendHistory({ role: 'assistant', content: response.content })
+      this.appendScratchpadAssistant(response.content)
 
       // Capture text output
       for (const c of response.content) {
@@ -468,7 +482,7 @@ export class AgentRuntime {
           content:     r.error ?? JSON.stringify(r.output),
           is_error:    r.isError,
         }))
-        this.context.appendHistory({ role: 'tool', content: toolResultContent })
+        this.appendScratchpadToolResults(toolResultContent)
         this.applyPendingSkills()
 
         // Did any tool emit a FSM event?
