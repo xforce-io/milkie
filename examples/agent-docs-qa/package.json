@@ -1,0 +1,9 @@
+{
+  "name": "agent-docs-qa-example",
+  "version": "0.0.0",
+  "private": true,
+  "description": "milkie example — 三国 Q&A agent with skill loading + live trace UI",
+  "scripts": {
+    "start": "npx tsx server.ts"
+  }
+}

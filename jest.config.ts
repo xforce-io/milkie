@@ -4,7 +4,7 @@ const config: Config = {
   preset: 'ts-jest',
   testEnvironment: 'node',
   rootDir: '.',
-  testMatch: ['<rootDir>/src/**/*.test.ts', '<rootDir>/tests/**/*.test.ts'],
+  testMatch: ['<rootDir>/src/**/*.test.ts', '<rootDir>/tests/**/*.test.ts', '<rootDir>/examples/**/*.test.ts'],
   moduleNameMapper: {
     '^@milkie/(.*)$':   '<rootDir>/src/$1',
     '^(\\.{1,2}/.+)\\.js$': '$1',   // strip .js for ts-jest CJS resolution
