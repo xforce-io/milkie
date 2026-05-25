@@ -33,6 +33,13 @@ export class ContextRegions {
     return this.epoch
   }
 
+  // Public iterator for the assemble layer. Leading underscore signals
+  // "internal to substrate — not for general consumers". Iteration order
+  // is unspecified: assemble must do its own sorting.
+  _allRegions(): IterableIterator<Region> {
+    return this.regions.values()
+  }
+
   snapshot(): RegionSnapshot {
     return {
       epoch:   this.epoch,
