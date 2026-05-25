@@ -4,6 +4,8 @@ node_modules/
 # Build output
 dist/
 *.tsbuildinfo
+# tsc occasionally leaves .js next to .ts sources when invoked with non-default outDir
+src/**/*.js
 
 # Test artifacts
 test-output/
