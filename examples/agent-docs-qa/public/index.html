@@ -95,7 +95,240 @@
   </main>
 
   <script>
-  /* Task 11 will fill this. */
+  (function () {
+    // ─── State ─────────────────────────────────────────────────────────
+    let currentContextId = new URLSearchParams(location.search).get('context') || null
+    let eventSource = null
+    let loadedSkillsByRun = {}  // runId → array of loadedSkills (latest snapshot)
+    let seenEventIds = new Set()
+
+    // ─── DOM ───────────────────────────────────────────────────────────
+    const $log     = document.getElementById('chat-log')
+    const $input   = document.querySelector('#chat-input input')
+    const $form    = document.getElementById('chat-input')
+    const $submit  = document.querySelector('#chat-input button')
+    const $picker  = document.getElementById('conversation-picker')
+    const $newBtn  = document.getElementById('new-chat')
+    const $tl      = document.getElementById('trace-timeline')
+    const $detail  = document.getElementById('payload-detail')
+    const $traceHd = document.getElementById('trace-header')
+
+    // ─── Utilities ─────────────────────────────────────────────────────
+    function esc(s) {
+      return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;')
+    }
+    function setUrlContext(ctxId) {
+      const url = new URL(location.href)
+      if (ctxId) url.searchParams.set('context', ctxId)
+      else url.searchParams.delete('context')
+      history.replaceState(null, '', url.toString())
+    }
+
+    // ─── Conversation picker ───────────────────────────────────────────
+    async function refreshPicker() {
+      const res = await fetch('/conversations')
+      const data = await res.json()
+      $picker.innerHTML = '<option value="">(new conversation)</option>'
+      for (const c of data.conversations) {
+        const opt = document.createElement('option')
+        opt.value = c.contextId
+        opt.textContent = `${c.contextId.slice(0, 8)}… · ${c.status} · ${c.runIds.length} turns`
+        $picker.appendChild(opt)
+      }
+      $picker.value = currentContextId ?? ''
+    }
+    $picker.addEventListener('change', () => {
+      const v = $picker.value
+      currentContextId = v || null
+      setUrlContext(currentContextId)
+      if (currentContextId) loadConversation(currentContextId)
+      else resetUI()
+    })
+    $newBtn.addEventListener('click', () => {
+      currentContextId = null
+      setUrlContext(null)
+      $picker.value = ''
+      resetUI()
+    })
+
+    // ─── UI reset ──────────────────────────────────────────────────────
+    function resetUI() {
+      $log.innerHTML = ''
+      $tl.innerHTML = ''
+      $detail.innerHTML = ''
+      $input.disabled = false
+      $submit.disabled = false
+      $input.placeholder = '问《三国演义》相关问题...'
+      $traceHd.textContent = 'Trace timeline (new conversation — send a message to start)'
+      if (eventSource) { eventSource.close(); eventSource = null }
+      loadedSkillsByRun = {}
+      seenEventIds = new Set()
+    }
+
+    // ─── Render an event into trace timeline ───────────────────────────
+    function renderEvent(event) {
+      if (seenEventIds.has(event.id)) return
+      seenEventIds.add(event.id)
+
+      const div = document.createElement('div')
+      div.className = `entry ${kindClass(event.type)}`
+      const icon = iconFor(event.type)
+      const summary = summaryFor(event)
+      div.innerHTML = `<span class="icon">${icon}</span>${esc(summary)}<span class="ts">${event.timestamp}</span>`
+
+      // Skill-loading highlight: agent.run.started events whose loadedSkills
+      // differs from the previous run's snapshot for this contextId.
+      if (event.type === 'agent.run.started') {
+        const skills = (event.payload && event.payload.loadedSkills) || []
+        const prevSkills = Object.values(loadedSkillsByRun).pop() || []
+        if (JSON.stringify(skills) !== JSON.stringify(prevSkills)) {
+          div.classList.add('skill-loaded')
+          div.title = `loadedSkills changed: [${prevSkills.join(', ')}] → [${skills.join(', ')}]`
+        }
+        loadedSkillsByRun[event.runId] = skills
+      }
+
+      // Click → show payload
+      div.addEventListener('click', () => {
+        $detail.textContent = JSON.stringify(event, null, 2)
+      })
+
+      $tl.appendChild(div)
+      autoScroll()
+    }
+
+    function kindClass(type) {
+      if (type.startsWith('llm.'))  return 'llm'
+      if (type.startsWith('tool.')) return 'tool'
+      return 'lifecycle'
+    }
+    function iconFor(type) {
+      if (type.startsWith('llm.'))  return '◆'
+      if (type.startsWith('tool.')) return '▣'
+      return '●'
+    }
+    function summaryFor(event) {
+      const t = event.type
+      if (t === 'agent.run.started')   return `run started · ${(event.payload && event.payload.input || '').slice(0, 60)}`
+      if (t === 'agent.run.completed') return `run completed · ${event.payload && event.payload.status}`
+      if (t === 'llm.requested')       return 'LLM request'
+      if (t === 'llm.responded')       return 'LLM response'
+      if (t === 'tool.requested')      return `tool: ${event.payload && event.payload.toolName}`
+      if (t === 'tool.responded')      return `tool: ${event.payload && event.payload.toolName} → ok`
+      if (t === 'clock.read')          return `clock.read · ${event.payload && event.payload.value}`
+      if (t === 'uuid.generated')      return `uuid.generated · ${(event.payload && event.payload.value || '').slice(0, 8)}…`
+      return t
+    }
+
+    function renderChatMessage(role, text) {
+      const div = document.createElement('div')
+      div.className = `msg ${role}`
+      div.innerHTML = `<div class="speaker">${role}</div>${esc(text)}`
+      $log.appendChild(div)
+      $log.scrollTop = $log.scrollHeight
+    }
+
+    function autoScroll() {
+      const nearBottom = $tl.scrollHeight - $tl.scrollTop - $tl.clientHeight < 100
+      if (nearBottom) $tl.scrollTop = $tl.scrollHeight
+    }
+
+    // ─── Load existing conversation (past events + maybe SSE) ──────────
+    async function loadConversation(ctxId) {
+      resetUI()
+      $traceHd.textContent = `Trace timeline — conversation ${ctxId.slice(0, 8)}…`
+
+      // 1. Pull conversation summary to know if it's active
+      const convResp = await fetch('/conversations')
+      const conv = (await convResp.json()).conversations.find(c => c.contextId === ctxId)
+      const isActive = conv && conv.status === 'active'
+
+      // 2. Pull past events to rebuild chat log + trace
+      const eventsResp = await fetch(`/conversation/${ctxId}/events`)
+      if (eventsResp.status === 404) return
+      const { events } = await eventsResp.json()
+      for (const e of events) {
+        renderEvent(e)
+        if (e.type === 'agent.run.started' && e.payload && e.payload.input) {
+          renderChatMessage('user', e.payload.input)
+        } else if (e.type === 'agent.run.completed' && e.payload && e.payload.lastTextOutput) {
+          renderChatMessage('assistant', e.payload.lastTextOutput)
+        }
+      }
+
+      // 3. Open SSE — handler dedupes events we already rendered via seenEventIds
+      openSse(ctxId)
+
+      // 4. If conversation ended, disable input
+      if (!isActive) {
+        $input.disabled = true
+        $submit.disabled = true
+        $input.placeholder = '此对话已结束。点 "+ new chat" 开始新对话。'
+      }
+    }
+
+    function openSse(ctxId) {
+      if (eventSource) eventSource.close()
+      eventSource = new EventSource(`/conversation/${ctxId}/stream`)
+      eventSource.onmessage = (msg) => {
+        const event = JSON.parse(msg.data)
+        renderEvent(event)
+        if (event.type === 'agent.run.completed' && event.payload && event.payload.lastTextOutput) {
+          renderChatMessage('assistant', event.payload.lastTextOutput)
+        }
+      }
+      eventSource.onerror = () => {
+        // SSE may close when server is done; that's expected
+      }
+    }
+
+    // ─── Chat submission ───────────────────────────────────────────────
+    $form.addEventListener('submit', async (ev) => {
+      ev.preventDefault()
+      const text = $input.value.trim()
+      if (!text) return
+
+      renderChatMessage('user', text)
+      $input.value = ''
+      $input.disabled = true
+      $submit.disabled = true
+
+      try {
+        const resp = await fetch('/chat', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ input: text, contextId: currentContextId }),
+        })
+        const data = await resp.json()
+        if (!currentContextId) {
+          currentContextId = data.contextId
+          setUrlContext(currentContextId)
+          // Open SSE for the new conversation
+          openSse(currentContextId)
+        }
+        // The completed-event handler in openSse will append the assistant response
+      } catch (err) {
+        renderChatMessage('assistant', `[error] ${err.message}`)
+      } finally {
+        $input.disabled = false
+        $submit.disabled = false
+        $input.focus()
+        refreshPicker()  // newly-created conversation should appear
+      }
+    })
+
+    // ─── Boot ──────────────────────────────────────────────────────────
+    (async function () {
+      await refreshPicker()
+      if (currentContextId) {
+        $picker.value = currentContextId
+        await loadConversation(currentContextId)
+      } else {
+        resetUI()
+      }
+    })()
+  })()
   </script>
 </body>
 </html>
