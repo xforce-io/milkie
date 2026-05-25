@@ -18,11 +18,14 @@ export interface AgentCheckpoint {
     stateData:    unknown
   }
   context: {
-    history:              Message[]
     workingMemory:        unknown
-    instructionsSnapshot: string[]
+    regions:              import('../context/Region.js').RegionSnapshot
+    // Deprecated (kept readable for backwards compat parsing; AgentRuntime no
+    // longer writes these. Will be removed when fixture format settles.):
+    history?:             Message[]
+    instructionsSnapshot?: string[]
     instructions?:        Record<string, string>
-    contextEpoch:         number
+    contextEpoch?:        number
   }
   pendingEvents: AgentEvent[]
   children: ChildAgentRecord[]

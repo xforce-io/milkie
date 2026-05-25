@@ -358,18 +358,14 @@ export class AgentRuntime {
   }
 
   private async saveCheckpoint(resumeState?: string, currentTurn?: string): Promise<AgentCheckpoint> {
-    const ctxSnapshot = this.context.snapshot()
     return this.checkpoints.save({
       sequence:    this.turnNumber,
       goal:        this.goal,
       currentTurn: currentTurn ?? this.getCurrentTurn() ?? undefined,
       fsm:         this.fsm.snapshot(resumeState),
       context: {
-        history:              ctxSnapshot.history,
-        workingMemory:        this.memory.toJSON(),
-        instructionsSnapshot: ctxSnapshot.instructionsSnapshot,
-        instructions:         ctxSnapshot.instructions,
-        contextEpoch:         ctxSnapshot.contextEpoch,
+        workingMemory: this.memory.toJSON(),
+        regions:       this.regions.snapshot(),
       },
       pendingEvents: this.pendingEvents.map(e => ({ type: e.type, payload: e.payload })),
       children:      Array.from(this.childRecords.values()),
@@ -387,12 +383,7 @@ export class AgentRuntime {
   // Load prior state for multi-turn continuation
   async loadCheckpoint(checkpoint: AgentCheckpoint): Promise<void> {
     this.turnNumber = checkpoint.sequence
-    this.context.restore({
-      history:              checkpoint.context.history,
-      instructionsSnapshot: checkpoint.context.instructionsSnapshot,
-      instructions:         checkpoint.context.instructions,
-      contextEpoch:         checkpoint.context.contextEpoch,
-    })
+    this.regions.restore(checkpoint.context.regions)
     const restoredMemory = WorkingMemory.fromJSON(checkpoint.context.workingMemory)
     Object.assign(this.memory, restoredMemory)
     this.fsm.restore(checkpoint.fsm)
