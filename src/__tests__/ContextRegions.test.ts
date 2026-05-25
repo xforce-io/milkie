@@ -217,3 +217,32 @@ describe('ContextRegions — snapshot / restore', () => {
     expect(clock).not.toHaveBeenCalled()
   })
 })
+
+describe('ContextRegions — _allRegions iteration', () => {
+  test('empty store iterates zero times', () => {
+    const store = new ContextRegions(() => 0)
+    expect([..._spread(store)]).toEqual([])
+  })
+
+  test('iterates all current regions (count + ids)', () => {
+    const store = new ContextRegions(() => 0)
+    store.set('a', regionInput({ content: '1' }))
+    store.set('b', regionInput({ content: '2' }))
+    store.set('c', regionInput({ content: '3' }))
+    const ids = [..._spread(store)].map(r => r.id).sort()
+    expect(ids).toEqual(['a', 'b', 'c'])
+  })
+
+  test('does not include deleted regions', () => {
+    const store = new ContextRegions(() => 0)
+    store.set('a', regionInput())
+    store.set('b', regionInput())
+    store.delete('a')
+    const ids = [..._spread(store)].map(r => r.id)
+    expect(ids).toEqual(['b'])
+  })
+})
+
+function _spread(store: ContextRegions): IterableIterator<import('../context/Region').Region> {
+  return store._allRegions()
+}
