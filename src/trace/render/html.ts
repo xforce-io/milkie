@@ -17,6 +17,7 @@ const BADGE_STATUS_CLASSES = new Set(['interrupted', 'error', 'in-flight'])
 function summaryFor(entry: TimelineEntry): string {
   if (entry.kind === 'llm')       return 'LLM call' + (entry.respondedId ? '' : ' (no response)')
   if (entry.kind === 'tool')      return 'tool: ' + esc(entry.toolName) + (entry.respondedId ? '' : ' (no response)')
+  if (entry.kind === 'region')    return esc(entry.summary)
   return entry.eventType === 'agent.run.started' ? 'run started' : 'run completed'
 }
 
@@ -25,6 +26,8 @@ function payloadFor(entry: TimelineEntry, eventById: Map<string, Event>): string
   if (entry.kind === 'lifecycle') {
     const evt = eventById.get(entry.eventId)
     if (evt) sections.push(JSON.stringify(evt.payload, null, 2))
+  } else if (entry.kind === 'region') {
+    sections.push(JSON.stringify(entry.payload, null, 2))
   } else {
     const req = eventById.get(entry.requestedId)
     if (req) sections.push('request:\n' + JSON.stringify(req.payload, null, 2))
@@ -35,7 +38,12 @@ function payloadFor(entry: TimelineEntry, eventById: Map<string, Event>): string
 }
 
 function renderEntry(entry: TimelineEntry, eventById: Map<string, Event>): string {
-  const icon = entry.kind === 'llm' ? '◆' : entry.kind === 'tool' ? '▣' : '●'
+  const icon = entry.kind === 'llm' ? '◆'
+             : entry.kind === 'tool' ? '▣'
+             : entry.kind === 'region'
+               ? (entry.eventType === 'context.boundary.applied' ? '⌖'
+                 : entry.eventType === 'region.added' ? '＋' : '－')
+             : '●'
   return `<div class="entry ${entry.kind}" data-kind="${entry.kind}">`
        + `<div class="entry-head">`
        + `<span class="icon">${icon}</span>`
@@ -93,6 +101,7 @@ export function renderHtml(events: Event[]): string {
   <span class="chip" data-kind="llm">LLM</span>
   <span class="chip" data-kind="tool">tool</span>
   <span class="chip" data-kind="lifecycle">lifecycle</span>
+  <span class="chip" data-kind="region">region</span>
 </div>
 ${tree.map(n => renderNode(n, eventById)).join('')}
 <script type="application/json" id="trace-data">${dataJson}</script>
