@@ -18,6 +18,7 @@ import {
   makeWmRegion,
   makeToolSchemaRegion,
   runInterTurnEngine,
+  rehydrateSnapshot,
 } from '../context/lifecycleEngine.js'
 import type { ToolSchema } from '../types/model.js'
 import { ToolRegistry } from '../tools/ToolRegistry.js'
@@ -278,10 +279,18 @@ export class AgentRuntime {
     this.regions.set(id, makeScratchpadToolResultRegion(content))
   }
 
-  private crystallizeTurn(userInput: string): void {
+  // Idempotent — safe to call multiple times per turn. Second call is a no-op
+  // because runInterTurnEngine deletes the current-turn region (turn-local) on
+  // the first run, so the fallback lookup returns undefined and archiving is
+  // skipped. Called both from executeFSM before the wait-for-user checkpoint
+  // (so the checkpoint sees crystallized state) and from run() after FSM
+  // completes (so terminal-state runs also crystallize).
+  private crystallizeTurn(userInput?: string): void {
+    const input = userInput ?? (this.regions.get('current-turn')?.content as string | undefined)
+    if (input === undefined) return
     runInterTurnEngine(this.regions, {
       boundary:  'turn-end',
-      userInput,
+      userInput: input,
       now:       this.ioPort.now(),
     })
   }
@@ -366,13 +375,21 @@ export class AgentRuntime {
   // Load prior state for multi-turn continuation
   async loadCheckpoint(checkpoint: AgentCheckpoint): Promise<void> {
     this.turnNumber = checkpoint.sequence
-    this.regions.restore(checkpoint.context.regions)
+    // Re-attach format functions dropped by JSON serialization.
+    this.regions.restore(rehydrateSnapshot(checkpoint.context.regions))
     const restoredMemory = WorkingMemory.fromJSON(checkpoint.context.workingMemory)
     Object.assign(this.memory, restoredMemory)
     this.fsm.restore(checkpoint.fsm)
     if (checkpoint.fsm.currentState === 'paused' && checkpoint.fsm.resumeState) {
       this.fsm.transitionTo(checkpoint.fsm.resumeState, { name: 'RESUME' })
     }
+    // Interrupt checkpoints did NOT crystallize (interrupt path saves mid-turn),
+    // so scratchpad + current-turn survive in the snapshot. Crystallize now so
+    // the resumed turn starts clean: prior partial work becomes a history pair,
+    // scratchpad clears, and the caller's new current-turn (set by run/continueTurn
+    // before executeFSM) is the only message after history.
+    // Wait-for-user checkpoints crystallized at save time, so this is a no-op for them.
+    this.crystallizeTurn()
   }
 
   async run(input: string): Promise<AgentResult> {
@@ -439,7 +456,10 @@ export class AgentRuntime {
         const shouldContinue = await this.runLLMState(state)
         if (!shouldContinue) {
           if (!state.terminal) {
-            // Waiting for user — save context checkpoint for multi-turn continuation
+            // Waiting for user — crystallize FIRST so the checkpoint includes
+            // the (user, finalAssistant) history pair (otherwise the next
+            // invoke sees an empty history).
+            this.crystallizeTurn()
             const checkpoint = await this.saveCheckpoint()
             await this.checkpoints.saveForContext(this.contextId, this.turnNumber, checkpoint)
             await this.stateStore.set(`context:${this.contextId}:checkpoint:latest`, checkpoint)

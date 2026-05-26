@@ -8,7 +8,7 @@
 //     into history pair region; drop turn-local; promote-to-wm)
 
 import type { ContextRegions } from './ContextRegions'
-import type { RegionInput } from './Region'
+import type { Region, RegionInput, RegionSnapshot } from './Region'
 import type { Message, MessageContent } from '../types/common.js'
 import type { ToolSchema } from '../types/model.js'
 
@@ -272,4 +272,89 @@ export function runInterTurnEngine(
   }
 
   return { crystallization: summary }
+}
+
+// Re-attach format functions to regions loaded from a serialized snapshot
+// (e.g. checkpoint stored as JSON in SQLite). JSON round-trip drops functions;
+// dispatch by id prefix or section to pick the right factory's format.
+//
+// Spec: docs/superpowers/specs/2026-05-25-context-region-substrate-design.md §4.2
+//   (snapshot/restore) — restore consumers re-attach format. Region.format is
+//   transient runtime state, not durable data.
+export function rehydrateRegion(r: Region): Region {
+  if (typeof r.format === 'function') return r   // already has it
+
+  // Choose factory by id prefix / section. Each branch reconstructs the same
+  // format closure the corresponding factory produced.
+  if (r.id === 'header') {
+    return { ...r, format: (c: unknown) => String(c) }
+  }
+  if (r.id.startsWith('skill:')) {
+    return {
+      ...r,
+      format: (c: unknown) => {
+        const { name, instructions } = c as { name: string; instructions: string }
+        return `\n--- Skill: ${name} ---\n${instructions}`
+      },
+    }
+  }
+  if (r.id.startsWith('state-instr:')) {
+    return { ...r, format: (c: unknown) => `\n--- Current Instructions ---\n${String(c)}` }
+  }
+  if (r.id === 'wm' || r.id.startsWith('wm:')) {
+    return { ...r, format: (c: unknown) => '\n--- Working Memory ---\n' + JSON.stringify(c, null, 2) }
+  }
+  if (r.id === 'current-turn') {
+    return {
+      ...r,
+      format: (c: unknown): Message => ({
+        role:    'user',
+        content: [{ type: 'text', text: String(c) }],
+      }),
+    }
+  }
+  if (r.id.startsWith('scratch:')) {
+    const role = (r.content as { role?: string }).role
+    if (role === 'assistant') {
+      return {
+        ...r,
+        format: (c: unknown): Message => ({
+          role:    'assistant',
+          content: (c as { raw: MessageContent[] }).raw,
+        }),
+      }
+    }
+    return {
+      ...r,
+      format: (c: unknown): Message => ({
+        role:    'tool',
+        content: (c as { raw: MessageContent[] }).raw,
+      }),
+    }
+  }
+  if (r.id.startsWith('history:turn-')) {
+    return {
+      ...r,
+      format: (c: unknown): Message[] => {
+        const { userInput, assistantText } = c as { userInput: string; assistantText: string }
+        return [
+          { role: 'user',      content: [{ type: 'text', text: userInput }] },
+          { role: 'assistant', content: [{ type: 'text', text: assistantText }] },
+        ]
+      },
+    }
+  }
+  if (r.id.startsWith('tool:')) {
+    return { ...r, format: (c: unknown) => c as ToolSchema }
+  }
+  // Unknown id pattern: identity format so assemble doesn't crash. The region
+  // likely won't render anything useful, but at least won't throw.
+  return { ...r, format: (c: unknown) => String(c) }
+}
+
+export function rehydrateSnapshot(snap: RegionSnapshot): RegionSnapshot {
+  return {
+    epoch:   snap.epoch,
+    regions: snap.regions.map(rehydrateRegion),
+  }
 }
