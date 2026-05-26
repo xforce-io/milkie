@@ -14,12 +14,17 @@ Last updated: 2026-05-24
 
 ## TL;DR
 
-- **Phase 1–4 are landed.** FSM Runtime, working context, Trajectory
+- **Phase 1–4 + 4.5 are landed.** FSM Runtime, working context, Trajectory
   observability, IOPort, Agent Trace event log (LLM + tool I/O + lifecycle +
   clock / uuid), content-addressed cache, structural replay, and
   **byte-identical replay via non-determinism log** are all in code. State
   stores (Memory / SQLite / Redis) ship. Sub-agent as named tool, interrupt
   signal, supervisor-tree propagation, skill epoch loading are verified.
+  **Phase 4.5 Context Region Substrate** replaced the `ContextLayer` shim
+  with `ContextRegions` + pure `assemble()` + lifecycle engine: scratchpad
+  and history are now distinct sections (scratchpad turn-local, history =
+  `(user, finalAssistant)` pairs built at turn-end crystallization), skills
+  declare `scope: 'turn' | 'session'` lifetime, section schema is cache-aware.
 - **8 of 15 stories are `active`** (have green E2E tests). The 7 `draft`
   stories all depend on Phase 5–6 capabilities that haven't shipped yet.
 - **Next big rock:** Phase 5 fork / diff / suite replay. Phase 4 was its
@@ -51,7 +56,7 @@ Last updated: 2026-05-24
 
 ---
 
-## Completed (Phase 1–4)
+## Completed (Phase 1–4 + 4.5)
 
 Already in code; see `ARCHITECTURE.md` → `Implementation Status` for
 file pointers.
@@ -84,6 +89,26 @@ file pointers.
   from structural-only to "Phase 4 byte-identical" (asserts nondet
   events captured + 3× repeat-replay produces identical results);
   example fixtures re-recorded.
+- **Phase 4.5 — Context Region Substrate.** Replaced the old `ContextLayer`
+  shim with a region-based substrate (PR #6 / #7 / #8 / #9). Every piece of
+  working context is now a typed `Region` in `ContextRegions`; LLM requests
+  are produced by a pure `assemble(regions, scope)` function with a
+  cache-aware section schema (`header` → `persistent-skills` → `tools-static`
+  → `session-skills` → `state` → `tools-state` → `wm` → `footer`).
+  scratchpad and history are distinct: scratchpad is `turn-local` and holds
+  ReAct intermediates; history holds `(user, finalAssistant)` pairs
+  produced by turn-end crystallization (`runInterTurnEngine`). Skills
+  declare lifetime at request time — `skill_request({ scope: 'turn' | 'session' })`
+  with default `'turn'` so the runtime auto-cleans them; there is
+  intentionally no `skill_release` tool (per spec §4.3 rationale). Checkpoint
+  format changed (BREAKING — pre-substrate checkpoints can't be loaded);
+  format functions rehydrated on `loadCheckpoint`; crystallization runs at
+  wait-for-user save AND on resume to keep message order chronological.
+  Spec: `docs/superpowers/specs/2026-05-25-context-region-substrate-design.md`.
+  Deferred: ToolResultStrategy (spec §4.4 — shape/visibility/target three
+  axes), runIntraTurnEngine (spec §7.2 — `tool-buffer` / `one-shot`
+  expiry), trace `region.added` / `region.removed` events + cache health
+  span attributes (rolled into Phase 4.6 below).
 
 ### Stories validated by Phase 1–4 (active)
 
@@ -99,15 +124,32 @@ Full readiness view: `docs/stories/INDEX.md`.
 
 ## In progress
 
-**Nothing code-side actively in flight.** The Phase 4 non-determinism
-log just landed (PR #2 merged); earlier in the same session the s-002
-HTML report probe and the agent-first CLI wave landed too. All
-substrate work for Phase 5 fork is now in place.
+**Nothing code-side actively in flight.** The Phase 4.5 Context Region
+Substrate just landed (PRs #6 / #7 / #8 / #9 / #10 merged); Phase 4
+non-determinism log + s-002 HTML report probe + agent-first CLI wave
+landed earlier in this development cycle.
 
-**Most natural next pickup is Phase 5** (fork primitive + structural
-diff + suite replay + in-flight trace query API). The cross-cutting
-work below stays valid in parallel — particularly the smaller
-follow-ups inherited from earlier landings: CLI surface spec update
+**Two reasonable next pickups:**
+
+- **Phase 4.6 — region trace events + cache health observability.**
+  Smaller scope (~600 LOC). Adds `region.added` / `region.removed` /
+  `context.boundary.applied` events to the trace stream; surfaces
+  `usage.cache_read_tokens` / `cache_creation_tokens` on `llm.responded`
+  spans; teaches the Anthropic adapter to translate
+  `region.cacheBreakpoint` into `cache_control: { type: 'ephemeral' }`.
+  This is what makes the cache-aware section schema (already in code) and
+  the region lifecycle (already in code) *visible* to agent designers —
+  without it, neither feature delivers user-facing value.
+
+- **Phase 5 — fork / structural diff / suite replay** (the original
+  next big rock). Substrate prerequisites are now stronger thanks to the
+  region snapshot/restore primitive, but Phase 5 is still a multi-PR
+  surface area.
+
+Recommended order: Phase 4.6 first (closes the observability gap on
+Phase 4.5), then Phase 5. The cross-cutting work below stays valid in
+parallel — particularly the smaller follow-ups inherited from earlier
+landings: CLI surface spec update
 for the three new `trace` verbs (`render-html` / `report` /
 `--include-children`); s-007-shape integration test for 3-sub-agent
 HTML rendering; routing `Milkie.invoke()`'s contextId/agentRunId
