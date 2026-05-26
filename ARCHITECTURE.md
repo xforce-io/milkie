@@ -337,6 +337,158 @@ The runtime is intentionally thin. Parallelism is expressed at the LLM/tool
 layer (multiple `tool_use` blocks in a single response; sub-agents declared
 as tools), not as built-in FSM state types.
 
+### Context Management
+
+**Definition.** Context Management is the **in-Agent discipline** that
+turns the content an agent currently has available into an LLM-ready
+`ModelRequest`, then maintains that content's lifecycle across
+multi-step ReAct loops and multi-turn dialogues.
+
+This is distinct from the external Context Layer (§Context Layer
+under "Infrastructure layers"). Context Layer answers *"what content
+should this agent see?"* — knowledge retrieval, memory lookup,
+capability resolution. Context Management answers *"how do we
+structure / maintain / assemble that content into a working LLM
+request?"*. Context Layer is upstream of Context Management — its
+output feeds into region content. Today Context Layer is absent and
+all content comes from `AgentConfig` directly; Context Management
+works the same regardless of upstream.
+
+**Goal.** Make every piece of context first-class data with explicit
+lifecycle; produce LLM requests through a single pure function; let
+agents declare lifetime intent without burdening them with resource
+management; structure the output for prefix-cache friendliness.
+
+**Value.** Agent designers can read the region map and know everything
+the LLM sees — no hidden state buried in framework internals. Adding
+new context kinds (RAG hit, time, cost) is one factory + one section
+entry; lifecycle takes care of cleanup. ReAct intermediates do not
+accumulate across turns — turn-end crystallization keeps cross-turn
+history clean. Prefix cache hits for stable content are architecturally
+guaranteed, not best-effort.
+
+**Core abstractions.**
+
+- **Region** (`src/context/Region.ts`) — typed unit of context with
+  `target` (system / message / tool), `section` (location within target),
+  `intraTurn` and `interTurn` lifecycle scopes, `stability` cache hint,
+  optional `cacheBreakpoint` marker, `content`, and a `format` function.
+  Stored in a `ContextRegions: Map<id, Region>` with CRUD-only primitives
+  (`set` / `delete` / `get` / `snapshot` / `restore`).
+
+- **`assemble`** (`src/context/assemble.ts`) — **pure function** called
+  once before each LLM request. Filters regions by `isActive` (state-scope
+  + TTL), groups by `target`, iterates sections per `SECTION_SCHEMA`, sorts
+  within section by ordinal-or-createdAt, calls each region's `format`,
+  joins. Same `regions + scope` → byte-identical `AssembledContext`.
+
+- **`SECTION_SCHEMA`** (`src/context/sectionSchema.ts`) — declarative
+  section ordering per `target`. System sections ordered by stability
+  descending (`header` → `persistent-skills` → `tools-static` →
+  `session-skills` → `state` → `tools-state` → `wm` → `footer`) so that
+  the byte prefix prefix-cache can hit is maximized. Message sections
+  are chronological (`history` → `current-turn` → `scratchpad`).
+
+- **`lifecycleEngine`** (`src/context/lifecycleEngine.ts`) — region
+  factory helpers (`makeHeaderRegion`, `makeSkillRegion`,
+  `makeCurrentTurnRegion`, `makeScratchpadAssistantRegion`,
+  `makeHistoryPairRegion`, `makeWmRegion`, `makeToolSchemaRegion`,
+  `makeStateInstructionsRegion`) and `runInterTurnEngine` for turn-end
+  crystallization.
+
+**Two-axis lifecycle.**
+
+| Axis | Values | Boundary that fires |
+|---|---|---|
+| `intraTurn` | `turn-persistent` / `{state-scoped, state}` / `{tool-buffer, remainingCalls}` / `one-shot` | FSM step boundary (today: `isActive` filter handles `state-scoped`; explicit `runIntraTurnEngine` for the rest deferred) |
+| `interTurn` | `session-persistent` / `turn-local` / `{ttl, deadline}` / `promote-to-wm` / `summarize-on-overflow` | Turn end (`runInterTurnEngine` crystallization) |
+
+**Scratchpad / history split.** scratchpad section holds within-turn
+ReAct intermediates (`assistant tool_use`, `tool result`) — `interTurn='turn-local'`.
+history section holds only `(user, finalAssistant)` pairs produced by
+crystallization at turn end — `interTurn='session-persistent'`. Within a
+turn, every LLM call sees `history + current-turn + growing scratchpad`
+(chronologically correct). After crystallization: scratchpad cleared,
+one `(user, finalAssistant)` pair joins history. ReAct noise does not
+sediment across turns.
+
+**Skill lifetime model.** Agents declare skill lifetime at request
+time — `skill_request({ name, scope: 'turn' | 'session' })`, default
+`scope='turn'`. There is intentionally **no `skill_release` tool** —
+release happens automatically via crystallization based on declared
+`interTurn` scope. Eliminates the LLM resource-management burden +
+resource-leak risk. `scope='turn'` skills land in `'session-skills'`
+section (turn-local); `scope='session'` skills land in
+`'persistent-skills'` section (session-persistent, serialized in
+checkpoint). See spec §4.3 for the design rationale.
+
+**Cache-aware assembly.** Section ordering puts immutable content
+first, volatile content last, so the byte prefix is maximized for
+provider prefix caching. Regions can carry `cacheBreakpoint: true` to
+indicate "after me is a good cache cut". The Anthropic adapter
+translates this into `cache_control: { type: 'ephemeral' }` block
+injection. PR-D Phase 1 ships a single `'system-end'` breakpoint;
+multi-breakpoint placement (spec §6's three cuts: stable / session /
+turn) is Phase 2, gated on accumulated cache-hit-rate data.
+
+**Observability.** `ContextRegions` and `runInterTurnEngine` accept
+optional callbacks (`onChange`, `onBoundary`) at construction; when
+present, fire on every region mutation / crystallization. AgentRuntime
+wires these to emit `region.added` / `region.removed` /
+`context.boundary.applied` trace events. LLM provider cache stats
+(`cacheReadTokens` / `cacheCreationTokens`) surface on `llm.responded`
+events as a `cacheStats` block (with computed `hitRate`) and on
+`llm.call` span attributes for trajectory consumers.
+
+**Invariants.**
+
+- `assemble` is pure: same `regions + scope` → byte-identical
+  `AssembledContext`
+- Mutation API on `ContextRegions` is CRUD only — no per-type methods
+- crystallization is idempotent (no-op when no `current-turn` region)
+  — safe to call from `executeFSM` wait-for-user save, `run()` success,
+  and `loadCheckpoint` (interrupt-checkpoint cleanup) without
+  double-archiving
+- format functions are transient runtime state; rehydrated by
+  id-prefix dispatch on `loadCheckpoint` because regions snapshot
+  serialization (JSON) drops closures
+
+**Known limitations and improvement paths.**
+
+- **Volatile system content vs message cache.** When working memory
+  changes per step, its bytes shift the position of everything after
+  it — including the entire `messages` array. Even though `history`
+  byte content is stable, prefix cache can't hit it because the wm
+  bytes in `system` change first. Two candidate fixes: (1)
+  `skip-when-unchanged` for the wm region (no `set` if content
+  byte-identical); (2) add a `volatile` message section between
+  `current-turn` and `scratchpad` so wm becomes a message and `system`
+  stays stable. Decision deferred until PR-D's cache-hit-rate trace
+  data accumulates.
+- **`ToolResultStrategy`** (spec §4.4 — three orthogonal axes
+  `shape` / `visibility` / `target`) is not implemented; tools return
+  verbatim today. Tracked for a follow-up PR.
+- **`runIntraTurnEngine`** (spec §7.2 — `tool-buffer` / `one-shot`
+  expiry) not implemented. `assemble`'s `isActive` filter provides
+  belt-without-suspenders for the only currently-used intra-turn
+  lifecycle state (`state-scoped`).
+- **Multi-breakpoint cache placement** not implemented (PR-D Phase 1
+  ships `'system-end'` only).
+
+**Future evolution.** When the external Context Layer (§Context Layer)
+materializes, region content sources shift from inline `AgentConfig`
+fields to Context Layer queries. The Context Management discipline
+described here is unchanged — only the upstream content provider
+changes. ContextRegions stays in-Agent as the assembly substrate;
+external Context Layer feeds it.
+
+**Links.**
+
+- Full design spec: `docs/superpowers/specs/2026-05-25-context-region-substrate-design.md`
+- Implementation: `src/context/{Region,ContextRegions,assemble,sectionSchema,lifecycleEngine}.ts`
+- Relation to external Context Layer: see §Context Layer under
+  "Infrastructure layers"
+
 ### Agent Trace
 
 **Definition.** Agent Trace is the subsystem where the agent **run lives
@@ -480,37 +632,20 @@ Data or Execution directly.
 **not implemented today** — there is no code that does knowledge
 retrieval, memory lookup, or capability resolution from external sources.
 
-What does exist in-tree is `src/context/ContextRegions.ts` plus
-`src/context/assemble.ts` (and `src/context/lifecycleEngine.ts`). These
-form a region-based **in-Agent assembly substrate**: each piece of
-working context (header, skill, state instructions, working memory,
-history pair, scratchpad, current turn, tool schema) is a typed
-`Region`; the pure `assemble(regions, scope)` function produces the
-LLM `ModelRequest` on every step; the lifecycle engine crystallizes
-scratchpad into history at turn end.
+What an agent currently has available comes from `AgentConfig` directly
+(inline `skillInstructions`, statically wired `tools`, in-process
+`WorkingMemory`). No cross-agent / cross-session knowledge or capability
+services exist.
 
-The substrate is **not** a local shim for the external Context Layer.
-Their responsibilities differ:
-
-| Concern | External Context Layer (future) | In-Agent ContextRegions (today) |
-|---|---|---|
-| Knowledge retrieval from corpora / RAG | Yes | No |
-| Memory lookup across sessions / agents | Yes | No |
-| Capability / tool catalog resolution | Yes | No (tools wired at Agent config time) |
-| Skill instruction loading | Yes (with versioned manifest) | Yes (in-Agent only, via `skill_request` system tool) |
-| Per-call message / system-prompt assembly | Yes (output shape) | Yes (sole responsibility) |
-| Region lifecycle (turn-local vs session-persistent vs TTL) | Not specified | Yes |
-| prefix cache–aware section ordering | Not specified | Yes |
-
-In short: the new substrate solves an in-Agent assembly problem the old
-`ContextLayer` shim was beginning to grow into; it does not displace
-the external Context Layer concept. When the external interface
-materializes, `ContextRegions` stays where it is — Agent Runtime would
-populate regions from values the external Context Layer delivers,
-instead of constructing them itself.
-
-The substrate's full design spec lives at
-`docs/superpowers/specs/2026-05-25-context-region-substrate-design.md`.
+That available content is consumed by the in-Agent **Context Management**
+discipline (see §Context Management under "Subsystems") — region
+substrate, `assemble`, lifecycle engine. Context Management is **not** a
+shim for this Context Layer concept; they answer different questions
+(*"what content?"* vs *"how to structure / maintain / assemble?"*) and
+will coexist when the external interface materializes. At that point,
+Context Management's region content sources shift from `AgentConfig` to
+Context Layer queries; its mechanisms (region lifecycle, cache-aware
+section ordering, crystallization) do not change.
 
 ### Data
 
