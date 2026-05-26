@@ -17,6 +17,8 @@ export interface ModelRequest {
   responseFormat?: unknown
   reasoning?:      ReasoningOptions
   metadata?:       Record<string, unknown>
+  /** PR-D Phase 1: when 'system-end', adapter wraps system block with cache_control. */
+  cacheBreakpoint?: 'system-end'
 }
 
 export interface ModelResponse {

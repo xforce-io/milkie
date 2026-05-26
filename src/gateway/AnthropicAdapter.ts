@@ -45,7 +45,15 @@ export class AnthropicAdapter implements IModelGateway {
     }
 
     if (request.system) {
-      params['system'] = request.system
+      if (request.cacheBreakpoint === 'system-end') {
+        params['system'] = [{
+          type:          'text',
+          text:          request.system,
+          cache_control: { type: 'ephemeral' },
+        }]
+      } else {
+        params['system'] = request.system
+      }
     }
 
     if (request.tools && request.tools.length > 0) {

@@ -25,6 +25,8 @@ export interface AssembledContext {
   system:   string
   messages: Message[]
   tools?:   ToolSchema[]
+  /** PR-D Phase 1: 'system-end' when any active system region declared cacheBreakpoint=true. */
+  cacheBreakpoint?: 'system-end'
 }
 
 export function assemble(regions: ContextRegions, scope: AssembleScope): AssembledContext {
@@ -55,10 +57,13 @@ export function assemble(regions: ContextRegions, scope: AssembleScope): Assembl
     tools.push(r.format(r.content) as ToolSchema)
   }
 
+  const hasSystemBreakpoint = active.some(r => r.target === 'system' && r.cacheBreakpoint === true)
+
   return {
     system:   systemBlocks.join('\n'),
     messages,
     ...(tools.length > 0 ? { tools } : {}),
+    ...(hasSystemBreakpoint ? { cacheBreakpoint: 'system-end' as const } : {}),
   }
 }
 

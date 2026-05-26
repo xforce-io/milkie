@@ -20,7 +20,7 @@ import {
   runInterTurnEngine,
   rehydrateSnapshot,
 } from '../context/lifecycleEngine.js'
-import type { ToolSchema } from '../types/model.js'
+import type { ToolSchema, ModelRequest } from '../types/model.js'
 import { ToolRegistry } from '../tools/ToolRegistry.js'
 import { WorkingMemory } from '../store/WorkingMemory.js'
 import { CheckpointManager } from '../store/CheckpointManager.js'
@@ -530,11 +530,12 @@ export class AgentRuntime {
         currentEpoch:  this.regions.getEpoch(),
       }
       const assembled = assemble(this.regions, scope)
-      const request   = {
+      const request: ModelRequest = {
         model:    this.config.model.model,
         system:   assembled.system,
         messages: assembled.messages,
         ...(assembled.tools ? { tools: assembled.tools } : {}),
+        ...(assembled.cacheBreakpoint ? { cacheBreakpoint: assembled.cacheBreakpoint } : {}),
       }
 
       const llmSpan = this.recorder.startSpan('llm.call', {

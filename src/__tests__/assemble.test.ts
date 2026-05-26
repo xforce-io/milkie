@@ -308,3 +308,32 @@ describe('assemble — purity invariant', () => {
     }
   })
 })
+
+describe('assemble — cacheBreakpoint computation', () => {
+  test('returns no cacheBreakpoint when no region marks one', () => {
+    const store = new ContextRegions(() => 0)
+    store.set('h', systemRegion())
+    const out = assemble(store, defaultScope())
+    expect(out.cacheBreakpoint).toBeUndefined()
+  })
+
+  test('returns "system-end" when any system region has cacheBreakpoint=true', () => {
+    const store = new ContextRegions(() => 0)
+    store.set('h', systemRegion())
+    store.set('skill', systemRegion({
+      section:        'persistent-skills',
+      content:        'I',
+      cacheBreakpoint: true,
+    }))
+    const out = assemble(store, defaultScope())
+    expect(out.cacheBreakpoint).toBe('system-end')
+  })
+
+  test('cacheBreakpoint stays undefined if only message/tool regions mark it (Phase 1 only handles system-end)', () => {
+    const store = new ContextRegions(() => 0)
+    store.set('h', systemRegion())
+    store.set('hist', messageRegion({ section: 'history', cacheBreakpoint: true }))
+    const out = assemble(store, defaultScope())
+    expect(out.cacheBreakpoint).toBeUndefined()
+  })
+})
