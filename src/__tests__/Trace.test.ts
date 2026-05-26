@@ -340,8 +340,12 @@ describe('RecordingIOPort — Phase 3 additions', () => {
 
     const events = await store.readByRunId(result.agentRunId)
     const kinds = events.map(e => e.type)
-    expect(kinds[0]).toBe('agent.run.started')
+    // clock.read / uuid.generated nondet events may appear before agent.run.started
+    // (ContextRegions.set() calls clock in the AgentRuntime constructor before
+    // attach() is called). Use find() instead of positional assertions.
+    const startedEvt = events.find(e => e.type === 'agent.run.started')
+    expect(startedEvt).toBeDefined()
     expect(kinds[kinds.length - 1]).toBe('agent.run.completed')
-    expect((events[0]!.payload as { agentId: string }).agentId).toBe('a1')
+    expect((startedEvt!.payload as { agentId: string }).agentId).toBe('a1')
   })
 })

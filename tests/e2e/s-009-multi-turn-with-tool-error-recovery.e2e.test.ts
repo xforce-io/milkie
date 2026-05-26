@@ -143,11 +143,14 @@ describe('Case 4: 多轮对话与错误恢复', () => {
   })
 
   live('第 2 次 invoke 的 context history 包含第 1 轮对话', () => {
-    const history = run2Cp?.context?.history ?? []
-    expect(history.length).toBeGreaterThan(0)
-    // History should contain messages from round 1 (either tool calls or assistant messages)
-    const historyStr = JSON.stringify(history)
-    // At minimum, query_orders was called in run1 and its result is in history
+    // New substrate: history is stored as regions with section === 'history',
+    // not in a flat context.history array. Each turn crystallises into a
+    // (user, finalAssistant) pair region persisted across turns.
+    const regions = run2Cp?.context?.regions?.regions ?? []
+    const historyRegions = regions.filter((r: { section: string }) => r.section === 'history')
+    expect(historyRegions.length).toBeGreaterThan(0)
+    // Sanity: the history pair content should be non-trivial
+    const historyStr = JSON.stringify(historyRegions)
     expect(historyStr.length).toBeGreaterThan(100)
   })
 

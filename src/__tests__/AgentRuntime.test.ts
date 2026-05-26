@@ -289,10 +289,8 @@ describe('AgentRuntime', () => {
         currentTurn:  'previous turn',
         fsm:          { currentState: 'paused', resumeState: 'react', stateData: null },
         context: {
-          history:              [],
-          workingMemory:        { data: {}, log: [] },
-          instructionsSnapshot: [],
-          contextEpoch:         0,
+          workingMemory: { data: {}, log: [] },
+          regions:       { epoch: 0, regions: [] },
         },
         pendingEvents: [],
         children:      [],

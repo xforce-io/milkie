@@ -6,7 +6,21 @@ import type { ITrajectoryRecorder, Span } from '../types/trajectory.js'
 import type { ToolDefinition, ToolContext, ToolResult } from '../types/tool.js'
 import type { MessageContent } from '../types/common.js'
 import { FSMEngine } from '../fsm/FSMEngine.js'
-import { ContextLayer } from '../context/ContextLayer.js'
+import { ContextRegions } from '../context/ContextRegions.js'
+import { assemble, type AssembleScope } from '../context/assemble.js'
+import {
+  makeHeaderRegion,
+  makeSkillRegion,
+  makeCurrentTurnRegion,
+  makeScratchpadAssistantRegion,
+  makeScratchpadToolResultRegion,
+  makeStateInstructionsRegion,
+  makeWmRegion,
+  makeToolSchemaRegion,
+  runInterTurnEngine,
+  rehydrateSnapshot,
+} from '../context/lifecycleEngine.js'
+import type { ToolSchema } from '../types/model.js'
 import { ToolRegistry } from '../tools/ToolRegistry.js'
 import { WorkingMemory } from '../store/WorkingMemory.js'
 import { CheckpointManager } from '../store/CheckpointManager.js'
@@ -45,7 +59,7 @@ export class AgentRuntime {
   private readonly extraTools:      ToolDefinition[]
 
   private readonly fsm:         FSMEngine
-  private readonly context:     ContextLayer
+  private readonly regions:     ContextRegions
   private readonly registry:    ToolRegistry
   private readonly memory:      WorkingMemory
   private readonly checkpoints: CheckpointManager
@@ -53,7 +67,7 @@ export class AgentRuntime {
 
   private eventQueue:    Array<{ type: string; payload: unknown }> = []
   private pendingEvents: Array<{ type: string; payload: unknown }> = []
-  private pendingSkills: Set<string> = new Set()
+  private pendingSkillLoads: Array<{ name: string; instructions: string }> = []
   private childRecords: Map<string, ChildAgentRecord> = new Map()
   private rootSpan!:     Span
   private turnNumber:    number = 0
@@ -74,10 +88,8 @@ export class AgentRuntime {
 
     this.fsm     = new FSMEngine(opts.config.fsm)
     this.memory  = new WorkingMemory()
-    this.context = new ContextLayer({
-      systemPrompt: opts.config.systemPrompt,
-      model:        opts.config.model.model,
-    })
+    this.regions = new ContextRegions(() => this.ioPort.now())
+    this.regions.set('header', makeHeaderRegion(opts.config.systemPrompt))
     this.registry    = new ToolRegistry()
     this.checkpoints = new CheckpointManager(
       this.stateStore,
@@ -231,18 +243,84 @@ export class AgentRuntime {
     if (!version || !instructions) {
       return { requested: name, status: 'unavailable' }
     }
-    this.pendingSkills.add(normalized)
+    this.pendingSkillLoads.push({ name: normalized, instructions })
     return { requested: normalized, status: 'pending_next_epoch', version }
   }
 
   private applyPendingSkills(): void {
-    for (const name of this.pendingSkills) {
-      const instructions = this.config.skillInstructions?.[name]
-      if (instructions && !this.context.getLoadedInstructions().includes(name)) {
-        this.context.loadInstructions(name, instructions)
-      }
+    for (const { name, instructions } of this.pendingSkillLoads) {
+      const id = `skill:${name}`
+      // Already loaded? Skip (preserves createdAt; idempotent like Map.set upsert).
+      if (this.regions.get(id)) continue
+      // PR-C2 will plumb scope through requestSkill; PR-C1 defaults to session.
+      this.regions.set(id, makeSkillRegion(name, instructions, 'session'))
     }
-    this.pendingSkills.clear()
+    this.pendingSkillLoads = []
+  }
+
+  private setCurrentTurn(input: string): void {
+    this.regions.set('current-turn', makeCurrentTurnRegion(input))
+  }
+
+  private getCurrentTurn(): string | null {
+    const r = this.regions.get('current-turn')
+    if (!r) return null
+    return r.content as string
+  }
+
+  private appendScratchpadAssistant(content: MessageContent[]): void {
+    const id = `scratch:${this.ioPort.uuid()}`
+    const hasToolUse = content.some(c => c.type === 'tool_use')
+    this.regions.set(id, makeScratchpadAssistantRegion(content, hasToolUse))
+  }
+
+  private appendScratchpadToolResults(content: MessageContent[]): void {
+    const id = `scratch:${this.ioPort.uuid()}`
+    this.regions.set(id, makeScratchpadToolResultRegion(content))
+  }
+
+  // Idempotent — safe to call multiple times per turn. Second call is a no-op
+  // because runInterTurnEngine deletes the current-turn region (turn-local) on
+  // the first run, so the fallback lookup returns undefined and archiving is
+  // skipped. Called both from executeFSM before the wait-for-user checkpoint
+  // (so the checkpoint sees crystallized state) and from run() after FSM
+  // completes (so terminal-state runs also crystallize).
+  private crystallizeTurn(userInput?: string): void {
+    const input = userInput ?? (this.regions.get('current-turn')?.content as string | undefined)
+    if (input === undefined) return
+    runInterTurnEngine(this.regions, {
+      boundary:  'turn-end',
+      userInput: input,
+      now:       this.ioPort.now(),
+    })
+  }
+
+  private refreshTransientRegions(state: FSMState, schemas: ToolSchema[]): void {
+    // State instructions — re-set every step so changes in state propagate.
+    // The state-scoped intraTurn filter (assemble's isActive) means only the
+    // current state's region is visible during assembly, but we still need
+    // to put it there.
+    if (state.instructions) {
+      this.regions.set(
+        `state-instr:${state.name}`,
+        makeStateInstructionsRegion(state.name, state.instructions),
+      )
+    }
+
+    // Working memory snapshot — written every step (deterministic key order in factory).
+    const wmJson = this.memory.toJSON() as { data: Record<string, unknown>; log: unknown[] }
+    const wmRegion = makeWmRegion(wmJson.data, wmJson.log)
+    if (wmRegion) this.regions.set('wm', wmRegion)
+    else this.regions.delete('wm')
+
+    // Tool schemas — re-set per step in case state.tools restricted the set.
+    // Clear existing tool regions first (only current schema set is valid).
+    for (const r of [...this.regions._allRegions()].filter(r => r.target === 'tool')) {
+      this.regions.delete(r.id)
+    }
+    for (const s of schemas) {
+      this.regions.set(`tool:${s.name}`, makeToolSchemaRegion(s))
+    }
   }
 
   private async checkEvents(): Promise<void> {
@@ -272,18 +350,14 @@ export class AgentRuntime {
   }
 
   private async saveCheckpoint(resumeState?: string, currentTurn?: string): Promise<AgentCheckpoint> {
-    const ctxSnapshot = this.context.snapshot()
     return this.checkpoints.save({
       sequence:    this.turnNumber,
       goal:        this.goal,
-      currentTurn: currentTurn ?? this.context.currentTurn ?? undefined,
+      currentTurn: currentTurn ?? this.getCurrentTurn() ?? undefined,
       fsm:         this.fsm.snapshot(resumeState),
       context: {
-        history:              ctxSnapshot.history,
-        workingMemory:        this.memory.toJSON(),
-        instructionsSnapshot: ctxSnapshot.instructionsSnapshot,
-        instructions:         ctxSnapshot.instructions,
-        contextEpoch:         ctxSnapshot.contextEpoch,
+        workingMemory: this.memory.toJSON(),
+        regions:       this.regions.snapshot(),
       },
       pendingEvents: this.pendingEvents.map(e => ({ type: e.type, payload: e.payload })),
       children:      Array.from(this.childRecords.values()),
@@ -301,18 +375,21 @@ export class AgentRuntime {
   // Load prior state for multi-turn continuation
   async loadCheckpoint(checkpoint: AgentCheckpoint): Promise<void> {
     this.turnNumber = checkpoint.sequence
-    this.context.restore({
-      history:              checkpoint.context.history,
-      instructionsSnapshot: checkpoint.context.instructionsSnapshot,
-      instructions:         checkpoint.context.instructions,
-      contextEpoch:         checkpoint.context.contextEpoch,
-    })
+    // Re-attach format functions dropped by JSON serialization.
+    this.regions.restore(rehydrateSnapshot(checkpoint.context.regions))
     const restoredMemory = WorkingMemory.fromJSON(checkpoint.context.workingMemory)
     Object.assign(this.memory, restoredMemory)
     this.fsm.restore(checkpoint.fsm)
     if (checkpoint.fsm.currentState === 'paused' && checkpoint.fsm.resumeState) {
       this.fsm.transitionTo(checkpoint.fsm.resumeState, { name: 'RESUME' })
     }
+    // Interrupt checkpoints did NOT crystallize (interrupt path saves mid-turn),
+    // so scratchpad + current-turn survive in the snapshot. Crystallize now so
+    // the resumed turn starts clean: prior partial work becomes a history pair,
+    // scratchpad clears, and the caller's new current-turn (set by run/continueTurn
+    // before executeFSM) is the only message after history.
+    // Wait-for-user checkpoints crystallized at save time, so this is a no-op for them.
+    this.crystallizeTurn()
   }
 
   async run(input: string): Promise<AgentResult> {
@@ -322,12 +399,14 @@ export class AgentRuntime {
       contextId: this.contextId,
     })
 
-    this.context.setCurrentTurn(`Goal: ${this.goal}\n\n${input}`)
+    const turnInput = `Goal: ${this.goal}\n\n${input}`
+    this.setCurrentTurn(turnInput)
     this.turnNumber++
 
     try {
       await this.executeFSM()
-
+      // Turn completed successfully — crystallize.
+      this.crystallizeTurn(turnInput)
       this.recorder.endSpan(this.rootSpan, 'ok')
       return {
         agentRunId: this.agentRunId,
@@ -360,7 +439,7 @@ export class AgentRuntime {
 
   // Continue an existing session with new user input
   async continueTurn(input: string): Promise<AgentResult> {
-    this.context.setCurrentTurn(input)
+    this.setCurrentTurn(input)
     this.turnNumber++
     return this.run(input)
   }
@@ -377,7 +456,10 @@ export class AgentRuntime {
         const shouldContinue = await this.runLLMState(state)
         if (!shouldContinue) {
           if (!state.terminal) {
-            // Waiting for user — save context checkpoint for multi-turn continuation
+            // Waiting for user — crystallize FIRST so the checkpoint includes
+            // the (user, finalAssistant) history pair (otherwise the next
+            // invoke sees an empty history).
+            this.crystallizeTurn()
             const checkpoint = await this.saveCheckpoint()
             await this.checkpoints.saveForContext(this.contextId, this.turnNumber, checkpoint)
             await this.stateStore.set(`context:${this.contextId}:checkpoint:latest`, checkpoint)
@@ -405,17 +487,33 @@ export class AgentRuntime {
       }
       iterations++
 
-      const tools    = this.registry.getForState(state.tools)
-      const schemas  = this.registry.toSchemas(tools)
-      const request  = this.context.buildRequest(schemas, this.memory, state.instructions)
+      const tools   = this.registry.getForState(state.tools)
+      const schemas = this.registry.toSchemas(tools)
+
+      this.refreshTransientRegions(state, schemas)
+
+      const scope: AssembleScope = {
+        currentState:  state.name,
+        currentTurnId: `turn-${this.turnNumber}`,
+        currentEpoch:  this.regions.getEpoch(),
+      }
+      const assembled = assemble(this.regions, scope)
+      const request   = {
+        model:    this.config.model.model,
+        system:   assembled.system,
+        messages: assembled.messages,
+        ...(assembled.tools ? { tools: assembled.tools } : {}),
+      }
 
       const llmSpan = this.recorder.startSpan('llm.call', {
         provider:     this.config.model.provider,
         model:        this.config.model.model,
         turn:         this.turnNumber,
         state:        state.name,
-        loadedSkills: this.context.getLoadedInstructions(),
-        contextEpoch: this.context.getContextEpoch(),
+        loadedSkills: [...this.regions._allRegions()]
+          .filter(r => r.section === 'persistent-skills' || r.section === 'session-skills')
+          .map(r => (r.content as { name: string }).name),
+        contextEpoch: this.regions.getEpoch(),
       })
 
       const response = await this.ioPort.invokeLLM(request)
@@ -427,7 +525,7 @@ export class AgentRuntime {
       this.recorder.endSpan(llmSpan, 'ok')
 
       // Append assistant turn to context
-      this.context.appendHistory({ role: 'assistant', content: response.content })
+      this.appendScratchpadAssistant(response.content)
 
       // Capture text output
       for (const c of response.content) {
@@ -451,7 +549,7 @@ export class AgentRuntime {
           content:     r.error ?? JSON.stringify(r.output),
           is_error:    r.isError,
         }))
-        this.context.appendHistory({ role: 'tool', content: toolResultContent })
+        this.appendScratchpadToolResults(toolResultContent)
         this.applyPendingSkills()
 
         // Did any tool emit a FSM event?
@@ -506,7 +604,7 @@ export class AgentRuntime {
 
     const actionInput = {
       goal:  this.goal,
-      input: `Context: ${JSON.stringify(this.memory.toJSON())}\nCurrent turn: ${this.context.currentTurn ?? ''}`,
+      input: `Context: ${JSON.stringify(this.memory.toJSON())}\nCurrent turn: ${this.getCurrentTurn() ?? ''}`,
     }
 
     try {
