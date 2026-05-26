@@ -132,8 +132,18 @@ export class OpenAICompatibleAdapter implements IModelGateway {
       toolCalls.push({ id: tc.id, name: tc.function.name, input })
     }
 
+    // PR-D follow-up: OpenAI's chat completions response includes
+    // prompt_tokens_details.cached_tokens when auto prefix caching hits
+    // (gpt-4o family, gpt-4o-mini, o1 family). No separate "creation
+    // tokens" counter — OpenAI's auto-cache writes are not surfaced.
+    const cachedTokens = (raw.usage as { prompt_tokens_details?: { cached_tokens?: number } } | undefined)
+      ?.prompt_tokens_details?.cached_tokens
     const usage: ModelUsage | undefined = raw.usage
-      ? { inputTokens: raw.usage.prompt_tokens, outputTokens: raw.usage.completion_tokens }
+      ? {
+          inputTokens:  raw.usage.prompt_tokens,
+          outputTokens: raw.usage.completion_tokens,
+          ...(cachedTokens !== undefined ? { cacheReadTokens: cachedTokens } : {}),
+        }
       : undefined
 
     return { content, toolCalls, usage, finishReason: choice.finish_reason ?? undefined, raw }
