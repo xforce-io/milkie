@@ -1,3 +1,4 @@
+import { v4 as uuidv4 } from 'uuid'
 import type { AgentConfig, FSMState } from '../types/agent.js'
 import type { AgentResult } from '../types/common.js'
 import { MaxIterationsError } from '../types/common.js'
@@ -41,6 +42,14 @@ export interface AgentRuntimeOptions {
   stateStore:        IStateStore
   recorder:          ITrajectoryRecorder
   ioPort:            IIOPort
+  /**
+   * Optional event store for emitting region.added / region.removed /
+   * context.boundary.applied events into the live trace stream (so HTML
+   * report / web UI can see them). Pass only in recording paths
+   * (Milkie.invoke / continueTurn). Replay must NOT pass this — otherwise
+   * region events get re-written on top of the existing run JSONL.
+   */
+  eventStore?:       import('../trace/EventStore.js').IEventStore
   extraTools?:       ToolDefinition[]
   subAgentConfigs?:  Map<string, AgentConfig>  // agentId → config, for spawning
   childRecorderFactory?: (config: AgentConfig, contextId: string, traceId: string) => ITrajectoryRecorder
@@ -55,6 +64,7 @@ export class AgentRuntime {
   private readonly stateStore:       IStateStore
   private readonly recorder:         ITrajectoryRecorder
   private readonly ioPort:           IIOPort
+  private readonly eventStore?:      import('../trace/EventStore.js').IEventStore
   private readonly subAgentConfigs?: Map<string, AgentConfig>
   private readonly childRecorderFactory?: (config: AgentConfig, contextId: string, traceId: string) => ITrajectoryRecorder
   private readonly extraTools:      ToolDefinition[]
@@ -83,6 +93,7 @@ export class AgentRuntime {
     this.parentId        = opts.parentId
     this.stateStore      = opts.stateStore
     this.recorder        = opts.recorder
+    this.eventStore      = opts.eventStore
     this.subAgentConfigs = opts.subAgentConfigs
     this.childRecorderFactory = opts.childRecorderFactory
     this.extraTools      = opts.extraTools ?? []
@@ -329,6 +340,25 @@ export class AgentRuntime {
       stability: delta.stability,
       reason,
     })
+    // Also write to the event log so trace HTML / web UI / inspect can see
+    // these. Recorder-only (span events) doesn't reach the live event stream.
+    if (this.eventStore) {
+      // Bypass IOPort for event metadata: these region/boundary events are
+      // informational (not consumed by replay's nondet cache), so we mustn't
+      // burn an ioPort.uuid()/now() in record mode that replay's skip-write
+      // branch wouldn't match. Date.now() / uuid() direct keep record and
+      // replay paths symmetric on IOPort consumption.
+      void this.eventStore.append({
+        id:        uuidv4(),
+        runId:     this.agentRunId,
+        type:      delta.kind === 'added' ? 'region.added' : 'region.removed',
+        actor:     this.config.agentId,
+        timestamp: Date.now(),
+        payload:   delta.kind === 'added'
+          ? { id: delta.id, target: delta.target ?? 'system', section: delta.section ?? 'unknown', stability: delta.stability ?? 'volatile', reason }
+          : { id: delta.id, reason },
+      })
+    }
   }
 
   private emitBoundaryApplied(summary: import('../context/lifecycleEngine.js').CrystallizationSummary): void {
@@ -343,6 +373,30 @@ export class AgentRuntime {
         archivedPair: summary.archivedPair,
       },
     })
+    if (this.eventStore) {
+      // Bypass IOPort for event metadata: these region/boundary events are
+      // informational (not consumed by replay's nondet cache), so we mustn't
+      // burn an ioPort.uuid()/now() in record mode that replay's skip-write
+      // branch wouldn't match. Date.now() / uuid() direct keep record and
+      // replay paths symmetric on IOPort consumption.
+      void this.eventStore.append({
+        id:        uuidv4(),
+        runId:     this.agentRunId,
+        type:      'context.boundary.applied',
+        actor:     this.config.agentId,
+        timestamp: Date.now(),
+        payload: {
+          boundary: 'turn-end',
+          epoch:    this.regions.getEpoch(),
+          crystallization: {
+            kept:         summary.kept.length,
+            dropped:      summary.dropped.length,
+            promoted:     summary.promoted.length,
+            archivedPair: summary.archivedPair,
+          },
+        },
+      })
+    }
   }
 
   // Idempotent — safe to call multiple times per turn. Second call is a no-op
