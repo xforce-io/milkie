@@ -3,7 +3,8 @@ import type { AgentResult } from '../types/common.js'
 import { MaxIterationsError } from '../types/common.js'
 import type { IStateStore, AgentCheckpoint, ChildAgentRecord } from '../types/store.js'
 import type { ITrajectoryRecorder, Span } from '../types/trajectory.js'
-import type { ToolDefinition, ToolContext, ToolResult } from '../types/tool.js'
+import type { ToolDefinition, ToolContext, ToolResult, ToolResultStrategy } from '../types/tool.js'
+import { applyShape } from './toolResultStrategy.js'
 import type { MessageContent } from '../types/common.js'
 import { FSMEngine } from '../fsm/FSMEngine.js'
 import { ContextRegions } from '../context/ContextRegions.js'
@@ -283,6 +284,27 @@ export class AgentRuntime {
   private appendScratchpadToolResults(content: MessageContent[]): void {
     const id = `scratch:${this.ioPort.uuid()}`
     this.regions.set(id, makeScratchpadToolResultRegion(content))
+  }
+
+  private toolStrategyFor(toolName: string): ToolResultStrategy | undefined {
+    return this.registry.get(toolName)?.resultStrategy
+  }
+
+  /**
+   * Apply the tool's declared resultStrategy (if any) to a single ToolResult,
+   * returning the string content that should go into the tool_result message.
+   * Default strategy is 'verbatim' (backwards compatible — pre-PR-E behavior).
+   *
+   * The raw output is recorded as-is on the tool.responded event (in
+   * executeSingleTool / RecordingIOPort); this method only shapes what goes
+   * into the LLM's scratchpad message.
+   */
+  private shapeToolResultForLlm(r: ToolResult): string {
+    const strategy = this.toolStrategyFor(r.toolName)
+    if (r.isError) {
+      return applyShape(r.error, strategy?.onError ?? 'verbatim')
+    }
+    return applyShape(r.output, strategy?.shape ?? 'verbatim')
   }
 
   private emitRegionDelta(delta: import('../context/ContextRegions.js').RegionChangeDelta, reason: string): void {
@@ -584,7 +606,7 @@ export class AgentRuntime {
         const toolResultContent: MessageContent[] = results.map(r => ({
           type:        'tool_result' as const,
           tool_use_id: r.toolCallId,
-          content:     r.error ?? JSON.stringify(r.output),
+          content:     this.shapeToolResultForLlm(r),
           is_error:    r.isError,
         }))
         this.appendScratchpadToolResults(toolResultContent)
