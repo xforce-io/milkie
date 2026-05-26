@@ -197,6 +197,8 @@ export interface InterTurnContext {
   boundary:   'turn-end' | 'turn-start'
   userInput?: string
   now:        number
+  /** PR-D: fires once after crystallization completes (turn-end only) with the summary. */
+  onBoundary?: (summary: CrystallizationSummary) => void
 }
 
 export interface CrystallizationSummary {
@@ -271,6 +273,7 @@ export function runInterTurnEngine(
     }
   }
 
+  ctx.onBoundary?.(summary)
   return { crystallization: summary }
 }
 
