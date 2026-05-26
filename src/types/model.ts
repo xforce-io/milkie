@@ -36,9 +36,13 @@ export type ModelEvent =
   | { type: 'error'; data: { code: string; message: string; retryable?: boolean } }
 
 export interface ModelUsage {
-  inputTokens:  number
-  outputTokens: number
-  cost?:        number
+  inputTokens:        number
+  outputTokens:       number
+  cost?:              number
+  /** PR-D: tokens served from provider prefix cache (Anthropic). */
+  cacheReadTokens?:     number
+  /** PR-D: tokens written to provider prefix cache (Anthropic). */
+  cacheCreationTokens?: number
 }
 
 export interface ReasoningOptions {

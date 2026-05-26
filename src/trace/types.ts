@@ -41,6 +41,14 @@ export interface LlmRespondedPayload {
   response: ModelResponse
   /** Mirrors the requested-event hash so consumers don't need to re-join. */
   requestHash: string
+  /** PR-D: cache-health snapshot lifted from response.usage; null when provider does not report. */
+  cacheStats?: {
+    readTokens:       number
+    creationTokens:   number
+    totalInputTokens: number
+    /** readTokens / totalInputTokens, [0, 1]. 0 when totalInputTokens === 0. */
+    hitRate:          number
+  }
 }
 
 export interface ToolRequestedPayload {
