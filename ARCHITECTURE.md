@@ -509,6 +509,26 @@ materializes, `ContextRegions` stays where it is — Agent Runtime would
 populate regions from values the external Context Layer delivers,
 instead of constructing them itself.
 
+**Two-tier memory pattern.** When the external Context Layer
+materializes, "memory" naturally splits into two tiers by how it
+surfaces to the LLM:
+
+- **Layer 1: in-context (WM-style).** Small, always-relevant state —
+  current intent, current plan, last decision. Rendered into every
+  LLM request via the `wm` region. Should be **session-stable** to
+  preserve prefix cache; mutations during a session cost cache hits.
+- **Layer 2: external (tool-mediated).** Large, occasionally-relevant
+  state — research findings, conversation summaries, user preferences,
+  long task state. Persisted out-of-band; LLM accesses via
+  `memory_read` / `memory_search` / `memory_write` tools. Tool results
+  enter scratchpad (turn-local), not the in-context WM region.
+
+Today only Layer 1 exists (`src/store/WorkingMemory.ts` + `wm` region).
+Layer 2 — `IMemoryStore` interface + memory tool surface — is
+roadmap.md "Memory tools (Layer 2)" and is one of the natural ways the
+external Context Layer's "memory lookup" responsibility could be
+prototyped before the full external infrastructure arrives.
+
 The substrate's full design spec lives at
 `docs/superpowers/specs/2026-05-25-context-region-substrate-design.md`.
 
