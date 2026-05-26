@@ -41,9 +41,14 @@ as implemented.
 
 - **Agent Runtime FSM Core** — Statechart-based execution, transitions,
   multi-turn loops. (`src/runtime/`, `src/fsm/`)
-- **working context (basic)** — Bucket structure (system / instructions /
-  history / working memory / current turn) assembled by an internal
-  `ContextLayer` class. (`src/context/`)
+- **working context (basic)** — Region-based substrate: every piece of
+  context (header, skills, state instructions, working memory, history,
+  scratchpad, current turn, tool schemas) is a typed `Region` in a
+  `ContextRegions` store; a pure `assemble(regions, scope)` function
+  produces the LLM request on each call. Note: this is an in-Agent
+  assembly substrate, **not** an implementation of the external
+  Context Layer concept described under "Infrastructure layers" — see
+  §Context Layer for the distinction. (`src/context/`)
 - **Trajectory / span observability** — `TrajectoryStore` collects spans
   for `llm.call`, `tool.call`, `fsm.transition`, etc. This is the
   predecessor of the event-sourced Agent Trace described below.
@@ -120,9 +125,13 @@ as implemented.
   in-flight + completed runs need an explicit contract. Phase 5.
 - **External Context Layer / Data / Execution / Foundation** — These
   infrastructure layers are described as outside the milkie boundary.
-  Today they are partially internal (`src/context/ContextLayer.ts`) or
-  absent (no Data / Execution abstraction; gateway substitutes for
-  Foundation).
+  Today they are entirely absent: there is no Data or Execution
+  abstraction (gateway substitutes for Foundation), and the read-side
+  responsibilities of an external Context Layer (knowledge retrieval,
+  memory lookup, capability table resolution) are not implemented. The
+  in-Agent `ContextRegions` substrate is not a stand-in for them — it
+  only assembles what the agent already has in scope into an LLM
+  request (see §Context Layer for the distinction).
 - **Evolution subsystem** — Experiment Registry, Traffic Splitter, Outcome
   Collector, Promotion Gate — none implemented.
 - **Capability vocabulary in full** — observable / diagnosable / lineage /
@@ -144,10 +153,14 @@ as implemented.
 - **Trajectory → Event log**: When event-sourced Agent Trace lands,
   TrajectoryStore either becomes a projection over the event log or is
   retired in favor of the event log's native query surface.
-- **Internal ContextLayer → External Context Layer**: The current
-  `src/context/ContextLayer.ts` is treated as a local adapter / shim that
-  anticipates the external interface. When external infrastructure exists,
-  responsibilities migrate outward.
+- **In-Agent ContextRegions → External Context Layer**: The current
+  `src/context/ContextRegions.ts` is a region-based assembly substrate
+  that lives inside Agent Runtime — it is **not** a local shim for the
+  external Context Layer. The external interface remains future work.
+  When it materializes, the read-side responsibilities (knowledge
+  retrieval, memory lookup, capability resolution) move outward;
+  `ContextRegions` stays in-Agent as the assembly substrate for whatever
+  the Context Layer projection delivers.
 - **IOPort → Execution operator**: IOPort currently passes through to
   the gateway directly. The target is to route invocations through an
   Execution layer operator (which itself delegates to Foundation /
@@ -463,16 +476,41 @@ projection-side caching.
 Agent Runtime depends on Context Layer for working context; it does not access
 Data or Execution directly.
 
-**Implementation note.** Today, `src/context/ContextLayer.ts` is an
-**internal** class instantiated directly by `AgentRuntime`. It assembles
-working-context buckets (system / history / tools / working memory) but
-does not yet pull from a distinct Data or Execution layer — those layers
-do not exist as separate runtime concepts. The internal class is treated
-as a **local adapter / shim** that anticipates the external Context Layer
-interface; when external infrastructure lands, responsibilities migrate
-outward. New contributors should not infer from the current file location
-that Context Layer is permanently inside milkie's boundary; the target
-position is below it.
+**Implementation note.** The external Context Layer described above is
+**not implemented today** — there is no code that does knowledge
+retrieval, memory lookup, or capability resolution from external sources.
+
+What does exist in-tree is `src/context/ContextRegions.ts` plus
+`src/context/assemble.ts` (and `src/context/lifecycleEngine.ts`). These
+form a region-based **in-Agent assembly substrate**: each piece of
+working context (header, skill, state instructions, working memory,
+history pair, scratchpad, current turn, tool schema) is a typed
+`Region`; the pure `assemble(regions, scope)` function produces the
+LLM `ModelRequest` on every step; the lifecycle engine crystallizes
+scratchpad into history at turn end.
+
+The substrate is **not** a local shim for the external Context Layer.
+Their responsibilities differ:
+
+| Concern | External Context Layer (future) | In-Agent ContextRegions (today) |
+|---|---|---|
+| Knowledge retrieval from corpora / RAG | Yes | No |
+| Memory lookup across sessions / agents | Yes | No |
+| Capability / tool catalog resolution | Yes | No (tools wired at Agent config time) |
+| Skill instruction loading | Yes (with versioned manifest) | Yes (in-Agent only, via `skill_request` system tool) |
+| Per-call message / system-prompt assembly | Yes (output shape) | Yes (sole responsibility) |
+| Region lifecycle (turn-local vs session-persistent vs TTL) | Not specified | Yes |
+| prefix cache–aware section ordering | Not specified | Yes |
+
+In short: the new substrate solves an in-Agent assembly problem the old
+`ContextLayer` shim was beginning to grow into; it does not displace
+the external Context Layer concept. When the external interface
+materializes, `ContextRegions` stays where it is — Agent Runtime would
+populate regions from values the external Context Layer delivers,
+instead of constructing them itself.
+
+The substrate's full design spec lives at
+`docs/superpowers/specs/2026-05-25-context-region-substrate-design.md`.
 
 ### Data
 
