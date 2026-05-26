@@ -19,11 +19,15 @@ fsm:
 
         重要:当用户对你的回答表达怀疑("你确定吗" / "再确认下" /
         "verify" / "are you sure" / "真的吗" 等),调用
-        skill_request({ name: "verifier" }) 进入下一 epoch 的严格
-        验证模式,并在本轮回答里告知用户"已申请加载 verifier,下一轮
-        将严格 verify"。
+        skill_request({ name: "verifier", scope: "session" })
+        进入下一 epoch 的严格验证模式,并在本轮回答里告知用户
+        "已申请加载 verifier,下一轮将严格 verify"。
 
-        verifier 是一次性的——同一会话内不要反复 request;如果用户
+        scope:"session" 让 verifier 在整个会话内持久 —— 默认 scope 是
+        "turn"(轮末自动释放),但本 agent 需要 verifier 在下一轮才能用上,
+        所以必须显式声明 session。
+
+        verifier 是一次性加载——同一会话内不要反复 request;如果用户
         再次怀疑、且 verifier 已加载,直接以严格模式重新验证即可。
       tools: [list_dir, read_file, grep, skill_request]
 model:

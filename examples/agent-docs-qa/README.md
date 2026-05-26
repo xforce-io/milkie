@@ -164,32 +164,35 @@ After `npx tsx server.ts`, open `http://localhost:7878` and verify:
 - **Custom corpus loading at runtime** — corpus path is hardcoded to
   `./corpus/`; replace files in that dir to change content.
 
-## Known substrate limitations (addressed in pending design)
+## Substrate notes
 
-This example is built on milkie's current `ContextLayer`, which has several
-architecturally-incomplete behaviors. The example honestly exposes them
-rather than papering over them:
+This example runs on the `ContextRegions` + `assemble` substrate (PR-C1)
+plus the skill lifetime model (PR-C2):
 
-- **No skill release path** — the agent can `skill_request` to load `verifier`,
-  but has no way to unload it. Once loaded, verifier stays in the system
-  prompt for the remainder of the conversation. Progressive disclosure is
-  one-way today.
-- **scratchpad and history are conflated** — the ReAct loop's
-  `assistant tool_use` / `tool` messages accumulate in the same `history`
-  array as cross-turn `(user, finalAssistant)` pairs. Across many turns the
-  intermediate tool-call noise crowds the LLM's context.
-- **Tool results have no upper bound** — `read_file` returns full chapter
-  bodies (10–20KB each) verbatim into history; nothing in the substrate
-  enforces a per-tool size policy.
+- **Skill lifetime** — `skill_request({ name, scope })` accepts `scope: 'turn' | 'session'`.
+  Default is `'turn'` (auto-released at turn end). This example's
+  `sanguo-researcher.md` agent explicitly passes `scope: 'session'` for `verifier`
+  because the agent's intended flow is "load this turn, use it next turn".
+  An agent that needed verifier only within the current turn would omit
+  `scope` (defaulting to `'turn'`) and let crystallization clean it up
+  automatically.
+- **scratchpad / history separation** — every assistant + tool message during
+  a turn becomes a `turn-local` scratchpad region. Cross-turn history holds
+  only `(user, finalAssistant)` pairs (built at turn-end crystallization).
+  No more ReAct-noise accumulation across turns.
 
-All three are addressed in:
-**`docs/superpowers/specs/2026-05-25-context-region-substrate-design.md`**
+Still pending in future PRs:
 
-After that substrate work lands (region abstraction + lifetime declaration +
-turn-end crystallization + `ToolResultStrategy`), this example's
-frontend + `agents/sanguo-researcher.agent.md` will be updated to demonstrate
-the full *load → use → auto-release at turn end* cycle and per-tool result
-shaping.
+- **Tool result strategy** (spec §4.4) — `read_file` still returns full chapter
+  bodies (10–20KB each) verbatim. The substrate has no per-tool size policy
+  yet; `ToolResultStrategy` (`shape` / `visibility` / `target` three axes) is
+  the planned fix. Tracked for a follow-up PR after Phase 5.
+- **Trace `region.added` / `region.removed` events** — the UI currently
+  detects skill loads by watching `tool.requested` (toolName === 'skill_request').
+  Once the substrate emits dedicated region lifecycle events (PR-D), the UI
+  can switch to those for a richer view.
+
+Full spec: **`docs/superpowers/specs/2026-05-25-context-region-substrate-design.md`**
 
 ## Related
 
