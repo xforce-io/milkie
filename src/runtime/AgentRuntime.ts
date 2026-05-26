@@ -4,7 +4,7 @@ import { MaxIterationsError } from '../types/common.js'
 import type { IStateStore, AgentCheckpoint, ChildAgentRecord } from '../types/store.js'
 import type { ITrajectoryRecorder, Span } from '../types/trajectory.js'
 import type { ToolDefinition, ToolContext, ToolResult, ToolResultStrategy } from '../types/tool.js'
-import { applyShape } from './toolResultStrategy.js'
+import { applyShape, serializeOutput } from './toolResultStrategy.js'
 import type { MessageContent } from '../types/common.js'
 import { FSMEngine } from '../fsm/FSMEngine.js'
 import { ContextRegions } from '../context/ContextRegions.js'
@@ -299,12 +299,25 @@ export class AgentRuntime {
    * executeSingleTool / RecordingIOPort); this method only shapes what goes
    * into the LLM's scratchpad message.
    */
-  private shapeToolResultForLlm(r: ToolResult): string {
+  private shapeToolResultForLlm(r: ToolResult, llmSpan: Span): string {
     const strategy = this.toolStrategyFor(r.toolName)
-    if (r.isError) {
-      return applyShape(r.error, strategy?.onError ?? 'verbatim')
+    const shape = r.isError ? (strategy?.onError ?? 'verbatim') : (strategy?.shape ?? 'verbatim')
+    const raw = r.isError ? r.error : r.output
+    const rawString = serializeOutput(raw)
+    const shaped = applyShape(raw, shape)
+
+    // Only emit tool.shaped when a non-verbatim shape actually changed bytes.
+    if (shape !== 'verbatim' && shaped.length !== rawString.length) {
+      this.recorder.recordEvent(llmSpan, 'tool.shaped', {
+        toolName:    r.toolName,
+        toolCallId:  r.toolCallId,
+        shapeKind:   typeof shape === 'object' ? shape.kind : shape,
+        rawBytes:    rawString.length,
+        storedBytes: shaped.length,
+        onErrorPath: r.isError,
+      })
     }
-    return applyShape(r.output, strategy?.shape ?? 'verbatim')
+    return shaped
   }
 
   private emitRegionDelta(delta: import('../context/ContextRegions.js').RegionChangeDelta, reason: string): void {
@@ -602,11 +615,15 @@ export class AgentRuntime {
         const results = await this.executeTools(response.toolCalls, state.tools)
         await this.checkEvents()
 
-        // Append tool results to context
+        // Append tool results to context. shapeToolResultForLlm may emit
+        // tool.shaped events on llmSpan; InMemoryRecorder.recordEvent only
+        // pushes to span.events (doesn't check endTime), so emitting after
+        // endSpan is fine — keeps llmSpan close to LLM-call boundary so
+        // sub-agent spawning (inside executeTools) sees a closed parent span.
         const toolResultContent: MessageContent[] = results.map(r => ({
           type:        'tool_result' as const,
           tool_use_id: r.toolCallId,
-          content:     this.shapeToolResultForLlm(r),
+          content:     this.shapeToolResultForLlm(r, llmSpan),
           is_error:    r.isError,
         }))
         this.appendScratchpadToolResults(toolResultContent)
