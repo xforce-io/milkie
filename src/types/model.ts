@@ -17,6 +17,8 @@ export interface ModelRequest {
   responseFormat?: unknown
   reasoning?:      ReasoningOptions
   metadata?:       Record<string, unknown>
+  /** PR-D Phase 1: when 'system-end', adapter wraps system block with cache_control. */
+  cacheBreakpoint?: 'system-end'
 }
 
 export interface ModelResponse {
@@ -36,9 +38,13 @@ export type ModelEvent =
   | { type: 'error'; data: { code: string; message: string; retryable?: boolean } }
 
 export interface ModelUsage {
-  inputTokens:  number
-  outputTokens: number
-  cost?:        number
+  inputTokens:        number
+  outputTokens:       number
+  cost?:              number
+  /** PR-D: tokens served from provider prefix cache (Anthropic). */
+  cacheReadTokens?:     number
+  /** PR-D: tokens written to provider prefix cache (Anthropic). */
+  cacheCreationTokens?: number
 }
 
 export interface ReasoningOptions {

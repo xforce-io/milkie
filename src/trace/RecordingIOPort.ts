@@ -13,6 +13,25 @@ import type {
 } from './types.js'
 import { hashModelRequest, hashToolCall } from './hash.js'
 
+function cacheStatsFrom(response: ModelResponse): {
+  readTokens:       number
+  creationTokens:   number
+  totalInputTokens: number
+  hitRate:          number
+} | undefined {
+  const usage = response.usage
+  if (!usage || usage.cacheReadTokens === undefined) return undefined
+  const readTokens     = usage.cacheReadTokens
+  const creationTokens = usage.cacheCreationTokens ?? 0
+  const totalInputTokens = usage.inputTokens
+  return {
+    readTokens,
+    creationTokens,
+    totalInputTokens,
+    hitRate: totalInputTokens > 0 ? readTokens / totalInputTokens : 0,
+  }
+}
+
 type PendingNondet =
   | { kind: 'clock'; value: number }
   | { kind: 'uuid';  value: string }
@@ -123,7 +142,11 @@ export class RecordingIOPort implements IIOPort {
       actor:     this.actor,
       causedBy:  reqEventId,
       timestamp: this.inner.now(),
-      payload:   { response, requestHash } satisfies LlmRespondedPayload,
+      payload:   {
+        response,
+        requestHash,
+        ...(cacheStatsFrom(response) ? { cacheStats: cacheStatsFrom(response) } : {}),
+      } satisfies LlmRespondedPayload,
     })
 
     return response

@@ -20,6 +20,8 @@ export const STYLES = `
   .entry.llm .icon { color: #5b3ec9; }
   .entry.tool .icon { color: #2563eb; }
   .entry.lifecycle .icon { color: #6e6e73; }
+  .entry.region .icon { color: #888; }
+  .entry.region .summary { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; }
   .entry .summary { flex: 1; font-size: 13px; }
   .entry .ts { font-family: ui-monospace, monospace; font-size: 11px; color: #6e6e73; }
   .child-run { margin-left: 24px; margin-top: 8px; border-left: 2px solid #e5e5e7;

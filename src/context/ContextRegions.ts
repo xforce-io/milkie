@@ -5,11 +5,30 @@ import type { Region, RegionInput, RegionSnapshot } from './Region'
 
 export type Clock = () => number
 
+export interface RegionChangeDelta {
+  kind:    'added' | 'removed'
+  id:      string
+  /** Present on 'added' deltas only (so consumers can index into section without re-reading the region). */
+  section?: string
+  /** Present on 'added' deltas only. */
+  target?:  'system' | 'message' | 'tool'
+  /** Present on 'added' deltas only. */
+  stability?: 'immutable' | 'session-stable' | 'turn-stable' | 'volatile'
+}
+
+export interface ContextRegionsOptions {
+  /** Fired on every successful set/delete. Optional — substrate stays pure-ish without it. */
+  onChange?: (delta: RegionChangeDelta) => void
+}
+
 export class ContextRegions {
   private readonly regions = new Map<string, Region>()
   private epoch = 0
 
-  constructor(private readonly clock: Clock) {}
+  constructor(
+    private readonly clock: Clock,
+    private readonly options: ContextRegionsOptions = {},
+  ) {}
 
   set(id: string, input: RegionInput): void {
     const existing = this.regions.get(id)
@@ -17,11 +36,21 @@ export class ContextRegions {
     const region: Region = { id, createdAt, ...input }
     this.regions.set(id, region)
     this.epoch++
+    this.options.onChange?.({
+      kind:      'added',
+      id,
+      section:   region.section,
+      target:    region.target,
+      stability: region.stability,
+    })
   }
 
   delete(id: string): boolean {
     const existed = this.regions.delete(id)
-    if (existed) this.epoch++
+    if (existed) {
+      this.epoch++
+      this.options.onChange?.({ kind: 'removed', id })
+    }
     return existed
   }
 

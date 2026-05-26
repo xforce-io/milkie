@@ -239,4 +239,43 @@ describe('runInterTurnEngine — turn-end crystallization', () => {
     // Scratchpad still cleared because it's turn-local.
     expect(r.get('s1')).toBeUndefined()
   })
+
+  test('onBoundary callback fires once with summary counts', () => {
+    const r = new ContextRegions(() => 100)
+    r.set('current', makeCurrentTurnRegion('q'))
+    r.set('s-final', makeScratchpadAssistantRegion(
+      [{ type: 'text', text: 'a' }], false,
+    ))
+    r.set('hdr', makeHeaderRegion('h'))   // session-persistent, will be kept
+
+    const events: Array<{ kept: string[]; dropped: string[]; promoted: Array<{ from: string; to: string }>; archivedPair?: string }> = []
+    runInterTurnEngine(r, {
+      boundary: 'turn-end',
+      userInput: 'q',
+      now: 999,
+      onBoundary: (summary) => events.push(summary),
+    })
+
+    expect(events).toHaveLength(1)
+    expect(events[0]!.dropped.length).toBeGreaterThanOrEqual(2)   // at least current + scratch
+    expect(events[0]!.kept.length).toBeGreaterThanOrEqual(1)      // at least header
+    expect(events[0]!.archivedPair).toMatch(/^history:turn-/)
+  })
+
+  test('onBoundary not fired when boundary !== turn-end', () => {
+    const r = new ContextRegions(() => 0)
+    const events: unknown[] = []
+    runInterTurnEngine(r, {
+      boundary: 'turn-start',
+      now: 1,
+      onBoundary: (s) => events.push(s),
+    })
+    expect(events).toEqual([])
+  })
+
+  test('runInterTurnEngine works without onBoundary callback (existing tests still pass)', () => {
+    const r = new ContextRegions(() => 0)
+    r.set('s', makeScratchpadAssistantRegion([{type:'text',text:'a'}], false))
+    expect(() => runInterTurnEngine(r, { boundary: 'turn-end', userInput: 'q', now: 1 })).not.toThrow()
+  })
 })

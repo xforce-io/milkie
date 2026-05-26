@@ -23,7 +23,18 @@ export interface LifecycleEntry {
   timestamp:   number
 }
 
-export type TimelineEntry = LlmEntry | ToolEntry | LifecycleEntry
+export interface RegionEntry {
+  kind:      'region'
+  eventId:   string
+  eventType: 'region.added' | 'region.removed' | 'context.boundary.applied'
+  timestamp: number
+  /** Free-text summary for the timeline row. */
+  summary:   string
+  /** Raw payload for click-through. */
+  payload:   unknown
+}
+
+export type TimelineEntry = LlmEntry | ToolEntry | LifecycleEntry | RegionEntry
 
 export interface TimelineNode {
   runId:     string
@@ -91,6 +102,40 @@ export function buildTimelineTree(events: Event[]): TimelineNode[] {
         })
       } else if (evt.type === 'agent.run.started' || evt.type === 'agent.run.completed') {
         entries.push({ kind: 'lifecycle', eventId: evt.id, eventType: evt.type, timestamp: evt.timestamp })
+      } else if (evt.type === 'region.added') {
+        const p = evt.payload as { id: string; section?: string; reason?: string }
+        entries.push({
+          kind:      'region',
+          eventId:   evt.id,
+          eventType: 'region.added',
+          timestamp: evt.timestamp,
+          summary:   `+ region ${p.id} (${p.section ?? 'unknown section'}, ${p.reason ?? 'no reason'})`,
+          payload:   evt.payload,
+        })
+      } else if (evt.type === 'region.removed') {
+        const p = evt.payload as { id: string; reason?: string }
+        entries.push({
+          kind:      'region',
+          eventId:   evt.id,
+          eventType: 'region.removed',
+          timestamp: evt.timestamp,
+          summary:   `- region ${p.id} (${p.reason ?? 'no reason'})`,
+          payload:   evt.payload,
+        })
+      } else if (evt.type === 'context.boundary.applied') {
+        const p = evt.payload as { boundary: string; epoch: number; crystallization?: { kept: number; dropped: number; promoted: number; archivedPair?: string } }
+        const cryst = p.crystallization
+        const detail = cryst
+          ? ` (kept=${cryst.kept} dropped=${cryst.dropped} promoted=${cryst.promoted}${cryst.archivedPair ? ' archived=' + cryst.archivedPair : ''})`
+          : ''
+        entries.push({
+          kind:      'region',
+          eventId:   evt.id,
+          eventType: 'context.boundary.applied',
+          timestamp: evt.timestamp,
+          summary:   `boundary ${p.boundary} @ epoch ${p.epoch}${detail}`,
+          payload:   evt.payload,
+        })
       }
     }
 

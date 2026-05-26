@@ -20,7 +20,7 @@ import {
   runInterTurnEngine,
   rehydrateSnapshot,
 } from '../context/lifecycleEngine.js'
-import type { ToolSchema } from '../types/model.js'
+import type { ToolSchema, ModelRequest } from '../types/model.js'
 import { ToolRegistry } from '../tools/ToolRegistry.js'
 import { WorkingMemory } from '../store/WorkingMemory.js'
 import { CheckpointManager } from '../store/CheckpointManager.js'
@@ -88,7 +88,10 @@ export class AgentRuntime {
 
     this.fsm     = new FSMEngine(opts.config.fsm)
     this.memory  = new WorkingMemory()
-    this.regions = new ContextRegions(() => this.ioPort.now())
+    this.regions = new ContextRegions(
+      () => this.ioPort.now(),
+      { onChange: (delta) => this.emitRegionDelta(delta, 'agent-set') },
+    )
     this.regions.set('header', makeHeaderRegion(opts.config.systemPrompt))
     this.registry    = new ToolRegistry()
     this.checkpoints = new CheckpointManager(
@@ -282,6 +285,31 @@ export class AgentRuntime {
     this.regions.set(id, makeScratchpadToolResultRegion(content))
   }
 
+  private emitRegionDelta(delta: import('../context/ContextRegions.js').RegionChangeDelta, reason: string): void {
+    if (!this.rootSpan) return   // pre-run mutations not yet attributable to a root span
+    this.recorder.recordEvent(this.rootSpan, delta.kind === 'added' ? 'region.added' : 'region.removed', {
+      id:        delta.id,
+      section:   delta.section,
+      target:    delta.target,
+      stability: delta.stability,
+      reason,
+    })
+  }
+
+  private emitBoundaryApplied(summary: import('../context/lifecycleEngine.js').CrystallizationSummary): void {
+    if (!this.rootSpan) return
+    this.recorder.recordEvent(this.rootSpan, 'context.boundary.applied', {
+      boundary: 'turn-end',
+      epoch:    this.regions.getEpoch(),
+      crystallization: {
+        kept:         summary.kept.length,
+        dropped:      summary.dropped.length,
+        promoted:     summary.promoted.length,
+        archivedPair: summary.archivedPair,
+      },
+    })
+  }
+
   // Idempotent — safe to call multiple times per turn. Second call is a no-op
   // because runInterTurnEngine deletes the current-turn region (turn-local) on
   // the first run, so the fallback lookup returns undefined and archiving is
@@ -292,9 +320,10 @@ export class AgentRuntime {
     const input = userInput ?? (this.regions.get('current-turn')?.content as string | undefined)
     if (input === undefined) return
     runInterTurnEngine(this.regions, {
-      boundary:  'turn-end',
-      userInput: input,
-      now:       this.ioPort.now(),
+      boundary:   'turn-end',
+      userInput:  input,
+      now:        this.ioPort.now(),
+      onBoundary: (summary) => this.emitBoundaryApplied(summary),
     })
   }
 
@@ -501,11 +530,12 @@ export class AgentRuntime {
         currentEpoch:  this.regions.getEpoch(),
       }
       const assembled = assemble(this.regions, scope)
-      const request   = {
+      const request: ModelRequest = {
         model:    this.config.model.model,
         system:   assembled.system,
         messages: assembled.messages,
         ...(assembled.tools ? { tools: assembled.tools } : {}),
+        ...(assembled.cacheBreakpoint ? { cacheBreakpoint: assembled.cacheBreakpoint } : {}),
       }
 
       const llmSpan = this.recorder.startSpan('llm.call', {
@@ -522,8 +552,13 @@ export class AgentRuntime {
       const response = await this.ioPort.invokeLLM(request)
 
       this.recorder.recordEvent(llmSpan, 'usage', {
-        inputTokens:  response.usage?.inputTokens,
-        outputTokens: response.usage?.outputTokens,
+        inputTokens:         response.usage?.inputTokens,
+        outputTokens:        response.usage?.outputTokens,
+        cacheReadTokens:     response.usage?.cacheReadTokens,
+        cacheCreationTokens: response.usage?.cacheCreationTokens,
+        cacheHitRate:        response.usage?.cacheReadTokens !== undefined && (response.usage?.inputTokens ?? 0) > 0
+                               ? response.usage.cacheReadTokens / response.usage.inputTokens
+                               : undefined,
       })
       this.recorder.endSpan(llmSpan, 'ok')
 

@@ -15,6 +15,9 @@ export type EventKind =
   | 'agent.run.completed'
   | 'clock.read'
   | 'uuid.generated'
+  | 'region.added'
+  | 'region.removed'
+  | 'context.boundary.applied'
 
 export interface Event<P = unknown> {
   id: string
@@ -38,6 +41,14 @@ export interface LlmRespondedPayload {
   response: ModelResponse
   /** Mirrors the requested-event hash so consumers don't need to re-join. */
   requestHash: string
+  /** PR-D: cache-health snapshot lifted from response.usage; null when provider does not report. */
+  cacheStats?: {
+    readTokens:       number
+    creationTokens:   number
+    totalInputTokens: number
+    /** readTokens / totalInputTokens, [0, 1]. 0 when totalInputTokens === 0. */
+    hitRate:          number
+  }
 }
 
 export interface ToolRequestedPayload {
@@ -89,6 +100,39 @@ export interface UuidGeneratedPayload {
   value: string
 }
 
+// ---- Region / context boundary payloads (Phase 4.6) ----
+
+export interface RegionAddedPayload {
+  /** Region id (e.g. 'header', 'skill:verifier', 'scratch:abc123'). */
+  id:        string
+  /** Stable identifier for which substrate section/target this region targets. */
+  target:    'system' | 'message' | 'tool'
+  section:   string
+  stability: 'immutable' | 'session-stable' | 'turn-stable' | 'volatile'
+  /** Why this region appeared (e.g. 'agent-set', 'turn-archived', 'promoted-to-wm'). */
+  reason:    string
+}
+
+export interface RegionRemovedPayload {
+  id:     string
+  /** Why this region was removed (e.g. 'turn-local-released', 'ttl-expired', 'promoted-source-removed'). */
+  reason: string
+}
+
+export interface ContextBoundaryAppliedPayload {
+  /** Which boundary engine fired: 'turn-end' (crystallization) for now. */
+  boundary: 'turn-end' | 'turn-start' | 'fsm-step'
+  /** epoch of the regions Map AFTER the boundary engine ran. */
+  epoch:    number
+  /** Summary of crystallization activity (omitted when boundary is non-turn-end). */
+  crystallization?: {
+    kept:         number   // count, not full ids (full ids in region.added/removed events)
+    dropped:      number
+    promoted:     number
+    archivedPair: string | undefined   // id of the new history pair region, if any
+  }
+}
+
 // ---- Typed event aliases ----
 
 export type LlmRequestedEvent       = Event<LlmRequestedPayload>       & { type: 'llm.requested' }
@@ -99,6 +143,9 @@ export type AgentRunStartedEvent    = Event<AgentRunStartedPayload>    & { type:
 export type AgentRunCompletedEvent  = Event<AgentRunCompletedPayload>  & { type: 'agent.run.completed' }
 export type ClockReadEvent          = Event<ClockReadPayload>          & { type: 'clock.read' }
 export type UuidGeneratedEvent      = Event<UuidGeneratedPayload>      & { type: 'uuid.generated' }
+export type RegionAddedEvent        = Event<RegionAddedPayload>        & { type: 'region.added' }
+export type RegionRemovedEvent      = Event<RegionRemovedPayload>      & { type: 'region.removed' }
+export type ContextBoundaryAppliedEvent = Event<ContextBoundaryAppliedPayload> & { type: 'context.boundary.applied' }
 
 export type AnyEvent =
   | LlmRequestedEvent
@@ -109,3 +156,6 @@ export type AnyEvent =
   | AgentRunCompletedEvent
   | ClockReadEvent
   | UuidGeneratedEvent
+  | RegionAddedEvent
+  | RegionRemovedEvent
+  | ContextBoundaryAppliedEvent
