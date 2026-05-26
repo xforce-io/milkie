@@ -257,11 +257,54 @@ turned into a parallel facade and violates invariant 12.
 
 ### External Context Layer / Data / Execution / Foundation (target)
 
-Today `src/context/ContextLayer.ts` is an internal class. The target
-architecture pushes it outside the milkie boundary; same with Data /
-Execution / Foundation. These migrations are intentionally not phased
-yet — they need a concrete consumer (e.g. KWeaver integration) to define
-the external interface shape. Until then the internal shim stays.
+Today there is no external Context Layer / Data / Execution / Foundation
+infrastructure. After PR-C1 the old `src/context/ContextLayer.ts` shim
+is gone — replaced by `ContextRegions` + `assemble` + lifecycle engine,
+which form an in-Agent **context management** discipline (not a Context
+Layer substitute; see ARCHITECTURE.md §Context Layer for the
+distinction). The target architecture still pushes Context Layer / Data
+/ Execution outside the milkie boundary as separate services; that
+migration is intentionally not phased yet — it needs a concrete
+consumer (e.g. KWeaver integration) to define the external interface
+shape.
+
+### Memory tools (Layer 2 external memory)
+
+**Goal.** Give agents a `memory_read` / `memory_write` / `memory_list`
+/ `memory_search` tool surface backed by an `IMemoryStore` interface
+(in-memory / SQLite / Redis implementations). Persists state out-of-band
+so it does not enter every LLM request; agent retrieves selectively.
+
+**Why a separate item.** The in-context WM (`src/store/WorkingMemory.ts`
++ `wm` region) is Layer 1 — small, always-rendered state. Layer 2 is
+the external memory tier described in ARCHITECTURE.md §Context Layer
+"Two-tier memory pattern". Today only Layer 1 exists; Layer 2 is the
+in-Agent precursor to what the future external Context Layer's
+"memory lookup" responsibility would deliver.
+
+**Estimated scope.** ~400 LOC + example. `IMemoryStore` interface,
+`InMemoryMemoryStore` + `SQLiteMemoryStore` implementations, 4 tools
+under `src/tools/memory.ts`, `ToolContext.memoryStore?` injection,
+unit tests, a heavy-WM example (e.g. todo agent) demonstrating
+cross-turn / cross-session persistence.
+
+**Trigger to actually do it.** Any of:
+- An agent on milkie needs stateful memory that exceeds the
+  in-context WM size budget (a few KB)
+- An agent needs cross-session persistence (state survives process
+  restart / different contextId)
+- A real workload appears that wants RAG-style memory_search and is
+  willing to bring an embedding backend
+- Two-tier memory becomes a recurring teaching point worth shipping
+
+Until one of those triggers, this stays deferred — making it real
+without a consumer would be speculative substrate.
+
+**Relationship to External Context Layer.** Doing memory tools first
+prototypes one slice of the future Context Layer's responsibility
+in-Agent. When the external interface arrives, `IMemoryStore` impl
+can point at the external memory service; agent / tool code stays
+the same.
 
 ---
 
