@@ -181,12 +181,14 @@ plus the skill lifetime model (PR-C2):
   only `(user, finalAssistant)` pairs (built at turn-end crystallization).
   No more ReAct-noise accumulation across turns.
 
+- **Tool result strategy** (PR-E step 6) — `read_file` uses `truncate(2000, tailHint:true)`
+  to keep chapter bodies (typically 5–15KB) from bloating prefix cache. Measured empirical
+  impact: 75% → 17% cache hit rate drop on a 5-turn dialogue when untruncated read_file
+  landed. Trade-off: agent gets first 2K chars + "[...truncated N chars...]" marker;
+  for deeper passages, agent should grep with tighter pattern to locate text first.
+
 Still pending in future PRs:
 
-- **Tool result strategy** (spec §4.4) — `read_file` still returns full chapter
-  bodies (10–20KB each) verbatim. The substrate has no per-tool size policy
-  yet; `ToolResultStrategy` (`shape` / `visibility` / `target` three axes) is
-  the planned fix. Tracked for a follow-up PR after Phase 5.
 - **Trace `region.added` / `region.removed` events** — the UI currently
   detects skill loads by watching `tool.requested` (toolName === 'skill_request').
   Once the substrate emits dedicated region lifecycle events (PR-D), the UI

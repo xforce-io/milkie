@@ -106,6 +106,11 @@ export function makeCorpusToolDefinitions(corpusRoot: string) {
         required: ['relPath'],
       },
       handler: t.read_file,
+      // PR-E: chapter bodies are 5K-15K chars; truncating to 2000 keeps tool_result
+      // from blowing prefix cache (measured: 75% → 17% hit rate without this).
+      // Agent should grep first to locate; read_file gives first 2000 chars of
+      // context. For deeper passages, agent can grep again with tighter pattern.
+      resultStrategy: { shape: { kind: 'truncate' as const, maxChars: 2000, tailHint: true } },
     },
     {
       name:        'grep',
