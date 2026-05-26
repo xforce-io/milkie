@@ -67,7 +67,7 @@ export class AgentRuntime {
 
   private eventQueue:    Array<{ type: string; payload: unknown }> = []
   private pendingEvents: Array<{ type: string; payload: unknown }> = []
-  private pendingSkillLoads: Array<{ name: string; instructions: string }> = []
+  private pendingSkillLoads: Array<{ name: string; instructions: string; scope: 'turn' | 'session' }> = []
   private childRecords: Map<string, ChildAgentRecord> = new Map()
   private rootSpan!:     Span
   private turnNumber:    number = 0
@@ -232,28 +232,31 @@ export class AgentRuntime {
       agentFactory:  this.factory,
       stateStore:    this.stateStore,
       emit:          emitFn,
-      requestSkill:  (name: string) => this.requestSkill(name),
+      requestSkill:  (name: string, scope?: 'turn' | 'session') => this.requestSkill(name, scope),
     }
   }
 
-  private requestSkill(name: string): { requested: string; status: string; version?: string } {
+  private requestSkill(name: string, scope: 'turn' | 'session' = 'turn'): { requested: string; status: string; version?: string; scope?: 'turn' | 'session' } {
     const normalized = name.trim().replace(/\s+skill$/i, '')
     const version = this.config.skills?.[normalized]
     const instructions = this.config.skillInstructions?.[normalized]
     if (!version || !instructions) {
       return { requested: name, status: 'unavailable' }
     }
-    this.pendingSkillLoads.push({ name: normalized, instructions })
-    return { requested: normalized, status: 'pending_next_epoch', version }
+    this.pendingSkillLoads.push({ name: normalized, instructions, scope })
+    return { requested: normalized, status: 'pending_next_epoch', version, scope }
   }
 
   private applyPendingSkills(): void {
-    for (const { name, instructions } of this.pendingSkillLoads) {
+    for (const { name, instructions, scope } of this.pendingSkillLoads) {
       const id = `skill:${name}`
       // Already loaded? Skip (preserves createdAt; idempotent like Map.set upsert).
+      // Note: this means re-requesting with a different scope is a no-op — the
+      // first request wins. Acceptable trade-off; agents that need to "upgrade"
+      // a turn-scoped skill to session would have to release first (not currently
+      // possible — release intentionally absent per spec §4.3 rationale).
       if (this.regions.get(id)) continue
-      // PR-C2 will plumb scope through requestSkill; PR-C1 defaults to session.
-      this.regions.set(id, makeSkillRegion(name, instructions, 'session'))
+      this.regions.set(id, makeSkillRegion(name, instructions, scope))
     }
     this.pendingSkillLoads = []
   }

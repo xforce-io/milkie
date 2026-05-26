@@ -8,7 +8,7 @@ export interface ToolContext {
   agentFactory:  AgentFactory
   stateStore:    IStateStore
   emit:          (event: string, payload?: unknown) => void
-  requestSkill?: (name: string) => { requested: string; status: string; version?: string }
+  requestSkill?: (name: string, scope?: 'turn' | 'session') => { requested: string; status: string; version?: string; scope?: 'turn' | 'session' }
 }
 
 export interface ToolDefinition {
