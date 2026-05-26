@@ -522,8 +522,13 @@ export class AgentRuntime {
       const response = await this.ioPort.invokeLLM(request)
 
       this.recorder.recordEvent(llmSpan, 'usage', {
-        inputTokens:  response.usage?.inputTokens,
-        outputTokens: response.usage?.outputTokens,
+        inputTokens:         response.usage?.inputTokens,
+        outputTokens:        response.usage?.outputTokens,
+        cacheReadTokens:     response.usage?.cacheReadTokens,
+        cacheCreationTokens: response.usage?.cacheCreationTokens,
+        cacheHitRate:        response.usage?.cacheReadTokens !== undefined && (response.usage?.inputTokens ?? 0) > 0
+                               ? response.usage.cacheReadTokens / response.usage.inputTokens
+                               : undefined,
       })
       this.recorder.endSpan(llmSpan, 'ok')
 
