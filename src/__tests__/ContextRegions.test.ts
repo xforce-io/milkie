@@ -246,3 +246,67 @@ describe('ContextRegions — _allRegions iteration', () => {
 function _spread(store: ContextRegions): IterableIterator<import('../context/Region').Region> {
   return store._allRegions()
 }
+
+describe('ContextRegions — onChange callback', () => {
+  test('fires on set with added=true and the new region', () => {
+    const calls: Array<{ kind: string; id: string; section?: string }> = []
+    const store = new ContextRegions(() => 0, {
+      onChange: (delta) => calls.push(delta),
+    })
+    store.set('a', regionInput({ content: 'hi', section: 'header' }))
+    expect(calls).toHaveLength(1)
+    expect(calls[0]).toMatchObject({ kind: 'added', id: 'a', section: 'header' })
+  })
+
+  test('fires on delete with removed=true', () => {
+    const calls: Array<{ kind: string; id: string }> = []
+    const store = new ContextRegions(() => 0, {
+      onChange: (delta) => calls.push(delta),
+    })
+    store.set('a', regionInput())
+    calls.length = 0
+    store.delete('a')
+    expect(calls).toHaveLength(1)
+    expect(calls[0]).toMatchObject({ kind: 'removed', id: 'a' })
+  })
+
+  test('does NOT fire on delete of non-existent id', () => {
+    const calls: unknown[] = []
+    const store = new ContextRegions(() => 0, {
+      onChange: (delta) => calls.push(delta),
+    })
+    store.delete('nope')
+    expect(calls).toEqual([])
+  })
+
+  test('fires on upsert (re-set on existing id) with kind=added', () => {
+    const calls: Array<{ kind: string }> = []
+    const store = new ContextRegions(() => 0, {
+      onChange: (delta) => calls.push(delta),
+    })
+    store.set('a', regionInput())
+    calls.length = 0
+    store.set('a', regionInput({ content: 'v2' }))
+    expect(calls).toHaveLength(1)
+    expect(calls[0]).toMatchObject({ kind: 'added', id: 'a', section: expect.any(String) })
+  })
+
+  test('no callback in constructor → no error on set/delete', () => {
+    const store = new ContextRegions(() => 0)   // no second arg
+    expect(() => store.set('a', regionInput())).not.toThrow()
+    expect(() => store.delete('a')).not.toThrow()
+  })
+
+  test('restore() does NOT fire onChange per region', () => {
+    const calls: unknown[] = []
+    const src = new ContextRegions(() => 0)
+    src.set('a', regionInput())
+    src.set('b', regionInput())
+    const snap = src.snapshot()
+
+    const dst = new ContextRegions(() => 0, { onChange: (delta) => calls.push(delta) })
+    dst.restore(snap)
+    // restore is a bulk reset; per-region events would be misleading replay noise.
+    expect(calls).toEqual([])
+  })
+})
