@@ -165,6 +165,27 @@ describe('server — REST endpoints', () => {
     const r = await get(`${baseUrl}/source/chapter-01-%E6%A1%83%E5%9B%AD%E4%B8%89%E7%BB%93%E4%B9%89.txt?lines=abc`)
     expect(r.status).toBe(400)
   })
+
+  it('POST /run/:runId/replay replays a recorded run deterministically', async () => {
+    // Run a chat first so there's something to replay.
+    const chatResp = JSON.parse((await postJson(`${baseUrl}/chat`, { input: 'hello' })).body) as { runId: string }
+
+    const r = await postJson(`${baseUrl}/run/${chatResp.runId}/replay`, {})
+    expect(r.status).toBe(200)
+    const body = JSON.parse(r.body) as {
+      status: string; replayedOutput: string; originalOutput: string; matchesOriginal: boolean
+    }
+    expect(body.status).toBe('deterministic')
+    expect(body.matchesOriginal).toBe(true)
+    expect(body.replayedOutput).toBe('hello from stub')
+    expect(body.originalOutput).toBe('hello from stub')
+  })
+
+  it('POST /run/:runId/replay returns 404 for unknown runId', async () => {
+    const r = await postJson(`${baseUrl}/run/00000000-0000-0000-0000-000000000000/replay`, {})
+    expect(r.status).toBe(404)
+    expect(JSON.parse(r.body).status).toBe('error')
+  })
 })
 
 describe('server — SSE stream', () => {

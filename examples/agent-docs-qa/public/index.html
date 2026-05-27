@@ -147,6 +147,38 @@
       font-size: 18px; line-height: 1; color: var(--muted);
     }
     #audit-panel .ap-close:hover { color: var(--text) }
+    #audit-panel .ap-replay {
+      cursor: pointer; background: var(--accent); color: white; border: none;
+      padding: 4px 10px; border-radius: 4px; font: inherit; font-size: 11px;
+      font-weight: 500;
+    }
+    #audit-panel .ap-replay:hover { opacity: 0.9 }
+    #audit-panel .ap-replay:disabled { opacity: 0.5; cursor: progress }
+
+    /* Replay result banner — sits above the tabs after a replay completes,
+       summarizing whether the run reproduced bit-exact (deterministic) or
+       diverged. Tabs and body remain accessible underneath. */
+    #audit-panel .ap-replay-banner {
+      display: none; padding: 10px 14px; border-bottom: 1px solid var(--border);
+      font-size: 12px; line-height: 1.5; position: relative;
+    }
+    #audit-panel .ap-replay-banner.shown { display: block }
+    #audit-panel .ap-replay-banner.deterministic { background: #f0faf3; border-left: 4px solid #2da14b }
+    #audit-panel .ap-replay-banner.divergent     { background: #fdf2e6; border-left: 4px solid #e07a00 }
+    #audit-panel .ap-replay-banner.error         { background: #fdf0f0; border-left: 4px solid #d93030 }
+    #audit-panel .ap-replay-banner .rb-title {
+      font-weight: 600; margin-bottom: 4px;
+    }
+    #audit-panel .ap-replay-banner.deterministic .rb-title { color: #2da14b }
+    #audit-panel .ap-replay-banner.divergent     .rb-title { color: #c66800 }
+    #audit-panel .ap-replay-banner.error         .rb-title { color: #c02020 }
+    #audit-panel .ap-replay-banner .rb-detail { color: var(--text) }
+    #audit-panel .ap-replay-banner .rb-meta { color: var(--muted); font-size: 11px; margin-top: 4px }
+    #audit-panel .ap-replay-banner .rb-close {
+      position: absolute; top: 6px; right: 10px; cursor: pointer;
+      background: none; border: none; font-size: 14px; line-height: 1; color: var(--muted);
+    }
+    #audit-panel .ap-replay-banner .rb-close:hover { color: var(--text) }
     #audit-panel .ap-tabs {
       display: flex; gap: 4px; padding: 0 12px; border-bottom: 1px solid var(--border); background: var(--bg);
     }
@@ -362,8 +394,10 @@
   <aside id="audit-panel" role="dialog" aria-label="Decision audit">
     <div class="ap-header">
       <div class="ap-title">How this answer was built</div>
+      <button class="ap-replay" aria-label="Replay this turn deterministically" title="Re-run this turn deterministically from the recorded trace">↻ Replay</button>
       <button class="ap-close" aria-label="Close audit panel">×</button>
     </div>
+    <div class="ap-replay-banner" role="status"></div>
     <div class="ap-tabs">
       <div class="ap-tab active" data-tab="sources">Sources</div>
       <div class="ap-tab" data-tab="steps">Steps</div>
@@ -413,7 +447,9 @@
     const $auditTitle = $audit.querySelector('.ap-title')
     const $auditBody  = $audit.querySelector('.ap-body')
     const $auditClose = $audit.querySelector('.ap-close')
-    const $auditTabs  = $audit.querySelectorAll('.ap-tab')
+    const $auditTabs   = $audit.querySelectorAll('.ap-tab')
+    const $auditReplay = $audit.querySelector('.ap-replay')
+    const $auditBanner = $audit.querySelector('.ap-replay-banner')
 
     // ─── Utilities ─────────────────────────────────────────────────────
     function esc(s) {
@@ -1039,6 +1075,9 @@
         closeAudit()
         return
       }
+      // Switching to a different run's audit invalidates any prior replay
+      // result — it pertains to the previous run, not this one.
+      if (auditAnchorRunId !== runId) hideReplayBanner()
       auditAnchorRunId = runId
       $audit.classList.add('open')
       updateAuditTitle()
@@ -1049,7 +1088,80 @@
     function closeAudit() {
       auditAnchorRunId = null
       $audit.classList.remove('open')
+      hideReplayBanner()
     }
+
+    // ─── Replay (Phase 4b) ────────────────────────────────────────────
+    function hideReplayBanner() {
+      $auditBanner.className = 'ap-replay-banner'
+      $auditBanner.innerHTML = ''
+    }
+
+    function showReplayBanner(state, html) {
+      $auditBanner.className = `ap-replay-banner shown ${state}`
+      $auditBanner.innerHTML = html + `<button class="rb-close" aria-label="Dismiss">×</button>`
+    }
+
+    function fmtCachePct(read, total) {
+      if (!total) return '0%'
+      return `${Math.round(100 * read / total)}%`
+    }
+
+    function renderReplayResult(result) {
+      if (result.status === 'deterministic') {
+        const cs = result.originalCacheStats || { readTokens: 0, creationTokens: 0, totalInputTokens: 0 }
+        const sav = fmtCachePct(cs.readTokens, cs.totalInputTokens)
+        const matches = result.matchesOriginal
+        const title = matches
+          ? '✓ Bit-exact replay'
+          : '✓ Replay completed (output differs)'
+        const detail = matches
+          ? `Re-running this turn from the recorded trace produced the same answer character-for-character. All ${cs.totalInputTokens} input tokens served from the local cache — zero new model calls.`
+          : `Replay finished without divergence, but its final text differs from the original. This is rare and suggests downstream non-determinism outside IOPort (e.g. random sampling in formatting code).`
+        const meta = cs.totalInputTokens
+          ? `Original turn: ${formatTokenCount(cs.totalInputTokens)} input tokens · ${sav} were cache-read · ${formatTokenCount(cs.creationTokens)} written to cache.`
+          : `Original turn: cache stats not reported by provider.`
+        showReplayBanner('deterministic',
+          `<div class="rb-title">${esc(title)}</div>` +
+          `<div class="rb-detail">${esc(detail)}</div>` +
+          `<div class="rb-meta">${esc(meta)}</div>`)
+      } else if (result.status === 'divergent') {
+        showReplayBanner('divergent',
+          `<div class="rb-title">⚠ Replay diverged on ${esc(result.kind)}</div>` +
+          `<div class="rb-detail">${esc(result.summary || 'No detail.')}</div>` +
+          (result.actualHashPrefix
+            ? `<div class="rb-meta">Unexpected ${esc(result.kind)} call: hash ${esc(result.actualHashPrefix)}… (cache has ${result.availableCount} alternatives)</div>`
+            : ''))
+      } else {
+        showReplayBanner('error',
+          `<div class="rb-title">Replay failed</div>` +
+          `<div class="rb-detail">${esc(result.message || 'unknown error')}</div>`)
+      }
+    }
+
+    async function runReplay() {
+      if (!auditAnchorRunId) return
+      $auditReplay.disabled = true
+      const originalLabel = $auditReplay.textContent
+      $auditReplay.textContent = 'Replaying…'
+      hideReplayBanner()
+      try {
+        const resp = await fetch(`/run/${encodeURIComponent(auditAnchorRunId)}/replay`, { method: 'POST' })
+        const data = await resp.json()
+        renderReplayResult(data)
+      } catch (err) {
+        renderReplayResult({ status: 'error', message: (err && err.message) || String(err) })
+      } finally {
+        $auditReplay.disabled = false
+        $auditReplay.textContent = originalLabel
+      }
+    }
+
+    $auditReplay.addEventListener('click', runReplay)
+    $auditBanner.addEventListener('click', (ev) => {
+      const t = ev.target
+      if (t instanceof HTMLElement && t.classList.contains('rb-close')) hideReplayBanner()
+    })
 
     function setAuditTab(name) {
       auditActiveTab = name

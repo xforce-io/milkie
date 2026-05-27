@@ -6,6 +6,8 @@ import { v4 as uuidv4 } from 'uuid'
 import { Milkie } from '../../src/runtime/Milkie.js'
 import { MemoryStore } from '../../src/store/MemoryStore.js'
 import { JsonlEventStore } from '../../src/trace/JsonlEventStore.js'
+import { ReplayError } from '../../src/trace/ReplayError.js'
+import { ReplayDivergenceError } from '../../src/trace/ReplayDivergenceError.js'
 import type { IModelGateway } from '../../src/types/model.js'
 import { BroadcastingEventStore } from './trace/broadcast-event-store.js'
 import { scanConversations, readEventsForContext } from './trace/conversation-scanner.js'
@@ -111,6 +113,66 @@ async function handleSseStream(
   })
 }
 
+async function handleReplay(
+  res: ServerResponse, s: ServerState, runId: string,
+): Promise<void> {
+  // Pull the original run's events first — both to confirm the run exists
+  // (Milkie.replay would throw ReplayError anyway, but we want a richer
+  // response shape with the original answer for client-side comparison)
+  // and to compute the run's cumulative cache stats from llm.responded
+  // events. Replay itself reads from cache so produces no new usage data;
+  // the interesting comparison is "what did the original cost vs what
+  // would a replay cost (= zero, all cached)".
+  const events = await s.eventStore.readByRunId(runId)
+  if (events.length === 0) {
+    sendJson(res, 404, { status: 'error', message: 'run not found' })
+    return
+  }
+  const completedEvt = events.find(e => e.type === 'agent.run.completed')
+  const originalOutput = (completedEvt?.payload as { lastTextOutput?: string } | undefined)
+    ?.lastTextOutput ?? ''
+
+  // Sum cache stats across the original run's LLM responses.
+  let origRead = 0
+  let origCreated = 0
+  let origTotal = 0
+  for (const e of events) {
+    if (e.type !== 'llm.responded') continue
+    const cs = (e.payload as { cacheStats?: { readTokens: number; creationTokens: number; totalInputTokens: number } }).cacheStats
+    if (!cs) continue
+    origRead    += cs.readTokens
+    origCreated += cs.creationTokens
+    origTotal   += cs.totalInputTokens
+  }
+
+  try {
+    const result = await s.milkie.replay(runId)
+    sendJson(res, 200, {
+      status:          'deterministic',
+      replayedOutput:  result.output,
+      originalOutput,
+      matchesOriginal: result.output === originalOutput,
+      originalCacheStats: { readTokens: origRead, creationTokens: origCreated, totalInputTokens: origTotal },
+    })
+  } catch (err) {
+    if (err instanceof ReplayDivergenceError) {
+      sendJson(res, 200, {
+        status:           'divergent',
+        kind:             err.kind,
+        summary:          err.summary,
+        actualHashPrefix: err.actualHash ? err.actualHash.slice(0, 12) : '',
+        availableCount:   err.availableHashes.length,
+        originalOutput,
+        originalCacheStats: { readTokens: origRead, creationTokens: origCreated, totalInputTokens: origTotal },
+      })
+    } else if (err instanceof ReplayError) {
+      sendJson(res, 400, { status: 'error', message: err.message })
+    } else {
+      sendJson(res, 500, { status: 'error', message: (err as Error).message })
+    }
+  }
+}
+
 async function handleSourceFetch(
   res: ServerResponse, s: ServerState, relPath: string, linesQuery: string | null,
 ): Promise<void> {
@@ -198,6 +260,11 @@ export async function startServer(config: ServerConfig): Promise<Server> {
       const sseMatch = route.match(/^\/conversation\/([^/]+)\/stream$/)
       if (req.method === 'GET' && sseMatch) {
         return handleSseStream(req, res, state, decodeURIComponent(sseMatch[1]!))
+      }
+
+      const replayMatch = route.match(/^\/run\/([^/]+)\/replay$/)
+      if (req.method === 'POST' && replayMatch) {
+        return handleReplay(res, state, decodeURIComponent(replayMatch[1]!))
       }
 
       const sourceMatch = route.match(/^\/source\/(.+)$/)
