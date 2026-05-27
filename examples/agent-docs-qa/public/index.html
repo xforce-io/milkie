@@ -226,13 +226,18 @@
       color: var(--muted); margin-bottom: 4px;
     }
     .ap-region-row {
-      display: flex; gap: 8px; padding: 2px 0; font-size: 11px;
+      display: block; padding: 4px 0; font-size: 11px;
+      border-top: 1px solid rgba(0,0,0,0.04);
     }
+    .ap-region-row:first-child { border-top: none; padding-top: 0 }
     .ap-region-row .rr-id {
+      display: block;
       font-family: ui-monospace, SFMono-Regular, monospace;
-      color: var(--text); flex: 0 0 auto;
+      color: var(--text); word-break: break-all;
     }
-    .ap-region-row .rr-meta { color: var(--muted); flex: 1; min-width: 0; word-break: break-all }
+    .ap-region-row .rr-meta {
+      display: block; color: var(--muted); margin-top: 1px;
+    }
     .ap-region-empty { color: var(--muted); font-style: italic; font-size: 11px; padding: 4px 0 }
 
     /* Provenance tab — color-coded answer segments by source backing.
