@@ -133,6 +133,33 @@ export class AgentRuntime {
         event:     event.name,
       })
       this.recorder.endSpan(span, 'ok')
+
+      // Also write to the event log so trace HTML / web UI / inspect can see
+      // these. Recorder-only (span events) doesn't reach the live event stream.
+      // Bypass IOPort for the same reason region.added does: these events are
+      // informational and not consumed by replay's nondet cache, so we mustn't
+      // burn an ioPort.uuid()/now() that replay's skip-write branch wouldn't
+      // match. Date.now() / uuidv4() direct keep record/replay paths symmetric.
+      if (this.eventStore) {
+        void this.eventStore.append({
+          id:        uuidv4(),
+          runId:     this.agentRunId,
+          type:      'fsm.transition',
+          actor:     this.config.agentId,
+          timestamp: Date.now(),
+          payload: {
+            from,
+            to,
+            trigger: {
+              // emitEvent / framework emit sites stamp domain explicitly; the
+              // only path that leaves it unset is direct construction in tests.
+              domain:  event.domain ?? 'business',
+              name:    event.name,
+              ...(event.payload !== undefined ? { payload: event.payload } : {}),
+            },
+          },
+        })
+      }
     })
   }
 
@@ -502,7 +529,7 @@ export class AgentRuntime {
     Object.assign(this.memory, restoredMemory)
     this.fsm.restore(checkpoint.fsm)
     if (checkpoint.fsm.currentState === 'paused' && checkpoint.fsm.resumeState) {
-      this.fsm.transitionTo(checkpoint.fsm.resumeState, { name: 'RESUME' })
+      this.fsm.transitionTo(checkpoint.fsm.resumeState, { name: 'RESUME', domain: 'lifecycle' })
     }
     // Interrupt checkpoints did NOT crystallize (interrupt path saves mid-turn),
     // so scratchpad + current-turn survive in the snapshot. Crystallize now so
@@ -841,7 +868,8 @@ export class AgentRuntime {
 
         const retryFromState = this.fsm.currentState.name
         this.fsm.transitionTo('error_handling', {
-          name: 'error',
+          name:   'error',
+          domain: 'runtime-control',
           payload: {
             attempt:  attempt + 1,
             toolName: call.name,
@@ -850,7 +878,8 @@ export class AgentRuntime {
         })
         await new Promise<void>(r => setTimeout(r, 500))
         this.fsm.transitionTo(retryFromState, {
-          name: 'RETRY',
+          name:   'RETRY',
+          domain: 'runtime-control',
           payload: {
             attempt:  attempt + 1,
             toolName: call.name,

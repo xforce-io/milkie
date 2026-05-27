@@ -1,14 +1,19 @@
 # milkie Roadmap
 
 Phased plan for shipping the architecture described in `ARCHITECTURE.md`.
-This file is the **forward-looking** view; the current snapshot of "what works
-today" lives in `ARCHITECTURE.md` → `## Implementation Status`, and the
-authoritative scenario inventory is in `docs/stories/INDEX.md`.
+This file is the single source of truth for **both** "what works today"
+and "what comes next" — the architecture doc deliberately stays
+status-free so it reads as a timeless target. Authoritative scenario
+inventory is in `docs/stories/INDEX.md`.
 
 The roadmap moves only when concrete code closes a gap — order of operations
 matters more than calendar dates, so phases are listed without dates.
 
-Last updated: 2026-05-24
+When code lands that closes a gap, update this file (Completed sections,
+Migration intentions, deferred items) before claiming the gap is closed
+elsewhere.
+
+Last updated: 2026-05-28
 
 ---
 
@@ -58,16 +63,16 @@ Last updated: 2026-05-24
 
 ## Completed (Phase 1–4 + 4.5)
 
-Already in code; see `ARCHITECTURE.md` → `Implementation Status` for
-file pointers.
-
 - **Phase 1 — FSM Core & working context.** Statechart-based runtime,
   multi-state FSMs, action / llm state types, ctx.emit transitions,
   multi-turn history, working memory, skill epoch loading.
+  (`src/runtime/`, `src/fsm/`, `src/context/`)
 - **Phase 2 — Trajectory observability + state stores.** Span-based
   TrajectoryStore (`llm.call` / `tool.call` / `fsm.transition` /
   `agent.spawn` / `agent.run`). MemoryStore / SQLiteStore / RedisStore
-  for checkpoint / interrupt / resume.
+  for checkpoint / interrupt / resume — all three implement `IStateStore`
+  (`src/types/store.ts`); SQLite and Redis require `init()`, MemoryStore
+  is constructor-ready. (`src/trajectory/`, `src/store/`)
 - **Phase 3 — Agent Trace event log + structural replay.** Append-only
   event log via `IEventStore` (Memory + JSONL implementations).
   `RecordingIOPort` decorator pattern records paired `requested` /
@@ -76,8 +81,21 @@ file pointers.
   response queues keyed by canonical request hash; `ReplayingIOPort`
   serves cached responses; `Milkie.replay(runId)` produces a structural
   re-run with strict `ReplayDivergenceError` on cache miss. Sub-agent
-  as named tool, parent interrupt → supervisor-tree propagation, and
-  interrupt-and-resume across stateStores are all working.
+  as named tool, parent interrupt → supervisor-tree propagation
+  (`src/runtime/AgentRuntime.ts:141-186`, `ChildAgentRecord` in
+  `src/types/store.ts:45-51`), interrupt-and-resume across stateStores
+  all working. IOPort lives at `src/runtime/IOPort.ts`; record/replay
+  decorators at `src/trace/RecordingIOPort.ts` /
+  `src/trace/ReplayingIOPort.ts`; cache at `src/trace/CacheIndex.ts`;
+  replay entry at `src/runtime/Milkie.ts:replay`. Yield/interrupt:
+  `paused` reserved FSM state + global `interrupt` event handler
+  (`src/fsm/FSMEngine.ts:11,61-62`, `src/runtime/Milkie.ts:297-300`,
+  `src/runtime/AgentRuntime.ts:238-242`).
+  **Substrate additions on top of Phase 3:**
+  - `fsm.transition` event with explicit `FsmEventDomain` taxonomy
+    (lifecycle / signal / runtime-control / business) — #21,
+    commit 7857423. Closes one node-class needed by future
+    diagnosable causedBy chains (#30 onward).
 - **Phase 4 — Non-determinism log + byte-identical replay.** New event
   kinds `clock.read` / `uuid.generated`. `RecordingIOPort` records every
   agent-facing `port.now()` / `port.uuid()` call via an internal pending
@@ -373,6 +391,55 @@ These don't block any phase but pay back continuously.
   end-to-end flow. Follow-ups deferred: CLI surface spec update for the
   three new verbs; richer in-flight badge styling; an s-007-shape
   integration test (3 sub-agent fan-out).
+
+---
+
+## Migration intentions (not commitments)
+
+Architectural transitions implied by the target architecture, expected to
+move when a concrete consumer or capability demands them. None are scheduled.
+
+- **Trajectory → Event log.** `TrajectoryStore` is the predecessor of the
+  event-sourced Agent Trace; Phase 4 has landed and the event log now
+  covers LLM / tool / lifecycle / clock / uuid / region / FSM transition.
+  Decision: project Trajectory from the event log, or retire
+  TrajectoryStore outright. Don't duplicate sources of truth long-term.
+  (Listed in Cross-cutting work above as the operational decision; this
+  entry records the architectural intent.)
+- **In-Agent `ContextRegions` → External Context Layer.**
+  `src/context/ContextRegions.ts` is a region-based assembly substrate
+  inside Agent Runtime — **not** a local shim for the external Context
+  Layer. When the external interface materializes (likely driven by a
+  KWeaver-shaped integration), the read-side responsibilities
+  (knowledge retrieval, memory lookup, capability resolution) move
+  outward; `ContextRegions` stays in-Agent as the assembly substrate for
+  whatever the Context Layer projection delivers.
+- **IOPort → Execution operator.** IOPort currently passes through to
+  the gateway directly. Target: route invocations through an Execution
+  layer operator that itself delegates to Foundation / Model Factory.
+  Waits on Execution layer materialization.
+
+---
+
+## Deferred small items
+
+Substrate gaps too small to phase but worth not losing:
+
+- **`random.consumed` non-determinism record.** Phase 4 ships
+  `clock.read` and `uuid.generated`; `Math.random` has zero call sites
+  in `src/` today, so the third variant is deferred until a real
+  consumer appears.
+- **External non-LLM tool I/O outcomes.** Beyond the already-recorded
+  `tool.responded` event, file I/O / network I/O from operator
+  implementations are served via the existing `tool.responded` cache
+  during replay. No operator-specific policy hook yet — coupled with
+  the "Replay side-effect policy" open question below.
+- **6-capability vocabulary status.** `ARCHITECTURE.md` describes
+  observable / diagnosable / lineage / replay / fork / diff as a
+  6-capability surface. Today: **replay is complete**; **observable** is
+  partial (substrate gaps tracked under #20 — see `fsm.transition`,
+  `skill.loaded`, region content hash etc.); **diagnosable / lineage /
+  fork / diff** are absent or Phase-5/6 work.
 
 ---
 

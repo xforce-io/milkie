@@ -18,6 +18,7 @@ export type EventKind =
   | 'region.added'
   | 'region.removed'
   | 'context.boundary.applied'
+  | 'fsm.transition'
 
 export interface Event<P = unknown> {
   id: string
@@ -133,6 +134,32 @@ export interface ContextBoundaryAppliedPayload {
   }
 }
 
+// ---- FSM payloads (#21) ----
+
+/**
+ * FSM event domain — explicit taxonomy of the previously-conflated FSMEvent.name
+ * namespace. Captured at emit site, not inferred post-hoc.
+ *
+ *   lifecycle       — FSM/Runtime phase markers (DONE, DIRECT, RESUME)
+ *   signal          — global override events that force a transition regardless
+ *                     of current state's `on:` map (interrupt, error global path)
+ *   runtime-control — AgentRuntime-driven control flow (retry, error escalation)
+ *   business        — tool handlers via ctx.emit(); user-defined names that
+ *                     participate in the state machine's `on:` table
+ */
+export type FsmEventDomain = 'lifecycle' | 'signal' | 'runtime-control' | 'business'
+
+export interface FsmTransitionPayload {
+  from: string
+  to:   string
+  trigger: {
+    domain: FsmEventDomain
+    name:   string
+    /** Optional structured payload (omit for lifecycle/signal which carry none). */
+    payload?: unknown
+  }
+}
+
 // ---- Typed event aliases ----
 
 export type LlmRequestedEvent       = Event<LlmRequestedPayload>       & { type: 'llm.requested' }
@@ -146,6 +173,7 @@ export type UuidGeneratedEvent      = Event<UuidGeneratedPayload>      & { type:
 export type RegionAddedEvent        = Event<RegionAddedPayload>        & { type: 'region.added' }
 export type RegionRemovedEvent      = Event<RegionRemovedPayload>      & { type: 'region.removed' }
 export type ContextBoundaryAppliedEvent = Event<ContextBoundaryAppliedPayload> & { type: 'context.boundary.applied' }
+export type FsmTransitionEvent     = Event<FsmTransitionPayload>     & { type: 'fsm.transition' }
 
 export type AnyEvent =
   | LlmRequestedEvent
@@ -159,3 +187,4 @@ export type AnyEvent =
   | RegionAddedEvent
   | RegionRemovedEvent
   | ContextBoundaryAppliedEvent
+  | FsmTransitionEvent
