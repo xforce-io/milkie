@@ -120,9 +120,25 @@ export class AnthropicAdapter implements IModelGateway {
       }
     }
 
+    // Anthropic reports cache_read_input_tokens / cache_creation_input_tokens
+    // alongside input_tokens whenever the request used cache_control markers
+    // (either via milkie's cacheBreakpoint plumbing or set externally). The
+    // raw API types in older @anthropic-ai/sdk versions don't always declare
+    // these fields, so read defensively through an unknown cast.
+    const rawUsage = raw.usage as {
+      input_tokens:                  number
+      output_tokens:                 number
+      cache_read_input_tokens?:      number | null
+      cache_creation_input_tokens?:  number | null
+    }
+    const cacheReadTokens     = rawUsage.cache_read_input_tokens     ?? undefined
+    const cacheCreationTokens = rawUsage.cache_creation_input_tokens ?? undefined
+
     const usage: ModelUsage = {
-      inputTokens:  raw.usage.input_tokens,
-      outputTokens: raw.usage.output_tokens,
+      inputTokens:  rawUsage.input_tokens,
+      outputTokens: rawUsage.output_tokens,
+      ...(cacheReadTokens     !== undefined ? { cacheReadTokens }     : {}),
+      ...(cacheCreationTokens !== undefined ? { cacheCreationTokens } : {}),
     }
 
     return { content, toolCalls, usage, finishReason: raw.stop_reason ?? undefined, raw }
