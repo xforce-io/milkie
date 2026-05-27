@@ -243,6 +243,18 @@
     .ap-region-row .rr-meta {
       display: block; color: var(--muted); margin-top: 1px;
     }
+    /* A region's *content* doesn't live on the region.added event (which
+       only records metadata). For a handful of well-known regions whose
+       content is recoverable elsewhere — the current-turn region's
+       content is the user's input, available from agent.run.started —
+       we surface a preview line so the user can see what's actually in
+       that slot. */
+    .ap-region-row .rr-preview {
+      display: block; margin-top: 4px; padding: 5px 8px;
+      background: var(--cite-bg); border-left: 2px solid var(--accent);
+      border-radius: 2px; font-size: 11px; color: var(--text);
+      white-space: pre-wrap; word-break: break-word;
+    }
     .ap-region-empty { color: var(--muted); font-style: italic; font-size: 11px; padding: 4px 0 }
 
     /* Provenance tab — color-coded answer segments by source backing.
@@ -625,19 +637,27 @@
         if (group.length === 0) continue
         html += `<div class="ap-region-group">
           <div class="rg-title">${esc(stability)} · ${group.length}</div>
-          ${group.map(r => `
-            <div class="ap-region-row">
-              <span class="rr-id">${esc(r.id)}</span>
-              <span class="rr-meta">${esc(r.target)} · ${esc(r.section)} · ${esc(r.reason)}</span>
-            </div>
-          `).join('')}
+          ${group.map(r => {
+            const preview = r.preview ? `<span class="rr-preview">${esc(r.preview)}</span>` : ''
+            return `
+              <div class="ap-region-row">
+                <span class="rr-id">${esc(r.id)}</span>
+                <span class="rr-meta">${esc(r.target)} · ${esc(r.section)} · ${esc(r.reason)}</span>
+                ${preview}
+              </div>
+            `
+          }).join('')}
         </div>`
       }
       return html
     }
 
     function renderStepsTab(runId) {
-      const events = eventsByRunId.get(runId) || []
+      const events    = eventsByRunId.get(runId) || []
+      // The current-turn region's content IS the user's input for this
+      // run. Cache it once so each snapshot can attach it as a preview
+      // without re-scanning events per LLM call.
+      const userInput = userInputForRun(runId)
       // Pair requests with their responses via requestHash — the
       // content-addressed cache key both sides carry. Same key both for
       // tool pairing and for fetching LLM cache stats off the response
@@ -667,7 +687,15 @@
           const messages = e.payload && e.payload.request && countMessages(e.payload.request)
           const resp     = e.payload && e.payload.requestHash && llmResponses.get(e.payload.requestHash)
           const cache    = resp && resp.payload && resp.payload.cacheStats
-          const snapshot = Array.from(activeRegions.values())
+          // Decorate the snapshot with content previews for regions we
+          // know how to surface (just current-turn for now). Region.added
+          // events don't carry content, so this is a per-id lookup, not
+          // a general mechanism.
+          const snapshot = Array.from(activeRegions.values()).map(r =>
+            r.id === 'current-turn' && userInput
+              ? { ...r, preview: userInput }
+              : r
+          )
           cards.push({
             kind:    'llm',
             label:   'LLM call',
