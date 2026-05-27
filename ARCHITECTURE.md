@@ -251,6 +251,116 @@ shapes are a design-doc concern.
 
 ---
 
+## Concept Model
+
+milkie's vocabulary borrows words (event, trace, span, context, region) that
+mean subtly different things across observability tools and agent frameworks.
+This section gives each load-bearing term a canonical definition before the
+rest of the document uses it. Each definition includes a *Not:* line naming
+the concepts it is most often confused with.
+
+### Event
+
+An immutable, time-stamped record of one thing that happened inside a run —
+the agent started, the LLM was called, a region entered context. Every Event
+has a `type` (from a closed `EventKind` union), a `runId`, a `timestamp`, and
+a typed `payload`. Events are append-only; nothing edits one after it is
+written.
+
+*Example:* one write of `llm.requested` to `IEventStore` is one Event.
+*Not:* a span. Spans are intervals with start/end and parent/child; Events
+are points.
+
+### Trace
+
+The ordered set of all Events belonging to one run, stored in an
+`IEventStore` (today: one JSONL file per run under `.milkie/runs/`). The
+Trace is the **substrate** of the Agent Trace subsystem — every higher-order
+capability (replay, fork, lineage, cache lookup) derives from it, and
+nothing else is canonical.
+
+*Example:* `.milkie/runs/<runId>.jsonl` is one Trace.
+*Not:* a UI timeline. A "trace timeline" panel is a *projection* of the
+Trace, free to filter or group Events; the Trace itself is the raw log.
+
+### Trajectory
+
+A tree of `Span`s (with attached events on each span) collected during a run
+by `TrajectoryStore` (`src/trajectory/`). Spans capture parent/child
+structure — `llm.call` inside `tool.call` inside `fsm.step`. Trajectory is
+the **older, span-shaped observability layer**; it coexists with Trace as a
+peer view and is on track to become a projection over the event log (see
+Implementation Status §Migration intentions).
+
+*Example:* a `Span` for one `llm.call` with its child `tool.call`s nested
+under it.
+*Not:* the Trace. Trace is flat and replay-canonical; Trajectory is
+hierarchical and derivable. Code calling `recorder.recordEvent(span, ...)`
+writes to Trajectory but **not** to Trace — for an event to be
+replay-visible or appear in event-log–backed UI, it must reach the event
+log too.
+
+### Region
+
+An addressable chunk of the agent's working context — a system-prompt
+fragment, a tool result, a retrieved document, a working-memory note. Every
+Region has an identity, a kind, and content. Regions are the unit of "what
+is currently in the context window."
+
+*Example:* `region.added` with payload `{kind: 'tool_result', toolName:
+'read_file', ...}` records one Region entering context.
+*Not:* an Event. The Region itself is state owned by the Context Layer; the
+Event is the *record* that the state changed.
+
+### Context boundary
+
+The rule that decides which Regions get assembled into the next LLM prompt,
+and in what order. Boundaries are how milkie projects a possibly-large
+working context down to a model-sized request.
+
+*Example:* `context.boundary.applied` records one boundary decision, with a
+payload describing which Regions were included, dropped, or compressed.
+*Not:* the request itself. The boundary is the *policy* that produces the
+request; the request lives in the subsequent `llm.requested` payload.
+
+### IOPort
+
+The single chokepoint through which the runtime crosses into nondeterminism
+— clock, uuid, LLM calls, tool calls. Every call through IOPort is recorded
+as an Event (`clock.read`, `uuid.generated`, `llm.requested/responded`,
+`tool.requested/responded`); every replay reads from those Events instead of
+re-calling out. This is what makes replay deterministic.
+
+*Example:* `runtime.io.clock.now()` writes one `clock.read` Event in record
+mode, reads it back in replay mode.
+*Not:* the Events it produces. IOPort is the boundary; Events are its
+recorded outputs. Code that bypasses IOPort (calling `Date.now()` directly)
+creates nondet that replay cannot reproduce.
+
+### SDK facade vs CLI facade
+
+Two export surfaces over the same library substrate, distinguished by
+audience: **SDK facade** for in-process consumers (apps, services, tests);
+**CLI facade** for agent consumers (sub-agents that read traces,
+meta-agents that propose variants). Neither carries logic of its own.
+
+*Not:* subsystems. See the Overview diagram — facades are the top boxes;
+subsystems (Agent Runtime, Agent Trace, Evolution) sit below them.
+
+---
+
+### Pairs that are often confused
+
+| Pair | Key distinction |
+|---|---|
+| **Event** vs **Trace** | Event is one record. Trace is the ordered set of all Events in a run. |
+| **Trace** vs **Trajectory** | Trace is flat, append-only, replay-canonical. Trajectory is a hierarchical span tree, derivable, currently a peer view (will be unified). |
+| **IOPort** vs **Event** | IOPort is the nondet boundary. Events are its recorded outputs. |
+| **Region** vs **`region.added` Event** | The Region is context state. The Event is the record that the state changed. |
+| **Context boundary** vs **LLM request** | The boundary is the policy that selects/orders Regions. The request is its serialized output. |
+
+---
+
 ## User-facing surfaces
 
 milkie presents three abstraction layers to users, plus an optional UI
