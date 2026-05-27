@@ -609,11 +609,19 @@
     // the bottom).
     const STABILITY_ORDER = ['immutable', 'session-stable', 'turn-stable', 'volatile']
 
-    function classifyCacheHit(hitRate) {
-      if (hitRate == null) return null
-      if (hitRate >= 0.7) return { tier: 'hot',  pct: Math.round(hitRate * 100) }
-      if (hitRate >= 0.3) return { tier: 'warm', pct: Math.round(hitRate * 100) }
-      return { tier: 'cold', pct: Math.round(hitRate * 100) }
+    // Cache tiering accounts for BOTH read and creation. A call that hit
+    // 70%+ of its tokens from cache is "hot". A call that read nothing
+    // but wrote new cache entries is "warm" — the substrate is engaged,
+    // a future call sharing this prefix will benefit. A call that did
+    // neither is "cold" (cache subsystem ran but nothing matched and
+    // nothing new was written, e.g. provider didn't report stats).
+    function classifyCacheTier(cache) {
+      if (!cache) return null
+      const hit = cache.hitRate || 0
+      const created = cache.creationTokens || 0
+      if (hit >= 0.7) return 'hot'
+      if (hit >= 0.3 || created > 0) return 'warm'
+      return 'cold'
     }
 
     function formatTokenCount(n) {
@@ -703,7 +711,7 @@
               ? `Sent <code>${messages}</code> message${messages === 1 ? '' : 's'} to the model`
               : 'Sent prompt to the model',
             meta:    null,
-            cache:   cache ? { ...cache, hit: classifyCacheHit(cache.hitRate) } : null,
+            cache:   cache ? { ...cache, tier: classifyCacheTier(cache) } : null,
             regions: snapshot,
           })
         } else if (e.type === 'tool.requested') {
@@ -726,9 +734,26 @@
         return `<div class="ap-empty">No recorded steps for this turn yet.</div>`
       }
       return cards.map((c, i) => {
-        const cacheBadge = c.cache && c.cache.hit
-          ? `<span class="ap-step-cache ${c.cache.hit.tier === 'cold' ? 'cold' : c.cache.hit.tier === 'warm' ? 'warm' : ''}">${c.cache.hit.pct}% cached · ${formatTokenCount(c.cache.readTokens)}/${formatTokenCount(c.cache.totalInputTokens)} tok</span>`
-          : ''
+        // Badge surfaces both read AND creation so a "0% hit but cache
+        // was just written" call (substrate engaged, future calls will
+        // benefit) is visibly different from a "no cache at all" call.
+        let cacheBadge = ''
+        if (c.cache) {
+          const read    = c.cache.readTokens     || 0
+          const created = c.cache.creationTokens || 0
+          const total   = c.cache.totalInputTokens || 0
+          const hitPct  = Math.round((c.cache.hitRate || 0) * 100)
+          const tierClass = c.cache.tier === 'cold' ? 'cold' : c.cache.tier === 'warm' ? 'warm' : ''
+          let text
+          if (read > 0) {
+            text = `${hitPct}% read · ${formatTokenCount(read)}/${formatTokenCount(total)} tok`
+          } else if (created > 0) {
+            text = `wrote ${formatTokenCount(created)} cache · ${formatTokenCount(total)} tok`
+          } else {
+            text = `no cache · ${formatTokenCount(total)} tok`
+          }
+          cacheBadge = `<span class="ap-step-cache ${tierClass}" title="read ${read} · wrote ${created} · total ${total}">${text}</span>`
+        }
         const expander = c.kind === 'llm'
           ? `<div class="ap-step-expand" data-step-idx="${i}">${c.regions.length} region${c.regions.length === 1 ? '' : 's'} in context</div>
              <div class="ap-step-expanded">${renderRegionExpander(c.regions)}</div>`
