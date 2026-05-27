@@ -289,6 +289,65 @@
     }
     .ap-region-empty { color: var(--muted); font-style: italic; font-size: 11px; padding: 4px 0 }
 
+    /* Step details — native <details>/<summary> for the second per-card
+       expander (prompt+response for LLM, full input+output for tool).
+       Using <details> gets us free click/keyboard toggle without another
+       JS handler; we restyle the disclosure widget for visual parity
+       with the existing "N regions in context" expander above. */
+    .ap-step details.ap-step-details {
+      margin-top: 6px;
+    }
+    .ap-step details.ap-step-details > summary {
+      cursor: pointer; user-select: none; list-style: none;
+      font-size: 11px; color: var(--accent);
+    }
+    .ap-step details.ap-step-details > summary::-webkit-details-marker { display: none }
+    .ap-step details.ap-step-details > summary::before { content: '▸ ' }
+    .ap-step details.ap-step-details[open] > summary::before { content: '▾ ' }
+    .ap-step details.ap-step-details > summary:hover { text-decoration: underline }
+    .ap-step details.ap-step-details .ap-sub {
+      margin-top: 8px;
+    }
+    .ap-step details.ap-step-details .ap-sub-title {
+      font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em;
+      color: var(--muted); margin-bottom: 4px;
+    }
+    .ap-json {
+      display: block; margin: 0; padding: 8px 10px; max-height: 240px; overflow: auto;
+      background: #1c1c1e; color: #f5f5f7; border-radius: 4px;
+      font-family: ui-monospace, SFMono-Regular, monospace; font-size: 11px;
+      line-height: 1.45; white-space: pre-wrap; word-break: break-all;
+    }
+    .ap-json.empty {
+      background: var(--panel); color: var(--muted); font-style: italic; padding: 4px 10px;
+    }
+
+    /* Message mini-cards inside the LLM prompt expander */
+    .ap-msg-card {
+      margin-bottom: 6px; padding: 6px 10px; background: var(--panel);
+      border: 1px solid var(--border); border-radius: 4px; font-size: 11px;
+    }
+    .ap-msg-card .mc-role {
+      display: inline-block; padding: 1px 6px; border-radius: 3px;
+      font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;
+      margin-right: 6px; color: white;
+    }
+    .ap-msg-card.role-system .mc-role    { background: #5b3ec9 }
+    .ap-msg-card.role-user .mc-role      { background: #2563eb }
+    .ap-msg-card.role-assistant .mc-role { background: #2da14b }
+    .ap-msg-card.role-tool .mc-role,
+    .ap-msg-card.role-tool_result .mc-role { background: #b8860b }
+    .ap-msg-card .mc-preview {
+      color: var(--text); white-space: pre-wrap; word-break: break-word;
+      max-height: 5.6em; overflow: hidden; position: relative;
+    }
+    .ap-msg-card.expanded .mc-preview { max-height: none }
+    .ap-msg-card .mc-more {
+      display: block; margin-top: 4px; font-size: 10px; color: var(--accent);
+      cursor: pointer; user-select: none;
+    }
+    .ap-msg-card .mc-more:hover { text-decoration: underline }
+
     /* Provenance tab — color-coded answer segments by source backing.
        Left border ribbon is the dominant visual: green = supported by
        direct quote in source, yellow = paraphrase with citation, orange
@@ -696,6 +755,122 @@
       return html
     }
 
+    // ─── Step detail renderers ────────────────────────────────────────
+    // Render one prompt message as a compact mini-card. Content might be
+    // a plain string OR an array of structured blocks (text / tool_use /
+    // tool_result) when the agent is mid-ReAct. We flatten to a single
+    // preview string for the collapsed view; expand reveals the raw JSON.
+    function renderMsgCard(msg, idx) {
+      const role = String(msg.role || 'unknown')
+      const previewText = flattenMessageContent(msg.content)
+      const rawJson = (() => {
+        try { return JSON.stringify(msg, null, 2) } catch { return String(msg) }
+      })()
+      const needsMore = previewText.length > 180 || rawJson.length > 240
+      return `
+        <div class="ap-msg-card role-${esc(role)}" data-msg-idx="${idx}">
+          <span class="mc-role">${esc(role)}</span>
+          <span class="mc-preview">${esc(previewText.slice(0, 600))}</span>
+          ${needsMore ? `<span class="mc-more">Show raw JSON</span>
+            <pre class="ap-json mc-raw" style="display:none; margin-top:6px">${esc(rawJson)}</pre>` : ''}
+        </div>`
+    }
+
+    function flattenMessageContent(content) {
+      if (content == null) return ''
+      if (typeof content === 'string') return content
+      if (Array.isArray(content)) {
+        return content.map(b => {
+          if (b == null) return ''
+          if (typeof b === 'string') return b
+          if (b.type === 'text')        return b.text || ''
+          if (b.type === 'tool_use')    return `[tool_use ${b.name || '?'} ${truncateJson(b.input ?? {}, 80)}]`
+          if (b.type === 'tool_result') {
+            const r = typeof b.content === 'string' ? b.content : truncateJson(b.content ?? '', 120)
+            return `[tool_result ${b.tool_use_id ? b.tool_use_id.slice(0, 8) + '…' : ''}: ${r}]`
+          }
+          return `[${b.type || 'block'}]`
+        }).join('\n')
+      }
+      return JSON.stringify(content)
+    }
+
+    function jsonBlock(value) {
+      if (value === undefined) return `<pre class="ap-json empty">undefined</pre>`
+      let s
+      try { s = JSON.stringify(value, null, 2) } catch { s = String(value) }
+      if (s === '' || s === '""') return `<pre class="ap-json empty">empty</pre>`
+      return `<pre class="ap-json">${esc(s)}</pre>`
+    }
+
+    function renderLLMDetails(card) {
+      if (!card.prompt && !card.response) {
+        return `<div class="ap-empty">No request / response payload recorded.</div>`
+      }
+      let html = ''
+      if (card.prompt) {
+        const sys = card.prompt.system
+        const msgs = card.prompt.messages || []
+        const tools = card.prompt.tools || []
+        if (sys) {
+          html += `<div class="ap-sub">
+            <div class="ap-sub-title">System (${(typeof sys === 'string' ? sys.length : JSON.stringify(sys).length)} chars)</div>
+            <pre class="ap-json">${esc(typeof sys === 'string' ? sys : JSON.stringify(sys, null, 2))}</pre>
+          </div>`
+        }
+        html += `<div class="ap-sub">
+          <div class="ap-sub-title">Messages (${msgs.length})</div>
+          ${msgs.length === 0
+            ? `<pre class="ap-json empty">none</pre>`
+            : msgs.map((m, i) => renderMsgCard(m, i)).join('')}
+        </div>`
+        if (tools.length > 0) {
+          const names = tools.map(t => t.name || '?').join(', ')
+          html += `<div class="ap-sub">
+            <div class="ap-sub-title">Tools (${tools.length})</div>
+            <pre class="ap-json">${esc(names)}</pre>
+          </div>`
+        }
+      }
+      if (card.response) {
+        const r = card.response
+        const text = (Array.isArray(r.content) ? r.content : [])
+          .filter(b => b && b.type === 'text').map(b => b.text || '').join('\n').trim()
+        const toolUses = (r.toolCalls || []).map(tc => `${tc.name}(${truncateJson(tc.input ?? {}, 120)})`).join('\n')
+        html += `<div class="ap-sub">
+          <div class="ap-sub-title">Response · text</div>
+          ${text ? `<pre class="ap-json">${esc(text)}</pre>` : `<pre class="ap-json empty">no text content</pre>`}
+        </div>`
+        if (toolUses) {
+          html += `<div class="ap-sub">
+            <div class="ap-sub-title">Response · tool calls</div>
+            <pre class="ap-json">${esc(toolUses)}</pre>
+          </div>`
+        }
+      }
+      return html
+    }
+
+    function renderToolDetails(card) {
+      let html = ''
+      html += `<div class="ap-sub">
+        <div class="ap-sub-title">Input</div>
+        ${jsonBlock(card.input)}
+      </div>`
+      if (card.error) {
+        html += `<div class="ap-sub">
+          <div class="ap-sub-title">Error</div>
+          ${jsonBlock(card.error)}
+        </div>`
+      } else {
+        html += `<div class="ap-sub">
+          <div class="ap-sub-title">Output</div>
+          ${jsonBlock(card.output)}
+        </div>`
+      }
+      return html
+    }
+
     function renderStepsTab(runId) {
       const events    = eventsByRunId.get(runId) || []
       // The current-turn region's content IS the user's input for this
@@ -740,6 +915,7 @@
               ? { ...r, preview: userInput }
               : r
           )
+          const req = e.payload && e.payload.request
           cards.push({
             kind:    'llm',
             label:   'LLM call',
@@ -749,6 +925,12 @@
             meta:    null,
             cache:   cache ? { ...cache, tier: classifyCacheTier(cache) } : null,
             regions: snapshot,
+            prompt:  req ? {
+              system:   req.system,
+              messages: req.messages || [],
+              tools:    req.tools || [],
+            } : null,
+            response: resp && resp.payload && resp.payload.response ? resp.payload.response : null,
           })
         } else if (e.type === 'tool.requested') {
           const name = (e.payload && e.payload.toolName) || '?'
@@ -759,10 +941,13 @@
             ? `→ ok (${describeToolResult(resp.payload.output)})`
             : '→ pending'
           cards.push({
-            kind: 'tool',
-            label: `Tool · ${name}`,
-            body: inputPreview ? `<code>${esc(inputPreview)}</code>` : '',
-            meta: respMeta,
+            kind:   'tool',
+            label:  `Tool · ${name}`,
+            body:   inputPreview ? `<code>${esc(inputPreview)}</code>` : '',
+            meta:   respMeta,
+            input,
+            output: resp && resp.payload ? resp.payload.output : undefined,
+            error:  resp && resp.payload ? resp.payload.error  : undefined,
           })
         }
       }
@@ -794,6 +979,11 @@
           ? `<div class="ap-step-expand" data-step-idx="${i}">${c.regions.length} region${c.regions.length === 1 ? '' : 's'} in context</div>
              <div class="ap-step-expanded">${renderRegionExpander(c.regions)}</div>`
           : ''
+        const details = c.kind === 'llm'
+          ? `<details class="ap-step-details"><summary>Prompt &amp; response</summary>${renderLLMDetails(c)}</details>`
+          : c.kind === 'tool'
+            ? `<details class="ap-step-details"><summary>Full input &amp; output</summary>${renderToolDetails(c)}</details>`
+            : ''
         return `
           <div class="ap-step kind-${c.kind}" data-step-idx="${i}">
             <div class="ap-step-num">${i + 1}</div>
@@ -804,6 +994,7 @@
             <div class="ap-step-body">${c.body}</div>
             ${c.meta ? `<div class="ap-step-meta">${esc(c.meta)}</div>` : ''}
             ${expander}
+            ${details}
           </div>
         `
       }).join('')
@@ -1179,14 +1370,28 @@
         setAuditTab(t.dataset.tab)
       })
     })
-    // Steps tab: click the "N regions in context" toggle on an LLM step
-    // to expand the context-composition panel for that step.
+    // Steps tab: click delegation for two expanders.
+    //   - "N regions in context" → toggle the per-card region snapshot
+    //   - "Show raw JSON" inside a prompt message mini-card → toggle the
+    //     raw JSON pre under that one message
     $auditBody.addEventListener('click', (ev) => {
       const target = ev.target
       if (!(target instanceof HTMLElement)) return
-      if (!target.classList.contains('ap-step-expand')) return
-      const card = target.closest('.ap-step')
-      if (card) card.classList.toggle('expanded')
+      if (target.classList.contains('ap-step-expand')) {
+        const card = target.closest('.ap-step')
+        if (card) card.classList.toggle('expanded')
+        return
+      }
+      if (target.classList.contains('mc-more')) {
+        const msgCard = target.closest('.ap-msg-card')
+        if (!msgCard) return
+        const rawPre = msgCard.querySelector('.mc-raw')
+        if (!rawPre) return
+        const opening = rawPre.style.display === 'none'
+        rawPre.style.display = opening ? 'block' : 'none'
+        target.textContent = opening ? 'Hide raw JSON' : 'Show raw JSON'
+        return
+      }
     })
     // Click on "View audit ▾" trigger inside any assistant message.
     $log.addEventListener('click', (ev) => {
