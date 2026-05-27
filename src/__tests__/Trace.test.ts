@@ -14,6 +14,7 @@ import type {
   LlmRespondedPayload,
   ToolRequestedPayload,
   ToolRespondedPayload,
+  FsmTransitionPayload,
 } from '../trace/types'
 import type { IModelGateway, ModelRequest, ModelResponse } from '../types/model'
 import type { AgentConfig } from '../types/agent'
@@ -347,5 +348,58 @@ describe('RecordingIOPort — Phase 3 additions', () => {
     expect(startedEvt).toBeDefined()
     expect(kinds[kinds.length - 1]).toBe('agent.run.completed')
     expect((startedEvt!.payload as { agentId: string }).agentId).toBe('a1')
+  })
+})
+
+// ---- fsm.transition (#21) ----
+
+describe('fsm.transition events', () => {
+  const twoStateConfig = (): AgentConfig => ({
+    agentId:      'multi-state',
+    version:      '1.0.0',
+    systemPrompt: 'sys',
+    fsm: {
+      states: [
+        { name: 'react', type: 'llm',    on: { DONE: 'wrap' } },
+        { name: 'wrap',  type: 'action', terminal: true },
+      ],
+    },
+    model: { provider: 'test', model: 'test', adapter: 'test' },
+  })
+
+  it('records one fsm.transition event per FSM transition with from/to/trigger', async () => {
+    const eventStore = new MemoryEventStore()
+    const milkie = new Milkie({
+      stateStore: new MemoryStore(),
+      gateway:    new StubGateway([textResponse('hi')]),
+      eventStore,
+    })
+    milkie.registerAgent(twoStateConfig())
+
+    const result = await milkie.invoke({ agentId: 'multi-state', goal: 'g', input: 'i' })
+    expect(result.status).toBe('completed')
+
+    const events = await eventStore.readByRunId(result.agentRunId)
+    const transitions = events.filter(e => e.type === 'fsm.transition') as Event<FsmTransitionPayload>[]
+    expect(transitions.length).toBe(1)
+
+    const t = transitions[0]!
+    expect(t.runId).toBe(result.agentRunId)
+    expect(t.payload.from).toBe('react')
+    expect(t.payload.to).toBe('wrap')
+    expect(t.payload.trigger.name).toBe('DONE')
+    expect(t.payload.trigger.domain).toBe('lifecycle')
+  })
+
+  it('does not record fsm.transition when no eventStore configured', async () => {
+    // No assertion — just verifies the run still works without an eventStore.
+    const milkie = new Milkie({
+      stateStore: new MemoryStore(),
+      gateway:    new StubGateway([textResponse('hi')]),
+    })
+    milkie.registerAgent(twoStateConfig())
+
+    const result = await milkie.invoke({ agentId: 'multi-state', goal: 'g', input: 'i' })
+    expect(result.status).toBe('completed')
   })
 })

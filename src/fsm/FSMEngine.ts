@@ -1,8 +1,16 @@
 import type { FSMDefinition, FSMState } from '../types/agent.js'
+import type { FsmEventDomain } from '../trace/types.js'
 
 export interface FSMEvent {
   name:     string
   payload?: unknown
+  /**
+   * Event domain — set at emit site so trace consumers can tell apart
+   * framework lifecycle / global signals / runtime control flow / business
+   * (tool-emitted) events. When omitted, treated as 'business' since the
+   * only path that doesn't set it is `ctx.emit()` from tool handlers.
+   */
+  domain?:  FsmEventDomain
 }
 
 export type FSMTransitionHandler = (from: string, to: string, event: FSMEvent) => void
@@ -40,13 +48,16 @@ export class FSMEngine {
     this.onTransition = fn
   }
 
-  // Called from tool handlers via ctx.emit()
+  // Called from tool handlers via ctx.emit() and from AgentRuntime for
+  // interrupt/error signals. Default domain is 'business' — the global
+  // 'interrupt'/'error' branches in processPendingEvent re-tag those to
+  // 'signal' on the transition itself, so this default is safe.
   emitEvent(event: string, payload?: unknown): void {
     if (this.pendingEvent) {
       // First event wins within a single tool execution
       return
     }
-    this.pendingEvent = { name: event, payload }
+    this.pendingEvent = { name: event, payload, domain: 'business' }
   }
 
   // Process the pending event (if any) and transition to the next state.
@@ -57,12 +68,14 @@ export class FSMEngine {
 
     if (!event) return null
 
-    // Global transitions override state-specific ones
+    // Global transitions override state-specific ones. Stamp the domain as
+    // 'signal' for these forced jumps; tool-emitted 'interrupt'/'error' names
+    // arrive without a domain and we re-tag them here at the global handler.
     if (event.name === 'interrupt') {
-      return this.transition('paused', event)
+      return this.transition('paused', { ...event, domain: 'signal' })
     }
     if (event.name === 'error') {
-      return this.transition('error_handling', event)
+      return this.transition('error_handling', { ...event, domain: 'signal' })
     }
 
     const target = this.current.on?.[event.name]
@@ -77,11 +90,11 @@ export class FSMEngine {
   processDone(): FSMState | null {
     const target = this.current.on?.['DONE']
     if (!target) return null
-    return this.transition(target, { name: 'DONE' })
+    return this.transition(target, { name: 'DONE', domain: 'lifecycle' })
   }
 
   transitionTo(stateName: string, event?: FSMEvent): FSMState {
-    return this.transition(stateName, event ?? { name: 'DIRECT' })
+    return this.transition(stateName, event ?? { name: 'DIRECT', domain: 'lifecycle' })
   }
 
   private transition(stateName: string, event: FSMEvent): FSMState {
