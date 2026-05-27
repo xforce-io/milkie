@@ -1137,7 +1137,13 @@
 
       const convResp = await fetch('/conversations')
       const conv = (await convResp.json()).conversations.find(c => c.contextId === ctxId)
-      const isActive = conv && conv.status === 'active'
+      // A conversation's "status" mirrors the latest run's status — 'active'
+      // means an agent is still running this turn (a /chat is in flight),
+      // 'completed/error/interrupted' means the last turn settled. Only
+      // 'active' should lock input: in every other case the user can
+      // (and often wants to) send a follow-up message, which the backend
+      // handles by minting a new run under the same contextId.
+      const isRunInFlight = conv && conv.status === 'active'
 
       const eventsResp = await fetch(`/conversation/${ctxId}/events`)
       if (eventsResp.status === 404) return
@@ -1154,10 +1160,10 @@
 
       openSse(ctxId)
 
-      if (!isActive) {
+      if (isRunInFlight) {
         $input.disabled = true
         $submit.disabled = true
-        $input.placeholder = '此对话已结束。点 "+ new chat" 开始新对话。'
+        $input.placeholder = '此对话当前正在运行 agent，请稍候…'
       }
     }
 
