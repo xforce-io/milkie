@@ -58,6 +58,12 @@
       display: inline-block; margin-right: 10px;
       font-family: ui-monospace, SFMono-Regular, monospace; color: var(--cite-fg);
     }
+    .msg.assistant .audit-trigger {
+      display: inline-block; margin-top: 8px; font-size: 12px; color: var(--accent);
+      cursor: pointer; user-select: none;
+    }
+    .msg.assistant .sources-footer + .audit-trigger { margin-top: 4px }
+    .msg.assistant .audit-trigger:hover { text-decoration: underline }
     .cite {
       display: inline-block; cursor: pointer; user-select: none;
       color: var(--cite-fg); background: var(--cite-bg); border-radius: 4px;
@@ -85,6 +91,78 @@
     }
     #cite-popover .cp-line { color: var(--muted); margin-top: 4px; font-size: 11px }
     #cite-popover .cp-hint { color: var(--muted); margin-top: 8px; font-size: 11px; font-style: italic }
+
+    /* ── Audit panel (Layer 2: per-message decision audit) ──────────── */
+    #audit-panel {
+      position: fixed; top: 49px; right: 0; bottom: 0; width: 380px; z-index: 90;
+      background: var(--panel); border-left: 1px solid var(--border);
+      box-shadow: -8px 0 24px rgba(0,0,0,0.06);
+      display: flex; flex-direction: column;
+      transform: translateX(100%); transition: transform 0.18s ease-out;
+    }
+    #audit-panel.open { transform: translateX(0) }
+    #audit-panel .ap-header {
+      display: flex; align-items: center; gap: 8px;
+      padding: 12px 16px; border-bottom: 1px solid var(--border);
+    }
+    #audit-panel .ap-title { font-size: 13px; font-weight: 600; flex: 1 }
+    #audit-panel .ap-close {
+      cursor: pointer; background: none; border: none; padding: 4px 8px;
+      font-size: 18px; line-height: 1; color: var(--muted);
+    }
+    #audit-panel .ap-close:hover { color: var(--text) }
+    #audit-panel .ap-tabs {
+      display: flex; gap: 4px; padding: 0 12px; border-bottom: 1px solid var(--border); background: var(--bg);
+    }
+    #audit-panel .ap-tab {
+      padding: 8px 12px; font-size: 12px; cursor: pointer; user-select: none;
+      color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px;
+    }
+    #audit-panel .ap-tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600 }
+    #audit-panel .ap-tab.disabled { color: #c0c0c5; cursor: default }
+    #audit-panel .ap-body { flex: 1; overflow-y: auto; padding: 14px 16px }
+    #audit-panel .ap-empty { color: var(--muted); font-style: italic; font-size: 12px; padding: 16px 0 }
+
+    /* Sources tab */
+    .ap-source-file {
+      margin-bottom: 14px; padding: 10px 12px; background: var(--bg); border-radius: 6px;
+    }
+    .ap-source-file .sf-path {
+      font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px;
+      color: var(--cite-fg); word-break: break-all; margin-bottom: 6px;
+    }
+    .ap-source-file .sf-lines {
+      font-size: 11px; color: var(--muted);
+    }
+    .ap-source-file .sf-lines .ln {
+      display: inline-block; padding: 1px 6px; margin-right: 4px;
+      background: var(--cite-bg); color: var(--cite-fg); border-radius: 3px;
+      font-family: ui-monospace, SFMono-Regular, monospace;
+    }
+
+    /* Steps tab */
+    .ap-step {
+      position: relative; padding: 10px 12px 10px 28px; margin-bottom: 10px;
+      background: var(--bg); border-radius: 6px; font-size: 12px; line-height: 1.5;
+    }
+    .ap-step .ap-step-num {
+      position: absolute; left: 8px; top: 10px; width: 16px; height: 16px;
+      border-radius: 50%; background: var(--accent); color: white;
+      font-size: 10px; text-align: center; line-height: 16px; font-weight: 600;
+    }
+    .ap-step .ap-step-kind {
+      font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted);
+      margin-bottom: 3px;
+    }
+    .ap-step .ap-step-body { color: var(--text) }
+    .ap-step .ap-step-body code {
+      font-family: ui-monospace, SFMono-Regular, monospace; font-size: 11px;
+      background: var(--panel); padding: 1px 5px; border-radius: 3px;
+      border: 1px solid var(--border);
+    }
+    .ap-step .ap-step-meta { color: var(--muted); font-size: 11px; margin-top: 4px }
+    .ap-step.kind-llm .ap-step-num   { background: var(--accent) }
+    .ap-step.kind-tool .ap-step-num  { background: #2563eb }
 
     /* ── Dev mode (Layer 3: substrate inspector) ────────────────────── */
     body.dev-mode main { justify-content: stretch }
@@ -144,6 +222,18 @@
     </section>
   </main>
   <div id="cite-popover" role="dialog" aria-label="Citation source"></div>
+  <aside id="audit-panel" role="dialog" aria-label="Decision audit">
+    <div class="ap-header">
+      <div class="ap-title">How this answer was built</div>
+      <button class="ap-close" aria-label="Close audit panel">×</button>
+    </div>
+    <div class="ap-tabs">
+      <div class="ap-tab active" data-tab="sources">Sources</div>
+      <div class="ap-tab" data-tab="steps">Steps</div>
+      <div class="ap-tab disabled" title="Coming in a future update">Provenance</div>
+    </div>
+    <div class="ap-body"></div>
+  </aside>
 
   <script>
   (function () {
@@ -153,6 +243,13 @@
     const isDev             = urlParams.get('dev') === '1'
     let eventSource         = null
     let seenEventIds        = new Set()
+    // Full event objects bucketed by runId, so the audit panel can
+    // reconstruct any turn's decision flow without re-fetching.
+    let eventsByRunId       = new Map()
+    // Anchor of the currently-open audit panel (the assistant bubble it
+    // describes), or null if closed. Used to toggle re-clicks.
+    let auditAnchorRunId    = null
+    let auditActiveTab      = 'sources'
 
     if (isDev) document.body.classList.add('dev-mode')
 
@@ -167,6 +264,11 @@
     const $detail  = document.getElementById('payload-detail')
     const $traceHd = document.getElementById('trace-header')
     const $popover = document.getElementById('cite-popover')
+    const $audit   = document.getElementById('audit-panel')
+    const $auditTitle = $audit.querySelector('.ap-title')
+    const $auditBody  = $audit.querySelector('.ap-body')
+    const $auditClose = $audit.querySelector('.ap-close')
+    const $auditTabs  = $audit.querySelectorAll('.ap-tab')
 
     // ─── Utilities ─────────────────────────────────────────────────────
     function esc(s) {
@@ -277,6 +379,200 @@
     window.addEventListener('resize', hideCitePopover)
     window.addEventListener('scroll', hideCitePopover, true)
 
+    // ─── Audit panel ───────────────────────────────────────────────────
+    // Extract citations from an assistant message DOM node — we already
+    // rendered them as <sup class="cite" data-file data-line>, so reuse
+    // those rather than re-running the regex.
+    function citationsFromMessage(msgEl) {
+      const cites = []
+      msgEl.querySelectorAll('.cite').forEach(el => {
+        cites.push({ file: el.dataset.file, line: el.dataset.line })
+      })
+      return cites
+    }
+
+    function renderSourcesTab(runId, msgEl) {
+      const cites = msgEl ? citationsFromMessage(msgEl) : []
+      if (cites.length === 0) {
+        return `<div class="ap-empty">This answer cites no sources.</div>`
+      }
+      // Group line ranges by file, preserving first-seen order.
+      const byFile = new Map()
+      for (const c of cites) {
+        if (!byFile.has(c.file)) byFile.set(c.file, [])
+        byFile.get(c.file).push(c.line)
+      }
+      let html = ''
+      for (const [file, lines] of byFile) {
+        const lineChips = lines.map(l => `<span class="ln">L${esc(l)}</span>`).join('')
+        html += `<div class="ap-source-file">
+          <div class="sf-path">${esc(file)}</div>
+          <div class="sf-lines">${lineChips}</div>
+        </div>`
+      }
+      return html
+    }
+
+    // Format the "Steps" tab: filter the bucketed events for this runId
+    // down to user-meaningful actions (llm.requested / tool.requested /
+    // tool.responded), pair each tool.requested with its response, and
+    // render them as numbered cards. Internal substrate events (clock,
+    // uuid, region, boundary) are intentionally hidden — those belong
+    // in dev mode's substrate inspector, not in a per-turn audit.
+    function renderStepsTab(runId) {
+      const events = eventsByRunId.get(runId) || []
+      // Pair tool.requested with tool.responded via requestHash — the
+      // content-addressed cache key both events carry. (Both events
+      // also carry toolName, but multiple calls to the same tool make
+      // toolName non-unique, so requestHash is the right key.)
+      const toolResponses = new Map()
+      for (const e of events) {
+        if (e.type === 'tool.responded' && e.payload && e.payload.requestHash) {
+          toolResponses.set(e.payload.requestHash, e)
+        }
+      }
+      const cards = []
+      for (const e of events) {
+        if (e.type === 'llm.requested') {
+          const messages = e.payload && e.payload.request && countMessages(e.payload.request)
+          cards.push({
+            kind: 'llm',
+            label: 'LLM call',
+            body: messages != null
+              ? `Sent <code>${messages}</code> message${messages === 1 ? '' : 's'} to the model`
+              : 'Sent prompt to the model',
+            meta: null,
+          })
+        } else if (e.type === 'tool.requested') {
+          const name = (e.payload && e.payload.toolName) || '?'
+          const input = e.payload && e.payload.input
+          const inputPreview = input ? truncateJson(input, 120) : ''
+          const resp = e.payload && e.payload.requestHash && toolResponses.get(e.payload.requestHash)
+          const respMeta = resp && resp.payload
+            ? `→ ok (${describeToolResult(resp.payload.output)})`
+            : '→ pending'
+          cards.push({
+            kind: 'tool',
+            label: `Tool · ${name}`,
+            body: inputPreview ? `<code>${esc(inputPreview)}</code>` : '',
+            meta: respMeta,
+          })
+        }
+      }
+      if (cards.length === 0) {
+        return `<div class="ap-empty">No recorded steps for this turn yet.</div>`
+      }
+      return cards.map((c, i) => `
+        <div class="ap-step kind-${c.kind}">
+          <div class="ap-step-num">${i + 1}</div>
+          <div class="ap-step-kind">${esc(c.label)}</div>
+          <div class="ap-step-body">${c.body}</div>
+          ${c.meta ? `<div class="ap-step-meta">${esc(c.meta)}</div>` : ''}
+        </div>
+      `).join('')
+    }
+
+    function countMessages(request) {
+      // ModelRequest shape varies by provider; the common case is an
+      // OpenAI-style {messages: [...]} array. Fall back to null when
+      // we can't tell, so the caller renders a generic label.
+      if (!request) return null
+      if (Array.isArray(request.messages)) return request.messages.length
+      return null
+    }
+
+    function truncateJson(value, max) {
+      let s
+      try { s = JSON.stringify(value) } catch { s = String(value) }
+      return s.length > max ? s.slice(0, max - 1) + '…' : s
+    }
+
+    function describeToolResult(output) {
+      if (output == null) return 'no output'
+      if (typeof output === 'string') return `${output.length} chars`
+      if (Array.isArray(output)) return `array · ${output.length} items`
+      if (typeof output === 'object') {
+        // Common tool-output shapes: {entries: [...]}, {content: "..."},
+        // {matches: [...]}, {hits: [...]}. Report the principal array
+        // length where it exists, else fall back to JSON byte size.
+        for (const k of ['entries', 'matches', 'hits', 'results']) {
+          if (Array.isArray(output[k])) return `${output[k].length} ${k}`
+        }
+        if (typeof output.content === 'string') return `${output.content.length} chars`
+        let bytes
+        try { bytes = JSON.stringify(output).length } catch { bytes = 0 }
+        return `${bytes} bytes`
+      }
+      return String(output).slice(0, 40)
+    }
+
+    function renderAuditBody() {
+      if (!auditAnchorRunId) { $auditBody.innerHTML = ''; return }
+      const msgEl = $log.querySelector(`.msg.assistant[data-run-id="${auditAnchorRunId}"]`)
+      if (auditActiveTab === 'sources') {
+        $auditBody.innerHTML = renderSourcesTab(auditAnchorRunId, msgEl)
+      } else if (auditActiveTab === 'steps') {
+        $auditBody.innerHTML = renderStepsTab(auditAnchorRunId)
+      }
+    }
+
+    function openAudit(runId) {
+      // Re-click on the same anchor closes the panel — natural toggle.
+      if (auditAnchorRunId === runId && $audit.classList.contains('open')) {
+        closeAudit()
+        return
+      }
+      auditAnchorRunId = runId
+      $audit.classList.add('open')
+      // Restore last active tab across openings; never land on a disabled tab.
+      setAuditTab(auditActiveTab || 'sources')
+    }
+
+    function closeAudit() {
+      auditAnchorRunId = null
+      $audit.classList.remove('open')
+    }
+
+    function setAuditTab(name) {
+      auditActiveTab = name
+      $auditTabs.forEach(t => {
+        if (t.classList.contains('disabled')) return
+        t.classList.toggle('active', t.dataset.tab === name)
+      })
+      renderAuditBody()
+    }
+
+    $auditClose.addEventListener('click', closeAudit)
+    $auditTabs.forEach(t => {
+      t.addEventListener('click', () => {
+        if (t.classList.contains('disabled')) return
+        setAuditTab(t.dataset.tab)
+      })
+    })
+    // Click on "View audit ▾" trigger inside any assistant message.
+    $log.addEventListener('click', (ev) => {
+      const target = ev.target
+      if (target instanceof HTMLElement && target.classList.contains('audit-trigger')) {
+        ev.stopPropagation()
+        const runId = target.dataset.runId
+        if (runId) openAudit(runId)
+      }
+    })
+    // Esc closes the panel.
+    document.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Escape' && $audit.classList.contains('open')) closeAudit()
+    })
+    // Click outside the panel and outside any audit-trigger dismisses it.
+    document.addEventListener('click', (ev) => {
+      if (!$audit.classList.contains('open')) return
+      const target = ev.target
+      if (!(target instanceof HTMLElement)) return
+      if ($audit.contains(target)) return
+      if (target.classList.contains('audit-trigger')) return
+      if (target.classList.contains('cite')) return
+      closeAudit()
+    })
+
     // ─── Conversation picker ───────────────────────────────────────────
     async function refreshPicker() {
       const res = await fetch('/conversations')
@@ -315,7 +611,9 @@
       $traceHd.textContent = 'Trace timeline (new conversation — send a message to start)'
       if (eventSource) { eventSource.close(); eventSource = null }
       seenEventIds = new Set()
+      eventsByRunId = new Map()
       hideCitePopover()
+      closeAudit()
     }
 
     // ─── Render an event into trace timeline (dev mode only matters) ───
@@ -327,6 +625,13 @@
     function renderEvent(event) {
       if (seenEventIds.has(event.id)) return false
       seenEventIds.add(event.id)
+      // Bucket full event under its runId so the audit panel can
+      // reconstruct the turn's flow on demand. Done regardless of
+      // dev mode — the audit panel needs it in default mode too.
+      if (event.runId) {
+        if (!eventsByRunId.has(event.runId)) eventsByRunId.set(event.runId, [])
+        eventsByRunId.get(event.runId).push(event)
+      }
 
       const div = document.createElement('div')
       div.className = `entry ${kindClass(event.type)}`
@@ -373,11 +678,19 @@
       return t
     }
 
-    function renderChatMessage(role, text) {
+    function renderChatMessage(role, text, runId) {
       const div = document.createElement('div')
       div.className = `msg ${role}`
       if (role === 'assistant') {
-        div.innerHTML = `<div class="speaker">${role}</div>${renderAssistantHtml(text)}`
+        // The audit trigger is rendered on every assistant message — even
+        // when there are no citations — so the user can always inspect
+        // the decision flow that produced it. Tied to runId so the panel
+        // can look up the relevant events when opened.
+        const trigger = runId
+          ? `<span class="audit-trigger" data-run-id="${esc(runId)}">View audit ▾</span>`
+          : ''
+        div.innerHTML = `<div class="speaker">${role}</div>${renderAssistantHtml(text)}${trigger}`
+        if (runId) div.dataset.runId = runId
       } else {
         div.innerHTML = `<div class="speaker">${role}</div>${esc(text)}`
       }
@@ -408,7 +721,7 @@
         if (e.type === 'agent.run.started' && e.payload && e.payload.input) {
           renderChatMessage('user', e.payload.input)
         } else if (e.type === 'agent.run.completed' && e.payload && e.payload.lastTextOutput) {
-          renderChatMessage('assistant', e.payload.lastTextOutput)
+          renderChatMessage('assistant', e.payload.lastTextOutput, e.runId)
         }
       }
 
@@ -429,7 +742,7 @@
         const isNew = renderEvent(event)
         if (!isNew) return
         if (event.type === 'agent.run.completed' && event.payload && event.payload.lastTextOutput) {
-          renderChatMessage('assistant', event.payload.lastTextOutput)
+          renderChatMessage('assistant', event.payload.lastTextOutput, event.runId)
         }
       }
       eventSource.onerror = () => {
