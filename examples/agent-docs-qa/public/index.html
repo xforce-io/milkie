@@ -136,7 +136,12 @@
       display: flex; align-items: center; gap: 8px;
       padding: 12px 16px; border-bottom: 1px solid var(--border);
     }
-    #audit-panel .ap-title { font-size: 13px; font-weight: 600; flex: 1 }
+    #audit-panel .ap-title { font-size: 13px; font-weight: 600; flex: 1; min-width: 0 }
+    #audit-panel .ap-title .ap-title-q {
+      display: block; font-size: 12px; font-weight: 400; color: var(--muted);
+      margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    #audit-panel .ap-title .ap-title-q::before { content: '↳ '; color: var(--accent) }
     #audit-panel .ap-close {
       cursor: pointer; background: none; border: none; padding: 4px 8px;
       font-size: 18px; line-height: 1; color: var(--muted);
@@ -933,6 +938,26 @@
       return legend + segHtml
     }
 
+    // Find the user input that started this run, so the audit panel can
+    // show which question it's auditing. Run-started is always the first
+    // event for a runId.
+    function userInputForRun(runId) {
+      const events = eventsByRunId.get(runId) || []
+      for (const e of events) {
+        if (e.type === 'agent.run.started' && e.payload && e.payload.input) {
+          return String(e.payload.input)
+        }
+      }
+      return null
+    }
+
+    function updateAuditTitle() {
+      const q = auditAnchorRunId ? userInputForRun(auditAnchorRunId) : null
+      $auditTitle.innerHTML = q
+        ? `How this answer was built<span class="ap-title-q" title="${esc(q)}">${esc(q)}</span>`
+        : `How this answer was built`
+    }
+
     function renderAuditBody() {
       if (!auditAnchorRunId) { $auditBody.innerHTML = ''; return }
       const msgEl = $log.querySelector(`.msg.assistant[data-run-id="${auditAnchorRunId}"]`)
@@ -963,6 +988,7 @@
       }
       auditAnchorRunId = runId
       $audit.classList.add('open')
+      updateAuditTitle()
       // Restore last active tab across openings; never land on a disabled tab.
       setAuditTab(auditActiveTab || 'sources')
     }
