@@ -12,6 +12,8 @@
       --text: #1c1c1e;
       --muted: #6e6e73;
       --accent: #5b3ec9;
+      --cite-bg: #f0eaff;
+      --cite-fg: #5b3ec9;
       --skill-highlight: #fff4e0;
     }
     * { box-sizing: border-box }
@@ -31,21 +33,315 @@
       border-radius: 4px; background: var(--panel); cursor: pointer;
     }
     header button { background: var(--accent); color: white; border-color: var(--accent) }
+    header .dev-badge {
+      font-size: 11px; color: var(--muted); padding: 2px 8px;
+      border: 1px solid var(--border); border-radius: 999px; background: var(--bg);
+    }
 
-    main { display: flex; height: calc(100vh - 49px) }
-    #chat { flex: 1; display: flex; flex-direction: column; border-right: 1px solid var(--border); background: var(--panel) }
-    #chat-log { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px }
-    .msg { padding: 8px 12px; border-radius: 8px; max-width: 80%; line-height: 1.5; white-space: pre-wrap }
+    /* ── Default (Layer 1: single-pane Answer view) ─────────────────── */
+    main { display: flex; height: calc(100vh - 49px); justify-content: center; background: var(--bg) }
+    #chat {
+      flex: 0 1 760px; max-width: 760px; display: flex; flex-direction: column;
+      background: var(--panel); border-left: 1px solid var(--border); border-right: 1px solid var(--border);
+    }
+    #chat-log { flex: 1; overflow-y: auto; padding: 24px 32px; display: flex; flex-direction: column; gap: 18px }
+    .msg { padding: 10px 14px; border-radius: 10px; max-width: 92%; line-height: 1.6; white-space: pre-wrap }
     .msg.user      { background: #e8f0fe; align-self: flex-end }
     .msg.assistant { background: #f0f0f2; align-self: flex-start }
-    .msg .speaker { font-size: 11px; color: var(--muted); margin-bottom: 4px; text-transform: uppercase }
-    #chat-input { display: flex; padding: 12px; border-top: 1px solid var(--border); gap: 8px }
-    #chat-input input { flex: 1; padding: 8px 12px; font: inherit; border: 1px solid var(--border); border-radius: 4px }
+    .msg .speaker { font-size: 11px; color: var(--muted); margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.04em }
+    .msg.assistant .body { display: block }
+    .msg.assistant .sources-footer {
+      display: block; margin-top: 10px; padding-top: 8px; border-top: 1px solid rgba(0,0,0,0.06);
+      font-size: 12px; color: var(--muted);
+    }
+    .msg.assistant .sources-footer .src {
+      display: inline-block; margin-right: 10px;
+      font-family: ui-monospace, SFMono-Regular, monospace; color: var(--cite-fg);
+    }
+    .msg.assistant .audit-trigger {
+      display: inline-block; margin-top: 8px; font-size: 12px; color: var(--accent);
+      cursor: pointer; user-select: none;
+    }
+    /* Pending bubble while the agent is running. We don't know yet how
+       long the turn will take or what tools it will call, so the bubble
+       shows an animated "·  ·  ·" plus a live status line that the SSE
+       handler updates as each tool/LLM step fires. */
+    .msg.assistant.pending {
+      color: var(--muted); font-style: italic;
+    }
+    .msg.assistant.pending .pending-dots::after {
+      content: '·';
+      animation: pendingDots 1.4s steps(4, end) infinite;
+    }
+    @keyframes pendingDots {
+      0%   { content: '·' }
+      25%  { content: '· ·' }
+      50%  { content: '· · ·' }
+      75%  { content: '· · · ·' }
+      100% { content: '·' }
+    }
+    .msg.assistant.pending .pending-status {
+      display: block; margin-top: 4px; font-size: 12px;
+    }
+    .msg.assistant .sources-footer + .audit-trigger { margin-top: 4px }
+    .msg.assistant .audit-trigger:hover { text-decoration: underline }
+    .msg.assistant .body strong { font-weight: 600 }
+    .msg.assistant .body code {
+      font-family: ui-monospace, SFMono-Regular, monospace; font-size: 0.92em;
+      background: rgba(0,0,0,0.06); padding: 1px 5px; border-radius: 3px;
+    }
+    .msg.assistant .body .md-quote {
+      display: inline; padding-left: 10px;
+      border-left: 3px solid var(--accent); margin-left: 2px;
+      color: #3a3a3d;
+    }
+    .cite {
+      display: inline-block; cursor: pointer; user-select: none;
+      color: var(--cite-fg); background: var(--cite-bg); border-radius: 4px;
+      padding: 0 4px; margin: 0 1px; font-size: 0.72em; font-weight: 600;
+      vertical-align: super; line-height: 1.4;
+    }
+    .cite:hover { background: #e1d5ff }
+    #chat-input { display: flex; padding: 14px 20px; border-top: 1px solid var(--border); gap: 8px; background: var(--panel) }
+    #chat-input input { flex: 1; padding: 9px 13px; font: inherit; border: 1px solid var(--border); border-radius: 6px }
     #chat-input input:disabled { background: #f5f5f7; color: var(--muted) }
-    #chat-input button { padding: 8px 16px; background: var(--accent); color: white; border: none; border-radius: 4px; cursor: pointer; font: inherit }
+    #chat-input button { padding: 9px 18px; background: var(--accent); color: white; border: none; border-radius: 6px; cursor: pointer; font: inherit }
     #chat-input button:disabled { opacity: 0.5; cursor: not-allowed }
 
-    #trace { flex: 1; display: flex; flex-direction: column; background: var(--bg) }
+    /* ── Citation popover (anchored, dismissable) ───────────────────── */
+    #cite-popover {
+      position: absolute; z-index: 100; max-width: 320px;
+      background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.12); padding: 12px 14px;
+      font-size: 13px; line-height: 1.5; display: none;
+    }
+    #cite-popover.open { display: block }
+    #cite-popover .cp-source {
+      font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px;
+      color: var(--text); word-break: break-all;
+    }
+    #cite-popover .cp-line { color: var(--muted); margin-top: 4px; font-size: 11px }
+    #cite-popover .cp-hint { color: var(--muted); margin-top: 8px; font-size: 11px; font-style: italic }
+
+    /* ── Audit panel (Layer 2: per-message decision audit) ──────────── */
+    #audit-panel {
+      position: fixed; top: 49px; right: 0; bottom: 0; width: 380px; z-index: 90;
+      background: var(--panel); border-left: 1px solid var(--border);
+      box-shadow: -8px 0 24px rgba(0,0,0,0.06);
+      display: flex; flex-direction: column;
+      transform: translateX(100%); transition: transform 0.18s ease-out;
+    }
+    #audit-panel.open { transform: translateX(0) }
+    #audit-panel .ap-header {
+      display: flex; align-items: center; gap: 8px;
+      padding: 12px 16px; border-bottom: 1px solid var(--border);
+    }
+    #audit-panel .ap-title { font-size: 13px; font-weight: 600; flex: 1; min-width: 0 }
+    #audit-panel .ap-title .ap-title-q {
+      display: block; font-size: 12px; font-weight: 400; color: var(--muted);
+      margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    #audit-panel .ap-title .ap-title-q::before { content: '↳ '; color: var(--accent) }
+    #audit-panel .ap-close {
+      cursor: pointer; background: none; border: none; padding: 4px 8px;
+      font-size: 18px; line-height: 1; color: var(--muted);
+    }
+    #audit-panel .ap-close:hover { color: var(--text) }
+    #audit-panel .ap-replay {
+      cursor: pointer; background: var(--accent); color: white; border: none;
+      padding: 4px 10px; border-radius: 4px; font: inherit; font-size: 11px;
+      font-weight: 500;
+    }
+    #audit-panel .ap-replay:hover { opacity: 0.9 }
+    #audit-panel .ap-replay:disabled { opacity: 0.5; cursor: progress }
+
+    /* Replay result banner — sits above the tabs after a replay completes,
+       summarizing whether the run reproduced bit-exact (deterministic) or
+       diverged. Tabs and body remain accessible underneath. */
+    #audit-panel .ap-replay-banner {
+      display: none; padding: 10px 14px; border-bottom: 1px solid var(--border);
+      font-size: 12px; line-height: 1.5; position: relative;
+    }
+    #audit-panel .ap-replay-banner.shown { display: block }
+    #audit-panel .ap-replay-banner.deterministic { background: #f0faf3; border-left: 4px solid #2da14b }
+    #audit-panel .ap-replay-banner.divergent     { background: #fdf2e6; border-left: 4px solid #e07a00 }
+    #audit-panel .ap-replay-banner.error         { background: #fdf0f0; border-left: 4px solid #d93030 }
+    #audit-panel .ap-replay-banner .rb-title {
+      font-weight: 600; margin-bottom: 4px;
+    }
+    #audit-panel .ap-replay-banner.deterministic .rb-title { color: #2da14b }
+    #audit-panel .ap-replay-banner.divergent     .rb-title { color: #c66800 }
+    #audit-panel .ap-replay-banner.error         .rb-title { color: #c02020 }
+    #audit-panel .ap-replay-banner .rb-detail { color: var(--text) }
+    #audit-panel .ap-replay-banner .rb-meta { color: var(--muted); font-size: 11px; margin-top: 4px }
+    #audit-panel .ap-replay-banner .rb-close {
+      position: absolute; top: 6px; right: 10px; cursor: pointer;
+      background: none; border: none; font-size: 14px; line-height: 1; color: var(--muted);
+    }
+    #audit-panel .ap-replay-banner .rb-close:hover { color: var(--text) }
+    #audit-panel .ap-tabs {
+      display: flex; gap: 4px; padding: 0 12px; border-bottom: 1px solid var(--border); background: var(--bg);
+    }
+    #audit-panel .ap-tab {
+      padding: 8px 12px; font-size: 12px; cursor: pointer; user-select: none;
+      color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px;
+    }
+    #audit-panel .ap-tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600 }
+    #audit-panel .ap-tab.disabled { color: #c0c0c5; cursor: default }
+    #audit-panel .ap-body { flex: 1; overflow-y: auto; padding: 14px 16px }
+    #audit-panel .ap-empty { color: var(--muted); font-style: italic; font-size: 12px; padding: 16px 0 }
+
+    /* Sources tab */
+    .ap-source-file {
+      margin-bottom: 14px; padding: 10px 12px; background: var(--bg); border-radius: 6px;
+    }
+    .ap-source-file .sf-path {
+      font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px;
+      color: var(--cite-fg); word-break: break-all; margin-bottom: 6px;
+    }
+    .ap-source-file .sf-lines {
+      font-size: 11px; color: var(--muted);
+    }
+    .ap-source-file .sf-lines .ln {
+      display: inline-block; padding: 1px 6px; margin-right: 4px;
+      background: var(--cite-bg); color: var(--cite-fg); border-radius: 3px;
+      font-family: ui-monospace, SFMono-Regular, monospace;
+    }
+
+    /* Steps tab */
+    .ap-step {
+      position: relative; padding: 10px 12px 10px 28px; margin-bottom: 10px;
+      background: var(--bg); border-radius: 6px; font-size: 12px; line-height: 1.5;
+    }
+    .ap-step .ap-step-num {
+      position: absolute; left: 8px; top: 10px; width: 16px; height: 16px;
+      border-radius: 50%; background: var(--accent); color: white;
+      font-size: 10px; text-align: center; line-height: 16px; font-weight: 600;
+    }
+    .ap-step .ap-step-kind {
+      font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted);
+      margin-bottom: 3px;
+    }
+    .ap-step .ap-step-body { color: var(--text) }
+    .ap-step .ap-step-body code {
+      font-family: ui-monospace, SFMono-Regular, monospace; font-size: 11px;
+      background: var(--panel); padding: 1px 5px; border-radius: 3px;
+      border: 1px solid var(--border);
+    }
+    .ap-step .ap-step-meta { color: var(--muted); font-size: 11px; margin-top: 4px }
+    .ap-step.kind-llm .ap-step-num   { background: var(--accent) }
+    .ap-step.kind-tool .ap-step-num  { background: #2563eb }
+
+    /* Steps tab — cache badge + context composition expander.
+       Both are substrate-derived signals: cache stats come from the
+       llm.responded payload's prefix-cache snapshot; context composition
+       comes from replaying region.added/removed up to the llm.requested. */
+    .ap-step .ap-step-headerline { display: flex; align-items: baseline; gap: 8px; margin-bottom: 3px }
+    .ap-step .ap-step-headerline .ap-step-kind { flex: 0 0 auto }
+    .ap-step .ap-step-cache {
+      margin-left: auto; font-size: 10px; font-weight: 600;
+      padding: 2px 7px; border-radius: 10px;
+      background: #e6f7ec; color: #2da14b;
+    }
+    .ap-step .ap-step-cache.cold { background: #fdecec; color: #c02020 }
+    .ap-step .ap-step-cache.warm { background: #fdf4e0; color: #b8860b }
+    .ap-step .ap-step-expand {
+      display: inline-block; margin-top: 6px; font-size: 11px; color: var(--accent);
+      cursor: pointer; user-select: none;
+    }
+    .ap-step .ap-step-expand:hover { text-decoration: underline }
+    .ap-step .ap-step-expand::before { content: '▸ ' }
+    .ap-step.expanded .ap-step-expand::before { content: '▾ ' }
+    .ap-step .ap-step-expanded { display: none; margin-top: 8px }
+    .ap-step.expanded .ap-step-expanded { display: block }
+    .ap-region-group {
+      margin-top: 8px; padding: 6px 8px; background: var(--panel); border-radius: 4px;
+      border: 1px solid var(--border);
+    }
+    .ap-region-group .rg-title {
+      font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em;
+      color: var(--muted); margin-bottom: 4px;
+    }
+    .ap-region-row {
+      display: block; padding: 4px 0; font-size: 11px;
+      border-top: 1px solid rgba(0,0,0,0.04);
+    }
+    .ap-region-row:first-child { border-top: none; padding-top: 0 }
+    .ap-region-row .rr-id {
+      display: block;
+      font-family: ui-monospace, SFMono-Regular, monospace;
+      color: var(--text); word-break: break-all;
+    }
+    .ap-region-row .rr-meta {
+      display: block; color: var(--muted); margin-top: 1px;
+    }
+    /* A region's *content* doesn't live on the region.added event (which
+       only records metadata). For a handful of well-known regions whose
+       content is recoverable elsewhere — the current-turn region's
+       content is the user's input, available from agent.run.started —
+       we surface a preview line so the user can see what's actually in
+       that slot. */
+    .ap-region-row .rr-preview {
+      display: block; margin-top: 4px; padding: 5px 8px;
+      background: var(--cite-bg); border-left: 2px solid var(--accent);
+      border-radius: 2px; font-size: 11px; color: var(--text);
+      white-space: pre-wrap; word-break: break-word;
+    }
+    .ap-region-empty { color: var(--muted); font-style: italic; font-size: 11px; padding: 4px 0 }
+
+    /* Provenance tab — color-coded answer segments by source backing.
+       Left border ribbon is the dominant visual: green = supported by
+       direct quote in source, yellow = paraphrase with citation, orange
+       = citation present but quoted text doesn't appear in source
+       (possible hallucinated quote), red = no source citation at all,
+       gray = couldn't fetch source to verify. */
+    .ap-seg {
+      padding: 10px 12px; margin-bottom: 8px; border-radius: 4px;
+      border-left: 4px solid; background: var(--panel);
+      font-size: 13px; line-height: 1.6;
+    }
+    .ap-seg .ap-seg-text { white-space: pre-wrap; word-break: break-word }
+    .ap-seg .ap-seg-label {
+      display: block; margin-top: 6px; font-size: 11px; font-weight: 600;
+      letter-spacing: 0.04em; text-transform: uppercase;
+    }
+    .ap-seg .ap-seg-meta { display: block; margin-top: 3px; font-size: 11px; color: var(--muted) }
+    .ap-seg.s-supported   { border-color: #2da14b; background: #f0faf3 }
+    .ap-seg.s-supported   .ap-seg-label { color: #2da14b }
+    .ap-seg.s-paraphrased { border-color: #d4a017; background: #fdf8ec }
+    .ap-seg.s-paraphrased .ap-seg-label { color: #b8860b }
+    .ap-seg.s-tenuous     { border-color: #e07a00; background: #fdf2e6 }
+    .ap-seg.s-tenuous     .ap-seg-label { color: #c66800 }
+    .ap-seg.s-unsupported { border-color: #d93030; background: #fdf0f0 }
+    .ap-seg.s-unsupported .ap-seg-label { color: #c02020 }
+    .ap-seg.s-unverified  { border-color: #b0b0b5; background: var(--bg) }
+    .ap-seg.s-unverified  .ap-seg-label { color: var(--muted) }
+    .ap-seg .ap-seg-quote {
+      display: block; margin-top: 6px; padding: 6px 10px; border-radius: 3px;
+      background: rgba(0,0,0,0.04); font-family: ui-monospace, SFMono-Regular, monospace;
+      font-size: 11px; color: var(--text); white-space: pre-wrap;
+      max-height: 80px; overflow: auto;
+    }
+    .ap-prov-legend {
+      margin-bottom: 12px; padding: 8px 10px; background: var(--bg); border-radius: 4px;
+      font-size: 11px; color: var(--muted); line-height: 1.5;
+    }
+    .ap-prov-legend .lg-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin: 0 4px 0 8px; vertical-align: middle }
+    .ap-prov-legend .lg-dot.s-supported   { background: #2da14b }
+    .ap-prov-legend .lg-dot.s-paraphrased { background: #d4a017 }
+    .ap-prov-legend .lg-dot.s-tenuous     { background: #e07a00 }
+    .ap-prov-legend .lg-dot.s-unsupported { background: #d93030 }
+    .ap-prov-legend .lg-dot.s-unverified  { background: #b0b0b5 }
+
+    /* ── Dev mode (Layer 3: substrate inspector) ────────────────────── */
+    body.dev-mode main { justify-content: stretch }
+    body.dev-mode #chat { flex: 1 1 50%; max-width: none; border-right: 1px solid var(--border) }
+    body.dev-mode #trace { display: flex }
+    body.dev-mode .dev-badge { display: inline-block }
+    body:not(.dev-mode) #trace { display: none }
+    body:not(.dev-mode) .dev-badge { display: none }
+
+    #trace { flex: 1 1 50%; display: flex; flex-direction: column; background: var(--bg) }
     #trace-header { padding: 8px 16px; background: var(--panel); border-bottom: 1px solid var(--border); font-size: 12px; color: var(--muted) }
     #trace-timeline { flex: 1; overflow-y: auto; padding: 12px }
     .entry {
@@ -73,6 +369,7 @@
   <header>
     <h1>milkie agent playground — 三国 Q&A</h1>
     <div class="controls">
+      <span class="dev-badge">dev mode</span>
       <select id="conversation-picker">
         <option value="">(new conversation)</option>
       </select>
@@ -93,13 +390,47 @@
       <div id="payload-detail"></div>
     </section>
   </main>
+  <div id="cite-popover" role="dialog" aria-label="Citation source"></div>
+  <aside id="audit-panel" role="dialog" aria-label="Decision audit">
+    <div class="ap-header">
+      <div class="ap-title">How this answer was built</div>
+      <button class="ap-replay" aria-label="Replay this turn deterministically" title="Re-run this turn deterministically from the recorded trace">↻ Replay</button>
+      <button class="ap-close" aria-label="Close audit panel">×</button>
+    </div>
+    <div class="ap-replay-banner" role="status"></div>
+    <div class="ap-tabs">
+      <div class="ap-tab active" data-tab="sources">Sources</div>
+      <div class="ap-tab" data-tab="steps">Steps</div>
+      <div class="ap-tab" data-tab="provenance">Provenance</div>
+    </div>
+    <div class="ap-body"></div>
+  </aside>
 
   <script>
   (function () {
     // ─── State ─────────────────────────────────────────────────────────
-    let currentContextId = new URLSearchParams(location.search).get('context') || null
-    let eventSource = null
-    let seenEventIds = new Set()
+    const urlParams         = new URLSearchParams(location.search)
+    let currentContextId    = urlParams.get('context') || null
+    const isDev             = urlParams.get('dev') === '1'
+    let eventSource         = null
+    let seenEventIds        = new Set()
+    // Full event objects bucketed by runId, so the audit panel can
+    // reconstruct any turn's decision flow without re-fetching.
+    let eventsByRunId       = new Map()
+    // Anchor of the currently-open audit panel (the assistant bubble it
+    // describes), or null if closed. Used to toggle re-clicks.
+    let auditAnchorRunId    = null
+    let auditActiveTab      = 'sources'
+    // Raw assistant text per runId, kept so the Provenance tab can re-
+    // segment the answer rather than parse it back out of the rendered
+    // DOM (which has already been esc()'d and citation-substituted).
+    const assistantTextByRunId = new Map()
+    // file+lineRange → fetched source slice, so opening Provenance for a
+    // message with 10 citations doesn't hit the server 10 times if the
+    // same source is referenced multiple times.
+    const sourceCache       = new Map()
+
+    if (isDev) document.body.classList.add('dev-mode')
 
     // ─── DOM ───────────────────────────────────────────────────────────
     const $log     = document.getElementById('chat-log')
@@ -111,6 +442,14 @@
     const $tl      = document.getElementById('trace-timeline')
     const $detail  = document.getElementById('payload-detail')
     const $traceHd = document.getElementById('trace-header')
+    const $popover = document.getElementById('cite-popover')
+    const $audit   = document.getElementById('audit-panel')
+    const $auditTitle = $audit.querySelector('.ap-title')
+    const $auditBody  = $audit.querySelector('.ap-body')
+    const $auditClose = $audit.querySelector('.ap-close')
+    const $auditTabs   = $audit.querySelectorAll('.ap-tab')
+    const $auditReplay = $audit.querySelector('.ap-replay')
+    const $auditBanner = $audit.querySelector('.ap-replay-banner')
 
     // ─── Utilities ─────────────────────────────────────────────────────
     function esc(s) {
@@ -123,6 +462,755 @@
       else url.searchParams.delete('context')
       history.replaceState(null, '', url.toString())
     }
+
+    // ─── Citation parsing ──────────────────────────────────────────────
+    // The sanguo-researcher agent emits citations in several shapes —
+    // the prompt asks for "chapter:行号" but the model picks its own
+    // syntactic frame. Observed in the wild:
+    //   (引用：chapter-01-桃园三结义.txt:33)
+    //   (引用：`chapter-01-桃园三结义.txt:33-34`)
+    //   （引用：chapter-01-桃园三结义.txt:34）            ← fullwidth parens
+    //   > **chapter-01-桃园三结义.txt:33**     殺到…    ← markdown blockquote header
+    //   请看 chapter-01-桃园三结义.txt:42 这行         ← bare inline mention
+    //
+    // The regex anchors on the corpus file shape (chapter-NN-…txt) and
+    // optionally eats the surrounding decoration: any of "(引用：…)",
+    // markdown bold "**…**", backticks, or full-/half-width parens.
+    // Captures: 1 = relative file path, 2 = line number ("N" or "N-M").
+    const CITATION_RE = /(?:[（(]\s*引用\s*[：:]\s*)?\*{0,2}`?(chapter-[^\s`)）"<>:*]+\.txt):(\d+(?:-\d+)?)`?\*{0,2}(?:\s*[)）])?/g
+
+    // Minimal markdown subset the agent actually emits: bold (**), inline
+    // code (`), and blockquote line prefix (> ). We deliberately do NOT
+    // pull in a general-purpose markdown parser because (a) the corpus
+    // doesn't use heading / list / link syntax, and (b) citation markers
+    // can overlap with bold syntax (e.g. **chapter-01-…txt:33**), so we
+    // need tight control over substitution order. Operates on already-
+    // HTML-escaped input; emits HTML.
+    function renderMinimalMarkdown(escaped) {
+      let s = escaped
+      // Bold first (non-greedy, single-line so unmatched stars don't eat
+      // across paragraphs).
+      s = s.replace(/\*\*([^*\n]+?)\*\*/g, '<strong>$1</strong>')
+      // Inline code (avoid crossing newlines).
+      s = s.replace(/`([^`\n]+)`/g, '<code>$1</code>')
+      // Blockquote line prefix: "> " at start of text or after a newline.
+      // (esc() turned > into &gt;, so we match that form here.) Wrap the
+      // remainder of the line so CSS can style it with a border ribbon.
+      s = s.replace(/(^|\n)&gt;\s?(.*)/g, '$1<span class="md-quote">$2</span>')
+      return s
+    }
+
+    // Render the assistant body: scan for citation markers, replace each
+    // with a <sup> chip, apply minimal markdown, and append a deduped
+    // "sources" footer summarizing which files were cited.
+    //
+    // Pipeline order matters:
+    //   1. Find citations and replace each with an unprintable placeholder
+    //      token. This must happen BEFORE markdown processing because some
+    //      citation forms (e.g. **file:line**) collide with bold syntax.
+    //   2. Escape the (still placeholder-bearing) text.
+    //   3. Apply markdown — placeholders are inert.
+    //   4. Substitute placeholders back with the final <sup> chip HTML.
+    function renderAssistantHtml(text) {
+      const cites = []
+      let cursor  = 0
+      let buffer  = ''
+      let m
+      CITATION_RE.lastIndex = 0
+      while ((m = CITATION_RE.exec(text)) !== null) {
+        const [match, file, line] = m
+        buffer += text.slice(cursor, m.index)
+        const n = cites.length + 1
+        cites.push({ file, line })
+        //  is non-printable and never appears in plain prose; it
+        // survives esc() because the regex below doesn't touch it.
+        buffer += `CITE${n}`
+        cursor = m.index + match.length
+      }
+      buffer += text.slice(cursor)
+
+      let html = renderMinimalMarkdown(esc(buffer))
+      html = html.replace(/CITE(\d+)/g, (_match, idx) => {
+        const c = cites[parseInt(idx, 10) - 1]
+        return `<sup class="cite" data-n="${esc(idx)}" data-file="${esc(c.file)}" data-line="${esc(c.line)}">${esc(idx)}</sup>`
+      })
+
+      let footer = ''
+      if (cites.length > 0) {
+        const seenFiles = new Set()
+        const fileList  = []
+        for (const c of cites) {
+          if (!seenFiles.has(c.file)) {
+            seenFiles.add(c.file)
+            fileList.push(c.file)
+          }
+        }
+        const srcChips = fileList.map(f => `<span class="src">${esc(f)}</span>`).join(' ')
+        footer = `<div class="sources-footer">Sourced from ${fileList.length} file${fileList.length > 1 ? 's' : ''} · ${srcChips}</div>`
+      }
+      return `<div class="body">${html}</div>${footer}`
+    }
+
+    // ─── Citation popover ──────────────────────────────────────────────
+    function showCitePopover(citeEl) {
+      const file = citeEl.dataset.file
+      const line = citeEl.dataset.line
+      $popover.innerHTML =
+        `<div class="cp-source">${esc(file)}</div>` +
+        `<div class="cp-line">Line ${esc(line)}</div>` +
+        `<div class="cp-hint">Source excerpt preview coming in a future update.</div>`
+      // Position below the chip, clamped to viewport.
+      const rect = citeEl.getBoundingClientRect()
+      $popover.classList.add('open')
+      const pw = $popover.offsetWidth
+      const ph = $popover.offsetHeight
+      const vw = document.documentElement.clientWidth
+      let left = rect.left + window.scrollX
+      if (left + pw > vw - 8) left = vw - pw - 8
+      if (left < 8) left = 8
+      let top = rect.bottom + window.scrollY + 6
+      // If popover would overflow viewport bottom, flip above the chip.
+      if (rect.bottom + ph + 14 > window.innerHeight) {
+        top = rect.top + window.scrollY - ph - 6
+      }
+      $popover.style.left = `${left}px`
+      $popover.style.top  = `${top}px`
+    }
+    function hideCitePopover() {
+      $popover.classList.remove('open')
+    }
+    document.addEventListener('click', (ev) => {
+      const target = ev.target
+      if (target instanceof HTMLElement && target.classList.contains('cite')) {
+        ev.stopPropagation()
+        // Re-clicking the same chip toggles closed.
+        if ($popover.classList.contains('open') && $popover.dataset.anchor === target.dataset.n + ':' + target.dataset.file) {
+          hideCitePopover()
+          return
+        }
+        $popover.dataset.anchor = target.dataset.n + ':' + target.dataset.file
+        showCitePopover(target)
+        return
+      }
+      // Click outside popover dismisses it.
+      if (!$popover.contains(target)) hideCitePopover()
+    })
+    window.addEventListener('resize', hideCitePopover)
+    window.addEventListener('scroll', hideCitePopover, true)
+
+    // ─── Audit panel ───────────────────────────────────────────────────
+    // Extract citations from an assistant message DOM node — we already
+    // rendered them as <sup class="cite" data-file data-line>, so reuse
+    // those rather than re-running the regex.
+    function citationsFromMessage(msgEl) {
+      const cites = []
+      msgEl.querySelectorAll('.cite').forEach(el => {
+        cites.push({ file: el.dataset.file, line: el.dataset.line })
+      })
+      return cites
+    }
+
+    function renderSourcesTab(runId, msgEl) {
+      const cites = msgEl ? citationsFromMessage(msgEl) : []
+      if (cites.length === 0) {
+        return `<div class="ap-empty">This answer cites no sources.</div>`
+      }
+      // Group line ranges by file, preserving first-seen order.
+      const byFile = new Map()
+      for (const c of cites) {
+        if (!byFile.has(c.file)) byFile.set(c.file, [])
+        byFile.get(c.file).push(c.line)
+      }
+      let html = ''
+      for (const [file, lines] of byFile) {
+        const lineChips = lines.map(l => `<span class="ln">L${esc(l)}</span>`).join('')
+        html += `<div class="ap-source-file">
+          <div class="sf-path">${esc(file)}</div>
+          <div class="sf-lines">${lineChips}</div>
+        </div>`
+      }
+      return html
+    }
+
+    // Format the "Steps" tab: filter the bucketed events for this runId
+    // down to user-meaningful actions (llm.requested / tool.requested /
+    // tool.responded), pair each tool.requested with its response, and
+    // render them as numbered cards. Internal substrate events (clock,
+    // uuid, region, boundary) are intentionally hidden — those belong
+    // in dev mode's substrate inspector, not in a per-turn audit.
+    // Stability buckets we group regions by in the expander. Listed in
+    // display order — most-stable first reads top-down like a layered
+    // prompt, which mirrors how the agent's working context is actually
+    // assembled (immutable system prompt at the top, volatile scratch at
+    // the bottom).
+    const STABILITY_ORDER = ['immutable', 'session-stable', 'turn-stable', 'volatile']
+
+    // Cache tiering accounts for BOTH read and creation. A call that hit
+    // 70%+ of its tokens from cache is "hot". A call that read nothing
+    // but wrote new cache entries is "warm" — the substrate is engaged,
+    // a future call sharing this prefix will benefit. A call that did
+    // neither is "cold" (cache subsystem ran but nothing matched and
+    // nothing new was written, e.g. provider didn't report stats).
+    function classifyCacheTier(cache) {
+      if (!cache) return null
+      const hit = cache.hitRate || 0
+      const created = cache.creationTokens || 0
+      if (hit >= 0.7) return 'hot'
+      if (hit >= 0.3 || created > 0) return 'warm'
+      return 'cold'
+    }
+
+    function formatTokenCount(n) {
+      if (n == null) return ''
+      if (n >= 1000) return `${(n / 1000).toFixed(1)}k`
+      return String(n)
+    }
+
+    function renderRegionExpander(regions) {
+      if (regions.length === 0) {
+        return `<div class="ap-region-empty">No regions in context at this point.</div>`
+      }
+      const byStability = new Map(STABILITY_ORDER.map(k => [k, []]))
+      for (const r of regions) {
+        const bucket = byStability.get(r.stability) || (byStability.set(r.stability, []), byStability.get(r.stability))
+        bucket.push(r)
+      }
+      let html = ''
+      for (const stability of STABILITY_ORDER) {
+        const group = byStability.get(stability) || []
+        if (group.length === 0) continue
+        html += `<div class="ap-region-group">
+          <div class="rg-title">${esc(stability)} · ${group.length}</div>
+          ${group.map(r => {
+            const preview = r.preview ? `<span class="rr-preview">${esc(r.preview)}</span>` : ''
+            return `
+              <div class="ap-region-row">
+                <span class="rr-id">${esc(r.id)}</span>
+                <span class="rr-meta">${esc(r.target)} · ${esc(r.section)} · ${esc(r.reason)}</span>
+                ${preview}
+              </div>
+            `
+          }).join('')}
+        </div>`
+      }
+      return html
+    }
+
+    function renderStepsTab(runId) {
+      const events    = eventsByRunId.get(runId) || []
+      // The current-turn region's content IS the user's input for this
+      // run. Cache it once so each snapshot can attach it as a preview
+      // without re-scanning events per LLM call.
+      const userInput = userInputForRun(runId)
+      // Pair requests with their responses via requestHash — the
+      // content-addressed cache key both sides carry. Same key both for
+      // tool pairing and for fetching LLM cache stats off the response
+      // payload.
+      const toolResponses = new Map()
+      const llmResponses  = new Map()
+      for (const e of events) {
+        if (e.type === 'tool.responded' && e.payload && e.payload.requestHash) {
+          toolResponses.set(e.payload.requestHash, e)
+        }
+        if (e.type === 'llm.responded' && e.payload && e.payload.requestHash) {
+          llmResponses.set(e.payload.requestHash, e)
+        }
+      }
+      // Maintain a live region map as we walk events; snapshot it whenever
+      // an llm.requested fires. The snapshot is what was in the model's
+      // working context at the moment of that LLM call — the unique
+      // milkie observation the region.added/removed substrate enables.
+      const activeRegions = new Map()
+      const cards = []
+      for (const e of events) {
+        if (e.type === 'region.added' && e.payload && e.payload.id) {
+          activeRegions.set(e.payload.id, e.payload)
+        } else if (e.type === 'region.removed' && e.payload && e.payload.id) {
+          activeRegions.delete(e.payload.id)
+        } else if (e.type === 'llm.requested') {
+          const messages = e.payload && e.payload.request && countMessages(e.payload.request)
+          const resp     = e.payload && e.payload.requestHash && llmResponses.get(e.payload.requestHash)
+          const cache    = resp && resp.payload && resp.payload.cacheStats
+          // Decorate the snapshot with content previews for regions we
+          // know how to surface (just current-turn for now). Region.added
+          // events don't carry content, so this is a per-id lookup, not
+          // a general mechanism.
+          const snapshot = Array.from(activeRegions.values()).map(r =>
+            r.id === 'current-turn' && userInput
+              ? { ...r, preview: userInput }
+              : r
+          )
+          cards.push({
+            kind:    'llm',
+            label:   'LLM call',
+            body:    messages != null
+              ? `Sent <code>${messages}</code> message${messages === 1 ? '' : 's'} to the model`
+              : 'Sent prompt to the model',
+            meta:    null,
+            cache:   cache ? { ...cache, tier: classifyCacheTier(cache) } : null,
+            regions: snapshot,
+          })
+        } else if (e.type === 'tool.requested') {
+          const name = (e.payload && e.payload.toolName) || '?'
+          const input = e.payload && e.payload.input
+          const inputPreview = input ? truncateJson(input, 120) : ''
+          const resp = e.payload && e.payload.requestHash && toolResponses.get(e.payload.requestHash)
+          const respMeta = resp && resp.payload
+            ? `→ ok (${describeToolResult(resp.payload.output)})`
+            : '→ pending'
+          cards.push({
+            kind: 'tool',
+            label: `Tool · ${name}`,
+            body: inputPreview ? `<code>${esc(inputPreview)}</code>` : '',
+            meta: respMeta,
+          })
+        }
+      }
+      if (cards.length === 0) {
+        return `<div class="ap-empty">No recorded steps for this turn yet.</div>`
+      }
+      return cards.map((c, i) => {
+        // Badge surfaces both read AND creation so a "0% hit but cache
+        // was just written" call (substrate engaged, future calls will
+        // benefit) is visibly different from a "no cache at all" call.
+        let cacheBadge = ''
+        if (c.cache) {
+          const read    = c.cache.readTokens     || 0
+          const created = c.cache.creationTokens || 0
+          const total   = c.cache.totalInputTokens || 0
+          const hitPct  = Math.round((c.cache.hitRate || 0) * 100)
+          const tierClass = c.cache.tier === 'cold' ? 'cold' : c.cache.tier === 'warm' ? 'warm' : ''
+          let text
+          if (read > 0) {
+            text = `${hitPct}% read · ${formatTokenCount(read)}/${formatTokenCount(total)} tok`
+          } else if (created > 0) {
+            text = `wrote ${formatTokenCount(created)} cache · ${formatTokenCount(total)} tok`
+          } else {
+            text = `no cache · ${formatTokenCount(total)} tok`
+          }
+          cacheBadge = `<span class="ap-step-cache ${tierClass}" title="read ${read} · wrote ${created} · total ${total}">${text}</span>`
+        }
+        const expander = c.kind === 'llm'
+          ? `<div class="ap-step-expand" data-step-idx="${i}">${c.regions.length} region${c.regions.length === 1 ? '' : 's'} in context</div>
+             <div class="ap-step-expanded">${renderRegionExpander(c.regions)}</div>`
+          : ''
+        return `
+          <div class="ap-step kind-${c.kind}" data-step-idx="${i}">
+            <div class="ap-step-num">${i + 1}</div>
+            <div class="ap-step-headerline">
+              <div class="ap-step-kind">${esc(c.label)}</div>
+              ${cacheBadge}
+            </div>
+            <div class="ap-step-body">${c.body}</div>
+            ${c.meta ? `<div class="ap-step-meta">${esc(c.meta)}</div>` : ''}
+            ${expander}
+          </div>
+        `
+      }).join('')
+    }
+
+    function countMessages(request) {
+      // ModelRequest shape varies by provider; the common case is an
+      // OpenAI-style {messages: [...]} array. Fall back to null when
+      // we can't tell, so the caller renders a generic label.
+      if (!request) return null
+      if (Array.isArray(request.messages)) return request.messages.length
+      return null
+    }
+
+    function truncateJson(value, max) {
+      let s
+      try { s = JSON.stringify(value) } catch { s = String(value) }
+      return s.length > max ? s.slice(0, max - 1) + '…' : s
+    }
+
+    function describeToolResult(output) {
+      if (output == null) return 'no output'
+      if (typeof output === 'string') return `${output.length} chars`
+      if (Array.isArray(output)) return `array · ${output.length} items`
+      if (typeof output === 'object') {
+        // Common tool-output shapes: {entries: [...]}, {content: "..."},
+        // {matches: [...]}, {hits: [...]}. Report the principal array
+        // length where it exists, else fall back to JSON byte size.
+        for (const k of ['entries', 'matches', 'hits', 'results']) {
+          if (Array.isArray(output[k])) return `${output[k].length} ${k}`
+        }
+        if (typeof output.content === 'string') return `${output.content.length} chars`
+        let bytes
+        try { bytes = JSON.stringify(output).length } catch { bytes = 0 }
+        return `${bytes} bytes`
+      }
+      return String(output).slice(0, 40)
+    }
+
+    // ─── Provenance ────────────────────────────────────────────────────
+    // Split the answer into paragraph segments and pull out the citation
+    // markers in each. The segment "text" is the paragraph with citation
+    // markers stripped, so the comparison against source content is
+    // against the prose only (citation markers are formatting noise).
+    function segmentAnswer(text) {
+      const paragraphs = text.split(/\n\n+/).map(p => p.trim()).filter(Boolean)
+      return paragraphs.map(p => {
+        const cites = []
+        const stripped = p.replace(CITATION_RE, (_match, file, line) => {
+          cites.push({ file, line })
+          return ''
+        }).trim()
+        return { text: stripped, raw: p, citations: cites }
+      })
+    }
+
+    // Extract verbatim quoted snippets from a segment. The agent wraps
+    // direct quotes in any of: straight " ", Chinese curly “ ”
+    // (U+201C/U+201D), Chinese corner 「 」 (U+300C/U+300D), or Chinese
+    // double corner 『 』 (U+300E/U+300F). The negated set inside the
+    // capture group lists all of these so a greedy match stops at the
+    // first closing quote of any flavor.
+    function extractQuotedSnippets(text) {
+      const QUOTE_CHARS = '"“”「」『』'
+      const re = new RegExp(`[${QUOTE_CHARS}]([^${QUOTE_CHARS}]+)[${QUOTE_CHARS}]`, 'g')
+      const out = []
+      let m
+      while ((m = re.exec(text)) !== null) {
+        if (m[1].trim().length > 0) out.push(m[1].trim())
+      }
+      return out
+    }
+
+    // LLM-emitted citation line numbers are often off by 1-2 lines —
+    // models eyeball line counts from tool output and round, or pick the
+    // line containing the chapter break rather than the line containing
+    // the prose. To make Provenance verification robust to this, we
+    // widen every cited range by ±2 lines before fetching. Display still
+    // shows the agent's original line numbers.
+    const LINE_TOLERANCE = 2
+    function expandedLineRange(line) {
+      const m = line.match(/^(\d+)(?:-(\d+))?$/)
+      if (!m) return line
+      const start = Math.max(1, parseInt(m[1], 10) - LINE_TOLERANCE)
+      const end   = (m[2] ? parseInt(m[2], 10) : parseInt(m[1], 10)) + LINE_TOLERANCE
+      return `${start}-${end}`
+    }
+    function verifyCacheKey(file, line) {
+      return `${file}::${expandedLineRange(line)}`
+    }
+
+    async function fetchVerifySlice(file, line) {
+      const key = verifyCacheKey(file, line)
+      if (sourceCache.has(key)) return sourceCache.get(key)
+      const expanded = expandedLineRange(line)
+      try {
+        const r = await fetch(`/source/${encodeURIComponent(file)}?lines=${encodeURIComponent(expanded)}`)
+        if (r.status !== 200) {
+          sourceCache.set(key, null)
+          return null
+        }
+        const j = await r.json()
+        sourceCache.set(key, j)
+        return j
+      } catch {
+        sourceCache.set(key, null)
+        return null
+      }
+    }
+
+    // Substring match between a segment and its source. Catches the
+    // "verbatim copy without quote wrappers" case — e.g. when the agent
+    // pastes a passage into a markdown blockquote (`> …`) or just inlines
+    // it bare. Markdown formatting chars are stripped before comparison
+    // since the source corpus has none of them.
+    const SUBSTRING_MIN_LEN = 20
+    function hasVerbatimSubstring(segText, sourceText) {
+      const strip = s => s.replace(/[*`>]/g, '')
+      const seg = strip(segText)
+      const src = strip(sourceText)
+      if (seg.length < SUBSTRING_MIN_LEN) return false
+      for (let i = 0; i + SUBSTRING_MIN_LEN <= seg.length; i++) {
+        if (src.includes(seg.slice(i, i + SUBSTRING_MIN_LEN))) return true
+      }
+      return false
+    }
+
+    // Decide a segment's provenance state from its citations and the
+    // (already-fetched) source slices. Rules in priority order:
+    //   1. No citation → unsupported (red).
+    //   2. Citation but every source fetch failed → unverified (gray).
+    //   3. Citation + explicit quoted snippets (curly/corner quotes):
+    //        all snippets in source → supported (green)
+    //        any snippet absent → tenuous (orange, possible hallucination)
+    //   4. Citation + a ≥20-char contiguous substring of source appears
+    //      in the segment (verbatim copy without quote wrappers, e.g.
+    //      a markdown blockquote header followed by pasted text) →
+    //      supported (green).
+    //   5. Otherwise (citation, summary in own words) → paraphrased (yellow).
+    function classifySegment(seg, sourceSlices) {
+      if (seg.citations.length === 0) return { state: 'unsupported' }
+      const okSlices = sourceSlices.filter(s => s != null)
+      if (okSlices.length === 0) return { state: 'unverified' }
+      const allSrc = okSlices.map(s => s.content).join('\n')
+
+      const quotes = extractQuotedSnippets(seg.raw)
+      if (quotes.length > 0) {
+        const missing = quotes.filter(q => !allSrc.includes(q))
+        if (missing.length === 0) return { state: 'supported', quotes }
+        return { state: 'tenuous', quotes, missingQuotes: missing }
+      }
+
+      if (hasVerbatimSubstring(seg.text, allSrc)) {
+        return { state: 'supported' }
+      }
+      return { state: 'paraphrased' }
+    }
+
+    const STATE_LABELS = {
+      supported:   'Directly supported by source',
+      paraphrased: 'Cited paraphrase (no verbatim quote)',
+      tenuous:     'Quote not found in source — verify',
+      unsupported: 'No source citation — model-generated',
+      unverified:  'Cited but source could not be fetched',
+    }
+
+    async function renderProvenanceTab(runId) {
+      const text = assistantTextByRunId.get(runId)
+      if (!text) return `<div class="ap-empty">Answer text unavailable.</div>`
+      const segments = segmentAnswer(text)
+      if (segments.length === 0) return `<div class="ap-empty">Empty answer.</div>`
+
+      // Resolve all unique (file, line) pairs in parallel, populating
+      // sourceCache as a side effect. Subsequent renders are zero-fetch.
+      // We dedupe across the expanded line ranges so two adjacent
+      // citations (e.g. :33 and :33-34) hit the server only once each
+      // after tolerance expansion.
+      const toFetch = []
+      const seen    = new Set()
+      for (const s of segments) {
+        for (const c of s.citations) {
+          const k = verifyCacheKey(c.file, c.line)
+          if (seen.has(k)) continue
+          seen.add(k)
+          toFetch.push([c.file, c.line])
+        }
+      }
+      await Promise.all(toFetch.map(([file, line]) => fetchVerifySlice(file, line)))
+
+      const legend = `
+        <div class="ap-prov-legend">
+          <span class="lg-dot s-supported"></span>supported
+          <span class="lg-dot s-paraphrased"></span>paraphrased
+          <span class="lg-dot s-tenuous"></span>tenuous
+          <span class="lg-dot s-unsupported"></span>no source
+          <span class="lg-dot s-unverified"></span>unverified
+        </div>`
+
+      const segHtml = segments.map(seg => {
+        const slices = seg.citations.map(c => sourceCache.get(verifyCacheKey(c.file, c.line)))
+        const klass = classifySegment(seg, slices)
+        const label = STATE_LABELS[klass.state]
+        const citeMeta = seg.citations.length > 0
+          ? seg.citations.map(c => `${c.file}:${c.line}`).join(' · ')
+          : ''
+        let quoteBlock = ''
+        if (klass.state === 'supported' && klass.quotes && klass.quotes.length > 0) {
+          quoteBlock = `<span class="ap-seg-quote">${esc(klass.quotes.join('\n'))}</span>`
+        } else if (klass.state === 'tenuous' && klass.missingQuotes && klass.missingQuotes.length > 0) {
+          quoteBlock = `<span class="ap-seg-quote">Missing from source:\n${esc(klass.missingQuotes.join('\n'))}</span>`
+        }
+        return `
+          <div class="ap-seg s-${klass.state}">
+            <span class="ap-seg-text">${esc(seg.text)}</span>
+            <span class="ap-seg-label">${esc(label)}</span>
+            ${citeMeta ? `<span class="ap-seg-meta">${esc(citeMeta)}</span>` : ''}
+            ${quoteBlock}
+          </div>`
+      }).join('')
+
+      return legend + segHtml
+    }
+
+    // Find the user input that started this run, so the audit panel can
+    // show which question it's auditing. Run-started is always the first
+    // event for a runId.
+    function userInputForRun(runId) {
+      const events = eventsByRunId.get(runId) || []
+      for (const e of events) {
+        if (e.type === 'agent.run.started' && e.payload && e.payload.input) {
+          return String(e.payload.input)
+        }
+      }
+      return null
+    }
+
+    function updateAuditTitle() {
+      const q = auditAnchorRunId ? userInputForRun(auditAnchorRunId) : null
+      $auditTitle.innerHTML = q
+        ? `How this answer was built<span class="ap-title-q" title="${esc(q)}">${esc(q)}</span>`
+        : `How this answer was built`
+    }
+
+    function renderAuditBody() {
+      if (!auditAnchorRunId) { $auditBody.innerHTML = ''; return }
+      const msgEl = $log.querySelector(`.msg.assistant[data-run-id="${auditAnchorRunId}"]`)
+      if (auditActiveTab === 'sources') {
+        $auditBody.innerHTML = renderSourcesTab(auditAnchorRunId, msgEl)
+      } else if (auditActiveTab === 'steps') {
+        $auditBody.innerHTML = renderStepsTab(auditAnchorRunId)
+      } else if (auditActiveTab === 'provenance') {
+        $auditBody.innerHTML = `<div class="ap-empty">Analyzing answer against sources…</div>`
+        // Async render: classifies each segment after fetching its source.
+        // Capture runId so a fast tab switch doesn't paint stale results
+        // over a panel that has since changed anchor.
+        const pendingRunId = auditAnchorRunId
+        const pendingTab   = auditActiveTab
+        renderProvenanceTab(auditAnchorRunId).then(html => {
+          if (auditAnchorRunId === pendingRunId && auditActiveTab === pendingTab) {
+            $auditBody.innerHTML = html
+          }
+        })
+      }
+    }
+
+    function openAudit(runId) {
+      // Re-click on the same anchor closes the panel — natural toggle.
+      if (auditAnchorRunId === runId && $audit.classList.contains('open')) {
+        closeAudit()
+        return
+      }
+      // Switching to a different run's audit invalidates any prior replay
+      // result — it pertains to the previous run, not this one.
+      if (auditAnchorRunId !== runId) hideReplayBanner()
+      auditAnchorRunId = runId
+      $audit.classList.add('open')
+      updateAuditTitle()
+      // Restore last active tab across openings; never land on a disabled tab.
+      setAuditTab(auditActiveTab || 'sources')
+    }
+
+    function closeAudit() {
+      auditAnchorRunId = null
+      $audit.classList.remove('open')
+      hideReplayBanner()
+    }
+
+    // ─── Replay (Phase 4b) ────────────────────────────────────────────
+    function hideReplayBanner() {
+      $auditBanner.className = 'ap-replay-banner'
+      $auditBanner.innerHTML = ''
+    }
+
+    function showReplayBanner(state, html) {
+      $auditBanner.className = `ap-replay-banner shown ${state}`
+      $auditBanner.innerHTML = html + `<button class="rb-close" aria-label="Dismiss">×</button>`
+    }
+
+    function fmtCachePct(read, total) {
+      if (!total) return '0%'
+      return `${Math.round(100 * read / total)}%`
+    }
+
+    function renderReplayResult(result) {
+      if (result.status === 'deterministic') {
+        const cs = result.originalCacheStats || { readTokens: 0, creationTokens: 0, totalInputTokens: 0 }
+        const sav = fmtCachePct(cs.readTokens, cs.totalInputTokens)
+        const matches = result.matchesOriginal
+        const title = matches
+          ? '✓ Bit-exact replay'
+          : '✓ Replay completed (output differs)'
+        const detail = matches
+          ? `Re-running this turn from the recorded trace produced the same answer character-for-character. All ${cs.totalInputTokens} input tokens served from the local cache — zero new model calls.`
+          : `Replay finished without divergence, but its final text differs from the original. This is rare and suggests downstream non-determinism outside IOPort (e.g. random sampling in formatting code).`
+        const meta = cs.totalInputTokens
+          ? `Original turn: ${formatTokenCount(cs.totalInputTokens)} input tokens · ${sav} were cache-read · ${formatTokenCount(cs.creationTokens)} written to cache.`
+          : `Original turn: cache stats not reported by provider.`
+        showReplayBanner('deterministic',
+          `<div class="rb-title">${esc(title)}</div>` +
+          `<div class="rb-detail">${esc(detail)}</div>` +
+          `<div class="rb-meta">${esc(meta)}</div>`)
+      } else if (result.status === 'divergent') {
+        showReplayBanner('divergent',
+          `<div class="rb-title">⚠ Replay diverged on ${esc(result.kind)}</div>` +
+          `<div class="rb-detail">${esc(result.summary || 'No detail.')}</div>` +
+          (result.actualHashPrefix
+            ? `<div class="rb-meta">Unexpected ${esc(result.kind)} call: hash ${esc(result.actualHashPrefix)}… (cache has ${result.availableCount} alternatives)</div>`
+            : ''))
+      } else {
+        showReplayBanner('error',
+          `<div class="rb-title">Replay failed</div>` +
+          `<div class="rb-detail">${esc(result.message || 'unknown error')}</div>`)
+      }
+    }
+
+    async function runReplay() {
+      if (!auditAnchorRunId) return
+      $auditReplay.disabled = true
+      const originalLabel = $auditReplay.textContent
+      $auditReplay.textContent = 'Replaying…'
+      hideReplayBanner()
+      try {
+        const resp = await fetch(`/run/${encodeURIComponent(auditAnchorRunId)}/replay`, { method: 'POST' })
+        const data = await resp.json()
+        renderReplayResult(data)
+      } catch (err) {
+        renderReplayResult({ status: 'error', message: (err && err.message) || String(err) })
+      } finally {
+        $auditReplay.disabled = false
+        $auditReplay.textContent = originalLabel
+      }
+    }
+
+    $auditReplay.addEventListener('click', runReplay)
+    $auditBanner.addEventListener('click', (ev) => {
+      const t = ev.target
+      if (t instanceof HTMLElement && t.classList.contains('rb-close')) hideReplayBanner()
+    })
+
+    function setAuditTab(name) {
+      auditActiveTab = name
+      $auditTabs.forEach(t => {
+        if (t.classList.contains('disabled')) return
+        t.classList.toggle('active', t.dataset.tab === name)
+      })
+      renderAuditBody()
+    }
+
+    $auditClose.addEventListener('click', closeAudit)
+    $auditTabs.forEach(t => {
+      t.addEventListener('click', () => {
+        if (t.classList.contains('disabled')) return
+        setAuditTab(t.dataset.tab)
+      })
+    })
+    // Steps tab: click the "N regions in context" toggle on an LLM step
+    // to expand the context-composition panel for that step.
+    $auditBody.addEventListener('click', (ev) => {
+      const target = ev.target
+      if (!(target instanceof HTMLElement)) return
+      if (!target.classList.contains('ap-step-expand')) return
+      const card = target.closest('.ap-step')
+      if (card) card.classList.toggle('expanded')
+    })
+    // Click on "View audit ▾" trigger inside any assistant message.
+    $log.addEventListener('click', (ev) => {
+      const target = ev.target
+      if (target instanceof HTMLElement && target.classList.contains('audit-trigger')) {
+        ev.stopPropagation()
+        const runId = target.dataset.runId
+        if (runId) openAudit(runId)
+      }
+    })
+    // Esc closes the panel.
+    document.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Escape' && $audit.classList.contains('open')) closeAudit()
+    })
+    // Click outside the panel and outside any audit-trigger dismisses it.
+    document.addEventListener('click', (ev) => {
+      if (!$audit.classList.contains('open')) return
+      const target = ev.target
+      if (!(target instanceof HTMLElement)) return
+      if ($audit.contains(target)) return
+      if (target.classList.contains('audit-trigger')) return
+      if (target.classList.contains('cite')) return
+      closeAudit()
+    })
 
     // ─── Conversation picker ───────────────────────────────────────────
     async function refreshPicker() {
@@ -162,17 +1250,30 @@
       $traceHd.textContent = 'Trace timeline (new conversation — send a message to start)'
       if (eventSource) { eventSource.close(); eventSource = null }
       seenEventIds = new Set()
+      eventsByRunId = new Map()
+      assistantTextByRunId.clear()
+      sourceCache.clear()
+      hideCitePopover()
+      closeAudit()
+      removePendingBubble()
     }
 
-    // ─── Render an event into trace timeline ───────────────────────────
-    // Returns true if the event was newly rendered, false if it was already
-    // seen (deduped). Callers use this to gate side effects like rendering
-    // a chat bubble — otherwise an event that arrives via both the /events
-    // catch-up fetch and the SSE stream's past-event replay would render
-    // its chat message twice.
+    // ─── Render an event into trace timeline (dev mode only matters) ───
+    // Returns true if the event was newly rendered, false if it was
+    // already seen (deduped). Callers use this to gate side effects like
+    // rendering a chat bubble — otherwise an event that arrives via both
+    // the /events catch-up fetch and the SSE stream's past-event replay
+    // would render its chat message twice.
     function renderEvent(event) {
       if (seenEventIds.has(event.id)) return false
       seenEventIds.add(event.id)
+      // Bucket full event under its runId so the audit panel can
+      // reconstruct the turn's flow on demand. Done regardless of
+      // dev mode — the audit panel needs it in default mode too.
+      if (event.runId) {
+        if (!eventsByRunId.has(event.runId)) eventsByRunId.set(event.runId, [])
+        eventsByRunId.get(event.runId).push(event)
+      }
 
       const div = document.createElement('div')
       div.className = `entry ${kindClass(event.type)}`
@@ -180,9 +1281,6 @@
       const summary = summaryFor(event)
       div.innerHTML = `<span class="icon">${icon}</span>${esc(summary)}<span class="ts">${event.timestamp}</span>`
 
-      // Skill-loading highlight: tool.requested where toolName === 'skill_request'
-      // is the agent invoking the system tool that loads a skill into context.
-      // The next FSM step folds the skill into the system prompt.
       if (event.type === 'tool.requested'
           && event.payload && event.payload.toolName === 'skill_request') {
         const skillName = (event.payload.input && event.payload.input.name) || '?'
@@ -190,7 +1288,6 @@
         div.title = `Skill load requested: ${skillName}`
       }
 
-      // Click → show payload
       div.addEventListener('click', () => {
         $detail.textContent = JSON.stringify(event, null, 2)
       })
@@ -223,10 +1320,56 @@
       return t
     }
 
-    function renderChatMessage(role, text) {
+    // Tracks the pending bubble for the in-flight turn so the SSE handler
+     // (which may receive agent.run.completed before /chat resolves) can
+     // find and replace it. Null when no turn is in flight.
+    let $pendingBubble = null
+
+    function showPendingBubble() {
+      removePendingBubble()
+      const div = document.createElement('div')
+      div.className = 'msg assistant pending'
+      div.innerHTML =
+        `<div class="speaker">assistant</div>` +
+        `<span class="pending-dots"></span>` +
+        `<span class="pending-status">Thinking…</span>`
+      $log.appendChild(div)
+      $log.scrollTop = $log.scrollHeight
+      $pendingBubble = div
+    }
+
+    function updatePendingStatus(text) {
+      if (!$pendingBubble) return
+      const $status = $pendingBubble.querySelector('.pending-status')
+      if ($status) $status.textContent = text
+    }
+
+    function removePendingBubble() {
+      if ($pendingBubble && $pendingBubble.parentNode) {
+        $pendingBubble.parentNode.removeChild($pendingBubble)
+      }
+      $pendingBubble = null
+    }
+
+    function renderChatMessage(role, text, runId) {
       const div = document.createElement('div')
       div.className = `msg ${role}`
-      div.innerHTML = `<div class="speaker">${role}</div>${esc(text)}`
+      if (role === 'assistant') {
+        // The audit trigger is rendered on every assistant message — even
+        // when there are no citations — so the user can always inspect
+        // the decision flow that produced it. Tied to runId so the panel
+        // can look up the relevant events when opened.
+        const trigger = runId
+          ? `<span class="audit-trigger" data-run-id="${esc(runId)}">View audit ▾</span>`
+          : ''
+        div.innerHTML = `<div class="speaker">${role}</div>${renderAssistantHtml(text)}${trigger}`
+        if (runId) {
+          div.dataset.runId = runId
+          assistantTextByRunId.set(runId, text)
+        }
+      } else {
+        div.innerHTML = `<div class="speaker">${role}</div>${esc(text)}`
+      }
       $log.appendChild(div)
       $log.scrollTop = $log.scrollHeight
     }
@@ -241,12 +1384,16 @@
       resetUI()
       $traceHd.textContent = `Trace timeline — conversation ${ctxId.slice(0, 8)}…`
 
-      // 1. Pull conversation summary to know if it's active
       const convResp = await fetch('/conversations')
       const conv = (await convResp.json()).conversations.find(c => c.contextId === ctxId)
-      const isActive = conv && conv.status === 'active'
+      // A conversation's "status" mirrors the latest run's status — 'active'
+      // means an agent is still running this turn (a /chat is in flight),
+      // 'completed/error/interrupted' means the last turn settled. Only
+      // 'active' should lock input: in every other case the user can
+      // (and often wants to) send a follow-up message, which the backend
+      // handles by minting a new run under the same contextId.
+      const isRunInFlight = conv && conv.status === 'active'
 
-      // 2. Pull past events to rebuild chat log + trace
       const eventsResp = await fetch(`/conversation/${ctxId}/events`)
       if (eventsResp.status === 404) return
       const { events } = await eventsResp.json()
@@ -256,18 +1403,16 @@
         if (e.type === 'agent.run.started' && e.payload && e.payload.input) {
           renderChatMessage('user', e.payload.input)
         } else if (e.type === 'agent.run.completed' && e.payload && e.payload.lastTextOutput) {
-          renderChatMessage('assistant', e.payload.lastTextOutput)
+          renderChatMessage('assistant', e.payload.lastTextOutput, e.runId)
         }
       }
 
-      // 3. Open SSE — handler dedupes events we already rendered via seenEventIds
       openSse(ctxId)
 
-      // 4. If conversation ended, disable input
-      if (!isActive) {
+      if (isRunInFlight) {
         $input.disabled = true
         $submit.disabled = true
-        $input.placeholder = '此对话已结束。点 "+ new chat" 开始新对话。'
+        $input.placeholder = '此对话当前正在运行 agent，请稍候…'
       }
     }
 
@@ -278,8 +1423,18 @@
         const event = JSON.parse(msg.data)
         const isNew = renderEvent(event)
         if (!isNew) return
+        // Live progress updates on the pending bubble — let the user
+        // see the agent is actively doing things, not stuck.
+        if ($pendingBubble) {
+          if (event.type === 'tool.requested' && event.payload && event.payload.toolName) {
+            updatePendingStatus(`Calling tool: ${event.payload.toolName}…`)
+          } else if (event.type === 'llm.requested') {
+            updatePendingStatus('Thinking…')
+          }
+        }
         if (event.type === 'agent.run.completed' && event.payload && event.payload.lastTextOutput) {
-          renderChatMessage('assistant', event.payload.lastTextOutput)
+          removePendingBubble()
+          renderChatMessage('assistant', event.payload.lastTextOutput, event.runId)
         }
       }
       eventSource.onerror = () => {
@@ -294,6 +1449,7 @@
       if (!text) return
 
       renderChatMessage('user', text)
+      showPendingBubble()
       $input.value = ''
       $input.disabled = true
       $submit.disabled = true
@@ -308,19 +1464,18 @@
         if (!currentContextId) {
           currentContextId = data.contextId
           setUrlContext(currentContextId)
-          // Open SSE for the new conversation
           openSse(currentContextId)
         }
-        // The completed-event handler in openSse will append the assistant response
       } catch (err) {
+        removePendingBubble()
         renderChatMessage('assistant', `[error] ${err.message}`)
       } finally {
         $input.disabled = false
         $submit.disabled = false
         $input.focus()
-        refreshPicker()  // newly-created conversation should appear
+        refreshPicker()
       }
-    })
+    });
 
     // ─── Boot ──────────────────────────────────────────────────────────
     (async function () {

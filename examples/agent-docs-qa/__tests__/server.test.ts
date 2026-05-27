@@ -120,6 +120,72 @@ describe('server — REST endpoints', () => {
     const r = await get(`${baseUrl}/conversation/nonexistent/events`)
     expect(r.status).toBe(404)
   })
+
+  it('GET /source/:relPath returns the full file when no line range', async () => {
+    const r = await get(`${baseUrl}/source/chapter-01-%E6%A1%83%E5%9B%AD%E4%B8%89%E7%BB%93%E4%B9%89.txt`)
+    expect(r.status).toBe(200)
+    const body = JSON.parse(r.body) as { path: string; startLine: number; endLine: number; content: string }
+    expect(body.path).toBe('chapter-01-桃园三结义.txt')
+    expect(body.startLine).toBe(1)
+    expect(body.endLine).toBeGreaterThan(1)
+    expect(body.content.length).toBeGreaterThan(0)
+  })
+
+  it('GET /source/:relPath?lines=N-M returns the requested slice only', async () => {
+    const r = await get(`${baseUrl}/source/chapter-01-%E6%A1%83%E5%9B%AD%E4%B8%89%E7%BB%93%E4%B9%89.txt?lines=33-34`)
+    expect(r.status).toBe(200)
+    const body = JSON.parse(r.body) as { startLine: number; endLine: number; content: string }
+    expect(body.startLine).toBe(33)
+    expect(body.endLine).toBe(34)
+    expect(body.content.split('\n').length).toBe(2)
+  })
+
+  it('GET /source/:relPath?lines=N (single line) returns one line', async () => {
+    const r = await get(`${baseUrl}/source/chapter-01-%E6%A1%83%E5%9B%AD%E4%B8%89%E7%BB%93%E4%B9%89.txt?lines=33`)
+    expect(r.status).toBe(200)
+    const body = JSON.parse(r.body) as { startLine: number; endLine: number; content: string }
+    expect(body.startLine).toBe(33)
+    expect(body.endLine).toBe(33)
+    expect(body.content).not.toContain('\n')
+  })
+
+  it('GET /source/:relPath returns 404 for missing file', async () => {
+    const r = await get(`${baseUrl}/source/no-such-chapter.txt`)
+    expect(r.status).toBe(404)
+  })
+
+  it('GET /source/:relPath rejects path traversal (../)', async () => {
+    // ../../etc/passwd attempts to escape the corpus dir.
+    const r = await get(`${baseUrl}/source/..%2F..%2Fetc%2Fpasswd`)
+    expect(r.status).toBe(400)
+    expect(r.body).toContain('escapes corpus root')
+  })
+
+  it('GET /source/:relPath rejects malformed lines query', async () => {
+    const r = await get(`${baseUrl}/source/chapter-01-%E6%A1%83%E5%9B%AD%E4%B8%89%E7%BB%93%E4%B9%89.txt?lines=abc`)
+    expect(r.status).toBe(400)
+  })
+
+  it('POST /run/:runId/replay replays a recorded run deterministically', async () => {
+    // Run a chat first so there's something to replay.
+    const chatResp = JSON.parse((await postJson(`${baseUrl}/chat`, { input: 'hello' })).body) as { runId: string }
+
+    const r = await postJson(`${baseUrl}/run/${chatResp.runId}/replay`, {})
+    expect(r.status).toBe(200)
+    const body = JSON.parse(r.body) as {
+      status: string; replayedOutput: string; originalOutput: string; matchesOriginal: boolean
+    }
+    expect(body.status).toBe('deterministic')
+    expect(body.matchesOriginal).toBe(true)
+    expect(body.replayedOutput).toBe('hello from stub')
+    expect(body.originalOutput).toBe('hello from stub')
+  })
+
+  it('POST /run/:runId/replay returns 404 for unknown runId', async () => {
+    const r = await postJson(`${baseUrl}/run/00000000-0000-0000-0000-000000000000/replay`, {})
+    expect(r.status).toBe(404)
+    expect(JSON.parse(r.body).status).toBe('error')
+  })
 })
 
 describe('server — SSE stream', () => {
