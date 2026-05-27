@@ -164,6 +164,50 @@
     .ap-step.kind-llm .ap-step-num   { background: var(--accent) }
     .ap-step.kind-tool .ap-step-num  { background: #2563eb }
 
+    /* Provenance tab — color-coded answer segments by source backing.
+       Left border ribbon is the dominant visual: green = supported by
+       direct quote in source, yellow = paraphrase with citation, orange
+       = citation present but quoted text doesn't appear in source
+       (possible hallucinated quote), red = no source citation at all,
+       gray = couldn't fetch source to verify. */
+    .ap-seg {
+      padding: 10px 12px; margin-bottom: 8px; border-radius: 4px;
+      border-left: 4px solid; background: var(--panel);
+      font-size: 13px; line-height: 1.6;
+    }
+    .ap-seg .ap-seg-text { white-space: pre-wrap; word-break: break-word }
+    .ap-seg .ap-seg-label {
+      display: block; margin-top: 6px; font-size: 11px; font-weight: 600;
+      letter-spacing: 0.04em; text-transform: uppercase;
+    }
+    .ap-seg .ap-seg-meta { display: block; margin-top: 3px; font-size: 11px; color: var(--muted) }
+    .ap-seg.s-supported   { border-color: #2da14b; background: #f0faf3 }
+    .ap-seg.s-supported   .ap-seg-label { color: #2da14b }
+    .ap-seg.s-paraphrased { border-color: #d4a017; background: #fdf8ec }
+    .ap-seg.s-paraphrased .ap-seg-label { color: #b8860b }
+    .ap-seg.s-tenuous     { border-color: #e07a00; background: #fdf2e6 }
+    .ap-seg.s-tenuous     .ap-seg-label { color: #c66800 }
+    .ap-seg.s-unsupported { border-color: #d93030; background: #fdf0f0 }
+    .ap-seg.s-unsupported .ap-seg-label { color: #c02020 }
+    .ap-seg.s-unverified  { border-color: #b0b0b5; background: var(--bg) }
+    .ap-seg.s-unverified  .ap-seg-label { color: var(--muted) }
+    .ap-seg .ap-seg-quote {
+      display: block; margin-top: 6px; padding: 6px 10px; border-radius: 3px;
+      background: rgba(0,0,0,0.04); font-family: ui-monospace, SFMono-Regular, monospace;
+      font-size: 11px; color: var(--text); white-space: pre-wrap;
+      max-height: 80px; overflow: auto;
+    }
+    .ap-prov-legend {
+      margin-bottom: 12px; padding: 8px 10px; background: var(--bg); border-radius: 4px;
+      font-size: 11px; color: var(--muted); line-height: 1.5;
+    }
+    .ap-prov-legend .lg-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin: 0 4px 0 8px; vertical-align: middle }
+    .ap-prov-legend .lg-dot.s-supported   { background: #2da14b }
+    .ap-prov-legend .lg-dot.s-paraphrased { background: #d4a017 }
+    .ap-prov-legend .lg-dot.s-tenuous     { background: #e07a00 }
+    .ap-prov-legend .lg-dot.s-unsupported { background: #d93030 }
+    .ap-prov-legend .lg-dot.s-unverified  { background: #b0b0b5 }
+
     /* ── Dev mode (Layer 3: substrate inspector) ────────────────────── */
     body.dev-mode main { justify-content: stretch }
     body.dev-mode #chat { flex: 1 1 50%; max-width: none; border-right: 1px solid var(--border) }
@@ -230,7 +274,7 @@
     <div class="ap-tabs">
       <div class="ap-tab active" data-tab="sources">Sources</div>
       <div class="ap-tab" data-tab="steps">Steps</div>
-      <div class="ap-tab disabled" title="Coming in a future update">Provenance</div>
+      <div class="ap-tab" data-tab="provenance">Provenance</div>
     </div>
     <div class="ap-body"></div>
   </aside>
@@ -250,6 +294,14 @@
     // describes), or null if closed. Used to toggle re-clicks.
     let auditAnchorRunId    = null
     let auditActiveTab      = 'sources'
+    // Raw assistant text per runId, kept so the Provenance tab can re-
+    // segment the answer rather than parse it back out of the rendered
+    // DOM (which has already been esc()'d and citation-substituted).
+    const assistantTextByRunId = new Map()
+    // file+lineRange → fetched source slice, so opening Provenance for a
+    // message with 10 citations doesn't hit the server 10 times if the
+    // same source is referenced multiple times.
+    const sourceCache       = new Map()
 
     if (isDev) document.body.classList.add('dev-mode')
 
@@ -506,6 +558,164 @@
       return String(output).slice(0, 40)
     }
 
+    // ─── Provenance ────────────────────────────────────────────────────
+    // Split the answer into paragraph segments and pull out the citation
+    // markers in each. The segment "text" is the paragraph with citation
+    // markers stripped, so the comparison against source content is
+    // against the prose only (citation markers are formatting noise).
+    function segmentAnswer(text) {
+      const paragraphs = text.split(/\n\n+/).map(p => p.trim()).filter(Boolean)
+      return paragraphs.map(p => {
+        const cites = []
+        const stripped = p.replace(CITATION_RE, (_match, file, line) => {
+          cites.push({ file, line })
+          return ''
+        }).trim()
+        return { text: stripped, raw: p, citations: cites }
+      })
+    }
+
+    // Extract verbatim quoted snippets from a segment. The agent wraps
+    // direct quotes in any of: straight " ", Chinese curly “ ”
+    // (U+201C/U+201D), Chinese corner 「 」 (U+300C/U+300D), or Chinese
+    // double corner 『 』 (U+300E/U+300F). The negated set inside the
+    // capture group lists all of these so a greedy match stops at the
+    // first closing quote of any flavor.
+    function extractQuotedSnippets(text) {
+      const QUOTE_CHARS = '"“”「」『』'
+      const re = new RegExp(`[${QUOTE_CHARS}]([^${QUOTE_CHARS}]+)[${QUOTE_CHARS}]`, 'g')
+      const out = []
+      let m
+      while ((m = re.exec(text)) !== null) {
+        if (m[1].trim().length > 0) out.push(m[1].trim())
+      }
+      return out
+    }
+
+    // LLM-emitted citation line numbers are often off by 1-2 lines —
+    // models eyeball line counts from tool output and round, or pick the
+    // line containing the chapter break rather than the line containing
+    // the prose. To make Provenance verification robust to this, we
+    // widen every cited range by ±2 lines before fetching. Display still
+    // shows the agent's original line numbers.
+    const LINE_TOLERANCE = 2
+    function expandedLineRange(line) {
+      const m = line.match(/^(\d+)(?:-(\d+))?$/)
+      if (!m) return line
+      const start = Math.max(1, parseInt(m[1], 10) - LINE_TOLERANCE)
+      const end   = (m[2] ? parseInt(m[2], 10) : parseInt(m[1], 10)) + LINE_TOLERANCE
+      return `${start}-${end}`
+    }
+    function verifyCacheKey(file, line) {
+      return `${file}::${expandedLineRange(line)}`
+    }
+
+    async function fetchVerifySlice(file, line) {
+      const key = verifyCacheKey(file, line)
+      if (sourceCache.has(key)) return sourceCache.get(key)
+      const expanded = expandedLineRange(line)
+      try {
+        const r = await fetch(`/source/${encodeURIComponent(file)}?lines=${encodeURIComponent(expanded)}`)
+        if (r.status !== 200) {
+          sourceCache.set(key, null)
+          return null
+        }
+        const j = await r.json()
+        sourceCache.set(key, j)
+        return j
+      } catch {
+        sourceCache.set(key, null)
+        return null
+      }
+    }
+
+    // Decide a segment's provenance state from its citations and the
+    // (already-fetched) source slices. Rules in priority order:
+    //   1. No citation → unsupported (red).
+    //   2. Citation but every source fetch failed → unverified (gray).
+    //   3. Citation, has explicit quoted snippet(s), every snippet
+    //      appears in some fetched source → supported (green).
+    //   4. Citation, has explicit quoted snippet(s), at least one
+    //      snippet absent from source → tenuous (orange — possible
+    //      hallucinated quote).
+    //   5. Citation, no explicit quote → paraphrased (yellow).
+    function classifySegment(seg, sourceSlices) {
+      if (seg.citations.length === 0) return { state: 'unsupported' }
+      const okSlices = sourceSlices.filter(s => s != null)
+      if (okSlices.length === 0) return { state: 'unverified' }
+      const quotes = extractQuotedSnippets(seg.raw)
+      if (quotes.length === 0) return { state: 'paraphrased' }
+      const allSrc = okSlices.map(s => s.content).join('\n')
+      const missing = quotes.filter(q => !allSrc.includes(q))
+      if (missing.length === 0) return { state: 'supported', quotes }
+      return { state: 'tenuous', quotes, missingQuotes: missing }
+    }
+
+    const STATE_LABELS = {
+      supported:   'Directly supported by source',
+      paraphrased: 'Cited paraphrase (no verbatim quote)',
+      tenuous:     'Quote not found in source — verify',
+      unsupported: 'No source citation — model-generated',
+      unverified:  'Cited but source could not be fetched',
+    }
+
+    async function renderProvenanceTab(runId) {
+      const text = assistantTextByRunId.get(runId)
+      if (!text) return `<div class="ap-empty">Answer text unavailable.</div>`
+      const segments = segmentAnswer(text)
+      if (segments.length === 0) return `<div class="ap-empty">Empty answer.</div>`
+
+      // Resolve all unique (file, line) pairs in parallel, populating
+      // sourceCache as a side effect. Subsequent renders are zero-fetch.
+      // We dedupe across the expanded line ranges so two adjacent
+      // citations (e.g. :33 and :33-34) hit the server only once each
+      // after tolerance expansion.
+      const toFetch = []
+      const seen    = new Set()
+      for (const s of segments) {
+        for (const c of s.citations) {
+          const k = verifyCacheKey(c.file, c.line)
+          if (seen.has(k)) continue
+          seen.add(k)
+          toFetch.push([c.file, c.line])
+        }
+      }
+      await Promise.all(toFetch.map(([file, line]) => fetchVerifySlice(file, line)))
+
+      const legend = `
+        <div class="ap-prov-legend">
+          <span class="lg-dot s-supported"></span>supported
+          <span class="lg-dot s-paraphrased"></span>paraphrased
+          <span class="lg-dot s-tenuous"></span>tenuous
+          <span class="lg-dot s-unsupported"></span>no source
+          <span class="lg-dot s-unverified"></span>unverified
+        </div>`
+
+      const segHtml = segments.map(seg => {
+        const slices = seg.citations.map(c => sourceCache.get(verifyCacheKey(c.file, c.line)))
+        const klass = classifySegment(seg, slices)
+        const label = STATE_LABELS[klass.state]
+        const citeMeta = seg.citations.length > 0
+          ? seg.citations.map(c => `${c.file}:${c.line}`).join(' · ')
+          : ''
+        let quoteBlock = ''
+        if (klass.state === 'supported' && klass.quotes && klass.quotes.length > 0) {
+          quoteBlock = `<span class="ap-seg-quote">${esc(klass.quotes.join('\n'))}</span>`
+        } else if (klass.state === 'tenuous' && klass.missingQuotes && klass.missingQuotes.length > 0) {
+          quoteBlock = `<span class="ap-seg-quote">Missing from source:\n${esc(klass.missingQuotes.join('\n'))}</span>`
+        }
+        return `
+          <div class="ap-seg s-${klass.state}">
+            <span class="ap-seg-text">${esc(seg.text)}</span>
+            <span class="ap-seg-label">${esc(label)}</span>
+            ${citeMeta ? `<span class="ap-seg-meta">${esc(citeMeta)}</span>` : ''}
+            ${quoteBlock}
+          </div>`
+      }).join('')
+
+      return legend + segHtml
+    }
+
     function renderAuditBody() {
       if (!auditAnchorRunId) { $auditBody.innerHTML = ''; return }
       const msgEl = $log.querySelector(`.msg.assistant[data-run-id="${auditAnchorRunId}"]`)
@@ -513,6 +723,18 @@
         $auditBody.innerHTML = renderSourcesTab(auditAnchorRunId, msgEl)
       } else if (auditActiveTab === 'steps') {
         $auditBody.innerHTML = renderStepsTab(auditAnchorRunId)
+      } else if (auditActiveTab === 'provenance') {
+        $auditBody.innerHTML = `<div class="ap-empty">Analyzing answer against sources…</div>`
+        // Async render: classifies each segment after fetching its source.
+        // Capture runId so a fast tab switch doesn't paint stale results
+        // over a panel that has since changed anchor.
+        const pendingRunId = auditAnchorRunId
+        const pendingTab   = auditActiveTab
+        renderProvenanceTab(auditAnchorRunId).then(html => {
+          if (auditAnchorRunId === pendingRunId && auditActiveTab === pendingTab) {
+            $auditBody.innerHTML = html
+          }
+        })
       }
     }
 
@@ -612,6 +834,8 @@
       if (eventSource) { eventSource.close(); eventSource = null }
       seenEventIds = new Set()
       eventsByRunId = new Map()
+      assistantTextByRunId.clear()
+      sourceCache.clear()
       hideCitePopover()
       closeAudit()
     }
@@ -690,7 +914,10 @@
           ? `<span class="audit-trigger" data-run-id="${esc(runId)}">View audit ▾</span>`
           : ''
         div.innerHTML = `<div class="speaker">${role}</div>${renderAssistantHtml(text)}${trigger}`
-        if (runId) div.dataset.runId = runId
+        if (runId) {
+          div.dataset.runId = runId
+          assistantTextByRunId.set(runId, text)
+        }
       } else {
         div.innerHTML = `<div class="speaker">${role}</div>${esc(text)}`
       }

@@ -24,6 +24,7 @@ interface ServerState {
   eventStore:  BroadcastingEventStore
   runsDir:     string
   publicDir:   string
+  corpusRoot:  string
 }
 
 async function readBody(req: IncomingMessage): Promise<string> {
@@ -110,6 +111,38 @@ async function handleSseStream(
   })
 }
 
+async function handleSourceFetch(
+  res: ServerResponse, s: ServerState, relPath: string, linesQuery: string | null,
+): Promise<void> {
+  // Resolve under corpusRoot and refuse anything that escapes it.
+  // path.resolve normalizes ../, so a "../../etc/passwd" attempt produces
+  // an absolute path outside corpusRoot and is rejected by the prefix check.
+  const corpusAbs = path.resolve(s.corpusRoot)
+  const resolved  = path.resolve(corpusAbs, relPath)
+  if (resolved !== corpusAbs && !resolved.startsWith(corpusAbs + path.sep)) {
+    sendJson(res, 400, { error: 'path escapes corpus root' })
+    return
+  }
+  let content: string
+  try {
+    content = await fs.readFile(resolved, 'utf-8')
+  } catch {
+    sendJson(res, 404, { error: 'source not found' })
+    return
+  }
+  const allLines = content.split(/\r?\n/)
+  let startLine = 1
+  let endLine   = allLines.length
+  if (linesQuery) {
+    const m = linesQuery.match(/^(\d+)(?:-(\d+))?$/)
+    if (!m) { sendJson(res, 400, { error: 'invalid lines query' }); return }
+    startLine = Math.max(1, parseInt(m[1]!, 10))
+    endLine   = m[2] ? Math.max(startLine, parseInt(m[2], 10)) : startLine
+  }
+  const slice = allLines.slice(startLine - 1, endLine).join('\n')
+  sendJson(res, 200, { path: relPath, startLine, endLine, content: slice })
+}
+
 async function serveStatic(res: ServerResponse, filePath: string): Promise<void> {
   try {
     const content = await fs.readFile(filePath, 'utf-8')
@@ -145,7 +178,7 @@ export async function startServer(config: ServerConfig): Promise<Server> {
   const fallbackPublic  = path.resolve(__dirname, 'public')
   const publicDir = existsSync(colocatedPublic) ? colocatedPublic : fallbackPublic
 
-  const state: ServerState = { milkie, eventStore, runsDir, publicDir }
+  const state: ServerState = { milkie, eventStore, runsDir, publicDir, corpusRoot: config.corpusRoot }
 
   const server = http.createServer(async (req, res) => {
     try {
@@ -165,6 +198,15 @@ export async function startServer(config: ServerConfig): Promise<Server> {
       const sseMatch = route.match(/^\/conversation\/([^/]+)\/stream$/)
       if (req.method === 'GET' && sseMatch) {
         return handleSseStream(req, res, state, decodeURIComponent(sseMatch[1]!))
+      }
+
+      const sourceMatch = route.match(/^\/source\/(.+)$/)
+      if (req.method === 'GET' && sourceMatch) {
+        return handleSourceFetch(
+          res, state,
+          decodeURIComponent(sourceMatch[1]!),
+          url.searchParams.get('lines'),
+        )
       }
 
       if (req.method === 'GET' && (route === '/' || route === '/index.html')) {
