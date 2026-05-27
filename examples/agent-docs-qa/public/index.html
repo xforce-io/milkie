@@ -64,6 +64,16 @@
     }
     .msg.assistant .sources-footer + .audit-trigger { margin-top: 4px }
     .msg.assistant .audit-trigger:hover { text-decoration: underline }
+    .msg.assistant .body strong { font-weight: 600 }
+    .msg.assistant .body code {
+      font-family: ui-monospace, SFMono-Regular, monospace; font-size: 0.92em;
+      background: rgba(0,0,0,0.06); padding: 1px 5px; border-radius: 3px;
+    }
+    .msg.assistant .body .md-quote {
+      display: inline; padding-left: 10px;
+      border-left: 3px solid var(--accent); margin-left: 2px;
+      color: #3a3a3d;
+    }
     .cite {
       display: inline-block; cursor: pointer; user-select: none;
       color: var(--cite-fg); background: var(--cite-bg); border-radius: 4px;
@@ -163,6 +173,46 @@
     .ap-step .ap-step-meta { color: var(--muted); font-size: 11px; margin-top: 4px }
     .ap-step.kind-llm .ap-step-num   { background: var(--accent) }
     .ap-step.kind-tool .ap-step-num  { background: #2563eb }
+
+    /* Steps tab — cache badge + context composition expander.
+       Both are substrate-derived signals: cache stats come from the
+       llm.responded payload's prefix-cache snapshot; context composition
+       comes from replaying region.added/removed up to the llm.requested. */
+    .ap-step .ap-step-headerline { display: flex; align-items: baseline; gap: 8px; margin-bottom: 3px }
+    .ap-step .ap-step-headerline .ap-step-kind { flex: 0 0 auto }
+    .ap-step .ap-step-cache {
+      margin-left: auto; font-size: 10px; font-weight: 600;
+      padding: 2px 7px; border-radius: 10px;
+      background: #e6f7ec; color: #2da14b;
+    }
+    .ap-step .ap-step-cache.cold { background: #fdecec; color: #c02020 }
+    .ap-step .ap-step-cache.warm { background: #fdf4e0; color: #b8860b }
+    .ap-step .ap-step-expand {
+      display: inline-block; margin-top: 6px; font-size: 11px; color: var(--accent);
+      cursor: pointer; user-select: none;
+    }
+    .ap-step .ap-step-expand:hover { text-decoration: underline }
+    .ap-step .ap-step-expand::before { content: '▸ ' }
+    .ap-step.expanded .ap-step-expand::before { content: '▾ ' }
+    .ap-step .ap-step-expanded { display: none; margin-top: 8px }
+    .ap-step.expanded .ap-step-expanded { display: block }
+    .ap-region-group {
+      margin-top: 8px; padding: 6px 8px; background: var(--panel); border-radius: 4px;
+      border: 1px solid var(--border);
+    }
+    .ap-region-group .rg-title {
+      font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em;
+      color: var(--muted); margin-bottom: 4px;
+    }
+    .ap-region-row {
+      display: flex; gap: 8px; padding: 2px 0; font-size: 11px;
+    }
+    .ap-region-row .rr-id {
+      font-family: ui-monospace, SFMono-Regular, monospace;
+      color: var(--text); flex: 0 0 auto;
+    }
+    .ap-region-row .rr-meta { color: var(--muted); flex: 1; min-width: 0; word-break: break-all }
+    .ap-region-empty { color: var(--muted); font-style: italic; font-size: 11px; padding: 4px 0 }
 
     /* Provenance tab — color-coded answer segments by source backing.
        Left border ribbon is the dominant visual: green = supported by
@@ -335,41 +385,79 @@
     }
 
     // ─── Citation parsing ──────────────────────────────────────────────
-    // Agent prompt (sanguo-researcher.md) instructs the model to cite as
-    // "chapter:行号", and observed outputs use shapes like
+    // The sanguo-researcher agent emits citations in several shapes —
+    // the prompt asks for "chapter:行号" but the model picks its own
+    // syntactic frame. Observed in the wild:
     //   (引用：chapter-01-桃园三结义.txt:33)
     //   (引用：`chapter-01-桃园三结义.txt:33-34`)
-    //   （引用：chapter-01-桃园三结义.txt:34）
-    // Match half- or full-width parens, optional backticks, and a line
-    // number that may be a single int or a range "N-M".
-    const CITATION_RE = /[（(]\s*引用\s*[：:]\s*`?([^`)\s）]+):(\d+(?:-\d+)?)`?\s*[)）]/g
+    //   （引用：chapter-01-桃园三结义.txt:34）            ← fullwidth parens
+    //   > **chapter-01-桃园三结义.txt:33**     殺到…    ← markdown blockquote header
+    //   请看 chapter-01-桃园三结义.txt:42 这行         ← bare inline mention
+    //
+    // The regex anchors on the corpus file shape (chapter-NN-…txt) and
+    // optionally eats the surrounding decoration: any of "(引用：…)",
+    // markdown bold "**…**", backticks, or full-/half-width parens.
+    // Captures: 1 = relative file path, 2 = line number ("N" or "N-M").
+    const CITATION_RE = /(?:[（(]\s*引用\s*[：:]\s*)?\*{0,2}`?(chapter-[^\s`)）"<>:*]+\.txt):(\d+(?:-\d+)?)`?\*{0,2}(?:\s*[)）])?/g
+
+    // Minimal markdown subset the agent actually emits: bold (**), inline
+    // code (`), and blockquote line prefix (> ). We deliberately do NOT
+    // pull in a general-purpose markdown parser because (a) the corpus
+    // doesn't use heading / list / link syntax, and (b) citation markers
+    // can overlap with bold syntax (e.g. **chapter-01-…txt:33**), so we
+    // need tight control over substitution order. Operates on already-
+    // HTML-escaped input; emits HTML.
+    function renderMinimalMarkdown(escaped) {
+      let s = escaped
+      // Bold first (non-greedy, single-line so unmatched stars don't eat
+      // across paragraphs).
+      s = s.replace(/\*\*([^*\n]+?)\*\*/g, '<strong>$1</strong>')
+      // Inline code (avoid crossing newlines).
+      s = s.replace(/`([^`\n]+)`/g, '<code>$1</code>')
+      // Blockquote line prefix: "> " at start of text or after a newline.
+      // (esc() turned > into &gt;, so we match that form here.) Wrap the
+      // remainder of the line so CSS can style it with a border ribbon.
+      s = s.replace(/(^|\n)&gt;\s?(.*)/g, '$1<span class="md-quote">$2</span>')
+      return s
+    }
 
     // Render the assistant body: scan for citation markers, replace each
-    // with a <sup> chip, and append a deduped "sources" footer summarizing
-    // which files were cited. Returns an HTML string; caller assigns to a
-    // container's innerHTML.
+    // with a <sup> chip, apply minimal markdown, and append a deduped
+    // "sources" footer summarizing which files were cited.
+    //
+    // Pipeline order matters:
+    //   1. Find citations and replace each with an unprintable placeholder
+    //      token. This must happen BEFORE markdown processing because some
+    //      citation forms (e.g. **file:line**) collide with bold syntax.
+    //   2. Escape the (still placeholder-bearing) text.
+    //   3. Apply markdown — placeholders are inert.
+    //   4. Substitute placeholders back with the final <sup> chip HTML.
     function renderAssistantHtml(text) {
       const cites = []
       let cursor  = 0
-      let html    = ''
+      let buffer  = ''
       let m
       CITATION_RE.lastIndex = 0
       while ((m = CITATION_RE.exec(text)) !== null) {
         const [match, file, line] = m
-        // Append text since last cursor, then the citation chip
-        html += esc(text.slice(cursor, m.index))
+        buffer += text.slice(cursor, m.index)
         const n = cites.length + 1
         cites.push({ file, line })
-        html += `<sup class="cite" data-n="${n}" data-file="${esc(file)}" data-line="${esc(line)}">${n}</sup>`
+        //  is non-printable and never appears in plain prose; it
+        // survives esc() because the regex below doesn't touch it.
+        buffer += `CITE${n}`
         cursor = m.index + match.length
       }
-      html += esc(text.slice(cursor))
+      buffer += text.slice(cursor)
+
+      let html = renderMinimalMarkdown(esc(buffer))
+      html = html.replace(/CITE(\d+)/g, (_match, idx) => {
+        const c = cites[parseInt(idx, 10) - 1]
+        return `<sup class="cite" data-n="${esc(idx)}" data-file="${esc(c.file)}" data-line="${esc(c.line)}">${esc(idx)}</sup>`
+      })
 
       let footer = ''
       if (cites.length > 0) {
-        // Dedupe by file path (line ranges collapsed) so the footer shows
-        // how many distinct source files back this answer, not how many
-        // inline citation markers were emitted.
         const seenFiles = new Set()
         const fileList  = []
         for (const c of cites) {
@@ -471,29 +559,93 @@
     // render them as numbered cards. Internal substrate events (clock,
     // uuid, region, boundary) are intentionally hidden — those belong
     // in dev mode's substrate inspector, not in a per-turn audit.
+    // Stability buckets we group regions by in the expander. Listed in
+    // display order — most-stable first reads top-down like a layered
+    // prompt, which mirrors how the agent's working context is actually
+    // assembled (immutable system prompt at the top, volatile scratch at
+    // the bottom).
+    const STABILITY_ORDER = ['immutable', 'session-stable', 'turn-stable', 'volatile']
+
+    function classifyCacheHit(hitRate) {
+      if (hitRate == null) return null
+      if (hitRate >= 0.7) return { tier: 'hot',  pct: Math.round(hitRate * 100) }
+      if (hitRate >= 0.3) return { tier: 'warm', pct: Math.round(hitRate * 100) }
+      return { tier: 'cold', pct: Math.round(hitRate * 100) }
+    }
+
+    function formatTokenCount(n) {
+      if (n == null) return ''
+      if (n >= 1000) return `${(n / 1000).toFixed(1)}k`
+      return String(n)
+    }
+
+    function renderRegionExpander(regions) {
+      if (regions.length === 0) {
+        return `<div class="ap-region-empty">No regions in context at this point.</div>`
+      }
+      const byStability = new Map(STABILITY_ORDER.map(k => [k, []]))
+      for (const r of regions) {
+        const bucket = byStability.get(r.stability) || (byStability.set(r.stability, []), byStability.get(r.stability))
+        bucket.push(r)
+      }
+      let html = ''
+      for (const stability of STABILITY_ORDER) {
+        const group = byStability.get(stability) || []
+        if (group.length === 0) continue
+        html += `<div class="ap-region-group">
+          <div class="rg-title">${esc(stability)} · ${group.length}</div>
+          ${group.map(r => `
+            <div class="ap-region-row">
+              <span class="rr-id">${esc(r.id)}</span>
+              <span class="rr-meta">${esc(r.target)} · ${esc(r.section)} · ${esc(r.reason)}</span>
+            </div>
+          `).join('')}
+        </div>`
+      }
+      return html
+    }
+
     function renderStepsTab(runId) {
       const events = eventsByRunId.get(runId) || []
-      // Pair tool.requested with tool.responded via requestHash — the
-      // content-addressed cache key both events carry. (Both events
-      // also carry toolName, but multiple calls to the same tool make
-      // toolName non-unique, so requestHash is the right key.)
+      // Pair requests with their responses via requestHash — the
+      // content-addressed cache key both sides carry. Same key both for
+      // tool pairing and for fetching LLM cache stats off the response
+      // payload.
       const toolResponses = new Map()
+      const llmResponses  = new Map()
       for (const e of events) {
         if (e.type === 'tool.responded' && e.payload && e.payload.requestHash) {
           toolResponses.set(e.payload.requestHash, e)
         }
+        if (e.type === 'llm.responded' && e.payload && e.payload.requestHash) {
+          llmResponses.set(e.payload.requestHash, e)
+        }
       }
+      // Maintain a live region map as we walk events; snapshot it whenever
+      // an llm.requested fires. The snapshot is what was in the model's
+      // working context at the moment of that LLM call — the unique
+      // milkie observation the region.added/removed substrate enables.
+      const activeRegions = new Map()
       const cards = []
       for (const e of events) {
-        if (e.type === 'llm.requested') {
+        if (e.type === 'region.added' && e.payload && e.payload.id) {
+          activeRegions.set(e.payload.id, e.payload)
+        } else if (e.type === 'region.removed' && e.payload && e.payload.id) {
+          activeRegions.delete(e.payload.id)
+        } else if (e.type === 'llm.requested') {
           const messages = e.payload && e.payload.request && countMessages(e.payload.request)
+          const resp     = e.payload && e.payload.requestHash && llmResponses.get(e.payload.requestHash)
+          const cache    = resp && resp.payload && resp.payload.cacheStats
+          const snapshot = Array.from(activeRegions.values())
           cards.push({
-            kind: 'llm',
-            label: 'LLM call',
-            body: messages != null
+            kind:    'llm',
+            label:   'LLM call',
+            body:    messages != null
               ? `Sent <code>${messages}</code> message${messages === 1 ? '' : 's'} to the model`
               : 'Sent prompt to the model',
-            meta: null,
+            meta:    null,
+            cache:   cache ? { ...cache, hit: classifyCacheHit(cache.hitRate) } : null,
+            regions: snapshot,
           })
         } else if (e.type === 'tool.requested') {
           const name = (e.payload && e.payload.toolName) || '?'
@@ -514,14 +666,27 @@
       if (cards.length === 0) {
         return `<div class="ap-empty">No recorded steps for this turn yet.</div>`
       }
-      return cards.map((c, i) => `
-        <div class="ap-step kind-${c.kind}">
-          <div class="ap-step-num">${i + 1}</div>
-          <div class="ap-step-kind">${esc(c.label)}</div>
-          <div class="ap-step-body">${c.body}</div>
-          ${c.meta ? `<div class="ap-step-meta">${esc(c.meta)}</div>` : ''}
-        </div>
-      `).join('')
+      return cards.map((c, i) => {
+        const cacheBadge = c.cache && c.cache.hit
+          ? `<span class="ap-step-cache ${c.cache.hit.tier === 'cold' ? 'cold' : c.cache.hit.tier === 'warm' ? 'warm' : ''}">${c.cache.hit.pct}% cached · ${formatTokenCount(c.cache.readTokens)}/${formatTokenCount(c.cache.totalInputTokens)} tok</span>`
+          : ''
+        const expander = c.kind === 'llm'
+          ? `<div class="ap-step-expand" data-step-idx="${i}">${c.regions.length} region${c.regions.length === 1 ? '' : 's'} in context</div>
+             <div class="ap-step-expanded">${renderRegionExpander(c.regions)}</div>`
+          : ''
+        return `
+          <div class="ap-step kind-${c.kind}" data-step-idx="${i}">
+            <div class="ap-step-num">${i + 1}</div>
+            <div class="ap-step-headerline">
+              <div class="ap-step-kind">${esc(c.label)}</div>
+              ${cacheBadge}
+            </div>
+            <div class="ap-step-body">${c.body}</div>
+            ${c.meta ? `<div class="ap-step-meta">${esc(c.meta)}</div>` : ''}
+            ${expander}
+          </div>
+        `
+      }).join('')
     }
 
     function countMessages(request) {
@@ -629,26 +794,52 @@
       }
     }
 
+    // Substring match between a segment and its source. Catches the
+    // "verbatim copy without quote wrappers" case — e.g. when the agent
+    // pastes a passage into a markdown blockquote (`> …`) or just inlines
+    // it bare. Markdown formatting chars are stripped before comparison
+    // since the source corpus has none of them.
+    const SUBSTRING_MIN_LEN = 20
+    function hasVerbatimSubstring(segText, sourceText) {
+      const strip = s => s.replace(/[*`>]/g, '')
+      const seg = strip(segText)
+      const src = strip(sourceText)
+      if (seg.length < SUBSTRING_MIN_LEN) return false
+      for (let i = 0; i + SUBSTRING_MIN_LEN <= seg.length; i++) {
+        if (src.includes(seg.slice(i, i + SUBSTRING_MIN_LEN))) return true
+      }
+      return false
+    }
+
     // Decide a segment's provenance state from its citations and the
     // (already-fetched) source slices. Rules in priority order:
     //   1. No citation → unsupported (red).
     //   2. Citation but every source fetch failed → unverified (gray).
-    //   3. Citation, has explicit quoted snippet(s), every snippet
-    //      appears in some fetched source → supported (green).
-    //   4. Citation, has explicit quoted snippet(s), at least one
-    //      snippet absent from source → tenuous (orange — possible
-    //      hallucinated quote).
-    //   5. Citation, no explicit quote → paraphrased (yellow).
+    //   3. Citation + explicit quoted snippets (curly/corner quotes):
+    //        all snippets in source → supported (green)
+    //        any snippet absent → tenuous (orange, possible hallucination)
+    //   4. Citation + a ≥20-char contiguous substring of source appears
+    //      in the segment (verbatim copy without quote wrappers, e.g.
+    //      a markdown blockquote header followed by pasted text) →
+    //      supported (green).
+    //   5. Otherwise (citation, summary in own words) → paraphrased (yellow).
     function classifySegment(seg, sourceSlices) {
       if (seg.citations.length === 0) return { state: 'unsupported' }
       const okSlices = sourceSlices.filter(s => s != null)
       if (okSlices.length === 0) return { state: 'unverified' }
-      const quotes = extractQuotedSnippets(seg.raw)
-      if (quotes.length === 0) return { state: 'paraphrased' }
       const allSrc = okSlices.map(s => s.content).join('\n')
-      const missing = quotes.filter(q => !allSrc.includes(q))
-      if (missing.length === 0) return { state: 'supported', quotes }
-      return { state: 'tenuous', quotes, missingQuotes: missing }
+
+      const quotes = extractQuotedSnippets(seg.raw)
+      if (quotes.length > 0) {
+        const missing = quotes.filter(q => !allSrc.includes(q))
+        if (missing.length === 0) return { state: 'supported', quotes }
+        return { state: 'tenuous', quotes, missingQuotes: missing }
+      }
+
+      if (hasVerbatimSubstring(seg.text, allSrc)) {
+        return { state: 'supported' }
+      }
+      return { state: 'paraphrased' }
     }
 
     const STATE_LABELS = {
@@ -770,6 +961,15 @@
         if (t.classList.contains('disabled')) return
         setAuditTab(t.dataset.tab)
       })
+    })
+    // Steps tab: click the "N regions in context" toggle on an LLM step
+    // to expand the context-composition panel for that step.
+    $auditBody.addEventListener('click', (ev) => {
+      const target = ev.target
+      if (!(target instanceof HTMLElement)) return
+      if (!target.classList.contains('ap-step-expand')) return
+      const card = target.closest('.ap-step')
+      if (card) card.classList.toggle('expanded')
     })
     // Click on "View audit ▾" trigger inside any assistant message.
     $log.addEventListener('click', (ev) => {
