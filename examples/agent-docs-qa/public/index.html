@@ -62,6 +62,27 @@
       display: inline-block; margin-top: 8px; font-size: 12px; color: var(--accent);
       cursor: pointer; user-select: none;
     }
+    /* Pending bubble while the agent is running. We don't know yet how
+       long the turn will take or what tools it will call, so the bubble
+       shows an animated "·  ·  ·" plus a live status line that the SSE
+       handler updates as each tool/LLM step fires. */
+    .msg.assistant.pending {
+      color: var(--muted); font-style: italic;
+    }
+    .msg.assistant.pending .pending-dots::after {
+      content: '·';
+      animation: pendingDots 1.4s steps(4, end) infinite;
+    }
+    @keyframes pendingDots {
+      0%   { content: '·' }
+      25%  { content: '· ·' }
+      50%  { content: '· · ·' }
+      75%  { content: '· · · ·' }
+      100% { content: '·' }
+    }
+    .msg.assistant.pending .pending-status {
+      display: block; margin-top: 4px; font-size: 12px;
+    }
     .msg.assistant .sources-footer + .audit-trigger { margin-top: 4px }
     .msg.assistant .audit-trigger:hover { text-decoration: underline }
     .msg.assistant .body strong { font-weight: 600 }
@@ -1038,6 +1059,7 @@
       sourceCache.clear()
       hideCitePopover()
       closeAudit()
+      removePendingBubble()
     }
 
     // ─── Render an event into trace timeline (dev mode only matters) ───
@@ -1100,6 +1122,37 @@
       if (t === 'clock.read')          return `clock.read · ${event.payload && event.payload.value}`
       if (t === 'uuid.generated')      return `uuid.generated · ${(event.payload && event.payload.value || '').slice(0, 8)}…`
       return t
+    }
+
+    // Tracks the pending bubble for the in-flight turn so the SSE handler
+     // (which may receive agent.run.completed before /chat resolves) can
+     // find and replace it. Null when no turn is in flight.
+    let $pendingBubble = null
+
+    function showPendingBubble() {
+      removePendingBubble()
+      const div = document.createElement('div')
+      div.className = 'msg assistant pending'
+      div.innerHTML =
+        `<div class="speaker">assistant</div>` +
+        `<span class="pending-dots"></span>` +
+        `<span class="pending-status">Thinking…</span>`
+      $log.appendChild(div)
+      $log.scrollTop = $log.scrollHeight
+      $pendingBubble = div
+    }
+
+    function updatePendingStatus(text) {
+      if (!$pendingBubble) return
+      const $status = $pendingBubble.querySelector('.pending-status')
+      if ($status) $status.textContent = text
+    }
+
+    function removePendingBubble() {
+      if ($pendingBubble && $pendingBubble.parentNode) {
+        $pendingBubble.parentNode.removeChild($pendingBubble)
+      }
+      $pendingBubble = null
     }
 
     function renderChatMessage(role, text, runId) {
@@ -1174,7 +1227,17 @@
         const event = JSON.parse(msg.data)
         const isNew = renderEvent(event)
         if (!isNew) return
+        // Live progress updates on the pending bubble — let the user
+        // see the agent is actively doing things, not stuck.
+        if ($pendingBubble) {
+          if (event.type === 'tool.requested' && event.payload && event.payload.toolName) {
+            updatePendingStatus(`Calling tool: ${event.payload.toolName}…`)
+          } else if (event.type === 'llm.requested') {
+            updatePendingStatus('Thinking…')
+          }
+        }
         if (event.type === 'agent.run.completed' && event.payload && event.payload.lastTextOutput) {
+          removePendingBubble()
           renderChatMessage('assistant', event.payload.lastTextOutput, event.runId)
         }
       }
@@ -1190,6 +1253,7 @@
       if (!text) return
 
       renderChatMessage('user', text)
+      showPendingBubble()
       $input.value = ''
       $input.disabled = true
       $submit.disabled = true
@@ -1207,6 +1271,7 @@
           openSse(currentContextId)
         }
       } catch (err) {
+        removePendingBubble()
         renderChatMessage('assistant', `[error] ${err.message}`)
       } finally {
         $input.disabled = false
