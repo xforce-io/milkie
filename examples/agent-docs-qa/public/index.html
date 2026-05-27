@@ -165,8 +165,13 @@
     }
 
     // ─── Render an event into trace timeline ───────────────────────────
+    // Returns true if the event was newly rendered, false if it was already
+    // seen (deduped). Callers use this to gate side effects like rendering
+    // a chat bubble — otherwise an event that arrives via both the /events
+    // catch-up fetch and the SSE stream's past-event replay would render
+    // its chat message twice.
     function renderEvent(event) {
-      if (seenEventIds.has(event.id)) return
+      if (seenEventIds.has(event.id)) return false
       seenEventIds.add(event.id)
 
       const div = document.createElement('div')
@@ -192,6 +197,7 @@
 
       $tl.appendChild(div)
       autoScroll()
+      return true
     }
 
     function kindClass(type) {
@@ -245,7 +251,8 @@
       if (eventsResp.status === 404) return
       const { events } = await eventsResp.json()
       for (const e of events) {
-        renderEvent(e)
+        const isNew = renderEvent(e)
+        if (!isNew) continue
         if (e.type === 'agent.run.started' && e.payload && e.payload.input) {
           renderChatMessage('user', e.payload.input)
         } else if (e.type === 'agent.run.completed' && e.payload && e.payload.lastTextOutput) {
@@ -269,7 +276,8 @@
       eventSource = new EventSource(`/conversation/${ctxId}/stream`)
       eventSource.onmessage = (msg) => {
         const event = JSON.parse(msg.data)
-        renderEvent(event)
+        const isNew = renderEvent(event)
+        if (!isNew) return
         if (event.type === 'agent.run.completed' && event.payload && event.payload.lastTextOutput) {
           renderChatMessage('assistant', event.payload.lastTextOutput)
         }
