@@ -3,11 +3,12 @@
 This document captures milkie's top-level architecture and the design decisions
 that hold it together.
 
-It describes the **target** architecture for milkie as a library. Many parts
-lead the current implementation. See `## Implementation Status` below for a
-calibrated picture of what is in code today vs. what this document anticipates;
-implementation gaps should be tracked as roadmap or design-doc work rather than
-treated as accidental drift by default.
+It describes the **target** architecture for milkie as a library.
+
+> **Target document.** Strong claims throughout (e.g. "every run replays
+> deterministically") are **target invariants** — not necessarily current
+> behavior. For what's implemented today, what's still target-only, and
+> migration intentions, see `roadmap.md`.
 
 ## Purpose & Value
 
@@ -28,147 +29,6 @@ agent has a first-class path to measurably improve the runs it produces.
 diagnosable, debuggable, auditable, and improvable as a first-class artifact.
 Outputs are views over runs, not vice versa. Agents that produce only outputs
 become black boxes that work until they don't.
-
-## Implementation Status
-
-The architecture below is a target. Below summarizes what is in code today
-vs. what this document anticipates. Strong claims throughout this document
-(e.g. "every run replays deterministically") should be read as **target
-invariants**, not current behavior, except where this section lists them
-as implemented.
-
-### Implemented today
-
-- **Agent Runtime FSM Core** — Statechart-based execution, transitions,
-  multi-turn loops. (`src/runtime/`, `src/fsm/`)
-- **working context (basic)** — Region-based substrate: every piece of
-  context (header, skills, state instructions, working memory, history,
-  scratchpad, current turn, tool schemas) is a typed `Region` in a
-  `ContextRegions` store; a pure `assemble(regions, scope)` function
-  produces the LLM request on each call. Note: this is an in-Agent
-  assembly substrate, **not** an implementation of the external
-  Context Layer concept described under "Infrastructure layers" — see
-  §Context Layer for the distinction. (`src/context/`)
-- **Trajectory / span observability** — `TrajectoryStore` collects spans
-  for `llm.call`, `tool.call`, `fsm.transition`, etc. This is the
-  predecessor of the event-sourced Agent Trace described below.
-  (`src/trajectory/`)
-- **IOPort as non-determinism boundary** — `IIOPort` / `DefaultIOPort`
-  in `src/runtime/IOPort.ts`. Agent Runtime routes every LLM call, tool
-  invocation, clock read, and UUID generation through it. `DefaultIOPort`
-  is the live-passthrough leaf; `RecordingIOPort` and `ReplayingIOPort`
-  are the record/replay decorators. (`src/runtime/IOPort.ts`,
-  `src/trace/RecordingIOPort.ts`, `src/trace/ReplayingIOPort.ts`)
-- **Agent Trace event log** — `Event` / `IEventStore` / `RecordingIOPort`
-  in `src/trace/`. When an `eventStore` is supplied to `Milkie`, every LLM
-  and tool I/O is recorded as paired `requested` / `responded` events with
-  `causedBy` chains, plus `agent.run.started` / `agent.run.completed`
-  lifecycle events and `clock.read` / `uuid.generated` non-determinism
-  events. MemoryEventStore and JsonlEventStore implementations provided.
-  (`src/trace/`)
-- **Content-addressed cache + byte-identical replay** — `CacheIndex`
-  projects an event log into per-hash FIFO queues for llm/tool, plus
-  position-FIFO queues for clock/uuid. `ReplayingIOPort` serves every
-  IIOPort method from the cache (live `inner` never called during
-  replay). `Milkie.replay(runId)` re-runs a recorded run with zero
-  live LLM/tool calls and byte-identical agent-observable nondet;
-  strict P-wide divergence — over-consume throws immediately,
-  under-consume across any of the four queues throws at the tail.
-  (`src/trace/CacheIndex.ts`, `src/trace/ReplayingIOPort.ts`,
-  `src/runtime/Milkie.ts:replay`)
-- **State stores for checkpoint/resume** — MemoryStore / SQLiteStore /
-  RedisStore for interrupt/resume scenarios. (`src/store/`) All three implement
-  `IStateStore` (`src/types/store.ts`); SQLite and Redis variants require
-  `init()`, MemoryStore is constructor-ready.
-- **Yield point + interrupt signal** — FSM has a `paused` reserved state and
-  a global `interrupt` event handler. `Milkie.interrupt(contextId)` writes an
-  interrupt flag into stateStore that AgentRuntime polls on each turn boundary,
-  enqueuing an `interrupt` event that transitions the FSM into `paused`. The
-  paused checkpoint can be re-loaded by a later `invoke` with the same
-  `contextId`. (`src/fsm/FSMEngine.ts:11,61-62`,
-  `src/runtime/Milkie.ts:297-300`, `src/runtime/AgentRuntime.ts:238-242`)
-- **Supervisor tree (interrupt propagation)** — When a parent agent is
-  interrupted, every spawned sub-agent receives the interrupt and writes its
-  own checkpoint; the parent's checkpoint records each child's `checkpointId`
-  in its `children` array so the whole tree can be resumed together.
-  (`src/runtime/AgentRuntime.ts:141-186`,
-  `src/types/store.ts:45-51` for `ChildAgentRecord`)
-
-### Target only (not yet in code)
-
-- **`random.consumed` non-determinism record** — Phase 4 ships
-  `clock.read` and `uuid.generated`; `Math.random` has zero call sites
-  in `src/` today, so the third variant is deferred until a real
-  consumer appears. External non-LLM tool I/O outcomes beyond the
-  already-recorded `tool.responded` event are similarly deferred —
-  Phase 4 records what `port.now()` / `port.uuid()` return and
-  ReplayingIOPort serves them strictly, but file I/O / network I/O
-  from operator implementations are still served via the existing
-  `tool.responded` cache (no operator-specific policy hook yet —
-  see Phase 5 fork follow-up).
-- **Fork engine** — branch a run at any event with shared prefix from cache
-  (no new model calls for the shared history). Phase 5.
-- **Structural diff** — typed comparison of two event logs / projected
-  graphs. Phase 5.
-- **Lineage-by-typed-relations** — current event log only records I/O;
-  lineage requires emitting `object.created` / `relation.created` and
-  traversing causedBy chains as a graph. Both **forward queries**
-  (artifact → source) and **reverse queries** (source → all dependents)
-  are in scope. Phase 6 or later.
-- **Suite definition + batch replay** — saved sets of runs (e.g.
-  `golden_v1`) replayable as a single operation against a new code version;
-  per-run divergence reported as structured output for batch analysis by
-  downstream consumers. Phase 5.
-- **In-flight trace query API** — query a run's event log while the run is
-  still active, so sub-agents can consume their parent's trace mid-run.
-  Today event stores are writable during a run; query semantics across
-  in-flight + completed runs need an explicit contract. Phase 5.
-- **External Context Layer / Data / Execution / Foundation** — These
-  infrastructure layers are described as outside the milkie boundary.
-  Today they are entirely absent: there is no Data or Execution
-  abstraction (gateway substitutes for Foundation), and the read-side
-  responsibilities of an external Context Layer (knowledge retrieval,
-  memory lookup, capability table resolution) are not implemented. The
-  in-Agent `ContextRegions` substrate is not a stand-in for them — it
-  only assembles what the agent already has in scope into an LLM
-  request (see §Context Layer for the distinction).
-- **Evolution subsystem** — Experiment Registry, Traffic Splitter, Outcome
-  Collector, Promotion Gate — none implemented.
-- **Capability vocabulary in full** — observable / diagnosable / lineage /
-  replay / fork / diff are described as a 6-capability surface; today only
-  basic span query exists via TrajectoryStore.
-- **Reference UI projection** — first probe shipped: `milkie trace report
-  <runId>` renders a completed run as a self-contained HTML timeline
-  (single agent + recursive sub-agent nesting via Observable). Full form
-  TBD — local viewer / static report generator / IDE extension are still
-  open, and Phase-5 capabilities (fork / diff / lineage / suite) have no
-  visual surface yet. The product thesis "runs as the primary engineering
-  product" requires a visual surface for humans to perceive runs as
-  objects; the probe validates that CLI JSON output is rich enough to
-  drive a projection, but the library is still incomplete without a UI
-  story for the Phase 5–6 capabilities.
-
-### Migration intentions (not commitments)
-
-- **Trajectory → Event log**: When event-sourced Agent Trace lands,
-  TrajectoryStore either becomes a projection over the event log or is
-  retired in favor of the event log's native query surface.
-- **In-Agent ContextRegions → External Context Layer**: The current
-  `src/context/ContextRegions.ts` is a region-based assembly substrate
-  that lives inside Agent Runtime — it is **not** a local shim for the
-  external Context Layer. The external interface remains future work.
-  When it materializes, the read-side responsibilities (knowledge
-  retrieval, memory lookup, capability resolution) move outward;
-  `ContextRegions` stays in-Agent as the assembly substrate for whatever
-  the Context Layer projection delivers.
-- **IOPort → Execution operator**: IOPort currently passes through to
-  the gateway directly. The target is to route invocations through an
-  Execution layer operator (which itself delegates to Foundation /
-  Model Factory).
-
-This section is the source of truth for "what works today." When code lands
-that closes a gap, update this section before claiming the gap is closed
-elsewhere.
 
 ## Overview
 
