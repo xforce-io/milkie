@@ -4,7 +4,7 @@ import type { ModelRequest, ModelResponse } from '../types/model.js'
  * Agent Trace event types.
  *
  * Phase 3 adds lifecycle events and content-addressed cache fields on I/O
- * payloads. Spawn/fork events are deferred to Phase 5.
+ * payloads. Agent spawn and return events are now included; fork events remain future.
  */
 export type EventKind =
   | 'llm.requested'
