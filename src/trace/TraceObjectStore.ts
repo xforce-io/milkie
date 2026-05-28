@@ -64,24 +64,22 @@ export class FileTraceObjectStore implements ITraceObjectStore {
   async putCanonical(bytes: string): Promise<string> {
     const hash = contentAddressForCanonicalBytes(bytes)
     const file = this.fileFor(hash)
-    try {
-      const existing = await fs.readFile(file, 'utf-8')
-      if (existing !== bytes) {
-        throw new Error(`Trace object hash collision or corruption for ${hash}`)
-      }
-      return hash
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
-    }
+    if (await this.has(hash)) return hash
 
     await fs.mkdir(path.dirname(file), { recursive: true })
-    await fs.writeFile(file, bytes, { encoding: 'utf-8', flag: 'wx' }).catch(async (err: NodeJS.ErrnoException) => {
-      if (err.code !== 'EEXIST') throw err
+    const tmp = `${file}.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`
+    try {
+      await fs.writeFile(tmp, bytes, { encoding: 'utf-8', flag: 'wx' })
+      await fs.link(tmp, file)
+      await fs.rm(tmp, { force: true })
+    } catch (err) {
+      await fs.rm(tmp, { force: true }).catch(() => undefined)
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err
       const existing = await fs.readFile(file, 'utf-8')
       if (existing !== bytes) {
         throw new Error(`Trace object hash collision or corruption for ${hash}`)
       }
-    })
+    }
     return hash
   }
 

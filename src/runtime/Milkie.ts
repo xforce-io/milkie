@@ -16,7 +16,7 @@ import { AgentRuntime } from './AgentRuntime.js'
 import { DefaultIOPort, type IIOPort } from './IOPort.js'
 import type { IEventStore } from '../trace/EventStore.js'
 import { RecordingIOPort } from '../trace/RecordingIOPort.js'
-import { MemoryTraceObjectStore, type ITraceObjectStore } from '../trace/TraceObjectStore.js'
+import type { ITraceObjectStore } from '../trace/TraceObjectStore.js'
 import { CacheIndex } from '../trace/CacheIndex.js'
 import { ReplayingIOPort } from '../trace/ReplayingIOPort.js'
 import { ReplayError } from '../trace/ReplayError.js'
@@ -57,7 +57,7 @@ export class Milkie {
     this.extraTools      = opts.tools            ?? []
     this.trajectoryStore = opts.trajectoryStore  ?? null
     this.eventStore      = opts.eventStore       ?? null
-    this.traceObjectStore = opts.traceObjectStore ?? (opts.eventStore ? new MemoryTraceObjectStore() : null)
+    this.traceObjectStore = opts.traceObjectStore ?? null
   }
 
   private wrapIOPort(gateway: IModelGateway, runId: string): IIOPort {

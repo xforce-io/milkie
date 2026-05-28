@@ -7,7 +7,7 @@ export interface RegionContentRef {
   section:      string
   stability:    RegionAddedPayload['stability']
   reason:       string
-  contentHash:  string
+  contentHash?: string
   renderedHash?: string
   content?:     string
   rendered?:    string
@@ -32,7 +32,7 @@ export function foldRegionContext(events: Event[]): Map<string, RegionContentRef
         section:      payload.section,
         stability:    payload.stability,
         reason:       payload.reason,
-        contentHash:  payload.contentHash,
+        ...(payload.contentHash ? { contentHash: payload.contentHash } : {}),
         ...(payload.renderedHash ? { renderedHash: payload.renderedHash } : {}),
       })
     } else if (event.type === 'region.removed') {
@@ -56,7 +56,7 @@ export async function hydrateRegionContext(
     const rendered = ref.renderedHash ? await objectStore.getCanonical(ref.renderedHash) : undefined
     hydrated.set(id, {
       ...ref,
-      content:  await objectStore.getCanonical(ref.contentHash),
+      ...(ref.contentHash ? { content: await objectStore.getCanonical(ref.contentHash) } : {}),
       ...(rendered !== undefined ? { rendered } : {}),
     })
   }

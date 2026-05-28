@@ -22,6 +22,15 @@ import type {
 import type { IModelGateway, ModelRequest, ModelResponse } from '../types/model'
 import type { AgentConfig } from '../types/agent'
 
+class FailingEventStore extends MemoryEventStore {
+  async append(event: Event): Promise<void> {
+    if (event.type === 'region.added' || event.type === 'region.removed' || event.type === 'context.boundary.applied') {
+      throw new Error('disk full')
+    }
+    await super.append(event)
+  }
+}
+
 function minimalAgentConfig(agentId: string): AgentConfig {
   return {
     agentId,
@@ -195,6 +204,19 @@ describe('TraceObjectStore', () => {
     expect((await getRegionAt(events, 'e1', 'skill:research', objects))?.content).toBe('"v1"')
     expect((await getRegionAt(events, 'e2', 'skill:research', objects))?.content).toBe('"v2"')
     expect(await getRegionAt(events, 'e3', 'skill:research', objects)).toBeUndefined()
+  })
+
+  it('gracefully hydrates legacy region.added events without contentHash', async () => {
+    const objects = new MemoryTraceObjectStore()
+    const events: Event[] = [
+      makeEvent({
+        id: 'legacy',
+        type: 'region.added',
+        payload: { id: 'header', target: 'system', section: 'header', stability: 'immutable', reason: 'legacy' },
+      }),
+    ]
+
+    expect((await getRegionAt(events, 'legacy', 'header', objects))?.content).toBeUndefined()
   })
 })
 
@@ -425,12 +447,43 @@ describe('RecordingIOPort — Phase 3 additions', () => {
     const headerAdded = events.find(e => e.type === 'region.added' && (e.payload as RegionAddedPayload).id === 'header')!
     const headerPayload = headerAdded.payload as RegionAddedPayload
     expect(headerPayload.contentHash).toMatch(/^sha256:[a-f0-9]{64}$/)
-    expect(await traceObjectStore.getCanonical(headerPayload.contentHash)).toBe('"system"')
+    expect(await traceObjectStore.getCanonical(headerPayload.contentHash!)).toBe('"system"')
 
     const firstLlm = events.find(e => e.type === 'llm.requested')!
     const context = await contextBefore(events, firstLlm.id, traceObjectStore)
     expect(context.get('header')?.content).toBe('"system"')
     expect(context.get('current-turn')?.content).toContain('Goal: g')
+  })
+
+  it('does not expose content hashes when no traceObjectStore is configured', async () => {
+    const eventStore = new MemoryEventStore()
+    const milkie = new Milkie({
+      stateStore: new MemoryStore(),
+      gateway:    new StubGateway([textResponse('hello')]),
+      eventStore,
+    })
+    milkie.registerAgent(minimalAgentConfig('a1'))
+
+    const result = await milkie.invoke({ agentId: 'a1', goal: 'g', input: 'i' })
+    const events = await eventStore.readByRunId(result.agentRunId)
+    const added = events.find(e => e.type === 'region.added')!
+
+    expect((added.payload as RegionAddedPayload).contentHash).toBeUndefined()
+  })
+
+  it('trace write failures do not change the agent result', async () => {
+    const milkie = new Milkie({
+      stateStore: new MemoryStore(),
+      gateway:    new StubGateway([textResponse('hello')]),
+      eventStore: new FailingEventStore(),
+      traceObjectStore: new MemoryTraceObjectStore(),
+    })
+    milkie.registerAgent(minimalAgentConfig('a1'))
+
+    const result = await milkie.invoke({ agentId: 'a1', goal: 'g', input: 'i' })
+
+    expect(result.status).toBe('completed')
+    expect(result.output).toBe('hello')
   })
 })
 
