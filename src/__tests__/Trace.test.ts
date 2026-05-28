@@ -15,6 +15,7 @@ import type {
   ToolRequestedPayload,
   ToolRespondedPayload,
   FsmTransitionPayload,
+  SkillLifecyclePayload,
 } from '../trace/types'
 import type { IModelGateway, ModelRequest, ModelResponse } from '../types/model'
 import type { AgentConfig } from '../types/agent'
@@ -62,6 +63,12 @@ const textResponse = (text: string): ModelResponse => ({
   content:      [{ type: 'text', text }],
   toolCalls:    [],
   finishReason: 'end_turn',
+})
+
+const toolCallResponse = (id: string, name: string, input: unknown): ModelResponse => ({
+  content:      [{ type: 'tool_use', id, name, input }],
+  toolCalls:    [{ id, name, input }],
+  finishReason: 'tool_use',
 })
 
 const sampleRequest: ModelRequest = {
@@ -348,6 +355,48 @@ describe('RecordingIOPort — Phase 3 additions', () => {
     expect(startedEvt).toBeDefined()
     expect(kinds[kinds.length - 1]).toBe('agent.run.completed')
     expect((startedEvt!.payload as { agentId: string }).agentId).toBe('a1')
+  })
+
+  it('records skill.loaded and skill.unloaded lifecycle events with version provenance', async () => {
+    const store = new MemoryEventStore()
+    const milkie = new Milkie({
+      stateStore: new MemoryStore(),
+      gateway: new StubGateway([
+        toolCallResponse('skill-1', 'skill_request', { name: 'research' }),
+        textResponse('done with research'),
+      ]),
+      eventStore: store,
+    })
+    milkie.registerAgent({
+      ...minimalAgentConfig('test-agent'),
+      fsm: { states: [{ name: 'react', type: 'llm', max_iterations: 3 }] },
+      skills: { research: '1.0.0' },
+      skillInstructions: { research: 'Research skill instructions' },
+    })
+
+    const result = await milkie.invoke({ agentId: 'test-agent', goal: 'g', input: 'i' })
+
+    const events = await store.readByRunId(result.agentRunId)
+    const loaded = events.find(e => e.type === 'skill.loaded')!
+    const unloaded = events.find(e => e.type === 'skill.unloaded')!
+    expect(loaded).toBeDefined()
+    expect(unloaded).toBeDefined()
+    const loadedIndex = events.findIndex(e => e.type === 'skill.loaded')
+    const requestedWithSkillIndex = events.findIndex(e =>
+      e.type === 'llm.requested'
+      && ((e.payload as LlmRequestedPayload).request.system ?? '').includes('Research skill instructions')
+    )
+    expect(requestedWithSkillIndex).toBeGreaterThan(-1)
+    expect(loadedIndex).toBeLessThan(requestedWithSkillIndex)
+
+    const loadedPayload = loaded.payload as SkillLifecyclePayload
+    expect(loadedPayload).toMatchObject({
+      skillId: 'skill:research',
+      version: '1.0.0',
+      source:  'agent-config.skillInstructions',
+    })
+    expect(loadedPayload.sha).toMatch(/^[a-f0-9]{64}$/)
+    expect(unloaded.payload).toEqual(loaded.payload)
   })
 })
 
