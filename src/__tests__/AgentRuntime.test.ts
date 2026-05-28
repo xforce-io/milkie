@@ -9,6 +9,7 @@ import type { AgentConfig } from '../types/agent'
 import type { AgentCheckpoint } from '../types/store'
 import type { IModelGateway, ModelRequest, ModelResponse } from '../types/model'
 import type { ToolDefinition } from '../types/tool'
+import type { AgentReturnedPayload } from '../trace/types'
 
 // ---- Fixtures ----
 
@@ -416,6 +417,54 @@ describe('AgentRuntime', () => {
       expect(parentCp.children).toHaveLength(2)
       expect(parentCp.children.every(c => c.status === 'interrupted')).toBe(true)
       expect(parentCp.children.every(c => c.checkpointId)).toBe(true)
+    })
+
+    it('emits agent.returned interrupted when sub-agents are interrupted', async () => {
+      const stateStore = new MemoryStore()
+      const eventStore = new MemoryEventStore()
+      const milkie = new Milkie({
+        stateStore,
+        eventStore,
+        gateway: new SupervisorGateway(),
+      })
+
+      milkie.registerAgent(makeConfig({
+        agentId: 'worker-a',
+        fsm: { states: [{ name: 'react', type: 'llm' }] },
+      }))
+      milkie.registerAgent(makeConfig({
+        agentId: 'worker-b',
+        fsm: { states: [{ name: 'react', type: 'llm' }] },
+      }))
+      milkie.registerAgent(makeConfig({
+        agentId: 'supervisor',
+        fsm: { states: [{ name: 'react', type: 'llm', max_iterations: 3 }] },
+        subAgents: {
+          'worker-a': '1.0.0',
+          'worker-b': '1.0.0',
+        },
+      }))
+
+      const runPromise = milkie.invoke({
+        agentId:   'supervisor',
+        goal:      'coordinate',
+        input:     'start',
+        contextId: 'ctx-int',
+      })
+
+      await waitFor(async () => {
+        const children = await stateStore.get('context:ctx-int:children') as Array<{ status: string }> | undefined
+        return (children ?? []).some(c => c.status === 'running')
+      })
+
+      await milkie.interrupt('ctx-int')
+      const result = await runPromise
+
+      const events = await eventStore.readByRunId(result.agentRunId)
+      const returned = events
+        .filter(e => e.type === 'agent.returned')
+        .map(e => e.payload as AgentReturnedPayload)
+      expect(returned.some(p => p.status === 'interrupted')).toBe(true)
     })
   })
 })
