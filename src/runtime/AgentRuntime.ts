@@ -460,13 +460,15 @@ export class AgentRuntime {
     if (!this.rootSpan) return
     this.recorder.recordEvent(this.rootSpan, type, { ...payload })
     if (this.eventStore) {
-      void this.eventStore.append({
-        id:        uuidv4(),
-        runId:     this.agentRunId,
-        type,
-        actor:     this.config.agentId,
-        timestamp: Date.now(),
-        payload,
+      this.enqueueTraceWrite(async () => {
+        await this.eventStore!.append({
+          id:        uuidv4(),
+          runId:     this.agentRunId,
+          type,
+          actor:     this.config.agentId,
+          timestamp: Date.now(),
+          payload,
+        })
       })
     }
   }
