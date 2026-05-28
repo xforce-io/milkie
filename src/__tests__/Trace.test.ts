@@ -608,8 +608,10 @@ describe('agent.spawned / agent.returned events', () => {
     const result = await milkie.invoke({ agentId: 'supervisor', goal: 'g', input: 'i' })
     const events = await eventStore.readByRunId(result.agentRunId)
 
+    const spawned  = events.find(e => e.type === 'agent.spawned')!.payload as AgentSpawnedPayload
     const returned = events.find(e => e.type === 'agent.returned')!.payload as AgentReturnedPayload
     expect(returned.status).toBe('error')
+    expect(returned.childRunId).toBe(spawned.childRunId)
   })
 })
 
