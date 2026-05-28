@@ -21,6 +21,8 @@ export type EventKind =
   | 'fsm.transition'
   | 'skill.loaded'
   | 'skill.unloaded'
+  | 'agent.spawned'
+  | 'agent.returned'
 
 export interface Event<P = unknown> {
   id: string
@@ -89,6 +91,23 @@ export interface AgentRunCompletedPayload {
   status:           'completed' | 'interrupted' | 'error'
   lastTextOutput?:  string
   error?:           string
+}
+
+export interface AgentSpawnedPayload {
+  /** 父 AgentRuntime.agentRunId。 */
+  parentRunId: string
+  /**
+   * 子运行的稳定身份。今天子复用父 runId，此字段填子的 contextId；
+   * #47（sub-agent 一类公民化）落地后改填子的独立 runId——只换值不换 schema。
+   */
+  childRunId:  string
+  agentId:     string
+  goal:        string
+}
+
+export interface AgentReturnedPayload {
+  childRunId: string
+  status:     'completed' | 'interrupted' | 'error'
 }
 
 // ---- Non-determinism payloads (Phase 4) ----
@@ -183,6 +202,8 @@ export type ToolRequestedEvent      = Event<ToolRequestedPayload>      & { type:
 export type ToolRespondedEvent      = Event<ToolRespondedPayload>      & { type: 'tool.responded' }
 export type AgentRunStartedEvent    = Event<AgentRunStartedPayload>    & { type: 'agent.run.started' }
 export type AgentRunCompletedEvent  = Event<AgentRunCompletedPayload>  & { type: 'agent.run.completed' }
+export type AgentSpawnedEvent       = Event<AgentSpawnedPayload>       & { type: 'agent.spawned' }
+export type AgentReturnedEvent      = Event<AgentReturnedPayload>      & { type: 'agent.returned' }
 export type ClockReadEvent          = Event<ClockReadPayload>          & { type: 'clock.read' }
 export type UuidGeneratedEvent      = Event<UuidGeneratedPayload>      & { type: 'uuid.generated' }
 export type RegionAddedEvent        = Event<RegionAddedPayload>        & { type: 'region.added' }
@@ -199,6 +220,8 @@ export type AnyEvent =
   | ToolRespondedEvent
   | AgentRunStartedEvent
   | AgentRunCompletedEvent
+  | AgentSpawnedEvent
+  | AgentReturnedEvent
   | ClockReadEvent
   | UuidGeneratedEvent
   | RegionAddedEvent
