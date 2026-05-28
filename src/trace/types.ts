@@ -19,6 +19,8 @@ export type EventKind =
   | 'region.removed'
   | 'context.boundary.applied'
   | 'fsm.transition'
+  | 'skill.loaded'
+  | 'skill.unloaded'
 
 export interface Event<P = unknown> {
   id: string
@@ -138,6 +140,15 @@ export interface ContextBoundaryAppliedPayload {
   }
 }
 
+// ---- Skill lifecycle payloads (#22) ----
+
+export interface SkillLifecyclePayload {
+  skillId: string
+  version: string
+  source:  string
+  sha?:    string
+}
+
 // ---- FSM payloads (#21) ----
 
 /**
@@ -178,6 +189,8 @@ export type RegionAddedEvent        = Event<RegionAddedPayload>        & { type:
 export type RegionRemovedEvent      = Event<RegionRemovedPayload>      & { type: 'region.removed' }
 export type ContextBoundaryAppliedEvent = Event<ContextBoundaryAppliedPayload> & { type: 'context.boundary.applied' }
 export type FsmTransitionEvent     = Event<FsmTransitionPayload>     & { type: 'fsm.transition' }
+export type SkillLoadedEvent       = Event<SkillLifecyclePayload>    & { type: 'skill.loaded' }
+export type SkillUnloadedEvent     = Event<SkillLifecyclePayload>    & { type: 'skill.unloaded' }
 
 export type AnyEvent =
   | LlmRequestedEvent
@@ -192,3 +205,5 @@ export type AnyEvent =
   | RegionRemovedEvent
   | ContextBoundaryAppliedEvent
   | FsmTransitionEvent
+  | SkillLoadedEvent
+  | SkillUnloadedEvent

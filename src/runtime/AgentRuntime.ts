@@ -1,4 +1,5 @@
 import { v4 as uuidv4 } from 'uuid'
+import { createHash } from 'crypto'
 import type { AgentConfig, FSMState } from '../types/agent.js'
 import type { AgentResult } from '../types/common.js'
 import { MaxIterationsError } from '../types/common.js'
@@ -34,6 +35,7 @@ import type { InMemoryRecorder } from '../trajectory/InMemoryRecorder.js'
 import type { ITraceObjectStore } from '../trace/TraceObjectStore.js'
 import { canonicalize, contentAddressForCanonicalBytes } from '../trace/hash.js'
 import type { Region } from '../context/Region.js'
+import type { SkillLifecyclePayload } from '../trace/types.js'
 
 export interface AgentRuntimeOptions {
   config:            AgentConfig
@@ -57,6 +59,13 @@ export interface AgentRuntimeOptions {
   extraTools?:       ToolDefinition[]
   subAgentConfigs?:  Map<string, AgentConfig>  // agentId → config, for spawning
   childRecorderFactory?: (config: AgentConfig, contextId: string, traceId: string) => ITrajectoryRecorder
+}
+
+type SkillLoadRequest = {
+  name:         string
+  instructions: string
+  scope:        'turn' | 'session'
+  lifecycle:    SkillLifecyclePayload
 }
 
 export class AgentRuntime {
@@ -83,7 +92,8 @@ export class AgentRuntime {
 
   private eventQueue:    Array<{ type: string; payload: unknown }> = []
   private pendingEvents: Array<{ type: string; payload: unknown }> = []
-  private pendingSkillLoads: Array<{ name: string; instructions: string; scope: 'turn' | 'session' }> = []
+  private pendingSkillLoads: Array<SkillLoadRequest> = []
+  private loadedSkills: Map<string, SkillLifecyclePayload> = new Map()
   private pendingTraceWrites: Promise<unknown>[] = []
   private traceWriteChain: Promise<unknown> = Promise.resolve()
   private initialRegionsEmitted = false
@@ -297,22 +307,49 @@ export class AgentRuntime {
     if (!version || !instructions) {
       return { requested: name, status: 'unavailable' }
     }
-    this.pendingSkillLoads.push({ name: normalized, instructions, scope })
+    this.pendingSkillLoads.push({
+      name: normalized,
+      instructions,
+      scope,
+      lifecycle: this.buildSkillLifecyclePayload(normalized, version, instructions),
+    })
     return { requested: normalized, status: 'pending_next_epoch', version, scope }
   }
 
   private applyPendingSkills(): void {
-    for (const { name, instructions, scope } of this.pendingSkillLoads) {
+    for (const { name, instructions, scope, lifecycle } of this.pendingSkillLoads) {
       const id = `skill:${name}`
-      // Already loaded? Skip (preserves createdAt; idempotent like Map.set upsert).
-      // Note: this means re-requesting with a different scope is a no-op — the
-      // first request wins. Acceptable trade-off; agents that need to "upgrade"
-      // a turn-scoped skill to session would have to release first (not currently
-      // possible — release intentionally absent per spec §4.3 rationale).
-      if (this.regions.get(id)) continue
+      const existing = this.regions.get(id)
+      const previous = this.loadedSkills.get(id) ?? this.lifecycleFromExistingSkill(id, existing)
+      // Same version already loaded: preserve createdAt and keep repeated
+      // skill_request idempotent.
+      if (existing && previous?.version === lifecycle.version) continue
+      if (existing && previous) {
+        this.emitSkillLifecycle('skill.unloaded', previous)
+      }
+      this.loadedSkills.set(id, lifecycle)
       this.regions.set(id, makeSkillRegion(name, instructions, scope))
+      this.emitSkillLifecycle('skill.loaded', lifecycle)
     }
     this.pendingSkillLoads = []
+  }
+
+  private buildSkillLifecyclePayload(name: string, version: string, instructions: string): SkillLifecyclePayload {
+    return {
+      skillId: `skill:${name}`,
+      version,
+      source:  'agent-config.skillInstructions',
+      sha:     createHash('sha256').update(instructions).digest('hex'),
+    }
+  }
+
+  private lifecycleFromExistingSkill(id: string, existing: ReturnType<ContextRegions['get']>): SkillLifecyclePayload | undefined {
+    if (!existing || !id.startsWith('skill:')) return undefined
+    const name = id.slice('skill:'.length)
+    const version = this.config.skills?.[name]
+    const instructions = (existing.content as { instructions?: unknown }).instructions
+    if (!version || typeof instructions !== 'string') return undefined
+    return this.buildSkillLifecyclePayload(name, version, instructions)
   }
 
   private setCurrentTurn(input: string): void {
@@ -404,6 +441,29 @@ export class AgentRuntime {
             ? (addedPayload ?? { id: delta.id, target: delta.target ?? 'system', section: delta.section ?? 'unknown', stability: delta.stability ?? 'volatile', reason })
             : { id: delta.id, reason },
         })
+      })
+    }
+
+    if (delta.kind === 'removed' && delta.id.startsWith('skill:')) {
+      const lifecycle = this.loadedSkills.get(delta.id)
+      if (lifecycle) {
+        this.emitSkillLifecycle('skill.unloaded', lifecycle)
+        this.loadedSkills.delete(delta.id)
+      }
+    }
+  }
+
+  private emitSkillLifecycle(type: 'skill.loaded' | 'skill.unloaded', payload: SkillLifecyclePayload): void {
+    if (!this.rootSpan) return
+    this.recorder.recordEvent(this.rootSpan, type, { ...payload })
+    if (this.eventStore) {
+      void this.eventStore.append({
+        id:        uuidv4(),
+        runId:     this.agentRunId,
+        type,
+        actor:     this.config.agentId,
+        timestamp: Date.now(),
+        payload,
       })
     }
   }
@@ -633,6 +693,13 @@ export class AgentRuntime {
     this.turnNumber = checkpoint.sequence
     // Re-attach format functions dropped by JSON serialization.
     this.regions.restore(rehydrateSnapshot(checkpoint.context.regions))
+    this.loadedSkills = new Map()
+    for (const r of this.regions._allRegions()) {
+      if (r.id.startsWith('skill:')) {
+        const lifecycle = this.lifecycleFromExistingSkill(r.id, r)
+        if (lifecycle) this.loadedSkills.set(r.id, lifecycle)
+      }
+    }
     const restoredMemory = WorkingMemory.fromJSON(checkpoint.context.workingMemory)
     Object.assign(this.memory, restoredMemory)
     this.fsm.restore(checkpoint.fsm)
