@@ -183,6 +183,27 @@ payload describing which Regions were included, dropped, or compressed.
 *Not:* the request itself. The boundary is the *policy* that produces the
 request; the request lives in the subsequent `llm.requested` payload.
 
+### Event-sourced runtime state
+
+Runtime state used for observability, diagnosis, replay, fork, and lineage is
+reconstructed from the append-only event log plus content-addressed object
+stores. Snapshots may exist as checkpoints, resume artifacts, or acceleration
+indexes, but they are derived artifacts, not canonical truth.
+
+For context Regions specifically, `region.added` / `region.removed` Events
+describe lifecycle changes, while content hashes point to immutable Region
+content objects. A "context at Event X" view is produced by folding those
+Events up to X. Persisting complete `ContextRegions` snapshots at every
+moment is not the model; if a snapshot is used to speed up a query, it must be
+rebuildable from the event log plus the content-addressed store.
+
+*Example:* a trace inspector reconstructs the active Region map before an
+`llm.requested` Event by folding prior Region lifecycle Events and fetching
+their content by hash.
+*Not:* checkpoint restore. Checkpoints are runtime recovery artifacts; they
+may contain Region snapshots, but they are not the audit source for explaining
+historical context.
+
 ### IOPort
 
 The single chokepoint through which the runtime crosses into nondeterminism
@@ -218,6 +239,7 @@ subsystems (Agent Runtime, Agent Trace, Evolution) sit below them.
 | **IOPort** vs **Event** | IOPort is the nondet boundary. Events are its recorded outputs. |
 | **Region** vs **`region.added` Event** | The Region is context state. The Event is the record that the state changed. |
 | **Context boundary** vs **LLM request** | The boundary is the policy that selects/orders Regions. The request is its serialized output. |
+| **Snapshot** vs **Event-sourced view** | A snapshot is a checkpoint or acceleration artifact. The view is derived from Events plus content-addressed objects and remains reconstructable without the snapshot. |
 
 ---
 
@@ -355,6 +377,11 @@ production artifact.
   capturing clock reads, UUIDs, random values, tool outputs, and other
   external I/O results, so replay can reuse recorded values rather than
   re-sampling the world.
+- **Region content store** — a content-addressed object store for Region
+  content and, where needed, rendered Region output. Region lifecycle Events
+  carry hashes into this store; context-at-time and why-this-call queries fold
+  the event log and dereference those hashes rather than reading live runtime
+  state or relying on per-moment full snapshots.
 - **Replay / Fork / Diff** — replay folds the event log back into runtime
   state; fork branches a run at any event, sharing the prefix from cache (no
   new model calls for the shared history); diff compares two runs structurally.

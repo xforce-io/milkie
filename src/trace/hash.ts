@@ -30,8 +30,16 @@ function normalize(value: unknown): unknown {
   return value
 }
 
-function sha256Hex(s: string): string {
+export function sha256Hex(s: string): string {
   return createHash('sha256').update(s).digest('hex')
+}
+
+export function contentAddressForCanonicalBytes(bytes: string): string {
+  return `sha256:${sha256Hex(bytes)}`
+}
+
+export function hashCanonical(value: unknown): string {
+  return contentAddressForCanonicalBytes(canonicalize(value))
 }
 
 export function hashModelRequest(req: ModelRequest): string {

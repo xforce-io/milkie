@@ -3,6 +3,8 @@ import { DefaultIOPort } from '../runtime/IOPort'
 import { Milkie } from '../runtime/Milkie'
 import { MemoryStore } from '../store/MemoryStore'
 import { InMemoryRecorder } from '../trajectory/InMemoryRecorder'
+import { MemoryEventStore } from '../trace/MemoryEventStore'
+import { MemoryTraceObjectStore } from '../trace/TraceObjectStore'
 import type { AgentConfig } from '../types/agent'
 import type { AgentCheckpoint } from '../types/store'
 import type { IModelGateway, ModelRequest, ModelResponse } from '../types/model'
@@ -316,6 +318,57 @@ describe('AgentRuntime', () => {
       expect(result.output).toBe('resumed')
       expect(result.agentRunId).toBe('run-original')
       expect(result.contextId).toBe('ctx-original')
+    })
+
+    it('records resume crystallization region removals after loading a checkpoint', async () => {
+      const stateStore = new MemoryStore()
+      const eventStore = new MemoryEventStore()
+      const checkpoint: AgentCheckpoint = {
+        checkpointId: 'cp-1',
+        sequence:     1,
+        goal:         'resume goal',
+        currentTurn:  'previous turn',
+        fsm:          { currentState: 'paused', resumeState: 'react', stateData: null },
+        context: {
+          workingMemory: { data: {}, log: [] },
+          regions: {
+            epoch: 1,
+            regions: [{
+              id:        'current-turn',
+              target:    'message',
+              section:   'current-turn',
+              createdAt: 1,
+              intraTurn: 'turn-persistent',
+              interTurn: 'turn-local',
+              stability: 'volatile',
+              content:   'previous turn',
+            } as never],
+          },
+        },
+        pendingEvents: [],
+        children:      [],
+        meta: {
+          agentId:    'test-agent',
+          agentRunId: 'run-original',
+          timestamp:  Date.now(),
+          traceId:    'trace-original',
+          contextId:  'ctx-original',
+        },
+      }
+      await stateStore.set('checkpoint-key', checkpoint)
+
+      const milkie = new Milkie({
+        stateStore,
+        eventStore,
+        traceObjectStore: new MemoryTraceObjectStore(),
+        gateway: new SequentialGateway([textResponse('resumed')]),
+      })
+      milkie.registerAgent(makeConfig())
+
+      const result = await milkie.resume('checkpoint-key', 'test-agent', 'resume goal', 'continue')
+      const events = await eventStore.readByRunId(result.agentRunId)
+
+      expect(events.some(e => e.type === 'region.removed' && (e.payload as { id?: string }).id === 'current-turn')).toBe(true)
     })
 
     it('propagates parent interrupt to running sub-agents and records child checkpoints', async () => {

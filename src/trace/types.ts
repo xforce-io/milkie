@@ -114,6 +114,10 @@ export interface RegionAddedPayload {
   stability: 'immutable' | 'session-stable' | 'turn-stable' | 'volatile'
   /** Why this region appeared (e.g. 'agent-set', 'turn-archived', 'promoted-to-wm'). */
   reason:    string
+  /** Content-addressed canonical Region.content bytes. Missing on legacy events or unsupported content shapes. */
+  contentHash?: string
+  /** Content-addressed canonical format(content) bytes, when renderable. */
+  renderedHash?: string
 }
 
 export interface RegionRemovedPayload {

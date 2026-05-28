@@ -32,6 +32,9 @@ import type { IIOPort } from './IOPort.js'
 import { cognitiveTools } from '../tools/cognitive.js'
 import { systemTools } from '../tools/system.js'
 import type { InMemoryRecorder } from '../trajectory/InMemoryRecorder.js'
+import type { ITraceObjectStore } from '../trace/TraceObjectStore.js'
+import { canonicalize, contentAddressForCanonicalBytes } from '../trace/hash.js'
+import type { Region } from '../context/Region.js'
 import type { SkillLifecyclePayload } from '../trace/types.js'
 
 export interface AgentRuntimeOptions {
@@ -52,6 +55,7 @@ export interface AgentRuntimeOptions {
    * region events get re-written on top of the existing run JSONL.
    */
   eventStore?:       import('../trace/EventStore.js').IEventStore
+  traceObjectStore?: ITraceObjectStore
   extraTools?:       ToolDefinition[]
   subAgentConfigs?:  Map<string, AgentConfig>  // agentId → config, for spawning
   childRecorderFactory?: (config: AgentConfig, contextId: string, traceId: string) => ITrajectoryRecorder
@@ -74,6 +78,7 @@ export class AgentRuntime {
   private readonly recorder:         ITrajectoryRecorder
   private readonly ioPort:           IIOPort
   private readonly eventStore?:      import('../trace/EventStore.js').IEventStore
+  private readonly traceObjectStore?: ITraceObjectStore
   private readonly subAgentConfigs?: Map<string, AgentConfig>
   private readonly childRecorderFactory?: (config: AgentConfig, contextId: string, traceId: string) => ITrajectoryRecorder
   private readonly extraTools:      ToolDefinition[]
@@ -89,6 +94,10 @@ export class AgentRuntime {
   private pendingEvents: Array<{ type: string; payload: unknown }> = []
   private pendingSkillLoads: Array<SkillLoadRequest> = []
   private loadedSkills: Map<string, SkillLifecyclePayload> = new Map()
+  private pendingTraceWrites: Promise<unknown>[] = []
+  private traceWriteChain: Promise<unknown> = Promise.resolve()
+  private initialRegionsEmitted = false
+  private needsResumeCrystallization = false
   private childRecords: Map<string, ChildAgentRecord> = new Map()
   private rootSpan!:     Span
   private turnNumber:    number = 0
@@ -104,6 +113,7 @@ export class AgentRuntime {
     this.stateStore      = opts.stateStore
     this.recorder        = opts.recorder
     this.eventStore      = opts.eventStore
+    this.traceObjectStore = opts.traceObjectStore
     this.subAgentConfigs = opts.subAgentConfigs
     this.childRecorderFactory = opts.childRecorderFactory
     this.extraTools      = opts.extraTools ?? []
@@ -151,23 +161,25 @@ export class AgentRuntime {
       // burn an ioPort.uuid()/now() that replay's skip-write branch wouldn't
       // match. Date.now() / uuidv4() direct keep record/replay paths symmetric.
       if (this.eventStore) {
-        void this.eventStore.append({
-          id:        uuidv4(),
-          runId:     this.agentRunId,
-          type:      'fsm.transition',
-          actor:     this.config.agentId,
-          timestamp: Date.now(),
-          payload: {
-            from,
-            to,
-            trigger: {
-              // emitEvent / framework emit sites stamp domain explicitly; the
-              // only path that leaves it unset is direct construction in tests.
-              domain:  event.domain ?? 'business',
-              name:    event.name,
-              ...(event.payload !== undefined ? { payload: event.payload } : {}),
+        this.enqueueTraceWrite(async () => {
+          await this.eventStore!.append({
+            id:        uuidv4(),
+            runId:     this.agentRunId,
+            type:      'fsm.transition',
+            actor:     this.config.agentId,
+            timestamp: Date.now(),
+            payload: {
+              from,
+              to,
+              trigger: {
+                // emitEvent / framework emit sites stamp domain explicitly; the
+                // only path that leaves it unset is direct construction in tests.
+                domain:  event.domain ?? 'business',
+                name:    event.name,
+                ...(event.payload !== undefined ? { payload: event.payload } : {}),
+              },
             },
-          },
+          })
         })
       }
     })
@@ -397,13 +409,18 @@ export class AgentRuntime {
 
   private emitRegionDelta(delta: import('../context/ContextRegions.js').RegionChangeDelta, reason: string): void {
     if (!this.rootSpan) return   // pre-run mutations not yet attributable to a root span
-    this.recorder.recordEvent(this.rootSpan, delta.kind === 'added' ? 'region.added' : 'region.removed', {
-      id:        delta.id,
-      section:   delta.section,
-      target:    delta.target,
-      stability: delta.stability,
-      reason,
-    })
+    const region = delta.kind === 'added' ? this.regions.get(delta.id) : undefined
+    const addedPayload = region ? this.buildRegionAddedPayload(region, reason) : undefined
+    const recorderPayload = delta.kind === 'added'
+      ? { ...(addedPayload ?? {
+        id:        delta.id,
+        section:   delta.section,
+        target:    delta.target,
+        stability: delta.stability,
+        reason,
+      }) }
+      : { id: delta.id, reason }
+    this.recorder.recordEvent(this.rootSpan, delta.kind === 'added' ? 'region.added' : 'region.removed', recorderPayload)
     // Also write to the event log so trace HTML / web UI / inspect can see
     // these. Recorder-only (span events) doesn't reach the live event stream.
     if (this.eventStore) {
@@ -412,15 +429,18 @@ export class AgentRuntime {
       // burn an ioPort.uuid()/now() in record mode that replay's skip-write
       // branch wouldn't match. Date.now() / uuid() direct keep record and
       // replay paths symmetric on IOPort consumption.
-      void this.eventStore.append({
-        id:        uuidv4(),
-        runId:     this.agentRunId,
-        type:      delta.kind === 'added' ? 'region.added' : 'region.removed',
-        actor:     this.config.agentId,
-        timestamp: Date.now(),
-        payload:   delta.kind === 'added'
-          ? { id: delta.id, target: delta.target ?? 'system', section: delta.section ?? 'unknown', stability: delta.stability ?? 'volatile', reason }
-          : { id: delta.id, reason },
+      this.enqueueTraceWrite(async () => {
+        if (addedPayload) await this.persistRegionContent(region!)
+        await this.eventStore!.append({
+          id:        uuidv4(),
+          runId:     this.agentRunId,
+          type:      delta.kind === 'added' ? 'region.added' : 'region.removed',
+          actor:     this.config.agentId,
+          timestamp: Date.now(),
+          payload:   delta.kind === 'added'
+            ? (addedPayload ?? { id: delta.id, target: delta.target ?? 'system', section: delta.section ?? 'unknown', stability: delta.stability ?? 'volatile', reason })
+            : { id: delta.id, reason },
+        })
       })
     }
 
@@ -448,6 +468,77 @@ export class AgentRuntime {
     }
   }
 
+  private buildRegionAddedPayload(region: Region, reason: string): import('../trace/types.js').RegionAddedPayload {
+    let contentHash: string | undefined
+    let renderedHash: string | undefined
+    try {
+      if (this.traceObjectStore) {
+        contentHash = this.hashCanonical(region.content)
+        const rendered = this.renderRegion(region)
+        if (rendered !== undefined) renderedHash = this.hashCanonical(rendered)
+      }
+    } catch {
+      // Region lifecycle events are observability records. Unsupported content
+      // shapes should degrade the hash fields, not make ContextRegions.set()
+      // fail and change agent behavior.
+    }
+    return {
+      id:        region.id,
+      target:    region.target,
+      section:   region.section,
+      stability: region.stability,
+      reason,
+      ...(contentHash ? { contentHash } : {}),
+      ...(renderedHash ? { renderedHash } : {}),
+    }
+  }
+
+  private renderRegion(region: Region): unknown {
+    return region.format(region.content)
+  }
+
+  private hashCanonical(value: unknown): string {
+    return contentAddressForCanonicalBytes(canonicalize(value))
+  }
+
+  private async persistRegionContent(region: Region): Promise<void> {
+    if (!this.traceObjectStore) return
+    try {
+      await this.traceObjectStore.putCanonical(canonicalize(region.content))
+      const rendered = this.renderRegion(region)
+      if (rendered !== undefined) {
+        await this.traceObjectStore.putCanonical(canonicalize(rendered))
+      }
+    } catch {
+      // Keep trace object storage best-effort. The event remains useful with
+      // metadata only if canonicalization/storage rejects a region shape.
+    }
+  }
+
+  private enqueueTraceWrite(write: () => Promise<void>): void {
+    const next = this.traceWriteChain.then(write)
+    this.traceWriteChain = next.catch(() => undefined)
+    this.pendingTraceWrites.push(next)
+  }
+
+  private async flushTraceWrites(): Promise<void> {
+    const writes = this.pendingTraceWrites
+    this.pendingTraceWrites = []
+    const settled = await Promise.allSettled(writes)
+    const rejected = settled.find((r): r is PromiseRejectedResult => r.status === 'rejected')
+    if (rejected) throw rejected.reason
+  }
+
+  private async tryFlushTraceWrites(): Promise<void> {
+    try {
+      await this.flushTraceWrites()
+    } catch {
+      // Trace persistence is best-effort and must not change the business
+      // outcome of a run. Durable deployments should surface store failures at
+      // the store/hosting layer.
+    }
+  }
+
   private emitBoundaryApplied(summary: import('../context/lifecycleEngine.js').CrystallizationSummary): void {
     if (!this.rootSpan) return
     this.recorder.recordEvent(this.rootSpan, 'context.boundary.applied', {
@@ -466,23 +557,39 @@ export class AgentRuntime {
       // burn an ioPort.uuid()/now() in record mode that replay's skip-write
       // branch wouldn't match. Date.now() / uuid() direct keep record and
       // replay paths symmetric on IOPort consumption.
-      void this.eventStore.append({
-        id:        uuidv4(),
-        runId:     this.agentRunId,
-        type:      'context.boundary.applied',
-        actor:     this.config.agentId,
-        timestamp: Date.now(),
-        payload: {
-          boundary: 'turn-end',
-          epoch:    this.regions.getEpoch(),
-          crystallization: {
-            kept:         summary.kept.length,
-            dropped:      summary.dropped.length,
-            promoted:     summary.promoted.length,
-            archivedPair: summary.archivedPair,
+      this.enqueueTraceWrite(async () => {
+        await this.eventStore!.append({
+          id:        uuidv4(),
+          runId:     this.agentRunId,
+          type:      'context.boundary.applied',
+          actor:     this.config.agentId,
+          timestamp: Date.now(),
+          payload: {
+            boundary: 'turn-end',
+            epoch:    this.regions.getEpoch(),
+            crystallization: {
+              kept:         summary.kept.length,
+              dropped:      summary.dropped.length,
+              promoted:     summary.promoted.length,
+              archivedPair: summary.archivedPair,
+            },
           },
-        },
+        })
       })
+    }
+  }
+
+  private emitInitialRegionAdds(): void {
+    if (this.initialRegionsEmitted) return
+    this.initialRegionsEmitted = true
+    for (const region of this.regions._allRegions()) {
+      this.emitRegionDelta({
+        kind:      'added',
+        id:        region.id,
+        section:   region.section,
+        target:    region.target,
+        stability: region.stability,
+      }, 'runtime-initialized')
     }
   }
 
@@ -547,6 +654,7 @@ export class AgentRuntime {
       this.fsm.emitEvent('interrupt')
       this.fsm.processPendingEvent()
       const checkpoint = await this.saveCheckpoint(resumeState)
+      await this.tryFlushTraceWrites()
       // Save to context:latest so Milkie.resume can find it
       await this.checkpoints.saveForContext(this.contextId, this.turnNumber, checkpoint)
       await this.stateStore.set(`context:${this.contextId}:checkpoint:latest`, checkpoint)
@@ -599,12 +707,11 @@ export class AgentRuntime {
       this.fsm.transitionTo(checkpoint.fsm.resumeState, { name: 'RESUME', domain: 'lifecycle' })
     }
     // Interrupt checkpoints did NOT crystallize (interrupt path saves mid-turn),
-    // so scratchpad + current-turn survive in the snapshot. Crystallize now so
-    // the resumed turn starts clean: prior partial work becomes a history pair,
-    // scratchpad clears, and the caller's new current-turn (set by run/continueTurn
-    // before executeFSM) is the only message after history.
-    // Wait-for-user checkpoints crystallized at save time, so this is a no-op for them.
-    this.crystallizeTurn()
+    // so scratchpad + current-turn survive in the snapshot. Defer
+    // crystallization until run() has a rootSpan, otherwise region.added /
+    // region.removed events would be silently dropped and event-sourced context
+    // reconstruction would miss the resume boundary.
+    this.needsResumeCrystallization = true
   }
 
   async run(input: string): Promise<AgentResult> {
@@ -613,6 +720,11 @@ export class AgentRuntime {
       goal:      this.goal,
       contextId: this.contextId,
     })
+    this.emitInitialRegionAdds()
+    if (this.needsResumeCrystallization) {
+      this.crystallizeTurn()
+      this.needsResumeCrystallization = false
+    }
 
     const turnInput = `Goal: ${this.goal}\n\n${input}`
     this.setCurrentTurn(turnInput)
@@ -648,6 +760,7 @@ export class AgentRuntime {
         status:     'error',
       }
     } finally {
+      await this.tryFlushTraceWrites()
       await this.recorder.flush()
     }
   }
@@ -676,6 +789,7 @@ export class AgentRuntime {
             // invoke sees an empty history).
             this.crystallizeTurn()
             const checkpoint = await this.saveCheckpoint()
+            await this.tryFlushTraceWrites()
             await this.checkpoints.saveForContext(this.contextId, this.turnNumber, checkpoint)
             await this.stateStore.set(`context:${this.contextId}:checkpoint:latest`, checkpoint)
           }
@@ -720,6 +834,7 @@ export class AgentRuntime {
         ...(assembled.tools ? { tools: assembled.tools } : {}),
         ...(assembled.cacheBreakpoint ? { cacheBreakpoint: assembled.cacheBreakpoint } : {}),
       }
+      await this.tryFlushTraceWrites()
 
       const llmSpan = this.recorder.startSpan('llm.call', {
         provider:     this.config.model.provider,

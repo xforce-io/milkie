@@ -16,6 +16,7 @@ import { AgentRuntime } from './AgentRuntime.js'
 import { DefaultIOPort, type IIOPort } from './IOPort.js'
 import type { IEventStore } from '../trace/EventStore.js'
 import { RecordingIOPort } from '../trace/RecordingIOPort.js'
+import type { ITraceObjectStore } from '../trace/TraceObjectStore.js'
 import { CacheIndex } from '../trace/CacheIndex.js'
 import { ReplayingIOPort } from '../trace/ReplayingIOPort.js'
 import { ReplayError } from '../trace/ReplayError.js'
@@ -37,6 +38,7 @@ export interface MilkieOptions {
    * only observability surface (Phase 2 behavior).
    */
   eventStore?:      IEventStore
+  traceObjectStore?: ITraceObjectStore
 }
 
 export class Milkie {
@@ -45,6 +47,7 @@ export class Milkie {
   private readonly extraTools:      ToolDefinition[]
   private readonly trajectoryStore: TrajectoryStore | null
   private readonly eventStore:      IEventStore | null
+  private readonly traceObjectStore: ITraceObjectStore | null
 
   private readonly agents:   Map<string, AgentConfig> = new Map()
 
@@ -54,6 +57,7 @@ export class Milkie {
     this.extraTools      = opts.tools            ?? []
     this.trajectoryStore = opts.trajectoryStore  ?? null
     this.eventStore      = opts.eventStore       ?? null
+    this.traceObjectStore = opts.traceObjectStore ?? null
   }
 
   private wrapIOPort(gateway: IModelGateway, runId: string): IIOPort {
@@ -202,6 +206,7 @@ export class Milkie {
       recorder,
       ioPort,
       eventStore:      this.eventStore ?? undefined,
+      traceObjectStore: this.traceObjectStore ?? undefined,
       extraTools:      this.extraTools,
       subAgentConfigs: this.agents,
       childRecorderFactory,
@@ -278,6 +283,7 @@ export class Milkie {
       recorder,
       ioPort:          this.wrapIOPort(gateway, agentRunId),
       eventStore:      this.eventStore ?? undefined,
+      traceObjectStore: this.traceObjectStore ?? undefined,
       extraTools:      this.extraTools,
       subAgentConfigs: this.agents,
       childRecorderFactory,
