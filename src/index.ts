@@ -27,6 +27,14 @@ export { AnthropicAdapter }         from './gateway/AnthropicAdapter.js'
 export { OpenAICompatibleAdapter }  from './gateway/OpenAICompatibleAdapter.js'
 export { createGateway }            from './gateway/GatewayFactory.js'
 
+// Trace stores / views
+export { MemoryEventStore } from './trace/MemoryEventStore.js'
+export { JsonlEventStore } from './trace/JsonlEventStore.js'
+export { MemoryTraceObjectStore, FileTraceObjectStore } from './trace/TraceObjectStore.js'
+export { contextAt, contextBefore, getRegionAt, getRegionBefore } from './trace/RegionContextView.js'
+export type { ITraceObjectStore } from './trace/TraceObjectStore.js'
+export type { RegionContentRef, ContextFoldMode } from './trace/RegionContextView.js'
+
 // Built-in tools
 export { cognitiveTools } from './tools/cognitive.js'
 export { systemTools } from './tools/system.js'

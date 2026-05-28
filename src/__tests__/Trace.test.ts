@@ -4,6 +4,8 @@ import path from 'path'
 
 import { MemoryEventStore } from '../trace/MemoryEventStore'
 import { JsonlEventStore } from '../trace/JsonlEventStore'
+import { FileTraceObjectStore, MemoryTraceObjectStore } from '../trace/TraceObjectStore'
+import { contextBefore, getRegionAt } from '../trace/RegionContextView'
 import { RecordingIOPort } from '../trace/RecordingIOPort'
 import { DefaultIOPort } from '../runtime/IOPort'
 import { Milkie } from '../runtime/Milkie'
@@ -15,6 +17,7 @@ import type {
   ToolRequestedPayload,
   ToolRespondedPayload,
   FsmTransitionPayload,
+  RegionAddedPayload,
 } from '../trace/types'
 import type { IModelGateway, ModelRequest, ModelResponse } from '../types/model'
 import type { AgentConfig } from '../types/agent'
@@ -137,6 +140,61 @@ describe('JsonlEventStore', () => {
     await store.append(makeEvent())
     const stat = await fs.stat(nested)
     expect(stat.isDirectory()).toBe(true)
+  })
+})
+
+// ---- TraceObjectStore / region context reconstruction ----
+
+describe('TraceObjectStore', () => {
+  it('deduplicates identical canonical bytes and reads them by content hash', async () => {
+    const store = new MemoryTraceObjectStore()
+
+    const h1 = await store.putCanonical('{"a":1}')
+    const h2 = await store.putCanonical('{"a":1}')
+
+    expect(h1).toBe(h2)
+    expect(await store.getCanonical(h1)).toBe('{"a":1}')
+  })
+
+  it('FileTraceObjectStore round-trips canonical bytes across instances', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'milkie-objects-'))
+    try {
+      const writer = new FileTraceObjectStore(dir)
+      const hash = await writer.putCanonical('{"name":"research"}')
+
+      const reader = new FileTraceObjectStore(dir)
+      expect(await reader.getCanonical(hash)).toBe('{"name":"research"}')
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('reconstructs context regions from region lifecycle events plus object store', async () => {
+    const objects = new MemoryTraceObjectStore()
+    const h1 = await objects.putCanonical('"v1"')
+    const h2 = await objects.putCanonical('"v2"')
+
+    const events: Event[] = [
+      makeEvent({
+        id: 'e1',
+        type: 'region.added',
+        payload: { id: 'skill:research', target: 'system', section: 'session-skills', stability: 'turn-stable', reason: 'test', contentHash: h1 },
+      }),
+      makeEvent({
+        id: 'e2',
+        type: 'region.added',
+        payload: { id: 'skill:research', target: 'system', section: 'session-skills', stability: 'turn-stable', reason: 'test', contentHash: h2 },
+      }),
+      makeEvent({
+        id: 'e3',
+        type: 'region.removed',
+        payload: { id: 'skill:research', reason: 'test' },
+      }),
+    ]
+
+    expect((await getRegionAt(events, 'e1', 'skill:research', objects))?.content).toBe('"v1"')
+    expect((await getRegionAt(events, 'e2', 'skill:research', objects))?.content).toBe('"v2"')
+    expect(await getRegionAt(events, 'e3', 'skill:research', objects)).toBeUndefined()
   })
 })
 
@@ -348,6 +406,31 @@ describe('RecordingIOPort — Phase 3 additions', () => {
     expect(startedEvt).toBeDefined()
     expect(kinds[kinds.length - 1]).toBe('agent.run.completed')
     expect((startedEvt!.payload as { agentId: string }).agentId).toBe('a1')
+  })
+
+  it('region.added events carry content hashes and can reconstruct context before an LLM request', async () => {
+    const eventStore = new MemoryEventStore()
+    const traceObjectStore = new MemoryTraceObjectStore()
+    const milkie = new Milkie({
+      stateStore: new MemoryStore(),
+      gateway:    new StubGateway([textResponse('hello')]),
+      eventStore,
+      traceObjectStore,
+    })
+    milkie.registerAgent(minimalAgentConfig('a1'))
+
+    const result = await milkie.invoke({ agentId: 'a1', goal: 'g', input: 'i' })
+
+    const events = await eventStore.readByRunId(result.agentRunId)
+    const headerAdded = events.find(e => e.type === 'region.added' && (e.payload as RegionAddedPayload).id === 'header')!
+    const headerPayload = headerAdded.payload as RegionAddedPayload
+    expect(headerPayload.contentHash).toMatch(/^sha256:[a-f0-9]{64}$/)
+    expect(await traceObjectStore.getCanonical(headerPayload.contentHash)).toBe('"system"')
+
+    const firstLlm = events.find(e => e.type === 'llm.requested')!
+    const context = await contextBefore(events, firstLlm.id, traceObjectStore)
+    expect(context.get('header')?.content).toBe('"system"')
+    expect(context.get('current-turn')?.content).toContain('Goal: g')
   })
 })
 

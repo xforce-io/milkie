@@ -3,6 +3,7 @@ import fs from 'fs'
 import path from 'path'
 import { Milkie } from '../runtime/Milkie.js'
 import { JsonlEventStore } from '../trace/JsonlEventStore.js'
+import { FileTraceObjectStore } from '../trace/TraceObjectStore.js'
 import { SQLiteStore } from '../store/SQLiteStore.js'
 import type { AgentCheckpoint } from '../types/store.js'
 
@@ -30,7 +31,8 @@ async function buildCliMilkie(): Promise<{ milkie: Milkie, milkieDir: string, st
   const stateStore = new SQLiteStore({ path: path.join(milkieDir, 'state.sqlite') })
   await stateStore.init()
   const eventStore = new JsonlEventStore(path.join(milkieDir, 'runs'))
-  const milkie = new Milkie({ stateStore, eventStore })
+  const traceObjectStore = new FileTraceObjectStore(path.join(milkieDir, 'objects'))
+  const milkie = new Milkie({ stateStore, eventStore, traceObjectStore })
   await milkie.loadManifest(path.join(milkieDir, 'agents.json'))
   return { milkie, milkieDir, stateStore }
 }
@@ -199,7 +201,8 @@ export async function main(argv: string[]): Promise<MainResult> {
         throw new Error('no .milkie/ directory found upward from cwd')
       }
       const eventStore = new JsonlEventStore(path.join(milkieDir, 'runs'))
-      const milkie = new Milkie({ eventStore })
+      const traceObjectStore = new FileTraceObjectStore(path.join(milkieDir, 'objects'))
+      const milkie = new Milkie({ eventStore, traceObjectStore })
       await milkie.loadManifest(path.join(milkieDir, 'agents.json'))
       const result = await milkie.replay(runId)
       stdout.push(JSON.stringify({

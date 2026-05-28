@@ -31,6 +31,9 @@ import type { IIOPort } from './IOPort.js'
 import { cognitiveTools } from '../tools/cognitive.js'
 import { systemTools } from '../tools/system.js'
 import type { InMemoryRecorder } from '../trajectory/InMemoryRecorder.js'
+import type { ITraceObjectStore } from '../trace/TraceObjectStore.js'
+import { canonicalize, contentAddressForCanonicalBytes } from '../trace/hash.js'
+import type { Region } from '../context/Region.js'
 
 export interface AgentRuntimeOptions {
   config:            AgentConfig
@@ -50,6 +53,7 @@ export interface AgentRuntimeOptions {
    * region events get re-written on top of the existing run JSONL.
    */
   eventStore?:       import('../trace/EventStore.js').IEventStore
+  traceObjectStore?: ITraceObjectStore
   extraTools?:       ToolDefinition[]
   subAgentConfigs?:  Map<string, AgentConfig>  // agentId → config, for spawning
   childRecorderFactory?: (config: AgentConfig, contextId: string, traceId: string) => ITrajectoryRecorder
@@ -65,6 +69,7 @@ export class AgentRuntime {
   private readonly recorder:         ITrajectoryRecorder
   private readonly ioPort:           IIOPort
   private readonly eventStore?:      import('../trace/EventStore.js').IEventStore
+  private readonly traceObjectStore?: ITraceObjectStore
   private readonly subAgentConfigs?: Map<string, AgentConfig>
   private readonly childRecorderFactory?: (config: AgentConfig, contextId: string, traceId: string) => ITrajectoryRecorder
   private readonly extraTools:      ToolDefinition[]
@@ -79,6 +84,9 @@ export class AgentRuntime {
   private eventQueue:    Array<{ type: string; payload: unknown }> = []
   private pendingEvents: Array<{ type: string; payload: unknown }> = []
   private pendingSkillLoads: Array<{ name: string; instructions: string; scope: 'turn' | 'session' }> = []
+  private pendingTraceWrites: Promise<unknown>[] = []
+  private traceWriteChain: Promise<unknown> = Promise.resolve()
+  private initialRegionsEmitted = false
   private childRecords: Map<string, ChildAgentRecord> = new Map()
   private rootSpan!:     Span
   private turnNumber:    number = 0
@@ -94,6 +102,7 @@ export class AgentRuntime {
     this.stateStore      = opts.stateStore
     this.recorder        = opts.recorder
     this.eventStore      = opts.eventStore
+    this.traceObjectStore = opts.traceObjectStore
     this.subAgentConfigs = opts.subAgentConfigs
     this.childRecorderFactory = opts.childRecorderFactory
     this.extraTools      = opts.extraTools ?? []
@@ -360,13 +369,18 @@ export class AgentRuntime {
 
   private emitRegionDelta(delta: import('../context/ContextRegions.js').RegionChangeDelta, reason: string): void {
     if (!this.rootSpan) return   // pre-run mutations not yet attributable to a root span
-    this.recorder.recordEvent(this.rootSpan, delta.kind === 'added' ? 'region.added' : 'region.removed', {
-      id:        delta.id,
-      section:   delta.section,
-      target:    delta.target,
-      stability: delta.stability,
-      reason,
-    })
+    const region = delta.kind === 'added' ? this.regions.get(delta.id) : undefined
+    const addedPayload = region ? this.buildRegionAddedPayload(region, reason) : undefined
+    const recorderPayload = delta.kind === 'added'
+      ? { ...(addedPayload ?? {
+        id:        delta.id,
+        section:   delta.section,
+        target:    delta.target,
+        stability: delta.stability,
+        reason,
+      }) }
+      : { id: delta.id, reason }
+    this.recorder.recordEvent(this.rootSpan, delta.kind === 'added' ? 'region.added' : 'region.removed', recorderPayload)
     // Also write to the event log so trace HTML / web UI / inspect can see
     // these. Recorder-only (span events) doesn't reach the live event stream.
     if (this.eventStore) {
@@ -375,17 +389,65 @@ export class AgentRuntime {
       // burn an ioPort.uuid()/now() in record mode that replay's skip-write
       // branch wouldn't match. Date.now() / uuid() direct keep record and
       // replay paths symmetric on IOPort consumption.
-      void this.eventStore.append({
-        id:        uuidv4(),
-        runId:     this.agentRunId,
-        type:      delta.kind === 'added' ? 'region.added' : 'region.removed',
-        actor:     this.config.agentId,
-        timestamp: Date.now(),
-        payload:   delta.kind === 'added'
-          ? { id: delta.id, target: delta.target ?? 'system', section: delta.section ?? 'unknown', stability: delta.stability ?? 'volatile', reason }
-          : { id: delta.id, reason },
+      this.enqueueTraceWrite(async () => {
+        if (addedPayload) await this.persistRegionContent(region!)
+        await this.eventStore!.append({
+          id:        uuidv4(),
+          runId:     this.agentRunId,
+          type:      delta.kind === 'added' ? 'region.added' : 'region.removed',
+          actor:     this.config.agentId,
+          timestamp: Date.now(),
+          payload:   delta.kind === 'added'
+            ? (addedPayload ?? { id: delta.id, target: delta.target ?? 'system', section: delta.section ?? 'unknown', stability: delta.stability ?? 'volatile', reason })
+            : { id: delta.id, reason },
+        })
       })
     }
+  }
+
+  private buildRegionAddedPayload(region: Region, reason: string): import('../trace/types.js').RegionAddedPayload {
+    const contentHash = this.hashCanonical(region.content)
+    const rendered = this.renderRegion(region)
+    return {
+      id:        region.id,
+      target:    region.target,
+      section:   region.section,
+      stability: region.stability,
+      reason,
+      contentHash,
+      ...(rendered !== undefined ? { renderedHash: this.hashCanonical(rendered) } : {}),
+    }
+  }
+
+  private renderRegion(region: Region): unknown {
+    return region.format(region.content)
+  }
+
+  private hashCanonical(value: unknown): string {
+    return contentAddressForCanonicalBytes(canonicalize(value))
+  }
+
+  private async persistRegionContent(region: Region): Promise<void> {
+    if (!this.traceObjectStore) return
+    await this.traceObjectStore.putCanonical(canonicalize(region.content))
+    const rendered = this.renderRegion(region)
+    if (rendered !== undefined) {
+      await this.traceObjectStore.putCanonical(canonicalize(rendered))
+    }
+  }
+
+  private enqueueTraceWrite(write: () => Promise<void>): void {
+    const next = this.traceWriteChain.then(write)
+    this.traceWriteChain = next.catch(() => undefined)
+    this.pendingTraceWrites.push(next)
+  }
+
+  private async flushTraceWrites(): Promise<void> {
+    const writes = this.pendingTraceWrites
+    this.pendingTraceWrites = []
+    const settled = await Promise.allSettled(writes)
+    const rejected = settled.find((r): r is PromiseRejectedResult => r.status === 'rejected')
+    if (rejected) throw rejected.reason
   }
 
   private emitBoundaryApplied(summary: import('../context/lifecycleEngine.js').CrystallizationSummary): void {
@@ -406,23 +468,39 @@ export class AgentRuntime {
       // burn an ioPort.uuid()/now() in record mode that replay's skip-write
       // branch wouldn't match. Date.now() / uuid() direct keep record and
       // replay paths symmetric on IOPort consumption.
-      void this.eventStore.append({
-        id:        uuidv4(),
-        runId:     this.agentRunId,
-        type:      'context.boundary.applied',
-        actor:     this.config.agentId,
-        timestamp: Date.now(),
-        payload: {
-          boundary: 'turn-end',
-          epoch:    this.regions.getEpoch(),
-          crystallization: {
-            kept:         summary.kept.length,
-            dropped:      summary.dropped.length,
-            promoted:     summary.promoted.length,
-            archivedPair: summary.archivedPair,
+      this.enqueueTraceWrite(async () => {
+        await this.eventStore!.append({
+          id:        uuidv4(),
+          runId:     this.agentRunId,
+          type:      'context.boundary.applied',
+          actor:     this.config.agentId,
+          timestamp: Date.now(),
+          payload: {
+            boundary: 'turn-end',
+            epoch:    this.regions.getEpoch(),
+            crystallization: {
+              kept:         summary.kept.length,
+              dropped:      summary.dropped.length,
+              promoted:     summary.promoted.length,
+              archivedPair: summary.archivedPair,
+            },
           },
-        },
+        })
       })
+    }
+  }
+
+  private emitInitialRegionAdds(): void {
+    if (this.initialRegionsEmitted) return
+    this.initialRegionsEmitted = true
+    for (const region of this.regions._allRegions()) {
+      this.emitRegionDelta({
+        kind:      'added',
+        id:        region.id,
+        section:   region.section,
+        target:    region.target,
+        stability: region.stability,
+      }, 'runtime-initialized')
     }
   }
 
@@ -546,6 +624,7 @@ export class AgentRuntime {
       goal:      this.goal,
       contextId: this.contextId,
     })
+    this.emitInitialRegionAdds()
 
     const turnInput = `Goal: ${this.goal}\n\n${input}`
     this.setCurrentTurn(turnInput)
@@ -581,6 +660,7 @@ export class AgentRuntime {
         status:     'error',
       }
     } finally {
+      await this.flushTraceWrites()
       await this.recorder.flush()
     }
   }
@@ -653,6 +733,7 @@ export class AgentRuntime {
         ...(assembled.tools ? { tools: assembled.tools } : {}),
         ...(assembled.cacheBreakpoint ? { cacheBreakpoint: assembled.cacheBreakpoint } : {}),
       }
+      await this.flushTraceWrites()
 
       const llmSpan = this.recorder.startSpan('llm.call', {
         provider:     this.config.model.provider,
