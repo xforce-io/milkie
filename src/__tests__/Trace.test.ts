@@ -591,6 +591,26 @@ describe('agent.spawned / agent.returned events', () => {
     expect(returned.status).toBe('completed')
     expect(returned.childRunId).toBe(spawned.childRunId)
   })
+
+  it('emits agent.returned with status error when the child run errors', async () => {
+    const eventStore = new MemoryEventStore()
+    const milkie = new Milkie({
+      stateStore: new MemoryStore(),
+      // 只给 supervisor 的工具调用留响应；worker 的 LLM 调用拿不到 → 子 run 报错
+      gateway: new StubGateway([
+        toolCallResponse('s1', 'worker', { goal: 'g', input: 'i' }),
+      ]),
+      eventStore,
+    })
+    milkie.registerAgent(supervisorConfig())
+    milkie.registerAgent(workerConfig())
+
+    const result = await milkie.invoke({ agentId: 'supervisor', goal: 'g', input: 'i' })
+    const events = await eventStore.readByRunId(result.agentRunId)
+
+    const returned = events.find(e => e.type === 'agent.returned')!.payload as AgentReturnedPayload
+    expect(returned.status).toBe('error')
+  })
 })
 
 // ---- fsm.transition (#21) ----

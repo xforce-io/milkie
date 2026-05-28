@@ -272,6 +272,7 @@ export class AgentRuntime {
             contextId: childContextId,
             status: 'error',
           })
+          this.emitAgentReturned(childContextId, 'error')
           spawnSpan.attributes['resultStatus'] = 'error'
           this.recorder.endSpan(spawnSpan, 'error')
           throw err
@@ -489,6 +490,8 @@ export class AgentRuntime {
 
   private emitAgentReturned(childRunId: string, status: 'completed' | 'interrupted' | 'error'): void {
     if (!this.eventStore) return
+    // Same IOPort-bypass rationale as emitAgentSpawned: informational event,
+    // written to the event log only (recorder already has the spawn span).
     this.enqueueTraceWrite(async () => {
       await this.eventStore!.append({
         id:        uuidv4(),
