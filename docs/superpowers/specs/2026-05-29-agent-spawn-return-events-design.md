@@ -140,7 +140,7 @@ child runId；子的稳定身份是 `childContextId`。本 issue 用字段名 `c
 - 子继续复用父 runId，**不**获独立 run 身份；
 - 子**不** emit 自己的 `agent.run.started/completed`；
 - `causedBy` → #30；
-- 子一类公民化（独立 runId / sub-trace）+ `Milkie.replay` 递归下钻 → **新 issue**
+- 子一类公民化（独立 runId / sub-trace）+ `Milkie.replay` 递归下钻 → **#47**
   （(2) 与递归 replay 为同一不可分单元）；
 - 原 issue 验收「子 run 第一帧 `agent.run.started.parentId` 与 `agent.spawned`
   一致」本期**放宽**——它描述的是目标态 (2)，待新 issue 满足。
@@ -161,4 +161,4 @@ child runId；子的稳定身份是 `childContextId`。本 issue 用字段名 `c
 - ARCH.md §Implemented today（supervisor tree）、invariant #11
 - Stories: s-007 / s-015
 - Blocks: #27（sub-agent nav）、lineage 跨 run 追踪
-- 待开新 issue：sub-agent 一类公民化 + 递归 replay（(2)）
+- Follow-on: #47（sub-agent 一类公民化 + 递归 replay，即 (2)）
