@@ -81,4 +81,33 @@ describe('RecordingIOPort — tool output metadata (#25)', () => {
     expect(putCount).toBe(3)
     expect(await objectStore.getCanonical(hash)).toBe(canonicalize(out))
   })
+
+  it('degrades gracefully when output is not canonicalizable (no throw, no hash fields)', async () => {
+    class Weird { constructor(public v = 1) {} }
+    const store = new MemoryEventStore()
+    const port  = new RecordingIOPort(new ExecInnerPort(), store, 'r1', undefined, new MemoryTraceObjectStore())
+
+    const out = new Weird()
+    const ret = await port.invokeTool('t', {}, async () => out)
+
+    expect(ret).toBe(out)
+    const p = await respondedPayload(store)
+    expect(p.outputHash).toBeUndefined()
+    expect(p.outputBytes).toBeUndefined()
+    expect(p.output).toBe(out)
+  })
+
+  it('error branch carries no output metadata', async () => {
+    const store = new MemoryEventStore()
+    const port  = new RecordingIOPort(new ExecInnerPort(), store, 'r1', undefined, new MemoryTraceObjectStore())
+
+    await expect(
+      port.invokeTool('t', {}, async () => { throw new Error('boom') })
+    ).rejects.toThrow('boom')
+
+    const p = await respondedPayload(store)
+    expect(p.error?.message).toBe('boom')
+    expect(p.outputHash).toBeUndefined()
+    expect(p.outputBytes).toBeUndefined()
+  })
 })
