@@ -287,6 +287,8 @@ export class Milkie {
       })
       : new InMemoryRecorder(checkpoint.meta.traceId || undefined, config.agentId)
 
+    const makeChildPort = this.buildMakeChildPort()
+
     const runtime = new AgentRuntime({
       config,
       goal,
@@ -301,7 +303,7 @@ export class Milkie {
       extraTools:      this.extraTools,
       subAgentConfigs: this.agents,
       childRecorderFactory,
-      makeChildPort:   this.buildMakeChildPort(),
+      makeChildPort,
     })
 
     await runtime.loadCheckpoint(checkpoint)

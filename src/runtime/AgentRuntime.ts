@@ -239,15 +239,15 @@ export class AgentRuntime {
 
         let childPort: IIOPort = this.ioPort
         let finish: ((c: AgentRunCompletedPayload) => Promise<void>) | null = null
-        if (this.makeChildPort) {
-          const built = await this.makeChildPort(childRunId, subConfig, {
-            agentId, goal, input: subInput, contextId: childContextId, parentId: this.agentRunId,
-          })
-          childPort = built.port
-          finish    = built.finish
-        }
 
         try {
+          if (this.makeChildPort) {
+            const built = await this.makeChildPort(childRunId, subConfig, {
+              agentId, goal, input: subInput, contextId: childContextId, parentId: this.agentRunId,
+            })
+            childPort = built.port
+            finish    = built.finish
+          }
           const result = await ctx.agentFactory.spawn({
             config:        subConfig,
             goal,
