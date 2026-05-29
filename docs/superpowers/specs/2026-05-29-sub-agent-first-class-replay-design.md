@@ -70,11 +70,21 @@ Related/Blocks 的未来项，验收只要求「replay 结果一致」。模型 
 
 ### 1. Record 侧（本 issue 主体）
 
-**(a) 注入 per-child port 工厂**（仿现有 `childRecorderFactory`，Milkie → AgentRuntime）：
+**(a) 给子铸一个绑 childRunId 的 RecordingIOPort（record-only）。** 子要把自己的 I/O 录进独立的
+`<childRunId>.jsonl`，而 `RecordingIOPort` 构造时绑死一个 `runId`、每条事件都盖它
+（`RecordingIOPort.ts:57-62,127`）；今天子复用父 port 故事件盖成父 runId。要分流，子必须有自己
+的、绑到 childRunId 的 `RecordingIOPort`。
+
+造它需要 inner gateway，而 gateway/`createGateway` 只住在 Milkie（runtime 只收一个包装好的
+`IIOPort`、够不到 gateway）。故由 Milkie 注入一个工厂（仿现有 `childRecorderFactory`），runtime
+保持对 Agent Trace 无知（invariant #3）：
 
 ```ts
 makeChildPort?: (childRunId: string, childConfig: AgentConfig) => IIOPort
 ```
+
+此工厂**仅 record 用、同步、单分支**——replay 不重跑子故不调它（与模型 II 截然不同：模型 II 的
+工厂还要异步读子文件、建子 CacheIndex、套 ReplayingIOPort、接散度聚合器）。
 
 Milkie 实现：
 
