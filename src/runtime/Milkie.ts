@@ -63,7 +63,7 @@ export class Milkie {
   private wrapIOPort(gateway: IModelGateway, runId: string): IIOPort {
     const base = new DefaultIOPort(gateway)
     return this.eventStore
-      ? new RecordingIOPort(base, this.eventStore, runId)
+      ? new RecordingIOPort(base, this.eventStore, runId, undefined, this.traceObjectStore ?? undefined)
       : base
   }
 

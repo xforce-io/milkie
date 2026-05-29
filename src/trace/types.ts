@@ -75,6 +75,12 @@ export interface ToolRespondedPayload {
   }
   /** Mirrors the requested-event hash. */
   requestHash: string
+  /** #25: 成功时 hashCanonical(output) → "sha256:..."；error 分支不填。 */
+  outputHash?:   string
+  /** #25: canonicalize(output) 的 UTF-8 字节数（= 对象库中那份大小）。 */
+  outputBytes?:  number
+  /** #25: 为 #37 (object.created) 预留；本期不填。 */
+  artifactRefs?: string[]
 }
 
 // ---- Lifecycle payloads (Phase 3) ----
