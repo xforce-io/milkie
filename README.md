@@ -23,16 +23,15 @@ The runtime, an event-sourced **Agent Trace**, and a deterministic
 - **Inter-agent parallelism** — sub-agents declared as named tools; orchestrators spawn them in parallel across independent FSM + context instances
 - **Interrupt / Resume** — cooperative yield points save checkpoints; any interrupted run resumes from the exact state
 - **Multi-turn conversations** — share a `contextId` across `invoke()` calls to accumulate history
-- **Event-sourced Agent Trace** — append-only event log records every LLM / tool I/O with `causedBy` chains; `Milkie.replay(runId)` re-runs a recorded run from the log with zero live LLM calls (Phase 3 structural replay)
+- **Event-sourced Agent Trace** — append-only event log records every LLM / tool I/O with `causedBy` chains; `Milkie.replay(runId)` re-runs a recorded run from the log with zero live LLM calls (byte-identical replay via a non-determinism log)
 - **`milkie` CLI** — `agent list / run / resume / interrupt` and `trace inspect / replay` over a `.milkie/agents.json` manifest; SQLite-backed default state store so interrupt / resume work across CLI processes. The CLI is the canonical agent-facing surface (ARCHITECTURE.md invariants 12–13) and every verb maps 1:1 to an SDK call
 - **Pluggable backends** — swap state stores (Memory / SQLite / Redis) and trajectory recorders (JSONL / in-memory / console) without touching agent logic
 - **Provider-agnostic** — Anthropic and any OpenAI-compatible endpoint out of the box
 
 **Target capabilities** still in development — fork / diff / lineage as
-first-class operations over the event log, a non-determinism log for
-byte-identical replay, and the Evolution experiment subsystem. See
-[ARCHITECTURE.md → Implementation Status](./ARCHITECTURE.md#implementation-status)
-for what's in code today vs. what's target architecture.
+first-class operations over the event log, and the Evolution experiment
+subsystem. See [roadmap.md](./roadmap.md) for what's in code today vs. what's
+target architecture.
 
 ---
 

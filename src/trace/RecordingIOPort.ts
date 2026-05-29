@@ -11,7 +11,8 @@ import type {
   ClockReadPayload,
   UuidGeneratedPayload,
 } from './types.js'
-import { hashModelRequest, hashToolCall } from './hash.js'
+import { hashModelRequest, hashToolCall, canonicalize, contentAddressForCanonicalBytes } from './hash.js'
+import type { ITraceObjectStore } from './TraceObjectStore.js'
 
 function cacheStatsFrom(response: ModelResponse): {
   readTokens:       number
@@ -59,7 +60,24 @@ export class RecordingIOPort implements IIOPort {
     private readonly store: IEventStore,
     private readonly runId: string,
     private readonly actor: string = 'runtime',
+    private readonly objectStore?: ITraceObjectStore,
   ) {}
+
+  private async outputMetadata(output: unknown): Promise<{ outputHash?: string; outputBytes?: number }> {
+    let canonical: string
+    try {
+      canonical = canonicalize(output)
+    } catch {
+      return {}
+    }
+    if (this.objectStore) {
+      try { await this.objectStore.putCanonical(canonical) } catch { /* best-effort */ }
+    }
+    return {
+      outputHash:  contentAddressForCanonicalBytes(canonical),
+      outputBytes: Buffer.byteLength(canonical, 'utf8'),
+    }
+  }
 
   /**
    * Drain pending nondet records to the store in input order. Called at
@@ -171,6 +189,7 @@ export class RecordingIOPort implements IIOPort {
 
     try {
       const output = await this.inner.invokeTool(toolName, input, execute)
+      const meta = await this.outputMetadata(output)
       await this.store.append({
         id:        this.inner.uuid(),
         runId:     this.runId,
@@ -178,7 +197,7 @@ export class RecordingIOPort implements IIOPort {
         actor:     this.actor,
         causedBy:  reqEventId,
         timestamp: this.inner.now(),
-        payload:   { toolName, output, requestHash } satisfies ToolRespondedPayload,
+        payload:   { toolName, output, requestHash, ...meta } satisfies ToolRespondedPayload,
       })
       return output
     } catch (err) {
