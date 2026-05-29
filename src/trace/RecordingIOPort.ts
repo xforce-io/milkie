@@ -13,6 +13,7 @@ import type {
 } from './types.js'
 import { hashModelRequest, hashToolCall, canonicalize, contentAddressForCanonicalBytes } from './hash.js'
 import type { ITraceObjectStore } from './TraceObjectStore.js'
+import type { CausalCursor } from './CausalCursor.js'
 
 function cacheStatsFrom(response: ModelResponse): {
   readTokens:       number
@@ -61,6 +62,7 @@ export class RecordingIOPort implements IIOPort {
     private readonly runId: string,
     private readonly actor: string = 'runtime',
     private readonly objectStore?: ITraceObjectStore,
+    private readonly cursor?: CausalCursor,
   ) {}
 
   private async outputMetadata(output: unknown): Promise<{ outputHash?: string; outputBytes?: number }> {
@@ -116,14 +118,17 @@ export class RecordingIOPort implements IIOPort {
 
   async attach(payload: AgentRunStartedPayload): Promise<void> {
     await this.flushPendingNondet()
+    const id = this.inner.uuid()
     await this.store.append({
-      id:        this.inner.uuid(),
+      id,
       runId:     this.runId,
       type:      'agent.run.started',
       actor:     this.actor,
       timestamp: this.inner.now(),
       payload,
     })
+    // Seed the terminator so the first llm.requested can trace back to the run root.
+    if (this.cursor) this.cursor.lastTerminatorId = id
   }
 
   async detach(payload: AgentRunCompletedPayload): Promise<void> {
@@ -147,14 +152,18 @@ export class RecordingIOPort implements IIOPort {
       runId:     this.runId,
       type:      'llm.requested',
       actor:     this.actor,
+      // edge 2: this call was provoked by the previous turn terminator.
+      ...(this.cursor?.lastTerminatorId ? { causedBy: this.cursor.lastTerminatorId } : {}),
       timestamp: this.inner.now(),
       payload:   { request, requestHash } satisfies LlmRequestedPayload,
     })
+    if (this.cursor) this.cursor.lastIoEventId = reqEventId
 
     const response = await this.inner.invokeLLM(request)
 
+    const respEventId = this.inner.uuid()
     await this.store.append({
-      id:        this.inner.uuid(),
+      id:        respEventId,
       runId:     this.runId,
       type:      'llm.responded',
       actor:     this.actor,
@@ -166,6 +175,10 @@ export class RecordingIOPort implements IIOPort {
         ...(cacheStatsFrom(response) ? { cacheStats: cacheStatsFrom(response) } : {}),
       } satisfies LlmRespondedPayload,
     })
+    if (this.cursor) {
+      this.cursor.lastLlmRespondedId = respEventId
+      this.cursor.lastIoEventId      = respEventId
+    }
 
     return response
   }
@@ -183,15 +196,19 @@ export class RecordingIOPort implements IIOPort {
       runId:     this.runId,
       type:      'tool.requested',
       actor:     this.actor,
+      // edge 1: this call was decided by the most recent llm.responded (the frame carrying toolCalls).
+      ...(this.cursor?.lastLlmRespondedId ? { causedBy: this.cursor.lastLlmRespondedId } : {}),
       timestamp: this.inner.now(),
       payload:   { toolName, input, requestHash } satisfies ToolRequestedPayload,
     })
+    if (this.cursor) this.cursor.lastIoEventId = reqEventId
 
     try {
       const output = await this.inner.invokeTool(toolName, input, execute)
       const meta = await this.outputMetadata(output)
+      const respEventId = this.inner.uuid()
       await this.store.append({
-        id:        this.inner.uuid(),
+        id:        respEventId,
         runId:     this.runId,
         type:      'tool.responded',
         actor:     this.actor,
@@ -199,6 +216,14 @@ export class RecordingIOPort implements IIOPort {
         timestamp: this.inner.now(),
         payload:   { toolName, output, requestHash, ...meta } satisfies ToolRespondedPayload,
       })
+      // tool.responded is a turn terminator for the next llm.requested (edge 2).
+      // Under a parallel tool batch, several tool.responded race to write this; the
+      // last-completed wins. That is intentional and harmless: any of the batch's
+      // results is a valid terminator, and replay never compares trace event ids.
+      if (this.cursor) {
+        this.cursor.lastTerminatorId = respEventId
+        this.cursor.lastIoEventId    = respEventId
+      }
       return output
     } catch (err) {
       const e = err as { message?: string; retryable?: boolean; code?: string; name?: string }
@@ -210,8 +235,9 @@ export class RecordingIOPort implements IIOPort {
       // 'Error' is the default name; omit it as it carries no information
       if (typeof e.name === 'string' && e.name !== 'Error') errorPayload.name = e.name
 
+      const respEventId = this.inner.uuid()
       await this.store.append({
-        id:        this.inner.uuid(),
+        id:        respEventId,
         runId:     this.runId,
         type:      'tool.responded',
         actor:     this.actor,
@@ -219,6 +245,11 @@ export class RecordingIOPort implements IIOPort {
         timestamp: this.inner.now(),
         payload:   { toolName, error: errorPayload, requestHash } satisfies ToolRespondedPayload,
       })
+      // An errored tool.responded still terminates the turn — the next llm.requested follows it.
+      if (this.cursor) {
+        this.cursor.lastTerminatorId = respEventId
+        this.cursor.lastIoEventId    = respEventId
+      }
       throw err
     }
   }

@@ -15,6 +15,7 @@ export interface AgentSpawnOptions {
   stateStore:  IStateStore
   recorder:    ITrajectoryRecorder
   ioPort:      IIOPort
+  causalCursor?:  import('../trace/CausalCursor.js').CausalCursor
   extraTools?:    ToolDefinition[]
   eventStore?:    import('../trace/EventStore.js').IEventStore
   makeChildPort?: import('./AgentRuntime.js').MakeChildPort
