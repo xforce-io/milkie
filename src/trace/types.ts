@@ -97,8 +97,8 @@ export interface AgentSpawnedPayload {
   /** 父 AgentRuntime.agentRunId。 */
   parentRunId: string
   /**
-   * 子运行的稳定身份。今天子复用父 runId，此字段填子的 contextId；
-   * #47（sub-agent 一类公民化）落地后改填子的独立 runId——只换值不换 schema。
+   * 子运行的独立 runId（父在 spawn 时铸造）。子的 I/O 事件以此 id 存入 event store，
+   * 可经 Milkie.replay(childRunId) 独立重放。
    */
   childRunId:  string
   agentId:     string

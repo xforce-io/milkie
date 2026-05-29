@@ -6,6 +6,7 @@ import { ReplayDivergenceError } from '../trace/ReplayDivergenceError'
 import type { IModelGateway, ModelRequest, ModelResponse } from '../types/model'
 import type { AgentConfig } from '../types/agent'
 import type { ToolDefinition } from '../types/tool'
+import type { AgentSpawnedPayload } from '../trace/types'
 
 class SequentialGateway implements IModelGateway {
   public callCount = 0
@@ -22,6 +23,50 @@ class SequentialGateway implements IModelGateway {
 const text = (s: string): ModelResponse => ({
   content: [{ type: 'text', text: s }], toolCalls: [], finishReason: 'end_turn',
 })
+
+// ---- StubGateway + helpers (shared with sub-agent replay test) ----
+
+class StubGateway implements IModelGateway {
+  private responses: ModelResponse[]
+  constructor(responses: ModelResponse[]) { this.responses = responses }
+  async complete(_req: ModelRequest): Promise<ModelResponse> {
+    const r = this.responses.shift()
+    if (!r) throw new Error('No more stub responses')
+    return r
+  }
+  async *stream(_req: ModelRequest): AsyncIterable<never> { yield* [] }
+}
+
+const textResponse = (t: string): ModelResponse => ({
+  content: [{ type: 'text', text: t }], toolCalls: [], finishReason: 'end_turn',
+})
+
+const toolCallResponse = (id: string, name: string, input: unknown): ModelResponse => ({
+  content:      [{ type: 'tool_use', id, name, input }],
+  toolCalls:    [{ id, name, input }],
+  finishReason: 'tool_use',
+})
+
+function supervisorConfig(): AgentConfig {
+  return {
+    agentId:      'supervisor',
+    version:      '0.0.0',
+    systemPrompt: 'system',
+    fsm: { states: [{ name: 'react', type: 'llm', max_iterations: 3 }] },
+    model: { provider: 'stub', model: 'stub', adapter: 'stub' },
+    subAgents: { worker: '1.0.0' },
+  }
+}
+
+function workerConfig(): AgentConfig {
+  return {
+    agentId:      'worker',
+    version:      '0.0.0',
+    systemPrompt: 'system',
+    fsm: { states: [{ name: 'react', type: 'llm' }] },
+    model: { provider: 'stub', model: 'stub', adapter: 'stub' },
+  }
+}
 
 const oneShotAgent = (agentId = 'a1'): AgentConfig => ({
   agentId,
@@ -305,5 +350,69 @@ describe('Milkie.replay', () => {
     expect(replayed.status).toBe(original.status)
     expect(replayed.output).toBe(original.output)
     expect(replayGateway.callCount).toBe(0)
+  })
+
+  // ── Test: Sub-agent replay (issue #47) ────────────────────────────────────
+  //
+  // A parent run that spawned a sub-agent must replay cleanly with no
+  // divergence: no over-consume (cache miss mid-run) and no under-consume
+  // (recorded events left unconsumed at the end). Under model-I the child
+  // I/O is recorded under its own childRunId stream; the parent records the
+  // sub-agent call as a tool.responded. The parent-side boundary ids
+  // (childRunId, childContextId, taskId, childTraceId) are plain uuidv4(),
+  // so no ioPort cache entries are generated for them — the parent cache
+  // only contains what the parent itself consumed.
+  it('replays a run containing a sub-agent with no divergence', async () => {
+    const eventStore = new MemoryEventStore()
+    const record = new Milkie({
+      stateStore: new MemoryStore(),
+      gateway: new StubGateway([
+        toolCallResponse('s1', 'worker', { goal: 'subgoal', input: 'subinput' }),
+        textResponse('worker done'),
+        textResponse('all done'),
+      ]),
+      eventStore,
+    })
+    record.registerAgent(supervisorConfig())
+    record.registerAgent(workerConfig())
+    const orig = await record.invoke({ agentId: 'supervisor', goal: 'g', input: 'i' })
+
+    const replay = new Milkie({
+      stateStore: new MemoryStore(),
+      gateway: new StubGateway([]),   // replay must not touch the gateway
+      eventStore,
+    })
+    replay.registerAgent(supervisorConfig())
+    replay.registerAgent(workerConfig())
+
+    const replayed = await replay.replay(orig.agentRunId)
+    expect(replayed.status).toBe('completed')
+    expect(replayed.output).toBe(orig.output)   // 'all done'
+  })
+
+  it('replays a child run standalone by its childRunId', async () => {
+    const eventStore = new MemoryEventStore()
+    const record = new Milkie({
+      stateStore: new MemoryStore(),
+      gateway: new StubGateway([
+        toolCallResponse('s1', 'worker', { goal: 'subgoal', input: 'subinput' }),
+        textResponse('worker done'),
+        textResponse('all done'),
+      ]),
+      eventStore,
+    })
+    record.registerAgent(supervisorConfig())
+    record.registerAgent(workerConfig())
+    const orig = await record.invoke({ agentId: 'supervisor', goal: 'g', input: 'i' })
+    const parentEvents = await eventStore.readByRunId(orig.agentRunId)
+    const childRunId = (parentEvents.find(e => e.type === 'agent.spawned')!.payload as AgentSpawnedPayload).childRunId
+
+    const replay = new Milkie({ stateStore: new MemoryStore(), gateway: new StubGateway([]), eventStore })
+    replay.registerAgent(supervisorConfig())
+    replay.registerAgent(workerConfig())
+
+    const child = await replay.replay(childRunId)
+    expect(child.status).toBe('completed')
+    expect(child.output).toBe('worker done')
   })
 })

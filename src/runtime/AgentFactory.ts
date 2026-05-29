@@ -15,7 +15,9 @@ export interface AgentSpawnOptions {
   stateStore:  IStateStore
   recorder:    ITrajectoryRecorder
   ioPort:      IIOPort
-  extraTools?: ToolDefinition[]
+  extraTools?:    ToolDefinition[]
+  eventStore?:    import('../trace/EventStore.js').IEventStore
+  makeChildPort?: import('./AgentRuntime.js').MakeChildPort
 }
 
 // Forward declaration to avoid circular import — resolved at runtime

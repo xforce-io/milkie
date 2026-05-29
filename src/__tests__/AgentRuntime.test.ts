@@ -419,6 +419,53 @@ describe('AgentRuntime', () => {
       expect(parentCp.children.every(c => c.checkpointId)).toBe(true)
     })
 
+    it('persists child runId in the parent checkpoint children records', async () => {
+      const stateStore = new MemoryStore()
+      const milkie = new Milkie({
+        stateStore,
+        gateway: new SupervisorGateway(),
+      })
+
+      milkie.registerAgent(makeConfig({
+        agentId: 'worker-a',
+        fsm: { states: [{ name: 'react', type: 'llm' }] },
+      }))
+      milkie.registerAgent(makeConfig({
+        agentId: 'worker-b',
+        fsm: { states: [{ name: 'react', type: 'llm' }] },
+      }))
+      milkie.registerAgent(makeConfig({
+        agentId: 'supervisor',
+        fsm: { states: [{ name: 'react', type: 'llm', max_iterations: 3 }] },
+        subAgents: {
+          'worker-a': '1.0.0',
+          'worker-b': '1.0.0',
+        },
+      }))
+
+      const runPromise = milkie.invoke({
+        agentId:   'supervisor',
+        goal:      'coordinate workers',
+        input:     'start workers',
+        contextId: 'ctx-supervisor-runid',
+      })
+
+      await waitFor(async () => {
+        const children = await stateStore.get('context:ctx-supervisor-runid:children') as Array<{ status: string }> | undefined
+        return (children ?? []).filter(c => c.status === 'running').length === 2
+      })
+
+      await milkie.interrupt('ctx-supervisor-runid')
+      await runPromise
+
+      const parentCp = await stateStore.get('context:ctx-supervisor-runid:checkpoint:latest') as AgentCheckpoint
+      expect(parentCp.children.length).toBeGreaterThan(0)
+      for (const c of parentCp.children) {
+        expect(typeof c.runId).toBe('string')
+        expect((c.runId ?? '').length).toBeGreaterThan(0)
+      }
+    })
+
     it('emits agent.returned interrupted when sub-agents are interrupted', async () => {
       const stateStore = new MemoryStore()
       const eventStore = new MemoryEventStore()
