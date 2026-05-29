@@ -670,6 +670,17 @@ describe('agent.spawned / agent.returned events', () => {
     expect((completed.payload as AgentRunCompletedPayload).status).toBe('completed')
     expect(started.runId).toBe(spawned.childRunId)
   })
+
+  it('child port factory resolves gateway from child config', async () => {
+    const milkie = new Milkie({ stateStore: new MemoryStore(), eventStore: new MemoryEventStore() })
+    const make = (milkie as any)['buildMakeChildPort']()
+    expect(make).not.toBeNull()
+    expect(make).not.toBeUndefined()
+    const bogus = { ...workerConfig(), model: { provider: 'x', model: 'm', adapter: 'no-such-adapter' } }
+    await expect(make('child-run-1', bogus, {
+      agentId: 'worker', goal: 'g', input: 'i', contextId: 'c', parentId: 'p',
+    })).rejects.toThrow(/no-such-adapter/)
+  })
 })
 
 // ---- fsm.transition (#21) ----
