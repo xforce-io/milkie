@@ -33,11 +33,11 @@ Last updated: 2026-05-29
 - **8 of 15 stories are `active`** (have green E2E tests). The 7 `draft`
   stories all depend on Phase 5–6 capabilities that haven't shipped yet.
 - **Active line:** #20 observable substrate (6-capability surface). The
-  observable.P0 substrate is essentially complete — `fsm.transition` /
-  `skill.loaded` / region content-hash / `agent.spawned·returned` merged
-  (#21–24); sub-agent first-class trace + replay (#47) and
-  `tool.responded` product metadata (#25) in review. Remaining: observable.P1
-  consumption (UI/CLI), then the diagnosable line (#30 causedBy onward).
+  observable.P0 substrate is complete — `fsm.transition` / `skill.loaded` /
+  region content-hash / `agent.spawned·returned` (#21–24), sub-agent
+  first-class trace + replay (#47, PR #49), and `tool.responded` product
+  metadata (#25, PR #50) all merged. Remaining: observable.P1 consumption
+  (UI/CLI), then the diagnosable line (#30 causedBy onward).
 - **Next big rock:** Phase 5 fork / diff / suite replay. Phase 4 was its
   prerequisite for honest fork semantics — fork can now share recorded
   prefixes byte-for-byte across forks instead of structurally.
@@ -163,14 +163,14 @@ runtime structures):
 
 - **Merged:** `fsm.transition` (#21), `skill.loaded/unloaded` (#22),
   region content-addressing (#23), `agent.spawned` / `agent.returned`
-  (#24).
-- **In review:** sub-agent first-class — independent `childRunId` +
-  nested sub-trace + independently replayable, "model I" (#47, PR #49);
+  (#24); sub-agent first-class — independent `childRunId` + nested
+  sub-trace + independently replayable, "model I" (#47, PR #49);
   `tool.responded` product metadata `outputHash` / `outputBytes` +
-  object-store write-through (#25, PR #50).
+  object-store write-through (#25, PR #50, incl. child-port wiring).
 - **Next in this line:** `tool.responded` was the last observable.P0
-  substrate gap; remaining #20 work is observable.P1 (consumption UI/CLI:
-  #26–29) and the diagnosable line (#30 causedBy onward).
+  substrate gap — observable.P0 is now complete. Remaining #20 work is
+  observable.P1 (consumption UI/CLI: #26–29) and the diagnosable line
+  (#30 causedBy onward).
 
 **Other reasonable next pickups:**
 
@@ -464,8 +464,8 @@ Substrate gaps too small to phase but worth not losing:
   6-capability surface. Today: **replay is complete** (incl. runs with
   sub-agents once #47 lands); **observable.P0 substrate is essentially
   complete** — `fsm.transition` (#21), `skill.loaded` (#22), region
-  content hash (#23), `agent.spawned/returned` (#24) merged; sub-agent
-  first-class trace (#47) + `tool.responded` metadata (#25) in review.
+  content hash (#23), `agent.spawned/returned` (#24), sub-agent
+  first-class trace (#47), `tool.responded` metadata (#25) all merged.
   Remaining observable work is P1 consumption (UI/CLI, #26–29).
   **diagnosable** starts at #30 (causedBy); **lineage / fork / diff** are
   absent or Phase-5/6 work.
