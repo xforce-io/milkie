@@ -10,6 +10,7 @@ import { RecordingIOPort } from '../trace/RecordingIOPort'
 import { DefaultIOPort } from '../runtime/IOPort'
 import { Milkie } from '../runtime/Milkie'
 import { MemoryStore } from '../store/MemoryStore'
+import { canonicalize, contentAddressForCanonicalBytes } from '../trace/hash'
 import type {
   Event,
   LlmRequestedPayload,
@@ -680,6 +681,39 @@ describe('agent.spawned / agent.returned events', () => {
     await expect(make('child-run-1', bogus, {
       agentId: 'worker', goal: 'g', input: 'i', contextId: 'c', parentId: 'p',
     })).rejects.toThrow(/no-such-adapter/)
+  })
+
+  it('child sub-agent tool output is written through to the trace object store', async () => {
+    const eventStore  = new MemoryEventStore()
+    const objectStore = new MemoryTraceObjectStore()
+    const big = { chapter: 'x'.repeat(50_000) }
+    const milkie = new Milkie({
+      stateStore: new MemoryStore(),
+      gateway: new StubGateway([
+        toolCallResponse('s1', 'worker',   { goal: 'g', input: 'i' }),  // supervisor spawns worker
+        toolCallResponse('w1', 'echo_big', {}),                         // worker calls echo_big
+        textResponse('worker done'),                                    // worker finishes
+        textResponse('all done'),                                       // supervisor finishes
+      ]),
+      eventStore,
+      traceObjectStore: objectStore,
+      tools: [{
+        name:         'echo_big',
+        description:  'returns a big object',
+        parallelSafe: true,
+        inputSchema:  { type: 'object', properties: {} },
+        handler:      async () => big,
+      }],
+    })
+    milkie.registerAgent(supervisorConfig())
+    milkie.registerAgent(workerConfig())
+
+    await milkie.invoke({ agentId: 'supervisor', goal: 'g', input: 'i' })
+
+    // echo_big is only ever called by the worker (child) — its output reaching the
+    // object store proves the child port was wired with traceObjectStore.
+    const hash = contentAddressForCanonicalBytes(canonicalize(big))
+    expect(await objectStore.has(hash)).toBe(true)
   })
 })
 

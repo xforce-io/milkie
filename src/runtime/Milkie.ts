@@ -71,9 +71,10 @@ export class Milkie {
     if (!this.eventStore) return undefined
     const eventStore = this.eventStore
     const gatewayOverride = this.gatewayOverride
+    const objectStore = this.traceObjectStore ?? undefined
     return async (childRunId, childConfig, start) => {
       const gw   = gatewayOverride ?? createGateway(childConfig.model)
-      const port = new RecordingIOPort(new DefaultIOPort(gw), eventStore, childRunId)
+      const port = new RecordingIOPort(new DefaultIOPort(gw), eventStore, childRunId, undefined, objectStore)
       await port.attach(start)
       return { port, finish: (c) => port.detach(c) }
     }
