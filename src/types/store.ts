@@ -48,7 +48,8 @@ export interface AgentEvent {
 export interface ChildAgentRecord {
   taskId:        string
   agentId:       string
-  contextId?:     string
+  runId?:        string
+  contextId?:    string
   checkpointId?: string
   status:        'running' | 'success' | 'error' | 'interrupted'
 }

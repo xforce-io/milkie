@@ -35,7 +35,13 @@ import type { InMemoryRecorder } from '../trajectory/InMemoryRecorder.js'
 import type { ITraceObjectStore } from '../trace/TraceObjectStore.js'
 import { canonicalize, contentAddressForCanonicalBytes } from '../trace/hash.js'
 import type { Region } from '../context/Region.js'
-import type { SkillLifecyclePayload } from '../trace/types.js'
+import type { SkillLifecyclePayload, AgentRunStartedPayload, AgentRunCompletedPayload } from '../trace/types.js'
+
+export type MakeChildPort = (
+  childRunId:  string,
+  childConfig: AgentConfig,
+  start:       AgentRunStartedPayload,
+) => Promise<{ port: IIOPort; finish: (c: AgentRunCompletedPayload) => Promise<void> }>
 
 export interface AgentRuntimeOptions {
   config:            AgentConfig
@@ -59,6 +65,7 @@ export interface AgentRuntimeOptions {
   extraTools?:       ToolDefinition[]
   subAgentConfigs?:  Map<string, AgentConfig>  // agentId → config, for spawning
   childRecorderFactory?: (config: AgentConfig, contextId: string, traceId: string) => ITrajectoryRecorder
+  makeChildPort?: MakeChildPort
 }
 
 type SkillLoadRequest = {
@@ -81,6 +88,7 @@ export class AgentRuntime {
   private readonly traceObjectStore?: ITraceObjectStore
   private readonly subAgentConfigs?: Map<string, AgentConfig>
   private readonly childRecorderFactory?: (config: AgentConfig, contextId: string, traceId: string) => ITrajectoryRecorder
+  private readonly makeChildPort?: MakeChildPort
   private readonly extraTools:      ToolDefinition[]
 
   private readonly fsm:         FSMEngine
@@ -116,6 +124,7 @@ export class AgentRuntime {
     this.traceObjectStore = opts.traceObjectStore
     this.subAgentConfigs = opts.subAgentConfigs
     this.childRecorderFactory = opts.childRecorderFactory
+    this.makeChildPort   = opts.makeChildPort
     this.extraTools      = opts.extraTools ?? []
 
     this.fsm     = new FSMEngine(opts.config.fsm)
@@ -135,8 +144,10 @@ export class AgentRuntime {
     this.factory = new AgentFactory(async (spawnOpts: AgentSpawnOptions) => {
       const child = new AgentRuntime({
         ...spawnOpts,
-        parentId: this.agentRunId,
+        parentId:             this.agentRunId,
         childRecorderFactory: this.childRecorderFactory,
+        eventStore:           this.eventStore,
+        makeChildPort:        this.makeChildPort,
       })
       return child.run(spawnOpts.input)
     })
@@ -214,65 +225,64 @@ export class AgentRuntime {
           throw new Error(`Sub-agent config not found: ${agentId}. Pass subAgentConfigs to AgentRuntime.`)
         }
 
-        const childTraceId = this.ioPort.uuid()
-        const childContextId = this.ioPort.uuid()
+        const childTraceId   = uuidv4()
+        const childContextId = uuidv4()
+        const taskId         = uuidv4()
+        const childRunId     = uuidv4()
+
         const childRecorder = this.childRecorderFactory?.(subConfig, childContextId, childTraceId) ?? this.recorder
-        const taskId = this.ioPort.uuid()
         const spawnSpan = this.recorder.startSpan('agent.spawn', {
-          childAgentId: agentId,
-          taskId,
-          turn:         this.turnNumber,
-          childTraceId,
-          childContextId,
+          childAgentId: agentId, taskId, turn: this.turnNumber, childTraceId, childContextId, childRunId,
         })
-        await this.recordChild({
-          taskId,
-          agentId,
-          contextId: childContextId,
-          status: 'running',
-        })
-        this.emitAgentSpawned(childContextId, agentId, goal)
+        await this.recordChild({ taskId, agentId, runId: childRunId, contextId: childContextId, status: 'running' })
+        this.emitAgentSpawned(childRunId, agentId, goal)
+
+        let childPort: IIOPort = this.ioPort
+        let finish: ((c: AgentRunCompletedPayload) => Promise<void>) | null = null
+        if (this.makeChildPort) {
+          const built = await this.makeChildPort(childRunId, subConfig, {
+            agentId, goal, input: subInput, contextId: childContextId, parentId: this.agentRunId,
+          })
+          childPort = built.port
+          finish    = built.finish
+        }
 
         try {
           const result = await ctx.agentFactory.spawn({
-            config:      subConfig,
+            config:        subConfig,
             goal,
-            input:       subInput,
-            contextId:   childContextId,
-            agentRunId:   this.agentRunId,
-            stateStore:  this.stateStore,
-            recorder:    childRecorder,
-            ioPort:      this.ioPort,
-            extraTools:  this.extraTools,
+            input:         subInput,
+            contextId:     childContextId,
+            agentRunId:    childRunId,
+            stateStore:    this.stateStore,
+            recorder:      childRecorder,
+            ioPort:        childPort,
+            extraTools:    this.extraTools,
+            eventStore:    this.eventStore,
+            makeChildPort: this.makeChildPort,
           })
+          await finish?.({ status: result.status, lastTextOutput: result.output })
+
           const childCheckpoint = result.status === 'interrupted'
             ? await this.stateStore.get(`context:${childContextId}:checkpoint:latest`) as AgentCheckpoint | undefined
             : undefined
           await this.recordChild({
-            taskId,
-            agentId,
-            contextId:     childContextId,
-            checkpointId:  childCheckpoint?.checkpointId,
-            status:        result.status === 'interrupted' ? 'interrupted' : result.status === 'completed' ? 'success' : 'error',
+            taskId, agentId, runId: childRunId, contextId: childContextId,
+            checkpointId: childCheckpoint?.checkpointId,
+            status: result.status === 'interrupted' ? 'interrupted' : result.status === 'completed' ? 'success' : 'error',
           })
           this.recorder.recordEvent(spawnSpan, 'agent.spawn.complete', { resultStatus: result.status })
-          this.emitAgentReturned(childContextId, result.status)
-          spawnSpan.attributes['resultStatus']  = result.status
-          spawnSpan.attributes['childTraceId']  = childTraceId
+          this.emitAgentReturned(childRunId, result.status)
+          spawnSpan.attributes['resultStatus']   = result.status
+          spawnSpan.attributes['childTraceId']   = childTraceId
           spawnSpan.attributes['childContextId'] = childContextId
-          if (childCheckpoint?.checkpointId) {
-            spawnSpan.attributes['checkpointId'] = childCheckpoint.checkpointId
-          }
+          if (childCheckpoint?.checkpointId) spawnSpan.attributes['checkpointId'] = childCheckpoint.checkpointId
           this.recorder.endSpan(spawnSpan, 'ok')
           return result.output
         } catch (err) {
-          await this.recordChild({
-            taskId,
-            agentId,
-            contextId: childContextId,
-            status: 'error',
-          })
-          this.emitAgentReturned(childContextId, 'error')
+          await finish?.({ status: 'error', error: err instanceof Error ? err.message : String(err) })
+          await this.recordChild({ taskId, agentId, runId: childRunId, contextId: childContextId, status: 'error' })
+          this.emitAgentReturned(childRunId, 'error')
           spawnSpan.attributes['resultStatus'] = 'error'
           this.recorder.endSpan(spawnSpan, 'error')
           throw err

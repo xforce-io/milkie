@@ -67,6 +67,18 @@ export class Milkie {
       : base
   }
 
+  private buildMakeChildPort(): import('./AgentRuntime.js').MakeChildPort | undefined {
+    if (!this.eventStore) return undefined
+    const eventStore = this.eventStore
+    const gatewayOverride = this.gatewayOverride
+    return async (childRunId, childConfig, start) => {
+      const gw   = gatewayOverride ?? createGateway(childConfig.model)
+      const port = new RecordingIOPort(new DefaultIOPort(gw), eventStore, childRunId)
+      await port.attach(start)
+      return { port, finish: (c) => port.detach(c) }
+    }
+  }
+
   registerTool(tool: ToolDefinition): void {
     this.extraTools.push(tool)
   }
@@ -195,6 +207,7 @@ export class Milkie {
       : new InMemoryRecorder(undefined, config.agentId)
 
     const ioPort = this.wrapIOPort(gateway, agentRunId)
+    const makeChildPort = this.buildMakeChildPort()
 
     const runtime = new AgentRuntime({
       config,
@@ -210,6 +223,7 @@ export class Milkie {
       extraTools:      this.extraTools,
       subAgentConfigs: this.agents,
       childRecorderFactory,
+      makeChildPort,
     })
 
     if (restoredCheckpoint) {
@@ -287,6 +301,7 @@ export class Milkie {
       extraTools:      this.extraTools,
       subAgentConfigs: this.agents,
       childRecorderFactory,
+      makeChildPort:   this.buildMakeChildPort(),
     })
 
     await runtime.loadCheckpoint(checkpoint)

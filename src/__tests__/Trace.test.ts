@@ -613,6 +613,33 @@ describe('agent.spawned / agent.returned events', () => {
     expect(returned.status).toBe('error')
     expect(returned.childRunId).toBe(spawned.childRunId)
   })
+
+  it('records child LLM I/O under an independent childRunId, not the parent run', async () => {
+    const eventStore = new MemoryEventStore()
+    const milkie = new Milkie({
+      stateStore: new MemoryStore(),
+      gateway: new StubGateway([
+        toolCallResponse('s1', 'worker', { goal: 'subgoal', input: 'subinput' }),
+        textResponse('worker done'),
+        textResponse('all done'),
+      ]),
+      eventStore,
+    })
+    milkie.registerAgent(supervisorConfig())
+    milkie.registerAgent(workerConfig())
+
+    const result = await milkie.invoke({ agentId: 'supervisor', goal: 'g', input: 'i' })
+    const parentEvents = await eventStore.readByRunId(result.agentRunId)
+
+    const spawned = parentEvents.find(e => e.type === 'agent.spawned')!.payload as AgentSpawnedPayload
+    expect(spawned.childRunId).not.toBe(result.agentRunId)
+
+    const parentLlm = parentEvents.filter(e => e.type === 'llm.requested')
+    const childEvents = await eventStore.readByRunId(spawned.childRunId)
+    const childLlm = childEvents.filter(e => e.type === 'llm.requested')
+    expect(childLlm.length).toBeGreaterThan(0)
+    expect(parentLlm.length).toBe(2)
+  })
 })
 
 // ---- fsm.transition (#21) ----
