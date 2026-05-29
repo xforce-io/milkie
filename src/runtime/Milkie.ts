@@ -16,6 +16,7 @@ import { AgentRuntime } from './AgentRuntime.js'
 import { DefaultIOPort, type IIOPort } from './IOPort.js'
 import type { IEventStore } from '../trace/EventStore.js'
 import { RecordingIOPort } from '../trace/RecordingIOPort.js'
+import { CausalCursor } from '../trace/CausalCursor.js'
 import type { ITraceObjectStore } from '../trace/TraceObjectStore.js'
 import { CacheIndex } from '../trace/CacheIndex.js'
 import { ReplayingIOPort } from '../trace/ReplayingIOPort.js'
@@ -60,10 +61,10 @@ export class Milkie {
     this.traceObjectStore = opts.traceObjectStore ?? null
   }
 
-  private wrapIOPort(gateway: IModelGateway, runId: string): IIOPort {
+  private wrapIOPort(gateway: IModelGateway, runId: string, cursor?: CausalCursor): IIOPort {
     const base = new DefaultIOPort(gateway)
     return this.eventStore
-      ? new RecordingIOPort(base, this.eventStore, runId, undefined, this.traceObjectStore ?? undefined)
+      ? new RecordingIOPort(base, this.eventStore, runId, undefined, this.traceObjectStore ?? undefined, cursor)
       : base
   }
 
@@ -73,10 +74,11 @@ export class Milkie {
     const gatewayOverride = this.gatewayOverride
     const objectStore = this.traceObjectStore ?? undefined
     return async (childRunId, childConfig, start) => {
-      const gw   = gatewayOverride ?? createGateway(childConfig.model)
-      const port = new RecordingIOPort(new DefaultIOPort(gw), eventStore, childRunId, undefined, objectStore)
+      const gw     = gatewayOverride ?? createGateway(childConfig.model)
+      const cursor = new CausalCursor()
+      const port   = new RecordingIOPort(new DefaultIOPort(gw), eventStore, childRunId, undefined, objectStore, cursor)
       await port.attach(start)
-      return { port, finish: (c) => port.detach(c) }
+      return { port, finish: (c) => port.detach(c), cursor }
     }
   }
 
@@ -207,7 +209,8 @@ export class Milkie {
       })
       : new InMemoryRecorder(undefined, config.agentId)
 
-    const ioPort = this.wrapIOPort(gateway, agentRunId)
+    const causalCursor = new CausalCursor()
+    const ioPort = this.wrapIOPort(gateway, agentRunId, causalCursor)
     const makeChildPort = this.buildMakeChildPort()
 
     const runtime = new AgentRuntime({
@@ -225,6 +228,7 @@ export class Milkie {
       subAgentConfigs: this.agents,
       childRecorderFactory,
       makeChildPort,
+      causalCursor,
     })
 
     if (restoredCheckpoint) {
@@ -289,6 +293,7 @@ export class Milkie {
       : new InMemoryRecorder(checkpoint.meta.traceId || undefined, config.agentId)
 
     const makeChildPort = this.buildMakeChildPort()
+    const causalCursor = new CausalCursor()
 
     const runtime = new AgentRuntime({
       config,
@@ -298,13 +303,14 @@ export class Milkie {
       contextId,
       stateStore: this.stateStore,
       recorder,
-      ioPort:          this.wrapIOPort(gateway, agentRunId),
+      ioPort:          this.wrapIOPort(gateway, agentRunId, causalCursor),
       eventStore:      this.eventStore ?? undefined,
       traceObjectStore: this.traceObjectStore ?? undefined,
       extraTools:      this.extraTools,
       subAgentConfigs: this.agents,
       childRecorderFactory,
       makeChildPort,
+      causalCursor,
     })
 
     await runtime.loadCheckpoint(checkpoint)

@@ -34,6 +34,7 @@ import { systemTools } from '../tools/system.js'
 import type { InMemoryRecorder } from '../trajectory/InMemoryRecorder.js'
 import type { ITraceObjectStore } from '../trace/TraceObjectStore.js'
 import { canonicalize, contentAddressForCanonicalBytes } from '../trace/hash.js'
+import type { CausalCursor } from '../trace/CausalCursor.js'
 import type { Region } from '../context/Region.js'
 import type { SkillLifecyclePayload, AgentRunStartedPayload, AgentRunCompletedPayload } from '../trace/types.js'
 
@@ -41,7 +42,7 @@ export type MakeChildPort = (
   childRunId:  string,
   childConfig: AgentConfig,
   start:       AgentRunStartedPayload,
-) => Promise<{ port: IIOPort; finish: (c: AgentRunCompletedPayload) => Promise<void> }>
+) => Promise<{ port: IIOPort; finish: (c: AgentRunCompletedPayload) => Promise<void>; cursor?: CausalCursor }>
 
 export interface AgentRuntimeOptions {
   config:            AgentConfig
@@ -66,6 +67,9 @@ export interface AgentRuntimeOptions {
   subAgentConfigs?:  Map<string, AgentConfig>  // agentId → config, for spawning
   childRecorderFactory?: (config: AgentConfig, contextId: string, traceId: string) => ITrajectoryRecorder
   makeChildPort?: MakeChildPort
+  /** #30: per-run causal cursor shared with this run's RecordingIOPort, so fsm.transition
+   *  can stamp causedBy = the last llm/tool event id. Omit → no fsm.transition causedBy. */
+  causalCursor?: CausalCursor
 }
 
 type SkillLoadRequest = {
@@ -90,6 +94,7 @@ export class AgentRuntime {
   private readonly childRecorderFactory?: (config: AgentConfig, contextId: string, traceId: string) => ITrajectoryRecorder
   private readonly makeChildPort?: MakeChildPort
   private readonly extraTools:      ToolDefinition[]
+  private readonly causalCursor?:   CausalCursor
 
   private readonly fsm:         FSMEngine
   private readonly regions:     ContextRegions
@@ -110,6 +115,10 @@ export class AgentRuntime {
   private rootSpan!:     Span
   private turnNumber:    number = 0
   private lastTextOutput: string = ''
+  /** #30: id of the in-flight context.boundary.applied event; region.added emitted inside
+   *  crystallization reads it for causedBy. Unset outside the crystallization window so
+   *  agent-set region deltas (e.g. header) get no causedBy. */
+  private pendingBoundaryId?: string
 
   constructor(opts: AgentRuntimeOptions) {
     this.ioPort          = opts.ioPort
@@ -126,6 +135,7 @@ export class AgentRuntime {
     this.childRecorderFactory = opts.childRecorderFactory
     this.makeChildPort   = opts.makeChildPort
     this.extraTools      = opts.extraTools ?? []
+    this.causalCursor    = opts.causalCursor
 
     this.fsm     = new FSMEngine(opts.config.fsm)
     this.memory  = new WorkingMemory()
@@ -172,12 +182,18 @@ export class AgentRuntime {
       // burn an ioPort.uuid()/now() that replay's skip-write branch wouldn't
       // match. Date.now() / uuidv4() direct keep record/replay paths symmetric.
       if (this.eventStore) {
+        // edge 3 (#30): capture the cause synchronously here — the last llm/tool event
+        // emitted by RecordingIOPort is what provoked this transition (tool ctx.emit ->
+        // tool.responded, or DONE-after-text -> llm.responded). Must read the cursor now,
+        // NOT inside the deferred write closure, because trace appends are reordered.
+        const causedBy = this.causalCursor?.lastIoEventId
         this.enqueueTraceWrite(async () => {
           await this.eventStore!.append({
             id:        uuidv4(),
             runId:     this.agentRunId,
             type:      'fsm.transition',
             actor:     this.config.agentId,
+            ...(causedBy ? { causedBy } : {}),
             timestamp: Date.now(),
             payload: {
               from,
@@ -239,14 +255,16 @@ export class AgentRuntime {
 
         let childPort: IIOPort = this.ioPort
         let finish: ((c: AgentRunCompletedPayload) => Promise<void>) | null = null
+        let childCursor: CausalCursor | undefined
 
         try {
           if (this.makeChildPort) {
             const built = await this.makeChildPort(childRunId, subConfig, {
               agentId, goal, input: subInput, contextId: childContextId, parentId: this.agentRunId,
             })
-            childPort = built.port
-            finish    = built.finish
+            childPort   = built.port
+            finish      = built.finish
+            childCursor = built.cursor   // #30: child run gets its own cursor (parent/child isolated)
           }
           const result = await ctx.agentFactory.spawn({
             config:        subConfig,
@@ -257,6 +275,7 @@ export class AgentRuntime {
             stateStore:    this.stateStore,
             recorder:      childRecorder,
             ioPort:        childPort,
+            causalCursor:  childCursor,
             extraTools:    this.extraTools,
             eventStore:    this.eventStore,
             makeChildPort: this.makeChildPort,
@@ -437,6 +456,11 @@ export class AgentRuntime {
     // Also write to the event log so trace HTML / web UI / inspect can see
     // these. Recorder-only (span events) doesn't reach the live event stream.
     if (this.eventStore) {
+      // edge 4 (#30): a region.added produced during turn-end crystallization is caused by
+      // that turn's boundary. pendingBoundaryId is set only for the crystallization window,
+      // so agent-set deltas (header, scratchpad) outside it get no causedBy. Captured here
+      // synchronously — emitRegionDelta runs inside the synchronous crystallization call.
+      const causedBy = delta.kind === 'added' ? this.pendingBoundaryId : undefined
       // Bypass IOPort for event metadata: these region/boundary events are
       // informational (not consumed by replay's nondet cache), so we mustn't
       // burn an ioPort.uuid()/now() in record mode that replay's skip-write
@@ -449,6 +473,7 @@ export class AgentRuntime {
           runId:     this.agentRunId,
           type:      delta.kind === 'added' ? 'region.added' : 'region.removed',
           actor:     this.config.agentId,
+          ...(causedBy ? { causedBy } : {}),
           timestamp: Date.now(),
           payload:   delta.kind === 'added'
             ? (addedPayload ?? { id: delta.id, target: delta.target ?? 'system', section: delta.section ?? 'unknown', stability: delta.stability ?? 'volatile', reason })
@@ -587,7 +612,7 @@ export class AgentRuntime {
     }
   }
 
-  private emitBoundaryApplied(summary: import('../context/lifecycleEngine.js').CrystallizationSummary): void {
+  private emitBoundaryApplied(summary: import('../context/lifecycleEngine.js').CrystallizationSummary, boundaryId: string = uuidv4()): void {
     if (!this.rootSpan) return
     this.recorder.recordEvent(this.rootSpan, 'context.boundary.applied', {
       boundary: 'turn-end',
@@ -607,7 +632,7 @@ export class AgentRuntime {
       // replay paths symmetric on IOPort consumption.
       this.enqueueTraceWrite(async () => {
         await this.eventStore!.append({
-          id:        uuidv4(),
+          id:        boundaryId,
           runId:     this.agentRunId,
           type:      'context.boundary.applied',
           actor:     this.config.agentId,
@@ -650,12 +675,21 @@ export class AgentRuntime {
   private crystallizeTurn(userInput?: string): void {
     const input = userInput ?? (this.regions.get('current-turn')?.content as string | undefined)
     if (input === undefined) return
-    runInterTurnEngine(this.regions, {
-      boundary:   'turn-end',
-      userInput:  input,
-      now:        this.ioPort.now(),
-      onBoundary: (summary) => this.emitBoundaryApplied(summary),
-    })
+    // #30: mint the boundary event id BEFORE crystallization mutates regions —
+    // runInterTurnEngine sets regions (firing region.added) and only calls onBoundary at
+    // the end, so the boundary id must already exist for those region.added to point at it.
+    const boundaryId = uuidv4()
+    this.pendingBoundaryId = boundaryId
+    try {
+      runInterTurnEngine(this.regions, {
+        boundary:   'turn-end',
+        userInput:  input,
+        now:        this.ioPort.now(),
+        onBoundary: (summary) => this.emitBoundaryApplied(summary, boundaryId),
+      })
+    } finally {
+      this.pendingBoundaryId = undefined
+    }
   }
 
   private refreshTransientRegions(state: FSMState, schemas: ToolSchema[]): void {
