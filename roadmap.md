@@ -13,7 +13,7 @@ When code lands that closes a gap, update this file (Completed sections,
 Migration intentions, deferred items) before claiming the gap is closed
 elsewhere.
 
-Last updated: 2026-05-28
+Last updated: 2026-05-29
 
 ---
 
@@ -32,6 +32,12 @@ Last updated: 2026-05-28
   declare `scope: 'turn' | 'session'` lifetime, section schema is cache-aware.
 - **8 of 15 stories are `active`** (have green E2E tests). The 7 `draft`
   stories all depend on Phase 5–6 capabilities that haven't shipped yet.
+- **Active line:** #20 observable substrate (6-capability surface). The
+  observable.P0 substrate is essentially complete — `fsm.transition` /
+  `skill.loaded` / region content-hash / `agent.spawned·returned` merged
+  (#21–24); sub-agent first-class trace + replay (#47) and
+  `tool.responded` product metadata (#25) in review. Remaining: observable.P1
+  consumption (UI/CLI), then the diagnosable line (#30 causedBy onward).
 - **Next big rock:** Phase 5 fork / diff / suite replay. Phase 4 was its
   prerequisite for honest fork semantics — fork can now share recorded
   prefixes byte-for-byte across forks instead of structurally.
@@ -91,11 +97,19 @@ Last updated: 2026-05-28
   `paused` reserved FSM state + global `interrupt` event handler
   (`src/fsm/FSMEngine.ts:11,61-62`, `src/runtime/Milkie.ts:297-300`,
   `src/runtime/AgentRuntime.ts:238-242`).
-  **Substrate additions on top of Phase 3:**
+  **Substrate additions on top of Phase 3 (#20 observable.P0, merged):**
   - `fsm.transition` event with explicit `FsmEventDomain` taxonomy
     (lifecycle / signal / runtime-control / business) — #21,
     commit 7857423. Closes one node-class needed by future
     diagnosable causedBy chains (#30 onward).
+  - `skill.loaded` / `skill.unloaded` lifecycle events — #22.
+  - Region content-addressing: `region.added` carries `contentHash` /
+    `renderedHash`, content bytes offloaded to `ITraceObjectStore`
+    (`MemoryTraceObjectStore` / `FileTraceObjectStore`, content-addressed
+    + dedup) — #23.
+  - `agent.spawned` / `agent.returned` anchors on the parent run — #24
+    (PR #48). The supervisor tree is now an event, not a runtime-only
+    `ChildAgentRecord` reconstruction.
 - **Phase 4 — Non-determinism log + byte-identical replay.** New event
   kinds `clock.read` / `uuid.generated`. `RecordingIOPort` records every
   agent-facing `port.now()` / `port.uuid()` call via an internal pending
@@ -142,12 +156,23 @@ Full readiness view: `docs/stories/INDEX.md`.
 
 ## In progress
 
-**Nothing code-side actively in flight.** The Phase 4.5 Context Region
-Substrate just landed (PRs #6 / #7 / #8 / #9 / #10 merged); Phase 4
-non-determinism log + s-002 HTML report probe + agent-first CLI wave
-landed earlier in this development cycle.
+**Active line: #20 observable substrate (6-capability surface push).**
+Closing the observable-substrate gaps so the event log is a complete
+source of truth (every state visible as events, not reconstructed from
+runtime structures):
 
-**Two reasonable next pickups:**
+- **Merged:** `fsm.transition` (#21), `skill.loaded/unloaded` (#22),
+  region content-addressing (#23), `agent.spawned` / `agent.returned`
+  (#24).
+- **In review:** sub-agent first-class — independent `childRunId` +
+  nested sub-trace + independently replayable, "model I" (#47, PR #49);
+  `tool.responded` product metadata `outputHash` / `outputBytes` +
+  object-store write-through (#25, PR #50).
+- **Next in this line:** `tool.responded` was the last observable.P0
+  substrate gap; remaining #20 work is observable.P1 (consumption UI/CLI:
+  #26–29) and the diagnosable line (#30 causedBy onward).
+
+**Other reasonable next pickups:**
 
 - **Phase 4.6 — region trace events + cache health observability.**
   Smaller scope (~600 LOC). Adds `region.added` / `region.removed` /
@@ -436,10 +461,14 @@ Substrate gaps too small to phase but worth not losing:
   the "Replay side-effect policy" open question below.
 - **6-capability vocabulary status.** `ARCHITECTURE.md` describes
   observable / diagnosable / lineage / replay / fork / diff as a
-  6-capability surface. Today: **replay is complete**; **observable** is
-  partial (substrate gaps tracked under #20 — see `fsm.transition`,
-  `skill.loaded`, region content hash etc.); **diagnosable / lineage /
-  fork / diff** are absent or Phase-5/6 work.
+  6-capability surface. Today: **replay is complete** (incl. runs with
+  sub-agents once #47 lands); **observable.P0 substrate is essentially
+  complete** — `fsm.transition` (#21), `skill.loaded` (#22), region
+  content hash (#23), `agent.spawned/returned` (#24) merged; sub-agent
+  first-class trace (#47) + `tool.responded` metadata (#25) in review.
+  Remaining observable work is P1 consumption (UI/CLI, #26–29).
+  **diagnosable** starts at #30 (causedBy); **lineage / fork / diff** are
+  absent or Phase-5/6 work.
 
 ---
 
