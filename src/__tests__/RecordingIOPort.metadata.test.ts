@@ -58,4 +58,27 @@ describe('RecordingIOPort — tool output metadata (#25)', () => {
     expect(typeof p.outputHash).toBe('string')
     expect(p.outputBytes).toBe(Buffer.byteLength(canonicalize('hello'), 'utf8'))
   })
+
+  it('dedupes large output by hash in the trace object store', async () => {
+    const objectStore = new MemoryTraceObjectStore()
+    let putCount = 0
+    const counting = {
+      putCanonical: async (b: string) => { putCount++; return objectStore.putCanonical(b) },
+      getCanonical: (h: string) => objectStore.getCanonical(h),
+      has:          (h: string) => objectStore.has(h),
+    }
+    const store = new MemoryEventStore()
+    const big = 'x'.repeat(100_000)
+    const out = { chapter: big }
+
+    for (let i = 0; i < 3; i++) {
+      await new RecordingIOPort(new ExecInnerPort(), store, `r${i}`, undefined, counting)
+        .invokeTool('read_file', { path: 'ch1', n: i }, async () => out)
+    }
+
+    const hash = contentAddressForCanonicalBytes(canonicalize(out))
+    expect(await objectStore.has(hash)).toBe(true)
+    expect(putCount).toBe(3)
+    expect(await objectStore.getCanonical(hash)).toBe(canonicalize(out))
+  })
 })
