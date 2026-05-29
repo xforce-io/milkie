@@ -231,6 +231,7 @@ export class AgentRuntime {
           contextId: childContextId,
           status: 'running',
         })
+        this.emitAgentSpawned(childContextId, agentId, goal)
 
         try {
           const result = await ctx.agentFactory.spawn({
@@ -255,6 +256,7 @@ export class AgentRuntime {
             status:        result.status === 'interrupted' ? 'interrupted' : result.status === 'completed' ? 'success' : 'error',
           })
           this.recorder.recordEvent(spawnSpan, 'agent.spawn.complete', { resultStatus: result.status })
+          this.emitAgentReturned(childContextId, result.status)
           spawnSpan.attributes['resultStatus']  = result.status
           spawnSpan.attributes['childTraceId']  = childTraceId
           spawnSpan.attributes['childContextId'] = childContextId
@@ -270,6 +272,7 @@ export class AgentRuntime {
             contextId: childContextId,
             status: 'error',
           })
+          this.emitAgentReturned(childContextId, 'error')
           spawnSpan.attributes['resultStatus'] = 'error'
           this.recorder.endSpan(spawnSpan, 'error')
           throw err
@@ -457,15 +460,50 @@ export class AgentRuntime {
     if (!this.rootSpan) return
     this.recorder.recordEvent(this.rootSpan, type, { ...payload })
     if (this.eventStore) {
-      void this.eventStore.append({
-        id:        uuidv4(),
-        runId:     this.agentRunId,
-        type,
-        actor:     this.config.agentId,
-        timestamp: Date.now(),
-        payload,
+      this.enqueueTraceWrite(async () => {
+        await this.eventStore!.append({
+          id:        uuidv4(),
+          runId:     this.agentRunId,
+          type,
+          actor:     this.config.agentId,
+          timestamp: Date.now(),
+          payload,
+        })
       })
     }
+  }
+
+  private emitAgentSpawned(childRunId: string, agentId: string, goal: string): void {
+    if (!this.eventStore) return
+    // Bypass IOPort (Date.now/uuidv4 direct): informational event, not consumed
+    // by replay's nondet cache. The recorder already carries the agent.spawn
+    // span for the trajectory view, so this writes to the event log only.
+    this.enqueueTraceWrite(async () => {
+      await this.eventStore!.append({
+        id:        uuidv4(),
+        runId:     this.agentRunId,
+        type:      'agent.spawned',
+        actor:     this.config.agentId,
+        timestamp: Date.now(),
+        payload:   { parentRunId: this.agentRunId, childRunId, agentId, goal },
+      })
+    })
+  }
+
+  private emitAgentReturned(childRunId: string, status: 'completed' | 'interrupted' | 'error'): void {
+    if (!this.eventStore) return
+    // Same IOPort-bypass rationale as emitAgentSpawned: informational event,
+    // written to the event log only (recorder already has the spawn span).
+    this.enqueueTraceWrite(async () => {
+      await this.eventStore!.append({
+        id:        uuidv4(),
+        runId:     this.agentRunId,
+        type:      'agent.returned',
+        actor:     this.config.agentId,
+        timestamp: Date.now(),
+        payload:   { childRunId, status },
+      })
+    })
   }
 
   private buildRegionAddedPayload(region: Region, reason: string): import('../trace/types.js').RegionAddedPayload {

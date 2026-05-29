@@ -19,6 +19,8 @@ import type {
   FsmTransitionPayload,
   RegionAddedPayload,
   SkillLifecyclePayload,
+  AgentSpawnedPayload,
+  AgentReturnedPayload,
 } from '../trace/types'
 import type { IModelGateway, ModelRequest, ModelResponse } from '../types/model'
 import type { AgentConfig } from '../types/agent'
@@ -533,6 +535,83 @@ describe('RecordingIOPort — Phase 3 additions', () => {
     })
     expect(loadedPayload.sha).toMatch(/^[a-f0-9]{64}$/)
     expect(unloaded.payload).toEqual(loaded.payload)
+  })
+})
+
+// ---- agent.spawned / agent.returned (#24) ----
+
+describe('agent.spawned / agent.returned events', () => {
+  function supervisorConfig(): AgentConfig {
+    return {
+      agentId:      'supervisor',
+      version:      '0.0.0',
+      systemPrompt: 'system',
+      fsm: { states: [{ name: 'react', type: 'llm', max_iterations: 3 }] },
+      model: { provider: 'stub', model: 'stub', adapter: 'stub' },
+      subAgents: { worker: '1.0.0' },
+    }
+  }
+  function workerConfig(): AgentConfig {
+    return {
+      agentId:      'worker',
+      version:      '0.0.0',
+      systemPrompt: 'system',
+      fsm: { states: [{ name: 'react', type: 'llm' }] },
+      model: { provider: 'stub', model: 'stub', adapter: 'stub' },
+    }
+  }
+
+  it('emits agent.spawned then agent.returned (completed) on the parent run', async () => {
+    const eventStore = new MemoryEventStore()
+    const milkie = new Milkie({
+      stateStore: new MemoryStore(),
+      gateway: new StubGateway([
+        toolCallResponse('s1', 'worker', { goal: 'subgoal', input: 'subinput' }),
+        textResponse('worker done'),
+        textResponse('all done'),
+      ]),
+      eventStore,
+    })
+    milkie.registerAgent(supervisorConfig())
+    milkie.registerAgent(workerConfig())
+
+    const result = await milkie.invoke({ agentId: 'supervisor', goal: 'g', input: 'i' })
+    const events = await eventStore.readByRunId(result.agentRunId)
+
+    const spawnedIdx  = events.findIndex(e => e.type === 'agent.spawned')
+    const returnedIdx = events.findIndex(e => e.type === 'agent.returned')
+    expect(spawnedIdx).toBeGreaterThan(-1)
+    expect(returnedIdx).toBeGreaterThan(spawnedIdx)
+
+    const spawned  = events[spawnedIdx]!.payload as AgentSpawnedPayload
+    const returned = events[returnedIdx]!.payload as AgentReturnedPayload
+    expect(spawned.parentRunId).toBe(result.agentRunId)
+    expect(spawned.agentId).toBe('worker')
+    expect(spawned.goal).toBe('subgoal')
+    expect(returned.status).toBe('completed')
+    expect(returned.childRunId).toBe(spawned.childRunId)
+  })
+
+  it('emits agent.returned with status error when the child run errors', async () => {
+    const eventStore = new MemoryEventStore()
+    const milkie = new Milkie({
+      stateStore: new MemoryStore(),
+      // 只给 supervisor 的工具调用留响应；worker 的 LLM 调用拿不到 → 子 run 报错
+      gateway: new StubGateway([
+        toolCallResponse('s1', 'worker', { goal: 'g', input: 'i' }),
+      ]),
+      eventStore,
+    })
+    milkie.registerAgent(supervisorConfig())
+    milkie.registerAgent(workerConfig())
+
+    const result = await milkie.invoke({ agentId: 'supervisor', goal: 'g', input: 'i' })
+    const events = await eventStore.readByRunId(result.agentRunId)
+
+    const spawned  = events.find(e => e.type === 'agent.spawned')!.payload as AgentSpawnedPayload
+    const returned = events.find(e => e.type === 'agent.returned')!.payload as AgentReturnedPayload
+    expect(returned.status).toBe('error')
+    expect(returned.childRunId).toBe(spawned.childRunId)
   })
 })
 
