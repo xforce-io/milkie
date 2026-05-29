@@ -6,6 +6,7 @@ import { ReplayDivergenceError } from '../trace/ReplayDivergenceError'
 import type { IModelGateway, ModelRequest, ModelResponse } from '../types/model'
 import type { AgentConfig } from '../types/agent'
 import type { ToolDefinition } from '../types/tool'
+import type { AgentSpawnedPayload } from '../trace/types'
 
 class SequentialGateway implements IModelGateway {
   public callCount = 0
@@ -387,5 +388,31 @@ describe('Milkie.replay', () => {
     const replayed = await replay.replay(orig.agentRunId)
     expect(replayed.status).toBe('completed')
     expect(replayed.output).toBe(orig.output)   // 'all done'
+  })
+
+  it('replays a child run standalone by its childRunId', async () => {
+    const eventStore = new MemoryEventStore()
+    const record = new Milkie({
+      stateStore: new MemoryStore(),
+      gateway: new StubGateway([
+        toolCallResponse('s1', 'worker', { goal: 'subgoal', input: 'subinput' }),
+        textResponse('worker done'),
+        textResponse('all done'),
+      ]),
+      eventStore,
+    })
+    record.registerAgent(supervisorConfig())
+    record.registerAgent(workerConfig())
+    const orig = await record.invoke({ agentId: 'supervisor', goal: 'g', input: 'i' })
+    const parentEvents = await eventStore.readByRunId(orig.agentRunId)
+    const childRunId = (parentEvents.find(e => e.type === 'agent.spawned')!.payload as AgentSpawnedPayload).childRunId
+
+    const replay = new Milkie({ stateStore: new MemoryStore(), gateway: new StubGateway([]), eventStore })
+    replay.registerAgent(supervisorConfig())
+    replay.registerAgent(workerConfig())
+
+    const child = await replay.replay(childRunId)
+    expect(child.status).toBe('completed')
+    expect(child.output).toBe('worker done')
   })
 })
