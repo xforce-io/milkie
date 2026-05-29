@@ -21,6 +21,8 @@ import type {
   SkillLifecyclePayload,
   AgentSpawnedPayload,
   AgentReturnedPayload,
+  AgentRunStartedPayload,
+  AgentRunCompletedPayload,
 } from '../trace/types'
 import type { IModelGateway, ModelRequest, ModelResponse } from '../types/model'
 import type { AgentConfig } from '../types/agent'
@@ -639,6 +641,34 @@ describe('agent.spawned / agent.returned events', () => {
     const childLlm = childEvents.filter(e => e.type === 'llm.requested')
     expect(childLlm.length).toBeGreaterThan(0)
     expect(parentLlm.length).toBe(2)
+  })
+
+  it('child run emits agent.run.started{parentId} and agent.run.completed in its own stream', async () => {
+    const eventStore = new MemoryEventStore()
+    const milkie = new Milkie({
+      stateStore: new MemoryStore(),
+      gateway: new StubGateway([
+        toolCallResponse('s1', 'worker', { goal: 'subgoal', input: 'subinput' }),
+        textResponse('worker done'),
+        textResponse('all done'),
+      ]),
+      eventStore,
+    })
+    milkie.registerAgent(supervisorConfig())
+    milkie.registerAgent(workerConfig())
+
+    const result = await milkie.invoke({ agentId: 'supervisor', goal: 'g', input: 'i' })
+    const parentEvents = await eventStore.readByRunId(result.agentRunId)
+    const spawned = parentEvents.find(e => e.type === 'agent.spawned')!.payload as AgentSpawnedPayload
+
+    const childEvents = await eventStore.readByRunId(spawned.childRunId)
+    const started = childEvents.find(e => e.type === 'agent.run.started')!
+    const completed = childEvents.find(e => e.type === 'agent.run.completed')!
+    expect(childEvents[0]!.type).toBe('agent.run.started')
+    expect((started.payload as AgentRunStartedPayload).parentId).toBe(result.agentRunId)
+    expect((started.payload as AgentRunStartedPayload).agentId).toBe('worker')
+    expect((completed.payload as AgentRunCompletedPayload).status).toBe('completed')
+    expect(started.runId).toBe(spawned.childRunId)
   })
 })
 
