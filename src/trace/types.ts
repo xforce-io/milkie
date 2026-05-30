@@ -189,6 +189,15 @@ export interface SkillLifecyclePayload {
  */
 export type FsmEventDomain = 'lifecycle' | 'signal' | 'runtime-control' | 'business'
 
+export interface GuardEvaluation {
+  /** 判断标识,如 'intent-threshold'。 */
+  guardId:      string
+  /** 判断结果:产出的事件名或布尔/任意值。 */
+  result:       unknown
+  /** 决定结果真假的最小输入切片(约定最小化,框架不强制)。 */
+  contextSlice: unknown
+}
+
 export interface FsmTransitionPayload {
   from: string
   to:   string
@@ -198,6 +207,8 @@ export interface FsmTransitionPayload {
     /** Optional structured payload (omit for lifecycle/signal which carry none). */
     payload?: unknown
   }
+  /** #31:本次转移背后的判断依据(工具自报,可选)。 */
+  guardEvaluations?: GuardEvaluation[]
 }
 
 // ---- Typed event aliases ----
