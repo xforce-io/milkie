@@ -83,7 +83,7 @@ ctx.emit(eventMap[intent] ?? 'ESCALATE', undefined, {
 
 理由:① 现状 `emit` 第二参 `payload` 实际无人使用,但保留以免破坏签名;② guard 作为独立第三参,与 `trigger.payload` 语义不混;③ 一次调用原子完成"发事件 + 报依据",guard 恰好对应产生本次转移的那一次决策,无需缓冲生命周期。
 
-**备选(留给 spec review 取舍)**:单独 `ctx.recordGuard(evaluation)` 方法,多次调用累积成数组、由下一次转移消费。语义更显式、天然产出数组,但引入"记录了却没转移""记录顺序"等缓冲边界。若团队更看重 authoring 显式性,可改采此式。
+**决定:采用甲,锁定。** 备选乙(单独 `ctx.recordGuard(evaluation)` 方法,多次调用累积成数组、由下一次转移消费)已评估**不采用**——它引入"记录了却没转移""记录顺序""跨 emit 归属"等缓冲生命周期边界,违背最小自洽;甲 的一次调用原子绑定"发事件 + 报依据",更简单。
 
 ## 6. 捕获机制(复用 #30 模式,零新增 IOPort 调用)
 
@@ -122,6 +122,8 @@ ctx.emit(eventMap[intent] ?? 'ESCALATE', undefined, {
 - **replay 确定性**:沿用 s-005 模式——带 guard 的 run 回放后 `status/output` 一致、gateway 调用数为 0,证明缓存序列未受扰。
 - **渲染**:带 guard 的事件渲出额外行;不带的不渲。
 - **s-011 e2e**:live 路径下,trace 中 `classify_intent` 触发的 `fsm.transition` 含 `intent-threshold` 的 guardEvaluations。
+
+> **验证分工(诚实声明)**:s-011 是 live e2e,挂在 `VOLCENGINE_TOKEN` 后,无 token 即 skip——故 **每次都跑的确定性验证是单元测试**(自带假工具 + mock gateway);s-011 提供"真实多状态场景也通"的额外信心与一份 authoring 样例,但常在 CI 被 skip。两者都要:单元测试保确定性,s-011 保真实性。
 
 ## 11. 改动文件清单
 
