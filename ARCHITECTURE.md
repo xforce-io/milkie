@@ -160,6 +160,74 @@ writes to Trajectory but **not** to Trace — for an event to be
 replay-visible or appear in event-log–backed UI, it must reach the event
 log too.
 
+### FSM
+
+The finite state machine that structures an agent's control flow: each agent
+*is* an FSM whose states are phases of work (`classify`, `handle_a`, …) and
+whose transitions move between them. The LLM reasons *inside* a state, picks
+tools, and emits the events that drive transitions — autonomy lives in the
+state, structure lives in the machine. Dialog, ReAct, and multi-state
+workflows are different FSM topologies on one runtime, not separate systems; a
+continuous conversation loop is the degenerate one-state self-loop. Implemented
+by `FSMEngine` (`src/fsm/`); a state is `{name, type: 'llm'|'action', on:
+Record<eventName, targetState>, …}`.
+
+*Example:* a routing agent `classify → {handle_a, handle_b}`, each state's
+`on:` mapping an emitted event name to its target.
+*Not:* the `llm.call` / `tool.call` inside a state. Those are IOPort effects
+nested within one `fsm.step` (`llm.call inside tool.call inside fsm.step`), not
+machine states — the FSM owns *which state*, never *how one LLM/tool call
+executes*. *Not:* the working context; that is the data a state holds (see
+State, by level), not the state itself.
+
+Two axes classify a state. By **execution type** (the `type` field): an `llm`
+state lets the LLM reason, pick tools, and emit the transition event; an
+`action` state runs a named deterministic `handler` with no LLM call. By
+**role**:
+
+| Kind | `type` | Example | Notes |
+|---|---|---|---|
+| Initial | either | first entry in `states[]` | where every run starts |
+| LLM work | `llm` | `classify` (router), a ReAct `think` self-loop, a `chat` conversation self-loop | reasons and routes |
+| Action work | `action` | `handle_a` (`handler: doA`), `format_output` | deterministic, no LLM |
+| Terminal | either, `terminal: true` | `done` | FSM halts here |
+| Reserved (framework-injected, not in user config) | `action` | `paused` (terminal, on `interrupt`), `error_handling` (on `error`), `failed` (terminal) | global signals jump here, overriding `on:` |
+
+### Transition
+
+A move from one FSM state to the next, selected by the **name** of an emitted
+event through the current state's `on:` map. Today this is a pure name lookup;
+conditional guards (evaluate a predicate before allowing the move) are a
+planned extension (#31). Global signals (`interrupt`, `error`) override
+state-local `on:` mappings.
+
+*Example:* `fsm.transition` with payload `{from: 'classify', to: 'handle_b',
+trigger: {name: 'INTENT_B', …}}`, written when a tool calls
+`ctx.emit('INTENT_B')`.
+*Not:* the event that triggered it. The emitted event is the *cause*; the
+transition is the *effect* recorded as `fsm.transition`. *Not:* the decision of
+*which* event to emit — that judgement happens inside the state (today inside
+the LLM/tool) and is itself not yet traced; surfacing it is the subject of #31
+(guard evaluation).
+
+### State, by level
+
+"State" is overloaded in milkie — three distinct things live on three distinct
+mechanisms. Naming the level removes most of the ambiguity.
+
+| Level | What it is | Mechanism / owner | Lifetime | Recorded as |
+|---|---|---|---|---|
+| **Effect** | a single LLM or tool call | IOPort | within one `fsm.step` | `llm.requested/responded`, `tool.requested/responded` |
+| **FSM state** | the current machine state — *where in the flow* the agent is | FSM Core (`FSMEngine`) | across turns; survives interrupt via checkpoint | `fsm.transition` |
+| **Working context** | session data held while in a state — history, working memory, scratchpad, current turn | Context Layer / `ContextRegions` | turn-local (scratchpad) vs session-persistent (history, WM) vs TTL | `region.added/removed` |
+
+*Example:* in one turn the agent sits in FSM state `classify` (level 2), makes
+an `llm.call` then a `tool.call` (level 1) whose result lands in the scratchpad
+(level 3, turn-local); at turn end the lifecycle engine crystallizes scratchpad
+into history (level 3, session-persistent).
+*Not:* one thing. Unqualified "the agent's state" is ambiguous — an effect, a
+machine state, and session data are different concerns; name the level.
+
 ### Region
 
 An addressable chunk of the agent's working context — a system-prompt
@@ -238,6 +306,9 @@ subsystems (Agent Runtime, Agent Trace, Evolution) sit below them.
 | **Trace** vs **Trajectory** | Trace is flat, append-only, replay-canonical. Trajectory is a hierarchical span tree, derivable, currently a peer view (will be unified). |
 | **IOPort** vs **Event** | IOPort is the nondet boundary. Events are its recorded outputs. |
 | **Region** vs **`region.added` Event** | The Region is context state. The Event is the record that the state changed. |
+| **FSM state** vs **`llm.call` / `tool.call`** | The FSM state is the flow position the machine owns. The call is an IOPort effect nested inside one `fsm.step`, not a machine state. |
+| **FSM state** vs **working context** | The state is *where in the flow*; the working context is the *data held while there* (history, WM, scratchpad). |
+| **Transition** vs **the event that triggers it** | The event (emitted by a tool) is the cause; the transition (`fsm.transition`) is the effect. |
 | **Context boundary** vs **LLM request** | The boundary is the policy that selects/orders Regions. The request is its serialized output. |
 | **Snapshot** vs **Event-sourced view** | A snapshot is a checkpoint or acceleration artifact. The view is derived from Events plus content-addressed objects and remains reconstructable without the snapshot. |
 
