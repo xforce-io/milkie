@@ -135,4 +135,12 @@ describe('renderHtml', () => {
     expect(html).toContain('class="why"')
     expect(html).toContain('s0 → end')
   })
+
+  it('includes Why-block styling', () => {
+    const html = renderHtml([
+      e({ id: 's', runId: 'r1', type: 'agent.run.started', timestamp: 1,
+          payload: { agentId: 'x', goal: 'g', input: 'i', contextId: 'c' } }),
+    ])
+    expect(html).toContain('.why {')
+  })
 })

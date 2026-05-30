@@ -34,11 +34,20 @@ export const STYLES = `
              font-family: ui-monospace, monospace; font-size: 11px; white-space: pre-wrap;
              border-radius: 4px; max-height: 320px; overflow: auto; }
   .entry.open .payload { display: block; }
+  .why { margin: 4px 0 4px 22px; padding: 6px 10px; border-left: 3px solid #6b8;
+         background: rgba(0,0,0,0.03); font-size: 12px; line-height: 1.5; }
+  .why-summary { font-weight: 600; margin-bottom: 2px; }
+  .why-trigger, .why-guards { color: #444; }
+  .why-chain { margin-top: 3px; color: #666; word-break: break-word; }
+  .why a { color: #36a; text-decoration: none; }
+  .why a:hover { text-decoration: underline; }
+  .anchor { scroll-margin-top: 8px; }
 `
 
 export const SCRIPT = `
   (function () {
     document.addEventListener('click', function (ev) {
+      if (ev.target.closest && ev.target.closest('.why a')) return;
       var entry = ev.target.closest('.entry');
       if (entry) entry.classList.toggle('open');
       var chip = ev.target.closest('.chip');
