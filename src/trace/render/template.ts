@@ -42,12 +42,41 @@ export const STYLES = `
   .why a { color: #36a; text-decoration: none; }
   .why a:hover { text-decoration: underline; }
   .anchor { scroll-margin-top: 8px; }
+  .assembled { margin: 4px 0 4px 22px; padding: 6px 10px; border-left: 3px solid #b58;
+               background: rgba(0,0,0,0.03); font-size: 12px; line-height: 1.5; }
+  .ar-head { font-weight: 600; margin-bottom: 4px; }
+  .ar-row { padding: 3px 0 3px 8px; border-left: 3px solid transparent; cursor: pointer; }
+  .ar-row[data-hash]:hover { background: rgba(0,0,0,0.04); }
+  .ar-id { font-family: ui-monospace, SFMono-Regular, monospace; }
+  .ar-note { color: #a13; }
+  .reuse { color: #8a5a00; font-size: 11px; }
+  .region-preview { display: none; margin-top: 4px; background: #fafafa; padding: 8px;
+                    font-family: ui-monospace, monospace; font-size: 11px; white-space: pre-wrap;
+                    border-radius: 4px; max-height: 280px; overflow: auto; }
+  .ar-row.open .region-preview { display: block; }
+  .stab-immutable      { border-left-color: #2d6a2d; }
+  .stab-session-stable { border-left-color: #1a56db; }
+  .stab-turn-stable    { border-left-color: #8a5a00; }
+  .stab-volatile       { border-left-color: #a13; }
 `
 
 export const SCRIPT = `
   (function () {
     document.addEventListener('click', function (ev) {
       if (ev.target.closest && ev.target.closest('.why a')) return;
+      var arRow = ev.target.closest('.ar-row');
+      if (arRow && arRow.dataset.hash) {
+        ev.stopPropagation();
+        arRow.classList.toggle('open');
+        var pre = arRow.querySelector('.region-preview');
+        if (pre && !pre.dataset.loaded) {
+          var reg = JSON.parse((document.getElementById('region-content') || {}).textContent || '{}');
+          var c = reg[arRow.dataset.hash];
+          pre.textContent = (c != null) ? c : '(内容不可用)';
+          pre.dataset.loaded = '1';
+        }
+        return;
+      }
       var entry = ev.target.closest('.entry');
       if (entry) entry.classList.toggle('open');
       var chip = ev.target.closest('.chip');

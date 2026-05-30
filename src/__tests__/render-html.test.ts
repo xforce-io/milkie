@@ -144,3 +144,53 @@ describe('renderHtml', () => {
     expect(html).toContain('.why {')
   })
 })
+
+describe('#26 Assembled by', () => {
+  const region = (id: string, stability: string, contentHash?: string) =>
+    e({ id: `add-${id}`, runId: 'r1', type: 'region.added', timestamp: 1,
+        payload: { id, target: 'message', section: 'history', stability, reason: 'turn-archived',
+          ...(contentHash ? { contentHash } : {}) } })
+
+  it('renders an Assembled by block on llm.requested with metadata + stability class', () => {
+    const events: Event[] = [
+      region('header', 'immutable', 'H1'),
+      e({ id: 'llm', runId: 'r1', type: 'llm.requested', timestamp: 2, payload: { model: 'm' } }),
+    ]
+    const html = renderHtml(events, { regionContent: new Map([['H1', 'SYSTEM PROMPT TEXT']]) })
+    expect(html).toContain('Assembled by')
+    expect(html).toContain('header')
+    expect(html).toContain('stab-immutable')
+    expect(html).toContain('data-hash="H1"')
+    expect(html).toContain('SYSTEM PROMPT TEXT')
+  })
+
+  it('dedups identical content across prompts and annotates reuse count', () => {
+    const events: Event[] = [
+      region('header', 'immutable', 'H1'),
+      e({ id: 'llm1', runId: 'r1', type: 'llm.requested', timestamp: 2, payload: { model: 'm' } }),
+      e({ id: 'llm2', runId: 'r1', type: 'llm.requested', timestamp: 3, payload: { model: 'm' } }),
+    ]
+    const html = renderHtml(events, { regionContent: new Map([['H1', 'SHARED-CONTENT-XYZ']]) })
+    expect(html.split('SHARED-CONTENT-XYZ').length - 1).toBe(1)
+    expect(html).toContain('复用 ×2')
+  })
+
+  it('degrades gracefully without region content (metadata only)', () => {
+    const events: Event[] = [
+      region('header', 'immutable', 'H1'),
+      e({ id: 'llm', runId: 'r1', type: 'llm.requested', timestamp: 2, payload: { model: 'm' } }),
+    ]
+    const html = renderHtml(events)
+    expect(html).toContain('Assembled by')
+    expect(html).toContain('header')
+    expect(html).toContain('(内容不可用)')
+  })
+
+  it('renders no Assembled by block for an llm.requested with no active regions', () => {
+    const events: Event[] = [
+      e({ id: 'llm', runId: 'r1', type: 'llm.requested', timestamp: 2, payload: { model: 'm' } }),
+    ]
+    const html = renderHtml(events)
+    expect(html).not.toContain('Assembled by')
+  })
+})
