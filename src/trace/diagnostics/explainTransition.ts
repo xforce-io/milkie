@@ -34,6 +34,7 @@ export function explainTransition(events: Event[], transitionEventId: string): T
 
   const p = evt.payload as FsmTransitionPayload
   const causeEvt = evt.causedBy ? byId.get(evt.causedBy) : undefined
+  const causeSummary = causeEvt ? summarizeEvent(causeEvt) : undefined
   const guards = p.guardEvaluations ?? []
 
   const causalChain = walkCausedBy(events, transitionEventId).map(e => ({
@@ -45,7 +46,7 @@ export function explainTransition(events: Event[], transitionEventId: string): T
   const guardPart = guards.length
     ? `;guard ${guards.map(g => `${g.guardId} 判定 ${String(g.result)}`).join('、')}`
     : ''
-  const triggerSource = causeEvt ? summarizeEvent(causeEvt) : '(无上游记录)'
+  const triggerSource = causeSummary ?? '(无上游记录)'
   const summary = `${p.from} → ${p.to}:由 ${triggerSource} 发出的 ${p.trigger.name} 触发${guardPart}`
 
   return {
@@ -56,7 +57,7 @@ export function explainTransition(events: Event[], transitionEventId: string): T
       name:   p.trigger.name,
       domain: p.trigger.domain,
       ...(evt.causedBy ? { causedByEventId: evt.causedBy } : {}),
-      ...(causeEvt ? { causedBySummary: summarizeEvent(causeEvt) } : {}),
+      ...(causeSummary ? { causedBySummary: causeSummary } : {}),
     },
     guards,
     causalChain,

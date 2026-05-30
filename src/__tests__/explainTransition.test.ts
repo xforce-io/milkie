@@ -57,4 +57,15 @@ describe('explainTransition', () => {
   it('throws on an unknown event id', () => {
     expect(() => explainTransition(routingEvents(), 'nope')).toThrow(/nope/)
   })
+
+  it('handles a dangling causedBy: keeps causedByEventId, omits causedBySummary, falls back in summary', () => {
+    const events: Event[] = [
+      ev('fsm', 'fsm.transition', { from: 'a', to: 'b', trigger: { domain: 'business', name: 'GO' } }, 'missing'),
+    ]
+    const exp = explainTransition(events, 'fsm')
+    expect(exp.trigger.causedByEventId).toBe('missing')
+    expect(exp.trigger.causedBySummary).toBeUndefined()
+    expect(exp.summary).toContain('(无上游记录)')
+    expect(exp.causalChain.map(c => c.eventId)).toEqual(['fsm'])  // walkCausedBy stops at the dangling ref
+  })
 })
