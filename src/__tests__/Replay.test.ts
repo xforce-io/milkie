@@ -6,7 +6,7 @@ import { ReplayDivergenceError } from '../trace/ReplayDivergenceError'
 import type { IModelGateway, ModelRequest, ModelResponse } from '../types/model'
 import type { AgentConfig } from '../types/agent'
 import type { ToolDefinition } from '../types/tool'
-import type { AgentSpawnedPayload } from '../trace/types'
+import type { AgentSpawnedPayload, FsmTransitionPayload } from '../trace/types'
 
 class SequentialGateway implements IModelGateway {
   public callCount = 0
@@ -414,5 +414,55 @@ describe('Milkie.replay', () => {
     const child = await replay.replay(childRunId)
     expect(child.status).toBe('completed')
     expect(child.output).toBe('worker done')
+  })
+
+  it('guardEvaluations adds zero IOPort events — replay cache sequence unchanged (#31)', async () => {
+    const IO_TYPES = ['clock.read', 'uuid.generated', 'llm.requested', 'llm.responded', 'tool.requested', 'tool.responded']
+
+    const recordOnce = async (withGuard: boolean): Promise<string[]> => {
+      const store = new MemoryEventStore()
+      const tool: ToolDefinition = {
+        name: 'classify_intent', description: 'c', inputSchema: { type: 'object', properties: {} },
+        handler: async (_i, ctx) => {
+          if (withGuard) {
+            ctx.emit('INTENT_DONE', undefined, { guardId: 'g', result: 'INTENT_DONE', contextSlice: { confidence: 0.9 } })
+          } else {
+            ctx.emit('INTENT_DONE')
+          }
+          return {}
+        },
+      }
+      const config: AgentConfig = {
+        agentId: 'guard-agent', version: '0.0.0', systemPrompt: 'sys',
+        fsm: { states: [
+          { name: 's0', type: 'llm', tools: ['classify_intent'], on: { INTENT_DONE: 'end' } },
+          { name: 'end', type: 'action', terminal: true },
+        ] },
+        model: { provider: 'stub', model: 'stub', adapter: 'stub' },
+      }
+      const milkie = new Milkie({
+        stateStore: new MemoryStore(),
+        gateway: new SequentialGateway([toolCallResponse('tc-1', 'classify_intent', {})]),
+        eventStore: store, tools: [tool],
+      })
+      milkie.registerAgent(config)
+      const r = await milkie.invoke({ agentId: 'guard-agent', goal: 'g', input: 'i' })
+      expect(r.status).toBe('completed')           // sanity: emit-FSM completes in record mode
+      const evs = await store.readByRunId(r.agentRunId)
+      if (withGuard) {
+        const t = evs.find(e => e.type === 'fsm.transition'
+          && (e.payload as FsmTransitionPayload).guardEvaluations)
+        expect(t).toBeDefined()                    // sanity: guard actually recorded
+      }
+      return evs.filter(e => IO_TYPES.includes(e.type)).map(e => e.type)
+    }
+
+    const withGuard = await recordOnce(true)
+    const without   = await recordOnce(false)
+
+    // Guard write rides on fsm.transition (direct uuid/Date.now, NOT IOPort),
+    // so the IOPort-recorded event sequence is identical with/without the guard.
+    expect(withGuard).toEqual(without)
+    expect(withGuard.length).toBeGreaterThan(0)
   })
 })
