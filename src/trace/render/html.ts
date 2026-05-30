@@ -1,6 +1,7 @@
 import type { Event } from '../types.js'
 import { buildTimelineTree, type TimelineEntry, type TimelineNode } from './tree.js'
 import { STYLES, SCRIPT } from './template.js'
+import { explainTransition, type TransitionExplanation } from '../diagnostics/explainTransition.js'
 
 function esc(s: string): string {
   return s
@@ -40,7 +41,34 @@ function payloadFor(entry: TimelineEntry, eventById: Map<string, Event>): string
   return sections.length > 0 ? esc(sections.join('\n\n')) : ''
 }
 
-function renderEntry(entry: TimelineEntry, eventById: Map<string, Event>): string {
+function entryEventIds(entry: TimelineEntry): string[] {
+  if (entry.kind === 'llm' || entry.kind === 'tool') {
+    return entry.respondedId ? [entry.requestedId, entry.respondedId] : [entry.requestedId]
+  }
+  return [entry.eventId]
+}
+
+function renderWhy(exp: TransitionExplanation): string {
+  const trigger = exp.trigger.causedByEventId
+    ? `<div class="why-trigger">触发: <a href="#ev-${esc(exp.trigger.causedByEventId)}">${esc(exp.trigger.causedBySummary ?? exp.trigger.causedByEventId)}</a></div>`
+    : ''
+  const guards = exp.guards.length
+    ? `<div class="why-guards">guard: ${esc(exp.guards.map(g => `${g.guardId}=${String(g.result)}`).join(', '))}</div>`
+    : ''
+  const chain = `<div class="why-chain">`
+    + exp.causalChain.map(c => `<a href="#ev-${esc(c.eventId)}">${esc(c.summary)}</a>`).join(' → ')
+    + `</div>`
+  return `<div class="why">`
+       + `<div class="why-summary">${esc(exp.summary)}</div>`
+       + trigger + guards + chain
+       + `</div>`
+}
+
+function renderEntry(
+  entry: TimelineEntry,
+  eventById: Map<string, Event>,
+  explanations: Map<string, TransitionExplanation>,
+): string {
   const icon = entry.kind === 'llm' ? '◆'
              : entry.kind === 'tool' ? '▣'
              : entry.kind === 'region'
@@ -48,17 +76,29 @@ function renderEntry(entry: TimelineEntry, eventById: Map<string, Event>): strin
                  : entry.eventType === 'region.added' ? '＋' : '－')
              : entry.kind === 'fsm' ? '⇒'
              : '●'
-  return `<div class="entry ${entry.kind}" data-kind="${entry.kind}">`
+  const ids = entryEventIds(entry)
+  const primaryId = ids[0]!
+  const extraAnchors = ids.slice(1).map(id => `<span class="anchor" id="ev-${esc(id)}"></span>`).join('')
+  const why = entry.kind === 'fsm' && explanations.has(entry.eventId)
+    ? renderWhy(explanations.get(entry.eventId)!)
+    : ''
+  return `<div class="entry ${entry.kind}" data-kind="${entry.kind}" id="ev-${esc(primaryId)}">`
+       + extraAnchors
        + `<div class="entry-head">`
        + `<span class="icon">${icon}</span>`
        + `<span class="summary">${summaryFor(entry)}</span>`
        + `<span class="ts">${entry.timestamp}</span>`
        + `</div>`
+       + why
        + `<pre class="payload">${payloadFor(entry, eventById)}</pre>`
        + `</div>`
 }
 
-function renderNode(node: TimelineNode, eventById: Map<string, Event>): string {
+function renderNode(
+  node: TimelineNode,
+  eventById: Map<string, Event>,
+  explanations: Map<string, TransitionExplanation>,
+): string {
   const status = node.status ?? 'in-flight'
   const badgeClass = BADGE_STATUS_CLASSES.has(status) ? ' ' + status : ''
   return `<section class="run" data-run-id="${esc(node.runId)}">`
@@ -67,9 +107,9 @@ function renderNode(node: TimelineNode, eventById: Map<string, Event>): string {
        + `<span class="run-id">${esc(node.runId)}</span>`
        + `<span class="badge${badgeClass}">${esc(status)}</span>`
        + `</div>`
-       + node.entries.map(en => renderEntry(en, eventById)).join('')
+       + node.entries.map(en => renderEntry(en, eventById, explanations)).join('')
        + (node.children.length > 0
-           ? `<div class="child-run">${node.children.map(n => renderNode(n, eventById)).join('')}</div>`
+           ? `<div class="child-run">${node.children.map(n => renderNode(n, eventById, explanations)).join('')}</div>`
            : '')
        + `</section>`
 }
@@ -89,6 +129,10 @@ export function renderHtml(events: Event[]): string {
   const tree = buildTimelineTree(events)
   const eventById = new Map<string, Event>()
   for (const evt of events) eventById.set(evt.id, evt)
+  const explanations = new Map<string, TransitionExplanation>()
+  for (const evt of events) {
+    if (evt.type === 'fsm.transition') explanations.set(evt.id, explainTransition(events, evt.id))
+  }
   const dataJson = JSON.stringify(events)
     // close-tag-safe inlining: prevent the JSON from ending the script element.
     .replace(/<\/script/gi, '<\\/script')
@@ -108,7 +152,7 @@ export function renderHtml(events: Event[]): string {
   <span class="chip" data-kind="region">region</span>
   <span class="chip" data-kind="fsm">fsm</span>
 </div>
-${tree.map(n => renderNode(n, eventById)).join('')}
+${tree.map(n => renderNode(n, eventById, explanations)).join('')}
 <script type="application/json" id="trace-data">${dataJson}</script>
 <script>${SCRIPT}</script>
 </body>
