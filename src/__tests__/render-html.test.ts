@@ -193,4 +193,43 @@ describe('#26 Assembled by', () => {
     const html = renderHtml(events)
     expect(html).not.toContain('Assembled by')
   })
+
+  it('renders a region row without contentHash as metadata only (no data-hash, no preview)', () => {
+    const events: Event[] = [
+      region('eph', 'volatile'),   // no contentHash
+      e({ id: 'llm', runId: 'r1', type: 'llm.requested', timestamp: 2, payload: { model: 'm' } }),
+    ]
+    const html = renderHtml(events)
+    expect(html).toContain('Assembled by')
+    expect(html).toContain('eph')
+    // no data-hash attribute on the row and no region-preview element emitted
+    // (the bare substrings appear in STYLES/SCRIPT, so assert the rendered forms)
+    expect(html).not.toContain('data-hash="')
+    expect(html).not.toContain('class="region-preview"')
+  })
+
+  it('applies the stability class for each stability tier', () => {
+    const events: Event[] = [
+      region('a', 'immutable', 'HA'),
+      region('b', 'session-stable', 'HB'),
+      region('c', 'turn-stable', 'HC'),
+      region('d', 'volatile', 'HD'),
+      e({ id: 'llm', runId: 'r1', type: 'llm.requested', timestamp: 2, payload: { model: 'm' } }),
+    ]
+    const html = renderHtml(events)
+    for (const cls of ['stab-immutable', 'stab-session-stable', 'stab-turn-stable', 'stab-volatile']) {
+      expect(html).toContain(cls)
+    }
+  })
+
+  it('keeps region content with a </script> sequence from breaking the document', () => {
+    const events: Event[] = [
+      region('x', 'volatile', 'HX'),
+      e({ id: 'llm', runId: 'r1', type: 'llm.requested', timestamp: 2, payload: { model: 'm' } }),
+    ]
+    const html = renderHtml(events, { regionContent: new Map([['HX', '</script><b>boom</b>']]) })
+    // the raw closing tag must be neutralized in the embedded JSON registry
+    expect(html).not.toContain('</script><b>boom</b>')
+    expect(html).toContain('<\\/script>')   // close-tag-safe escaped form present
+  })
 })

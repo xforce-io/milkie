@@ -62,6 +62,14 @@ export const STYLES = `
 
 export const SCRIPT = `
   (function () {
+    var _regCache = null;
+    function regOnce() {
+      if (_regCache === null) {
+        var el = document.getElementById('region-content');
+        _regCache = JSON.parse((el && el.textContent) || '{}');
+      }
+      return _regCache;
+    }
     document.addEventListener('click', function (ev) {
       if (ev.target.closest && ev.target.closest('.why a')) return;
       var arRow = ev.target.closest('.ar-row');
@@ -70,9 +78,10 @@ export const SCRIPT = `
         arRow.classList.toggle('open');
         var pre = arRow.querySelector('.region-preview');
         if (pre && !pre.dataset.loaded) {
-          var reg = JSON.parse((document.getElementById('region-content') || {}).textContent || '{}');
+          var reg = regOnce();
           var c = reg[arRow.dataset.hash];
-          pre.textContent = (c != null) ? c : '(内容不可用)';
+          // region-preview only emitted when content is available
+          pre.textContent = (c != null) ? c : '';
           pre.dataset.loaded = '1';
         }
         return;
