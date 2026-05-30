@@ -103,4 +103,44 @@ describe('renderHtml', () => {
     expect(html).toContain('intent-threshold')
     expect(html).toContain('data-kind="fsm"')
   })
+
+  it('renders a Why? block on fsm.transition with anchor links to upstream events', () => {
+    const events: Event[] = [
+      e({ id: 'start', runId: 'r1', type: 'agent.run.started', timestamp: 1,
+          payload: { agentId: 'x', goal: 'g', input: 'i', contextId: 'c' } }),
+      e({ id: 'treq', runId: 'r1', type: 'tool.requested', timestamp: 2, causedBy: 'start',
+          payload: { toolName: 'classify_intent', input: {}, requestHash: 'h' } }),
+      e({ id: 'tres', runId: 'r1', type: 'tool.responded', timestamp: 3, causedBy: 'treq',
+          payload: { toolName: 'classify_intent', output: {}, requestHash: 'h' } }),
+      e({ id: 'fsm', runId: 'r1', type: 'fsm.transition', timestamp: 4, causedBy: 'tres',
+          payload: { from: 'classify', to: 'handle_b', trigger: { domain: 'business', name: 'INTENT_B' },
+            guardEvaluations: [{ guardId: 'intent-threshold', result: 'INTENT_B', contextSlice: { confidence: 0.9 } }] } }),
+    ]
+    const html = renderHtml(events)
+    expect(html).toContain('class="why"')
+    expect(html).toContain('classify → handle_b')
+    expect(html).toContain('intent-threshold')
+    expect(html).toContain('href="#ev-tres"')
+    expect(html).toContain('id="ev-tres"')
+  })
+
+  it('renders a Why? block for an fsm.transition without guards', () => {
+    const events: Event[] = [
+      e({ id: 'start', runId: 'r1', type: 'agent.run.started', timestamp: 1,
+          payload: { agentId: 'x', goal: 'g', input: 'i', contextId: 'c' } }),
+      e({ id: 'fsm', runId: 'r1', type: 'fsm.transition', timestamp: 2, causedBy: 'start',
+          payload: { from: 's0', to: 'end', trigger: { domain: 'lifecycle', name: 'DONE' } } }),
+    ]
+    const html = renderHtml(events)
+    expect(html).toContain('class="why"')
+    expect(html).toContain('s0 → end')
+  })
+
+  it('includes Why-block styling', () => {
+    const html = renderHtml([
+      e({ id: 's', runId: 'r1', type: 'agent.run.started', timestamp: 1,
+          payload: { agentId: 'x', goal: 'g', input: 'i', contextId: 'c' } }),
+    ])
+    expect(html).toContain('.why {')
+  })
 })
