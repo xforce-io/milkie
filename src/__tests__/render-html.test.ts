@@ -90,4 +90,17 @@ describe('renderHtml', () => {
     // the status string when rendered as text content is escaped
     expect(html).not.toContain('class="badge ' + malicious)
   })
+
+  it('renders fsm.transition with guard summary in html', () => {
+    const events: Event[] = [
+      e({ id: 's', runId: 'r1', type: 'agent.run.started', timestamp: 1,
+          payload: { agentId: 'x', goal: 'g', input: 'i', contextId: 'c' } }),
+      e({ id: 't', runId: 'r1', type: 'fsm.transition', timestamp: 2,
+          payload: { from: 'classify', to: 'handle_b', trigger: { domain: 'business', name: 'INTENT_B' },
+            guardEvaluations: [{ guardId: 'intent-threshold', result: 'INTENT_B', contextSlice: {} }] } }),
+    ]
+    const html = renderHtml(events)
+    expect(html).toContain('intent-threshold')
+    expect(html).toContain('data-kind="fsm"')
+  })
 })
