@@ -515,3 +515,86 @@ describe('AgentRuntime', () => {
     })
   })
 })
+
+describe('#31 guard evaluation capture', () => {
+  const routingConfig = makeConfig({
+    fsm: {
+      states: [
+        {
+          name:  'classify',
+          type:  'llm',
+          tools: ['classify_intent'],
+          on:    { INTENT_DONE: 'done' },
+        },
+        { name: 'done', type: 'action', terminal: true },
+      ],
+    },
+  })
+
+  it('writes guardEvaluations onto the fsm.transition event', async () => {
+    const eventStore = new MemoryEventStore()
+    const guardTool: ToolDefinition = {
+      name:        'classify_intent',
+      description: 'classify',
+      inputSchema: { type: 'object', properties: {} },
+      handler:     async (_input, ctx) => {
+        ctx.emit('INTENT_DONE', undefined, {
+          guardId: 'intent-threshold', result: 'INTENT_DONE',
+          contextSlice: { confidence: 0.9, threshold: 0.75 },
+        })
+        return { ok: true }
+      },
+    }
+    const runtime = new AgentRuntime({
+      config:     routingConfig,
+      goal:       'classify',
+      input:      'hello',
+      stateStore: new MemoryStore(),
+      recorder:   new InMemoryRecorder(),
+      ioPort:     new DefaultIOPort(new SequentialGateway([
+        toolCallResponse('tc-1', 'classify_intent', {}),
+      ])),
+      extraTools: [guardTool],
+      eventStore,
+    })
+
+    const result = await runtime.run('hello')
+    const events = await eventStore.readByRunId(result.agentRunId)
+    const transitions = events.filter(e => e.type === 'fsm.transition')
+    const withGuard = transitions.find(
+      t => (t.payload as import('../trace/types').FsmTransitionPayload).guardEvaluations,
+    )
+    expect((withGuard!.payload as import('../trace/types').FsmTransitionPayload).guardEvaluations)
+      .toEqual([{ guardId: 'intent-threshold', result: 'INTENT_DONE', contextSlice: { confidence: 0.9, threshold: 0.75 } }])
+  })
+
+  it('omits guardEvaluations when the tool does not report one', async () => {
+    const eventStore = new MemoryEventStore()
+    const plainTool: ToolDefinition = {
+      name:        'classify_intent',
+      description: 'classify',
+      inputSchema: { type: 'object', properties: {} },
+      handler:     async (_input, ctx) => { ctx.emit('INTENT_DONE'); return {} },
+    }
+    const runtime = new AgentRuntime({
+      config:     routingConfig,
+      goal:       'classify',
+      input:      'hello',
+      stateStore: new MemoryStore(),
+      recorder:   new InMemoryRecorder(),
+      ioPort:     new DefaultIOPort(new SequentialGateway([
+        toolCallResponse('tc-1', 'classify_intent', {}),
+      ])),
+      extraTools: [plainTool],
+      eventStore,
+    })
+    const result = await runtime.run('hello')
+    const events = await eventStore.readByRunId(result.agentRunId)
+    const transition = events.find(
+      e => e.type === 'fsm.transition'
+        && (e.payload as import('../trace/types').FsmTransitionPayload).trigger.name === 'INTENT_DONE',
+    )
+    expect((transition!.payload as import('../trace/types').FsmTransitionPayload).guardEvaluations)
+      .toBeUndefined()
+  })
+})
