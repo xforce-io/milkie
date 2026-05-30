@@ -70,4 +70,20 @@ describe('buildTimelineTree', () => {
     expect(entry).toBeDefined()
     expect((entry as { summary: string }).summary).toContain('intent-threshold')
   })
+
+  it('renders an fsm.transition entry without guard evaluations (no bracket segment)', () => {
+    const events: Event[] = [
+      e({ id: 's', runId: 'r1', type: 'agent.run.started', timestamp: 1,
+          payload: { agentId: 'x', goal: 'g', input: 'i', contextId: 'c' } }),
+      e({ id: 't', runId: 'r1', type: 'fsm.transition', timestamp: 2,
+          payload: { from: 'classify', to: 'handle_a',
+            trigger: { domain: 'business', name: 'INTENT_A' } } }),
+    ]
+    const tree = buildTimelineTree(events)
+    const entry = tree[0]!.entries.find(en => en.kind === 'fsm')
+    expect(entry).toBeDefined()
+    const summary = (entry as { summary: string }).summary
+    expect(summary).toContain('classify → handle_a')
+    expect(summary).not.toContain('[')
+  })
 })
