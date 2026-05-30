@@ -19,6 +19,8 @@ import { Milkie } from '../../src/runtime/Milkie.js'
 import { TrajectoryStore } from '../../src/trajectory/TrajectoryStore.js'
 import { RedisStore } from '../../src/store/RedisStore.js'
 import { MemoryStore } from '../../src/store/MemoryStore.js'
+import { MemoryEventStore } from '../../src/trace/MemoryEventStore.js'
+import type { FsmTransitionPayload } from '../../src/trace/types.js'
 import { createRedisStore } from './redis.js'
 
 const SKIP = !process.env['VOLCENGINE_TOKEN'] || !process.env['VOLCENGINE_API_BASE']
@@ -43,7 +45,10 @@ const classifyIntentTool: ToolDefinition = {
     ctx.workingMemory.set('intentConfidence', confidence)
 
     if (confidence < 0.75) {
-      ctx.emit('ESCALATE')
+      ctx.emit('ESCALATE', undefined, {
+        guardId: 'intent-threshold', result: 'ESCALATE',
+        contextSlice: { intent, confidence, threshold: 0.75 },
+      })
       return { accepted: false, reason: 'low_confidence', confidence }
     }
 
@@ -52,7 +57,10 @@ const classifyIntentTool: ToolDefinition = {
       billing:      'INTENT_BILLING',
       unclear:      'INTENT_UNCLEAR',
     }
-    ctx.emit(eventMap[intent] ?? 'ESCALATE')
+    ctx.emit(eventMap[intent] ?? 'ESCALATE', undefined, {
+      guardId: 'intent-threshold', result: eventMap[intent] ?? 'ESCALATE',
+      contextSlice: { intent, confidence, threshold: 0.75 },
+    })
     return { accepted: true, intent, confidence }
   },
 }
@@ -75,7 +83,10 @@ const collectSlotTool: ToolDefinition = {
     ctx.workingMemory.set('collectedSlots', slots)
 
     const allFilled = ['orderId', 'reason', 'preferRefund'].every(k => slots[k] !== undefined)
-    if (allFilled) ctx.emit('SLOTS_COMPLETE')
+    if (allFilled) ctx.emit('SLOTS_COMPLETE', undefined, {
+      guardId: 'slots-complete', result: 'SLOTS_COMPLETE',
+      contextSlice: { filled: Object.keys(slots), required: ['orderId', 'reason', 'preferRefund'] },
+    })
     return { collected: slots, complete: allFilled }
   },
 }
@@ -93,7 +104,10 @@ const confirmActionTool: ToolDefinition = {
   },
   handler: async (input: unknown, ctx) => {
     const { confirmed } = input as { confirmed: boolean }
-    ctx.emit(confirmed ? 'USER_CONFIRMED' : 'USER_REJECTED')
+    ctx.emit(confirmed ? 'USER_CONFIRMED' : 'USER_REJECTED', undefined, {
+      guardId: 'user-confirm', result: confirmed ? 'USER_CONFIRMED' : 'USER_REJECTED',
+      contextSlice: { confirmed },
+    })
     return { confirmed }
   },
 }
@@ -287,16 +301,18 @@ class SlotFillingGateway implements IModelGateway {
 
 async function createTestEnv() {
   const trajectoryStore = new TrajectoryStore({ jsonlDir: './test-output/trajectories' })
+  const eventStore      = new MemoryEventStore()
   const stateStore      = await createRedisStore(15)
   const milkie = new Milkie({
     stateStore,
     trajectoryStore,
+    eventStore,
     tools: [classifyIntentTool, collectSlotTool, confirmActionTool],
   })
   milkie.registerAgent(cancellationExecutorConfig)
   milkie.registerAgent(billingSpecialistConfig)
   milkie.registerAgent(customerServiceConfig)
-  return { milkie, trajectoryStore, stateStore }
+  return { milkie, trajectoryStore, eventStore, stateStore }
 }
 
 // ─────────────────────────────── Path A ──────────────────────────────────────
@@ -304,8 +320,10 @@ async function createTestEnv() {
 describe('Case 6 Path A: 主路径 — 取消订单', () => {
   let milkie: Milkie
   let trajectoryStore: TrajectoryStore
+  let eventStore: MemoryEventStore
   let stateStore: RedisStore
   let trajectory: Trajectory
+  let run1Result: AgentResult
   let run2Result: AgentResult
 
   const contextId = `ctx-case6-pathA-${Date.now()}`
@@ -318,10 +336,10 @@ describe('Case 6 Path A: 主路径 — 取消订单', () => {
   beforeAll(async () => {
     if (SKIP) return
     const env = await createTestEnv()
-    ;({ milkie, trajectoryStore, stateStore } = env)
+    ;({ milkie, trajectoryStore, eventStore, stateStore } = env)
 
     // Turn 1: all slot info provided upfront (more deterministic than 3 separate turns)
-    await sendTurn('我想取消订单 ORD-456，原因是商品损坏，需要退款')
+    run1Result = await sendTurn('我想取消订单 ORD-456，原因是商品损坏，需要退款')
 
     // Turn 2: confirm
     run2Result = await sendTurn('确认，请执行取消')
@@ -351,6 +369,20 @@ describe('Case 6 Path A: 主路径 — 取消订单', () => {
     const inp = classifySpan!.attributes['input'] as { intent?: string; confidence?: number }
     expect(inp.intent).toBe('cancellation')
     expect(inp.confidence).toBeGreaterThanOrEqual(0.75)
+  })
+
+  live('classify 的硬转移携带 intent-threshold guard 依据', async () => {
+    // guardEvaluations 落在 fsm.transition 事件 payload 上（不在 span attributes），
+    // 所以从 eventStore 读 turn 1 的事件流，定位 INTENT_* 业务硬转移那条。
+    const events = await eventStore.readByRunId(run1Result.agentRunId)
+    const transition = events.find(
+      e => e.type === 'fsm.transition' &&
+        (e.payload as FsmTransitionPayload).trigger.name.startsWith('INTENT_')
+    )
+    expect(transition).toBeDefined()
+    const ge = (transition!.payload as FsmTransitionPayload).guardEvaluations
+    expect(ge?.[0]?.guardId).toBe('intent-threshold')
+    expect((ge?.[0]?.contextSlice as { confidence?: number }).confidence).toBeGreaterThan(0)
   })
 
   live('collect_slot 收集了 orderId 槽位', () => {
