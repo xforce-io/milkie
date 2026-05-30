@@ -100,6 +100,13 @@ ctx.emit(eventMap[intent] ?? 'ESCALATE', undefined, {
 - guard 数据在**录制时**(handler 真跑、`ctx.emit` 触发)捕获;回放时 handler 不重跑(`ReplayingIOPort.invokeTool` 忽略 execute thunk),这是既有行为,本 issue 不改变、也不依赖它。诊断对象是录制 run,数据齐全。
 - 诚实声明:`fsm.transition` 事件的 `id/timestamp` 在录制/回放间本就不同(直接生成),事件**日志字节**对这些信息性事件本就非逐字节一致——这是既有事实,非本 issue 引入。
 
+**实现期发现(重要,影响验收的验证方式):**
+
+- guard 上报**只发生在 emit 驱动的转移**(工具 `ctx.emit` 触发)上。而 milkie 的 replay **不重跑工具 handler**(`ReplayingIOPort.invokeTool` 忽略 execute thunk),因此 **emit 驱动的转移在 replay 时根本不会重新触发** —— FSM 停在原状态、多发一次未缓存的 LLM 调用、抛 `ReplayDivergenceError`。这是 milkie **既有的 replay 限制**,影响所有 emit 驱动 FSM(含 s-011),**非 #31 引入**。
+- 推论:含 guard 的 run 无法靠"重执行"复现转移。但这对 #31 **无碍** —— guard 在录制时已落盘(诊断对象就是录制 run),#31 的职责是留痕、非 replay 复现。
+- 因此 Task 3 的验证**不**去 replay 一个 emit-FSM(那会撞上上述既有限制),而是直接验证 #31 真正承诺的点:**"加 guard 不产生任何新 IOPort 事件"**。做法:同一 emit-FSM 场景录制两次(工具一次带 guard、一次不带),断言两次的 IOPort 事件序列(`clock.read`/`uuid.generated`/`llm.*`/`tool.*`)**完全一致** → 证明 guard 写入零扰动 → replay 缓存序列不变。
+- 建议:emit 驱动 FSM 的 replay 限制本身值得**单独开 issue** 跟踪(超出 #31 范围)。
+
 ## 8. Producer 接线(给本 issue 一个真实水源)
 
 改 s-011 三个工具,各在 emit 处补一次上报,使端到端 trace 真能看到 guard:
