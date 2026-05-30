@@ -1,5 +1,5 @@
 import type { FSMDefinition, FSMState } from '../types/agent.js'
-import type { FsmEventDomain } from '../trace/types.js'
+import type { FsmEventDomain, GuardEvaluation } from '../trace/types.js'
 
 export interface FSMEvent {
   name:     string
@@ -11,6 +11,8 @@ export interface FSMEvent {
    * only path that doesn't set it is `ctx.emit()` from tool handlers.
    */
   domain?:  FsmEventDomain
+  /** #31:触发本次转移的判断依据(由 ctx.emit 第三参带入)。 */
+  guard?: GuardEvaluation[]
 }
 
 export type FSMTransitionHandler = (from: string, to: string, event: FSMEvent) => void
@@ -52,12 +54,21 @@ export class FSMEngine {
   // interrupt/error signals. Default domain is 'business' — the global
   // 'interrupt'/'error' branches in processPendingEvent re-tag those to
   // 'signal' on the transition itself, so this default is safe.
-  emitEvent(event: string, payload?: unknown): void {
+  emitEvent(
+    event: string,
+    payload?: unknown,
+    guard?: GuardEvaluation | GuardEvaluation[],
+  ): void {
     if (this.pendingEvent) {
       // First event wins within a single tool execution
       return
     }
-    this.pendingEvent = { name: event, payload, domain: 'business' }
+    this.pendingEvent = {
+      name:    event,
+      payload,
+      domain:  'business',
+      ...(guard ? { guard: Array.isArray(guard) ? guard : [guard] } : {}),
+    }
   }
 
   // Process the pending event (if any) and transition to the next state.

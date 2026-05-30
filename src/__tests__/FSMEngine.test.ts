@@ -78,6 +78,31 @@ describe('FSMEngine', () => {
       expect(next).toBeNull()
       expect(fsm.currentStateName).toBe('classify')
     })
+
+    it('carries guard evaluations through to the onTransition callback', () => {
+      const fsm = new FSMEngine(routingFSM)   // classify, on INTENT_A: handle_a
+      let received: import('../fsm/FSMEngine').FSMEvent | undefined
+      fsm.onTransitionCallback((_from, _to, event) => { received = event })
+
+      fsm.emitEvent('INTENT_A', undefined, {
+        guardId: 'g', result: 'INTENT_A', contextSlice: { s: 1 },
+      })
+      fsm.processPendingEvent()
+
+      expect(received?.guard).toEqual([
+        { guardId: 'g', result: 'INTENT_A', contextSlice: { s: 1 } },
+      ])
+    })
+
+    it('normalizes a guard array argument as-is', () => {
+      const fsm = new FSMEngine(routingFSM)
+      let received: import('../fsm/FSMEngine').FSMEvent | undefined
+      fsm.onTransitionCallback((_f, _t, e) => { received = e })
+      const arr = [{ guardId: 'a', result: 1, contextSlice: {} }, { guardId: 'b', result: 2, contextSlice: {} }]
+      fsm.emitEvent('INTENT_A', undefined, arr)
+      fsm.processPendingEvent()
+      expect(received?.guard).toEqual(arr)
+    })
   })
 
   describe('processDone()', () => {

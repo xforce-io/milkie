@@ -36,7 +36,7 @@ import type { ITraceObjectStore } from '../trace/TraceObjectStore.js'
 import { canonicalize, contentAddressForCanonicalBytes } from '../trace/hash.js'
 import type { CausalCursor } from '../trace/CausalCursor.js'
 import type { Region } from '../context/Region.js'
-import type { SkillLifecyclePayload, AgentRunStartedPayload, AgentRunCompletedPayload } from '../trace/types.js'
+import type { SkillLifecyclePayload, AgentRunStartedPayload, AgentRunCompletedPayload, GuardEvaluation } from '../trace/types.js'
 
 export type MakeChildPort = (
   childRunId:  string,
@@ -205,6 +205,7 @@ export class AgentRuntime {
                 name:    event.name,
                 ...(event.payload !== undefined ? { payload: event.payload } : {}),
               },
+              ...(event.guard?.length ? { guardEvaluations: event.guard } : {}),
             },
           })
         })
@@ -322,7 +323,7 @@ export class AgentRuntime {
     )
   }
 
-  private buildToolContext(emitFn: (event: string, payload?: unknown) => void): ToolContext {
+  private buildToolContext(emitFn: (event: string, payload?: unknown, guard?: GuardEvaluation | GuardEvaluation[]) => void): ToolContext {
     return {
       workingMemory: this.memory,
       agentFactory:  this.factory,
@@ -1014,8 +1015,8 @@ export class AgentRuntime {
       throw new Error(`Action handler "${state.handler}" not found in tool registry`)
     }
 
-    const ctx = this.buildToolContext((event, payload) => {
-      this.fsm.emitEvent(event, payload)
+    const ctx = this.buildToolContext((event, payload, guard) => {
+      this.fsm.emitEvent(event, payload, guard)
     })
 
     const span = this.recorder.startSpan('tool.call', {
@@ -1089,8 +1090,8 @@ export class AgentRuntime {
     call: { id: string; name: string; input: unknown },
     batchId: string | null,
   ): Promise<ToolResult> {
-    const ctx = this.buildToolContext((event, payload) => {
-      this.fsm.emitEvent(event, payload)
+    const ctx = this.buildToolContext((event, payload, guard) => {
+      this.fsm.emitEvent(event, payload, guard)
     })
 
     const maxRetries = 3

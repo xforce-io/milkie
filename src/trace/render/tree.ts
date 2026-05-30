@@ -1,4 +1,4 @@
-import type { Event } from '../types.js'
+import type { Event, FsmTransitionPayload } from '../types.js'
 
 export interface LlmEntry {
   kind:          'llm'
@@ -34,7 +34,16 @@ export interface RegionEntry {
   payload:   unknown
 }
 
-export type TimelineEntry = LlmEntry | ToolEntry | LifecycleEntry | RegionEntry
+export interface FsmEntry {
+  kind:      'fsm'
+  eventId:   string
+  eventType: 'fsm.transition'
+  timestamp: number
+  summary:   string
+  payload:   unknown
+}
+
+export type TimelineEntry = LlmEntry | ToolEntry | LifecycleEntry | RegionEntry | FsmEntry
 
 export interface TimelineNode {
   runId:     string
@@ -134,6 +143,19 @@ export function buildTimelineTree(events: Event[]): TimelineNode[] {
           eventType: 'context.boundary.applied',
           timestamp: evt.timestamp,
           summary:   `boundary ${p.boundary} @ epoch ${p.epoch}${detail}`,
+          payload:   evt.payload,
+        })
+      } else if (evt.type === 'fsm.transition') {
+        const p = evt.payload as FsmTransitionPayload
+        const guards = p.guardEvaluations?.length
+          ? ' [' + p.guardEvaluations.map(g => `${g.guardId}→${String(g.result)}`).join(', ') + ']'
+          : ''
+        entries.push({
+          kind:      'fsm',
+          eventId:   evt.id,
+          eventType: 'fsm.transition',
+          timestamp: evt.timestamp,
+          summary:   `${p.from} → ${p.to} (${p.trigger.name})${guards}`,
           payload:   evt.payload,
         })
       }

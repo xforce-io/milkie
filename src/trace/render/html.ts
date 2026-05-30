@@ -18,6 +18,7 @@ function summaryFor(entry: TimelineEntry): string {
   if (entry.kind === 'llm')       return 'LLM call' + (entry.respondedId ? '' : ' (no response)')
   if (entry.kind === 'tool')      return 'tool: ' + esc(entry.toolName) + (entry.respondedId ? '' : ' (no response)')
   if (entry.kind === 'region')    return esc(entry.summary)
+  if (entry.kind === 'fsm')       return esc(entry.summary)
   return entry.eventType === 'agent.run.started' ? 'run started' : 'run completed'
 }
 
@@ -27,6 +28,8 @@ function payloadFor(entry: TimelineEntry, eventById: Map<string, Event>): string
     const evt = eventById.get(entry.eventId)
     if (evt) sections.push(JSON.stringify(evt.payload, null, 2))
   } else if (entry.kind === 'region') {
+    sections.push(JSON.stringify(entry.payload, null, 2))
+  } else if (entry.kind === 'fsm') {
     sections.push(JSON.stringify(entry.payload, null, 2))
   } else {
     const req = eventById.get(entry.requestedId)
@@ -43,6 +46,7 @@ function renderEntry(entry: TimelineEntry, eventById: Map<string, Event>): strin
              : entry.kind === 'region'
                ? (entry.eventType === 'context.boundary.applied' ? '⌖'
                  : entry.eventType === 'region.added' ? '＋' : '－')
+             : entry.kind === 'fsm' ? '⇒'
              : '●'
   return `<div class="entry ${entry.kind}" data-kind="${entry.kind}">`
        + `<div class="entry-head">`
@@ -102,6 +106,7 @@ export function renderHtml(events: Event[]): string {
   <span class="chip" data-kind="tool">tool</span>
   <span class="chip" data-kind="lifecycle">lifecycle</span>
   <span class="chip" data-kind="region">region</span>
+  <span class="chip" data-kind="fsm">fsm</span>
 </div>
 ${tree.map(n => renderNode(n, eventById)).join('')}
 <script type="application/json" id="trace-data">${dataJson}</script>

@@ -55,4 +55,35 @@ describe('buildTimelineTree', () => {
     expect(tree.map(n => n.runId)).toEqual(['parent'])
     expect(tree[0]!.children.map(n => n.runId)).toEqual(['child'])
   })
+
+  it('renders an fsm.transition entry carrying guardEvaluations', () => {
+    const events: Event[] = [
+      e({ id: 's', runId: 'r1', type: 'agent.run.started', timestamp: 1,
+          payload: { agentId: 'x', goal: 'g', input: 'i', contextId: 'c' } }),
+      e({ id: 't', runId: 'r1', type: 'fsm.transition', timestamp: 2,
+          payload: { from: 'classify', to: 'handle_b',
+            trigger: { domain: 'business', name: 'INTENT_B' },
+            guardEvaluations: [{ guardId: 'intent-threshold', result: 'INTENT_B', contextSlice: { confidence: 0.7 } }] } }),
+    ]
+    const tree = buildTimelineTree(events)
+    const entry = tree[0]!.entries.find(en => en.kind === 'fsm')
+    expect(entry).toBeDefined()
+    expect((entry as { summary: string }).summary).toContain('intent-threshold')
+  })
+
+  it('renders an fsm.transition entry without guard evaluations (no bracket segment)', () => {
+    const events: Event[] = [
+      e({ id: 's', runId: 'r1', type: 'agent.run.started', timestamp: 1,
+          payload: { agentId: 'x', goal: 'g', input: 'i', contextId: 'c' } }),
+      e({ id: 't', runId: 'r1', type: 'fsm.transition', timestamp: 2,
+          payload: { from: 'classify', to: 'handle_a',
+            trigger: { domain: 'business', name: 'INTENT_A' } } }),
+    ]
+    const tree = buildTimelineTree(events)
+    const entry = tree[0]!.entries.find(en => en.kind === 'fsm')
+    expect(entry).toBeDefined()
+    const summary = (entry as { summary: string }).summary
+    expect(summary).toContain('classify → handle_a')
+    expect(summary).not.toContain('[')
+  })
 })
