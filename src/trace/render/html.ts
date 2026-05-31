@@ -2,6 +2,7 @@ import type { Event } from '../types.js'
 import { buildTimelineTree, type TimelineEntry, type TimelineNode } from './tree.js'
 import { STYLES, SCRIPT } from './template.js'
 import { explainTransition, type TransitionExplanation } from '../diagnostics/explainTransition.js'
+import { explainLlmCall, type LlmCallExplanation } from '../diagnostics/explainLlmCall.js'
 import { contextRefsAt, regionReuseCounts, type RegionContentRef } from '../RegionContextView.js'
 
 interface RegionCtx {
@@ -71,6 +72,20 @@ function renderWhy(exp: TransitionExplanation): string {
        + `</div>`
 }
 
+function renderWhyLlm(exp: LlmCallExplanation): string {
+  const trigger = exp.trigger.causedByEventId
+    ? `<div class="why-trigger">触发: <a href="#ev-${esc(exp.trigger.causedByEventId)}">${esc(exp.trigger.causedBySummary ?? exp.trigger.causedByEventId)}</a></div>`
+    : ''
+  const state = `<div class="why-guards">state: ${esc(exp.fsmState ?? '(未知)')}</div>`
+  const chain = `<div class="why-chain">`
+    + exp.causalChain.map(c => `<a href="#ev-${esc(c.eventId)}">${esc(c.summary)}</a>`).join(' → ')
+    + `</div>`
+  return `<div class="why">`
+       + `<div class="why-summary">${esc(exp.summary)}</div>`
+       + trigger + state + chain
+       + `</div>`
+}
+
 function renderAssembled(requestedId: string, ctx: RegionCtx): string {
   const refs: RegionContentRef[] = [...contextRefsAt(ctx.events, requestedId, 'at').values()]
   if (refs.length === 0) return ''
@@ -108,6 +123,7 @@ function renderEntry(
     ? renderWhy(explanations.get(entry.eventId)!)
     : ''
   const assembled = entry.kind === 'llm' ? renderAssembled(entry.requestedId, regionCtx) : ''
+  const whyLlm = entry.kind === 'llm' ? renderWhyLlm(explainLlmCall(regionCtx.events, entry.requestedId)) : ''
   return `<div class="entry ${entry.kind}" data-kind="${entry.kind}" id="ev-${esc(primaryId)}">`
        + extraAnchors
        + `<div class="entry-head">`
@@ -117,6 +133,7 @@ function renderEntry(
        + `</div>`
        + why
        + assembled
+       + whyLlm
        + `<pre class="payload">${payloadFor(entry, eventById)}</pre>`
        + `</div>`
 }

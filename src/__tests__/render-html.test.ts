@@ -145,6 +145,38 @@ describe('renderHtml', () => {
   })
 })
 
+describe('#34 llm Why?', () => {
+  it('renders a Why? block on llm.requested with trigger link, state and causal chain', () => {
+    const events: Event[] = [
+      e({ id: 'start', runId: 'r1', type: 'agent.run.started', timestamp: 1,
+          payload: { agentId: 'x', goal: 'g', input: 'i', contextId: 'c' } }),
+      e({ id: 'treq', runId: 'r1', type: 'tool.requested', timestamp: 2, causedBy: 'start',
+          payload: { toolName: 'search', input: {}, requestHash: 'h' } }),
+      e({ id: 'tres', runId: 'r1', type: 'tool.responded', timestamp: 3, causedBy: 'treq',
+          payload: { toolName: 'search', output: {}, requestHash: 'h' } }),
+      e({ id: 'fsm', runId: 'r1', type: 'fsm.transition', timestamp: 4, causedBy: 'tres',
+          payload: { from: 'plan', to: 'reflect', trigger: { domain: 'business', name: 'NEXT' } } }),
+      e({ id: 'llm', runId: 'r1', type: 'llm.requested', timestamp: 5, causedBy: 'tres', payload: { model: 'm' } }),
+    ]
+    const html = renderHtml(events)
+    expect(html).toContain('class="why"')
+    expect(html).toContain('reflect')
+    expect(html).toContain('tool.responded(search)')
+    expect(html).toContain('href="#ev-tres"')
+  })
+
+  it('shows (未知) state when the run has no transitions', () => {
+    const events: Event[] = [
+      e({ id: 'start', runId: 'r1', type: 'agent.run.started', timestamp: 1,
+          payload: { agentId: 'x', goal: 'g', input: 'i', contextId: 'c' } }),
+      e({ id: 'llm', runId: 'r1', type: 'llm.requested', timestamp: 2, causedBy: 'start', payload: { model: 'm' } }),
+    ]
+    const html = renderHtml(events)
+    expect(html).toContain('class="why"')
+    expect(html).toContain('(未知)')
+  })
+})
+
 describe('#26 Assembled by', () => {
   const region = (id: string, stability: string, contentHash?: string) =>
     e({ id: `add-${id}`, runId: 'r1', type: 'region.added', timestamp: 1,
