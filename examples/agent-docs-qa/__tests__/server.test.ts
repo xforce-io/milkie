@@ -224,6 +224,13 @@ describe('server — REST endpoints', () => {
     const r = await get(`${baseUrl}/run/does-not-exist/viewer`)
     expect(r.status).toBe(404)
   })
+
+  it('serves the audit panel with a Why tab', async () => {
+    const r = await get(`${baseUrl}/`)
+    expect(r.status).toBe(200)
+    expect(r.body).toContain('data-tab="why"')
+    expect(r.body).toContain('>Why<')
+  })
 })
 
 describe('server — SSE stream', () => {
