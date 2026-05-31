@@ -225,6 +225,41 @@ describe('server — REST endpoints', () => {
     expect(r.status).toBe(404)
   })
 
+  it('GET /run/:runId/execution returns the execution projection JSON', async () => {
+    const chat = await postJson(`${baseUrl}/chat`, { input: 'hi' })
+    const { runId } = JSON.parse(chat.body) as { runId: string }
+
+    const r = await get(`${baseUrl}/run/${runId}/execution`)
+    expect(r.status).toBe(200)
+    const body = JSON.parse(r.body) as {
+      steps: Array<{ kind: string; regionGroups?: Array<{ stability: string; regions: unknown[] }>; cacheHealth?: unknown }>
+    }
+    expect(Array.isArray(body.steps)).toBe(true)
+    expect(body.steps.length).toBeGreaterThan(0)
+    // The stub run makes one LLM call with composed regions → an llm step
+    // whose region groups come from the core projection (not the frontend).
+    const llmStep = body.steps.find(s => s.kind === 'llm')
+    expect(llmStep).toBeDefined()
+    expect(Array.isArray(llmStep!.regionGroups)).toBe(true)
+    expect(llmStep!.regionGroups!.length).toBeGreaterThan(0)
+  })
+
+  it('GET /run/:runId/execution 404s on an unknown run', async () => {
+    const r = await get(`${baseUrl}/run/does-not-exist/execution`)
+    expect(r.status).toBe(404)
+  })
+
+  it('Execution tab frontend carries no attribution logic — it only renders the projection (invariant 12/13)', () => {
+    const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8')
+    // #70: cache tiering, stability grouping, and event-walking attribution all
+    // moved into the core buildExecutionProjection. The frontend must NOT recompute them.
+    expect(html).not.toContain('classifyCacheTier')
+    expect(html).not.toContain('STABILITY_ORDER')
+    expect(html).not.toContain('activeRegions')
+    // It consumes the core projection endpoint instead.
+    expect(html).toContain('/execution`')
+  })
+
   it('serves the audit panel with a Why tab', async () => {
     const r = await get(`${baseUrl}/`)
     expect(r.status).toBe(200)
