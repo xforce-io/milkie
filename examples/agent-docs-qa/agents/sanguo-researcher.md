@@ -31,8 +31,8 @@ fsm:
         再次怀疑、且 verifier 已加载,直接以严格模式重新验证即可。
       tools: [list_dir, read_file, grep, skill_request]
 model:
-  provider: openai
-  model: gpt-4o-mini
+  provider: volcengine
+  model: doubao-seed-2-0-pro-260215
   adapter: openai-compatible
 skills:
   verifier: "0.1.0"
