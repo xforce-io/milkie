@@ -26,7 +26,6 @@ import {
 import type { ToolSchema, ModelRequest } from '../types/model.js'
 import { ToolRegistry } from '../tools/ToolRegistry.js'
 import { WorkingMemory } from '../store/WorkingMemory.js'
-import { CheckpointManager } from '../store/CheckpointManager.js'
 import { AgentFactory, type AgentSpawnOptions } from './AgentFactory.js'
 import type { IIOPort } from './IOPort.js'
 import { cognitiveTools } from '../tools/cognitive.js'
@@ -35,6 +34,7 @@ import type { InMemoryRecorder } from '../trajectory/InMemoryRecorder.js'
 import type { ITraceObjectStore } from '../trace/TraceObjectStore.js'
 import { canonicalize, contentAddressForCanonicalBytes } from '../trace/hash.js'
 import type { CausalCursor } from '../trace/CausalCursor.js'
+import { checkpointFromEvents } from '../trace/diagnostics/checkpointFromEvents.js'
 import type { Region } from '../context/Region.js'
 import type { SkillLifecyclePayload, AgentRunStartedPayload, AgentRunCompletedPayload, GuardEvaluation } from '../trace/types.js'
 
@@ -105,7 +105,6 @@ export class AgentRuntime {
   private readonly regions:     ContextRegions
   private readonly registry:    ToolRegistry
   private readonly memory:      WorkingMemory
-  private readonly checkpoints: CheckpointManager
   private readonly factory:     AgentFactory
 
   private eventQueue:    Array<{ type: string; payload: unknown }> = []
@@ -151,11 +150,6 @@ export class AgentRuntime {
     )
     this.regions.set('header', makeHeaderRegion(opts.config.systemPrompt))
     this.registry    = new ToolRegistry()
-    this.checkpoints = new CheckpointManager(
-      this.stateStore,
-      this.config.agentId,
-      this.agentRunId,
-    )
 
     this.factory = new AgentFactory(async (spawnOpts: AgentSpawnOptions) => {
       const child = new AgentRuntime({
@@ -289,10 +283,9 @@ export class AgentRuntime {
           })
           await finish?.({ status: result.status, lastTextOutput: result.output })
 
-          // Child resume state is mirrored to the stateStore (derived cache of
-          // the child's agent.checkpoint event); read the checkpointId from it.
-          const childCheckpoint = result.status === 'interrupted'
-            ? await this.stateStore.get(`context:${childContextId}:checkpoint:latest`) as AgentCheckpoint | undefined
+          // #73: read the child's resume state from its event log (source of truth).
+          const childCheckpoint = result.status === 'interrupted' && this.eventStore
+            ? checkpointFromEvents(await this.eventStore.readByRunId(childRunId)) ?? undefined
             : undefined
           await this.recordChild({
             taskId, agentId, runId: childRunId, contextId: childContextId,
@@ -744,25 +737,9 @@ export class AgentRuntime {
       const resumeState = this.fsm.currentState.name
       this.fsm.emitEvent('interrupt')
       this.fsm.processPendingEvent()
-      const checkpoint = await this.saveCheckpoint(resumeState)
-      // #73: the resume state lives in the event log (single source of truth).
-      // Emit it as an event; the stateStore keeps only a tiny context→runId
-      // routing pointer (not state — cannot drift). Legacy checkpoint:latest
-      // blob is still written for backward compatibility during migration.
-      if (this.eventStore) {
-        await this.eventStore.append({
-          id:        uuidv4(),
-          runId:     this.agentRunId,
-          type:      'agent.checkpoint',
-          actor:     this.config.agentId,
-          timestamp: Date.now(),
-          payload:   { checkpoint },
-        })
-      }
+      const checkpoint = this.buildCheckpoint(resumeState)
       await this.tryFlushTraceWrites()
-      await this.checkpoints.saveForContext(this.contextId, this.turnNumber, checkpoint)
-      await this.stateStore.set(`context:${this.contextId}:checkpoint:latest`, checkpoint)
-      await this.stateStore.set(`context:${this.contextId}:checkpoint-run:latest`, this.agentRunId)
+      await this.persistCheckpoint(checkpoint)
       const err = new Error('Agent interrupted')
       err.name = 'InterruptSignal'
       throw err
@@ -770,8 +747,12 @@ export class AgentRuntime {
     this.pendingEvents.push(event)
   }
 
-  private async saveCheckpoint(resumeState?: string, currentTurn?: string): Promise<AgentCheckpoint> {
-    return this.checkpoints.save({
+  // #73: build the resume-state checkpoint object. checkpointId is a content-free
+  // uuid (previously minted by the now-archived CheckpointManager). The object is
+  // NOT persisted to the stateStore — persistCheckpoint writes it to the event log.
+  private buildCheckpoint(resumeState?: string, currentTurn?: string): AgentCheckpoint {
+    return {
+      checkpointId: uuidv4(),
       sequence:    this.turnNumber,
       goal:        this.goal,
       currentTurn: currentTurn ?? this.getCurrentTurn() ?? undefined,
@@ -790,7 +771,24 @@ export class AgentRuntime {
         traceId:       (this.recorder as Partial<InMemoryRecorder>).traceId ?? '',
         contextId:      this.contextId,
       },
+    }
+  }
+
+  // #73: persist resume state to the event log (single source of truth) as an
+  // agent.checkpoint event, plus a tiny context->runId routing pointer (an index,
+  // not state). No stateStore checkpoint blob is written. Requires an eventStore:
+  // without one the run cannot be resumed (events are the sole resume substrate).
+  private async persistCheckpoint(checkpoint: AgentCheckpoint): Promise<void> {
+    if (!this.eventStore) return
+    await this.eventStore.append({
+      id:        uuidv4(),
+      runId:     this.agentRunId,
+      type:      'agent.checkpoint',
+      actor:     this.config.agentId,
+      timestamp: Date.now(),
+      payload:   { checkpoint },
     })
+    await this.stateStore.set(`context:${this.contextId}:checkpoint-run:latest`, this.agentRunId)
   }
 
   // Load prior state for multi-turn continuation
@@ -893,10 +891,9 @@ export class AgentRuntime {
             // the (user, finalAssistant) history pair (otherwise the next
             // invoke sees an empty history).
             this.crystallizeTurn()
-            const checkpoint = await this.saveCheckpoint()
+            const checkpoint = this.buildCheckpoint()
             await this.tryFlushTraceWrites()
-            await this.checkpoints.saveForContext(this.contextId, this.turnNumber, checkpoint)
-            await this.stateStore.set(`context:${this.contextId}:checkpoint:latest`, checkpoint)
+            await this.persistCheckpoint(checkpoint)
           }
           break
         }

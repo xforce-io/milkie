@@ -13,6 +13,8 @@ import type { ToolDefinition } from '../../src/types/tool.js'
 import { Milkie } from '../../src/runtime/Milkie.js'
 import { TrajectoryStore } from '../../src/trajectory/TrajectoryStore.js'
 import { SQLiteStore } from '../../src/store/SQLiteStore.js'
+import { MemoryEventStore } from '../../src/trace/MemoryEventStore.js'
+import { checkpointFromEvents } from '../../src/trace/diagnostics/checkpointFromEvents.js'
 import { createToolCallTracker } from './helpers.js'
 import fs from 'fs'
 import path from 'path'
@@ -144,7 +146,8 @@ describe('Case 3: 长任务中断与恢复', () => {
     if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath)
     stateStore = new SQLiteStore({ path: dbPath })
     await stateStore.init()
-    milkie = new Milkie({ stateStore, trajectoryStore, tools: [processChunkTool] })
+    const eventStore = new MemoryEventStore()
+    milkie = new Milkie({ stateStore, eventStore, trajectoryStore, tools: [processChunkTool] })
     milkie.registerAgent(analystConfig)
 
     contextId = `ctx-case3-${Date.now()}`
@@ -163,9 +166,9 @@ describe('Case 3: 长任务中断与恢复', () => {
     await milkie.interrupt(contextId)
     run1Result = await runPromise
 
-    // ── Phase 2: Load checkpoint ────────────────────────────────────────────
+    // ── Phase 2: Load checkpoint (#73: from the event log) ──────────────────
     const cpKey = `context:${contextId}:checkpoint:latest`
-    checkpoint = await stateStore.get(cpKey) as AgentCheckpoint
+    checkpoint = checkpointFromEvents(await eventStore.readByRunId(run1Result.agentRunId)) as AgentCheckpoint
 
     // ── Phase 3: Resume ────────────────────────────────────────────────────
     if (checkpoint) {
@@ -259,8 +262,10 @@ describe('Case 3 子流：Supervisor Tree 中断传播', () => {
     await stateStore.init()
 
     try {
+      const eventStore = new MemoryEventStore()
       const milkie = new Milkie({
         stateStore,
+        eventStore,
         trajectoryStore: new TrajectoryStore({ jsonlDir: './test-output/trajectories' }),
         gateway: new SupervisorGateway(),
       })
@@ -285,7 +290,7 @@ describe('Case 3 子流：Supervisor Tree 中断传播', () => {
 
       await milkie.interrupt('ctx-case3-supervisor')
       const result = await runPromise
-      const parentCp = await stateStore.get('context:ctx-case3-supervisor:checkpoint:latest') as AgentCheckpoint
+      const parentCp = checkpointFromEvents(await eventStore.readByRunId(result.agentRunId)) as AgentCheckpoint
 
       expect(result.status).toBe('interrupted')
       expect(parentCp.fsm.currentState).toBe('paused')

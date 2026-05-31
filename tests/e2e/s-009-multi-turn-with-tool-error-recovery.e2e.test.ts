@@ -13,6 +13,8 @@ import type { ToolDefinition } from '../../src/types/tool.js'
 import { Milkie } from '../../src/runtime/Milkie.js'
 import { TrajectoryStore } from '../../src/trajectory/TrajectoryStore.js'
 import { MemoryStore } from '../../src/store/MemoryStore.js'
+import { MemoryEventStore } from '../../src/trace/MemoryEventStore.js'
+import { checkpointFromEvents } from '../../src/trace/diagnostics/checkpointFromEvents.js'
 
 const SKIP = !process.env['VOLCENGINE_TOKEN'] || !process.env['VOLCENGINE_API_BASE']
 
@@ -102,7 +104,8 @@ describe('Case 4: 多轮对话与错误恢复', () => {
 
     trajectoryStore = new TrajectoryStore({ jsonlDir: './test-output/trajectories' })
     stateStore = new MemoryStore()
-    milkie = new Milkie({ stateStore, trajectoryStore, tools: [queryOrdersTool] })
+    const eventStore = new MemoryEventStore()
+    milkie = new Milkie({ stateStore, eventStore, trajectoryStore, tools: [queryOrdersTool] })
     milkie.registerAgent(orderAnalystConfig)
 
     // First turn: initial problem statement
@@ -112,7 +115,8 @@ describe('Case 4: 多轮对话与错误恢复', () => {
       input:   '订单 #12345 金额超出阈值 3 倍，请分析异常原因',
     })
 
-    run1Cp = await stateStore.get(`context:${run1.contextId}:checkpoint:latest`) as AgentCheckpoint | null
+    // #73: resume state lives in the event log.
+    run1Cp = checkpointFromEvents(await eventStore.readByRunId(run1.agentRunId))
 
     // Second turn: provide additional context, same contextId
     run2 = await milkie.invoke({
@@ -122,7 +126,7 @@ describe('Case 4: 多轮对话与错误恢复', () => {
       contextId: run1.contextId,
     })
 
-    run2Cp = await stateStore.get(`context:${run2.contextId}:checkpoint:latest`) as AgentCheckpoint | null
+    run2Cp = checkpointFromEvents(await eventStore.readByRunId(run2.agentRunId))
     trajectory = await trajectoryStore.getByAgentId('order-analyst')
   }, 120_000)
 

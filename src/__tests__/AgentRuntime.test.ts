@@ -4,6 +4,7 @@ import { Milkie } from '../runtime/Milkie'
 import { MemoryStore } from '../store/MemoryStore'
 import { InMemoryRecorder } from '../trajectory/InMemoryRecorder'
 import { MemoryEventStore } from '../trace/MemoryEventStore'
+import { checkpointFromEvents } from '../trace/diagnostics/checkpointFromEvents'
 import { MemoryTraceObjectStore } from '../trace/TraceObjectStore'
 import type { AgentConfig } from '../types/agent'
 import type { AgentCheckpoint } from '../types/store'
@@ -262,12 +263,14 @@ describe('AgentRuntime', () => {
   describe('checkpoint and resume', () => {
     it('saves interrupted checkpoints as paused with a resume state', async () => {
       const stateStore = new MemoryStore()
+      const eventStore = new MemoryEventStore()
       const runtime = new AgentRuntime({
         config:     makeConfig(),
         goal:       'test interrupt',
         input:      'hi',
         contextId:  'ctx-interrupt',
         stateStore,
+        eventStore,
         recorder:   new InMemoryRecorder('trace-interrupt', 'test-agent'),
         ioPort:     new DefaultIOPort(new SequentialGateway([textResponse('should not be called')])),
       })
@@ -276,7 +279,8 @@ describe('AgentRuntime', () => {
       const result = await runtime.run('hi')
 
       expect(result.status).toBe('interrupted')
-      const checkpoint = await stateStore.get('context:ctx-interrupt:checkpoint:latest') as AgentCheckpoint
+      // #73: resume state lives in the event log (agent.checkpoint event).
+      const checkpoint = checkpointFromEvents(await eventStore.readByRunId(result.agentRunId))!
       expect(checkpoint.fsm.currentState).toBe('paused')
       expect(checkpoint.fsm.resumeState).toBe('react')
       expect(checkpoint.meta.contextId).toBe('ctx-interrupt')
@@ -374,8 +378,10 @@ describe('AgentRuntime', () => {
 
     it('propagates parent interrupt to running sub-agents and records child checkpoints', async () => {
       const stateStore = new MemoryStore()
+      const eventStore = new MemoryEventStore()
       const milkie = new Milkie({
         stateStore,
+        eventStore,
         gateway: new SupervisorGateway(),
       })
 
@@ -412,7 +418,7 @@ describe('AgentRuntime', () => {
       const result = await runPromise
 
       expect(result.status).toBe('interrupted')
-      const parentCp = await stateStore.get('context:ctx-supervisor:checkpoint:latest') as AgentCheckpoint
+      const parentCp = checkpointFromEvents(await eventStore.readByRunId(result.agentRunId))!
       expect(parentCp.fsm.currentState).toBe('paused')
       expect(parentCp.children).toHaveLength(2)
       expect(parentCp.children.every(c => c.status === 'interrupted')).toBe(true)
@@ -421,8 +427,10 @@ describe('AgentRuntime', () => {
 
     it('persists child runId in the parent checkpoint children records', async () => {
       const stateStore = new MemoryStore()
+      const eventStore = new MemoryEventStore()
       const milkie = new Milkie({
         stateStore,
+        eventStore,
         gateway: new SupervisorGateway(),
       })
 
@@ -456,9 +464,9 @@ describe('AgentRuntime', () => {
       })
 
       await milkie.interrupt('ctx-supervisor-runid')
-      await runPromise
+      const result = await runPromise
 
-      const parentCp = await stateStore.get('context:ctx-supervisor-runid:checkpoint:latest') as AgentCheckpoint
+      const parentCp = checkpointFromEvents(await eventStore.readByRunId(result.agentRunId))!
       expect(parentCp.children.length).toBeGreaterThan(0)
       for (const c of parentCp.children) {
         expect(typeof c.runId).toBe('string')

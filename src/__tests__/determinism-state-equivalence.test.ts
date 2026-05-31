@@ -5,7 +5,7 @@
 import { Milkie } from '../runtime/Milkie'
 import { MemoryStore } from '../store/MemoryStore'
 import { MemoryEventStore } from '../trace/MemoryEventStore'
-import type { AgentCheckpoint } from '../types/store'
+import { checkpointFromEvents } from '../trace/diagnostics/checkpointFromEvents'
 import type { ToolDefinition } from '../types/tool'
 import type { IModelGateway, ModelRequest, ModelResponse } from '../types/model'
 import type { AgentConfig } from '../types/agent'
@@ -56,12 +56,12 @@ describe('#73 Stage 4 (Gate 3): event-log WM state == checkpoint WM state', () =
     const run = await runP
     expect(run.status).toBe('interrupted')
 
-    // (A) WM the checkpoint stores.
-    const cp = await stateStore.get(`context:${contextId}:checkpoint:latest`) as AgentCheckpoint
+    // (A) WM the resume checkpoint stores — now an agent.checkpoint EVENT.
+    const events = await eventStore.readByRunId(run.agentRunId)
+    const cp = checkpointFromEvents(events)!
     const cpWm = cp.context.workingMemory as { data: Record<string, unknown> }
 
     // (B) WM reconstructed from the event log = the latest wm.mutated snapshot.
-    const events = await eventStore.readByRunId(run.agentRunId)
     const wmEvents = events.filter(e => e.type === 'wm.mutated')
     expect(wmEvents.length).toBeGreaterThan(0)
     const eventWm = (wmEvents[wmEvents.length - 1]!.payload as { snapshot: { data: Record<string, unknown> } }).snapshot

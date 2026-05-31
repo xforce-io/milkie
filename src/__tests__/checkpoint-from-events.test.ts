@@ -38,7 +38,7 @@ const agent: AgentConfig = {
 }
 
 describe('#73 Stage 6: checkpoint projected from the event log == stateStore checkpoint', () => {
-  it('emits an agent.checkpoint event on interrupt, equal to the stateStore blob', async () => {
+  it('emits an agent.checkpoint event on interrupt carrying the resume state; no stateStore blob', async () => {
     const stateStore = new MemoryStore()
     const eventStore = new MemoryEventStore()
     const milkie = new Milkie({ stateStore, eventStore, gateway: new FactGateway(), tools: [slowWriter()] })
@@ -51,18 +51,16 @@ describe('#73 Stage 6: checkpoint projected from the event log == stateStore che
     const run = await runP
     expect(run.status).toBe('interrupted')
 
-    const fromStore = await stateStore.get(`context:${contextId}:checkpoint:latest`) as AgentCheckpoint
+    // The resume state lives in the event log (single source of truth).
     const events = await eventStore.readByRunId(run.agentRunId)
     const fromEvents = checkpointFromEvents(events)
-
     expect(fromEvents).not.toBeNull()
-    // The event-sourced checkpoint reproduces the full stateStore blob in its
-    // DURABLE form. (A real stateStore — SQLiteStore — JSON-serialises on set,
-    // so the checkpoint is already round-tripped through JSON in production;
-    // the in-memory MemoryStore keeps references, hence the JSON normalisation.)
-    expect(fromEvents).toEqual(JSON.parse(JSON.stringify(fromStore)))
-    // And the context→runId routing pointer is in place.
+    expect(fromEvents!.fsm.currentState).toBe('paused')
+    expect(Object.keys((fromEvents!.context.workingMemory as { data: Record<string, unknown> }).data).length).toBeGreaterThan(0)
+    // The context→runId routing pointer is in place (an index, not state).
     expect(await stateStore.get(`context:${contextId}:checkpoint-run:latest`)).toBe(run.agentRunId)
+    // The checkpoint blob is NO LONGER written to the stateStore (logically deleted).
+    expect(await stateStore.get(`context:${contextId}:checkpoint:latest`)).toBeUndefined()
   })
 
   it('multi-turn resume restores WM from the event log even with the stateStore blob deleted', async () => {
@@ -99,7 +97,7 @@ describe('#73 Stage 6: checkpoint projected from the event log == stateStore che
     expect(prompt).toContain('fact1')  // a fact recorded in the interrupted turn
   })
 
-  it('returns null for a run that completed without interruption', async () => {
+  it('a turn that completes (waiting for user) emits a continuation checkpoint event', async () => {
     const eventStore = new MemoryEventStore()
     const milkie = new Milkie({
       stateStore: new MemoryStore(), eventStore,
@@ -108,6 +106,8 @@ describe('#73 Stage 6: checkpoint projected from the event log == stateStore che
     milkie.registerAgent(agent)
     const run = await milkie.invoke({ agentId: 'recorder', goal: 'g', input: 'go', contextId: 'done' })
     expect(run.status).toBe('completed')
-    expect(checkpointFromEvents(await eventStore.readByRunId(run.agentRunId))).toBeNull()
+    // A non-terminal turn that finishes leaves a continuation checkpoint in the
+    // event log (so the next turn restores from it) — not the stateStore.
+    expect(checkpointFromEvents(await eventStore.readByRunId(run.agentRunId))).not.toBeNull()
   })
 })
