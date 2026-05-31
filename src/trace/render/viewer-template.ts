@@ -20,7 +20,9 @@ export const VIEWER_STYLES = `
   #why-panel h3 { font-size: 14px; margin: 0 0 8px; }
   .why-block { background: #f7f7f8; padding: 10px; border-radius: 6px; margin-bottom: 10px; }
   .nav-link { display: block; padding: 6px 10px; border-radius: 5px; margin: 4px 0; cursor: pointer; }
-  .nav-cause { background: #eef6ff; color: #2563eb; } .nav-effect { background: #fef0f5; color: #a13; }
+  .nav-cause { background: #eef6ff; color: #2563eb; }
+  .xlink { color: #36a; text-decoration: none; cursor: pointer; }
+  .xlink:hover { text-decoration: underline; }
   .rawpre { font-family: ui-monospace, monospace; font-size: 11px; white-space: pre-wrap; background: #fafafa; padding: 8px; border-radius: 4px; max-height: 240px; overflow: auto; }
   #pane-raw { padding: 12px 16px; }
 `

@@ -10,8 +10,16 @@ function esc(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;')
 }
 
+interface PanelRecord {
+  title:            string
+  bodyHtml:         string
+  causeDecisionId?: string
+  chain:            Array<{ eventId: string; type: string; summary: string }>
+  rawJson:          string
+}
+
 // One panel "explanation" record per node, consumed verbatim by the client JS.
-function panelRecord(events: Event[], node: DecisionNode, eventById: Map<string, Event>): unknown {
+function panelRecord(events: Event[], node: DecisionNode, eventById: Map<string, Event>): PanelRecord {
   const base = {
     causeDecisionId: node.causeDecisionId,
     chain: [] as Array<{ eventId: string; type: string; summary: string }>,
@@ -51,7 +59,7 @@ export function renderViewer(events: Event[], opts: { regionContent?: Map<string
   const eventById = new Map<string, Event>()
   for (const e of events) eventById.set(e.id, e)
 
-  const explanations: Record<string, unknown> = {}
+  const explanations: Record<string, PanelRecord> = {}
   for (const node of spine.nodes) explanations[node.eventId] = panelRecord(events, node, eventById)
 
   const spineHtml = spine.nodes.map(n => {
