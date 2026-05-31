@@ -6,8 +6,7 @@ export const VIEWER_STYLES = `
   .tab.active { background: #1c1c1e; color: #fff; border-color: #1c1c1e; }
   .pane { display: none; }
   .pane.active { display: block; }
-  #pane-decision { display: flex; height: calc(100vh - 90px); }
-  #pane-decision.active { display: flex; }
+  #pane-decision.active { display: flex; height: calc(100vh - 90px); }
   .spine { width: 42%; border-right: 1px solid #e5e5e7; overflow: auto; padding: 8px; background: #fafafa; }
   .node { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; padding: 5px 8px; margin: 3px 0; border-left: 3px solid transparent; border-radius: 3px; cursor: pointer; background: #fff; }
   .node.k-llm { border-left-color: #5b3ec9; } .node.k-tool { border-left-color: #2563eb; }

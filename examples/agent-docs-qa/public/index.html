@@ -15,6 +15,7 @@
       --cite-bg: #f0eaff;
       --cite-fg: #5b3ec9;
       --skill-highlight: #fff4e0;
+      --audit-w: clamp(440px, 44vw, 720px);
     }
     * { box-sizing: border-box }
     html, body { margin: 0; padding: 0; height: 100% }
@@ -125,13 +126,17 @@
 
     /* ── Audit panel (Layer 2: per-message decision audit) ──────────── */
     #audit-panel {
-      position: fixed; top: 49px; right: 0; bottom: 0; width: 380px; z-index: 90;
+      position: fixed; top: 49px; right: 0; bottom: 0; width: var(--audit-w); z-index: 90;
       background: var(--panel); border-left: 1px solid var(--border);
       box-shadow: -8px 0 24px rgba(0,0,0,0.06);
       display: flex; flex-direction: column;
       transform: translateX(100%); transition: transform 0.18s ease-out;
     }
     #audit-panel.open { transform: translateX(0) }
+    /* When the audit panel is open, dock it: stop centering the chat, let it
+       fill the freed left space, and reserve the panel's strip on the right. */
+    body.audit-open main { justify-content: flex-start; padding-right: var(--audit-w) }
+    body.audit-open #chat { flex: 1 1 auto; max-width: 880px }
     #audit-panel .ap-header {
       display: flex; align-items: center; gap: 8px;
       padding: 12px 16px; border-bottom: 1px solid var(--border);
@@ -189,6 +194,8 @@
     #audit-panel .ap-tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600 }
     #audit-panel .ap-tab.disabled { color: #c0c0c5; cursor: default }
     #audit-panel .ap-body { flex: 1; overflow-y: auto; padding: 14px 16px }
+    #audit-panel .ap-body.viewer { padding: 0; overflow: hidden }
+    #audit-panel .ap-viewer-frame { display: block; width: 100%; height: 100%; border: 0 }
     #audit-panel .ap-empty { color: var(--muted); font-style: italic; font-size: 12px; padding: 16px 0 }
 
     /* Sources tab */
@@ -459,8 +466,9 @@
     <div class="ap-replay-banner" role="status"></div>
     <div class="ap-tabs">
       <div class="ap-tab active" data-tab="sources">Sources</div>
-      <div class="ap-tab" data-tab="steps">Steps</div>
+      <div class="ap-tab" data-tab="steps">Execution</div>
       <div class="ap-tab" data-tab="provenance">Provenance</div>
+      <div class="ap-tab" data-tab="why">Why</div>
     </div>
     <div class="ap-body"></div>
   </aside>
@@ -1241,10 +1249,17 @@
     function renderAuditBody() {
       if (!auditAnchorRunId) { $auditBody.innerHTML = ''; return }
       const msgEl = $log.querySelector(`.msg.assistant[data-run-id="${auditAnchorRunId}"]`)
+      $auditBody.classList.toggle('viewer', auditActiveTab === 'why')
       if (auditActiveTab === 'sources') {
         $auditBody.innerHTML = renderSourcesTab(auditAnchorRunId, msgEl)
       } else if (auditActiveTab === 'steps') {
         $auditBody.innerHTML = renderStepsTab(auditAnchorRunId)
+      } else if (auditActiveTab === 'why') {
+        // Reuse the core #64 decision viewer wholesale: it is a self-contained
+        // HTML document (own CSS + drill-down JS), so an iframe isolates it and
+        // its "two clicks to root cause" interactions run inside the frame.
+        $auditBody.innerHTML =
+          `<iframe class="ap-viewer-frame" src="/run/${encodeURIComponent(auditAnchorRunId)}/viewer"></iframe>`
       } else if (auditActiveTab === 'provenance') {
         $auditBody.innerHTML = `<div class="ap-empty">Analyzing answer against sources…</div>`
         // Async render: classifies each segment after fetching its source.
@@ -1271,6 +1286,7 @@
       if (auditAnchorRunId !== runId) hideReplayBanner()
       auditAnchorRunId = runId
       $audit.classList.add('open')
+      document.body.classList.add('audit-open')
       updateAuditTitle()
       // Restore last active tab across openings; never land on a disabled tab.
       setAuditTab(auditActiveTab || 'sources')
@@ -1279,6 +1295,7 @@
     function closeAudit() {
       auditAnchorRunId = null
       $audit.classList.remove('open')
+      document.body.classList.remove('audit-open')
       hideReplayBanner()
     }
 

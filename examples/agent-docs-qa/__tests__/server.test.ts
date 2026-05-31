@@ -75,6 +75,16 @@ describe('server — REST endpoints', () => {
     expect(body.status).toBe('completed')
   })
 
+  it('persists region content to .milkie/objects after a run', async () => {
+    await postJson(`${baseUrl}/chat`, { input: 'hi' })
+    const objectsDir = path.join(exampleDir, '.milkie', 'objects')
+    expect(fs.existsSync(objectsDir)).toBe(true)
+    // A run composes context regions; their canonical content is written to
+    // the trace object store. Non-empty objects dir proves the wiring.
+    const entries = fs.readdirSync(objectsDir)
+    expect(entries.length).toBeGreaterThan(0)
+  })
+
   it('POST /chat with same contextId twice continues the same conversation', async () => {
     await stopServer(server)
     server = await startServer({
@@ -185,6 +195,41 @@ describe('server — REST endpoints', () => {
     const r = await postJson(`${baseUrl}/run/00000000-0000-0000-0000-000000000000/replay`, {})
     expect(r.status).toBe(404)
     expect(JSON.parse(r.body).status).toBe('error')
+  })
+
+  it('persists region content to .milkie/objects after a run', async () => {
+    await postJson(`${baseUrl}/chat`, { input: 'hi' })
+    const objectsDir = path.join(exampleDir, '.milkie', 'objects')
+    expect(fs.existsSync(objectsDir)).toBe(true)
+    // A run composes context regions; their canonical content is written to
+    // the trace object store. Non-empty objects dir proves the wiring.
+    const entries = fs.readdirSync(objectsDir)
+    expect(entries.length).toBeGreaterThan(0)
+  })
+
+  it('GET /run/:runId/viewer returns the decision viewer HTML', async () => {
+    const chat = await postJson(`${baseUrl}/chat`, { input: 'hi' })
+    const { runId } = JSON.parse(chat.body) as { runId: string }
+
+    const r = await get(`${baseUrl}/run/${runId}/viewer`)
+    expect(r.status).toBe(200)
+    // renderViewer emits a self-contained document with the decision spine.
+    expect(r.body).toContain('<!doctype html>')
+    expect(r.body).toContain('milkie trace viewer')
+    expect(r.body).toContain('data-id=')        // spine nodes
+    expect(r.body).toContain('spine-output')     // the output node with ❓ entry
+  })
+
+  it('GET /run/:runId/viewer 404s on an unknown run', async () => {
+    const r = await get(`${baseUrl}/run/does-not-exist/viewer`)
+    expect(r.status).toBe(404)
+  })
+
+  it('serves the audit panel with a Why tab', async () => {
+    const r = await get(`${baseUrl}/`)
+    expect(r.status).toBe(200)
+    expect(r.body).toContain('data-tab="why"')
+    expect(r.body).toContain('>Why<')
   })
 })
 
