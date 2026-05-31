@@ -406,6 +406,11 @@ export class Milkie {
       extraTools:      this.extraTools,
       subAgentConfigs: this.agents,
       childRecorderFactory: undefined,
+      // SPIKE(#73): recorded WM snapshots (one per tool call) → replay restores
+      // tool-written working memory the handler (not re-run) would have produced.
+      replayWmSnapshots: events
+        .filter(e => e.type === 'wm.mutated')
+        .map(e => (e.payload as { snapshot: unknown }).snapshot),
     })
 
     const result = await runtime.run(snapshot.input)

@@ -70,6 +70,10 @@ export interface AgentRuntimeOptions {
   /** #30: per-run causal cursor shared with this run's RecordingIOPort, so fsm.transition
    *  can stamp causedBy = the last llm/tool event id. Omit → no fsm.transition causedBy. */
   causalCursor?: CausalCursor
+  /** SPIKE(#73): recorded WM snapshots (one per tool call, in order) for replay.
+   *  Present → replay-restore mode: after each tool call, restore WM from the next
+   *  snapshot instead of trusting the (non-re-run) handler. Absent → record mode. */
+  replayWmSnapshots?: unknown[]
 }
 
 type SkillLoadRequest = {
@@ -90,6 +94,7 @@ export class AgentRuntime {
   private readonly ioPort:           IIOPort
   private readonly eventStore?:      import('../trace/EventStore.js').IEventStore
   private readonly traceObjectStore?: ITraceObjectStore
+  private readonly replayWmSnapshots?: unknown[]  // SPIKE(#73)
   private readonly subAgentConfigs?: Map<string, AgentConfig>
   private readonly childRecorderFactory?: (config: AgentConfig, contextId: string, traceId: string) => ITrajectoryRecorder
   private readonly makeChildPort?: MakeChildPort
@@ -130,6 +135,7 @@ export class AgentRuntime {
     this.stateStore      = opts.stateStore
     this.recorder        = opts.recorder
     this.eventStore      = opts.eventStore
+    this.replayWmSnapshots = opts.replayWmSnapshots
     this.traceObjectStore = opts.traceObjectStore
     this.subAgentConfigs = opts.subAgentConfigs
     this.childRecorderFactory = opts.childRecorderFactory
@@ -1114,6 +1120,25 @@ export class AgentRuntime {
           () => this.registry.execute(call.name, call.input, ctx),
         )
         span.attributes['output'] = output
+        // SPIKE(#73): event-source tool WM side-effects so replay reconstructs them.
+        // Replay does NOT re-run the handler (ReplayingIOPort serves cached output),
+        // so WM writes are lost unless captured here. Record a wm.mutated snapshot;
+        // on replay, restore WM from the recorded snapshot (value frozen → no L1/L2).
+        if (this.replayWmSnapshots) {
+          const snap = this.replayWmSnapshots.shift()
+          if (snap !== undefined) Object.assign(this.memory, WorkingMemory.fromJSON(snap))
+        } else if (this.eventStore) {
+          await this.eventStore.append({
+            id:        uuidv4(),
+            runId:     this.agentRunId,
+            type:      'wm.mutated',
+            actor:     this.config.agentId,
+            timestamp: Date.now(),
+            // Deep-clone to freeze the value at capture time: toJSON() returns the
+            // live `log` array reference, which later tool writes would mutate.
+            payload:   { snapshot: JSON.parse(JSON.stringify(this.memory.toJSON())) },
+          })
+        }
         const duration = this.ioPort.now() - start
         this.recorder.recordEvent(span, 'tool.result', { output })
         this.recorder.endSpan(span, 'ok')
