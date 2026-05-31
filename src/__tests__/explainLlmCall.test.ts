@@ -37,7 +37,16 @@ describe('explainLlmCall', () => {
     expect(exp.trigger.causedByEventId).toBeUndefined()
     expect(exp.fsmState).toBeNull()
     expect(exp.regionCount).toBe(0)
-    expect(exp.summary).toContain('(无上游)')
+    expect(exp.summary).toContain('(无上游记录)')
+  })
+
+  it('handles a dangling causedBy: keeps causedByEventId, omits causedBySummary, falls back in summary', () => {
+    const events: Event[] = [ev('llm', 'llm.requested', { model: 'm' }, 'missing')]
+    const exp = explainLlmCall(events, 'llm')
+    expect(exp.trigger.causedByEventId).toBe('missing')
+    expect(exp.trigger.causedBySummary).toBeUndefined()
+    expect(exp.summary).toContain('(无上游记录)')
+    expect(exp.causalChain.map(c => c.eventId)).toEqual(['llm'])
   })
 
   it('throws on a non-llm.requested event id', () => {

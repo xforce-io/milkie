@@ -44,7 +44,7 @@ export function explainLlmCall(events: Event[], llmRequestedEventId: string): Ll
     summary: summarizeEvent(e),
   }))
 
-  const triggerSource = causeSummary ?? '(无上游)'
+  const triggerSource = causeSummary ?? '(无上游记录)'
   const summary = `LLM 调用 @ state ${fsmState ?? '?'},由 ${triggerSource} 触发;prompt 由 ${regionCount} 个 region 拼成`
 
   return {
