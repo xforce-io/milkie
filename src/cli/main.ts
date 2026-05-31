@@ -189,7 +189,22 @@ export async function main(argv: string[]): Promise<MainResult> {
       const runIds = [runId, ...(await findDescendantRuns(runsDir, runId))]
       const events = []
       for (const id of runIds) events.push(...(await eventStore.readByRunId(id)))
-      stdout.push(renderHtml(events))
+
+      const traceObjectStore = new FileTraceObjectStore(path.join(milkieDir, 'objects'))
+      const hashes = new Set<string>()
+      for (const ev of events) {
+        if (ev.type === 'region.added') {
+          const h = (ev.payload as { contentHash?: string }).contentHash
+          if (h) hashes.add(h)
+        }
+      }
+      const regionContent = new Map<string, string>()
+      for (const h of hashes) {
+        const c = await traceObjectStore.getCanonical(h)
+        if (c !== undefined) regionContent.set(h, c)
+      }
+
+      stdout.push(renderHtml(events, { regionContent }))
     })
 
   trace
