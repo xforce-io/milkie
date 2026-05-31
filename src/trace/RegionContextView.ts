@@ -96,3 +96,21 @@ export async function getRegionBefore(
 ): Promise<RegionContentRef | undefined> {
   return (await contextBefore(events, eventId, objectStore)).get(regionId)
 }
+
+/**
+ * Report-wide reuse count: for every llm.requested, fold the active region set
+ * (contextRefsAt 'at') and tally each region's contentHash. The value is how
+ * many (llm.requested × region) references share that content — used by the UI
+ * to dedup identical content and annotate "复用 ×N". Pure.
+ */
+export function regionReuseCounts(events: Event[]): Map<string, number> {
+  const counts = new Map<string, number>()
+  for (const event of events) {
+    if (event.type !== 'llm.requested') continue
+    for (const ref of contextRefsAt(events, event.id, 'at').values()) {
+      if (!ref.contentHash) continue
+      counts.set(ref.contentHash, (counts.get(ref.contentHash) ?? 0) + 1)
+    }
+  }
+  return counts
+}

@@ -144,3 +144,92 @@ describe('renderHtml', () => {
     expect(html).toContain('.why {')
   })
 })
+
+describe('#26 Assembled by', () => {
+  const region = (id: string, stability: string, contentHash?: string) =>
+    e({ id: `add-${id}`, runId: 'r1', type: 'region.added', timestamp: 1,
+        payload: { id, target: 'message', section: 'history', stability, reason: 'turn-archived',
+          ...(contentHash ? { contentHash } : {}) } })
+
+  it('renders an Assembled by block on llm.requested with metadata + stability class', () => {
+    const events: Event[] = [
+      region('header', 'immutable', 'H1'),
+      e({ id: 'llm', runId: 'r1', type: 'llm.requested', timestamp: 2, payload: { model: 'm' } }),
+    ]
+    const html = renderHtml(events, { regionContent: new Map([['H1', 'SYSTEM PROMPT TEXT']]) })
+    expect(html).toContain('Assembled by')
+    expect(html).toContain('header')
+    expect(html).toContain('stab-immutable')
+    expect(html).toContain('data-hash="H1"')
+    expect(html).toContain('SYSTEM PROMPT TEXT')
+  })
+
+  it('dedups identical content across prompts and annotates reuse count', () => {
+    const events: Event[] = [
+      region('header', 'immutable', 'H1'),
+      e({ id: 'llm1', runId: 'r1', type: 'llm.requested', timestamp: 2, payload: { model: 'm' } }),
+      e({ id: 'llm2', runId: 'r1', type: 'llm.requested', timestamp: 3, payload: { model: 'm' } }),
+    ]
+    const html = renderHtml(events, { regionContent: new Map([['H1', 'SHARED-CONTENT-XYZ']]) })
+    expect(html.split('SHARED-CONTENT-XYZ').length - 1).toBe(1)
+    expect(html).toContain('复用 ×2')
+  })
+
+  it('degrades gracefully without region content (metadata only)', () => {
+    const events: Event[] = [
+      region('header', 'immutable', 'H1'),
+      e({ id: 'llm', runId: 'r1', type: 'llm.requested', timestamp: 2, payload: { model: 'm' } }),
+    ]
+    const html = renderHtml(events)
+    expect(html).toContain('Assembled by')
+    expect(html).toContain('header')
+    expect(html).toContain('(内容不可用)')
+  })
+
+  it('renders no Assembled by block for an llm.requested with no active regions', () => {
+    const events: Event[] = [
+      e({ id: 'llm', runId: 'r1', type: 'llm.requested', timestamp: 2, payload: { model: 'm' } }),
+    ]
+    const html = renderHtml(events)
+    expect(html).not.toContain('Assembled by')
+  })
+
+  it('renders a region row without contentHash as metadata only (no data-hash, no preview)', () => {
+    const events: Event[] = [
+      region('eph', 'volatile'),   // no contentHash
+      e({ id: 'llm', runId: 'r1', type: 'llm.requested', timestamp: 2, payload: { model: 'm' } }),
+    ]
+    const html = renderHtml(events)
+    expect(html).toContain('Assembled by')
+    expect(html).toContain('eph')
+    // no data-hash attribute on the row and no region-preview element emitted
+    // (the bare substrings appear in STYLES/SCRIPT, so assert the rendered forms)
+    expect(html).not.toContain('data-hash="')
+    expect(html).not.toContain('class="region-preview"')
+  })
+
+  it('applies the stability class for each stability tier', () => {
+    const events: Event[] = [
+      region('a', 'immutable', 'HA'),
+      region('b', 'session-stable', 'HB'),
+      region('c', 'turn-stable', 'HC'),
+      region('d', 'volatile', 'HD'),
+      e({ id: 'llm', runId: 'r1', type: 'llm.requested', timestamp: 2, payload: { model: 'm' } }),
+    ]
+    const html = renderHtml(events)
+    for (const cls of ['stab-immutable', 'stab-session-stable', 'stab-turn-stable', 'stab-volatile']) {
+      expect(html).toContain(cls)
+    }
+  })
+
+  it('keeps region content with a </script> sequence from breaking the document', () => {
+    const events: Event[] = [
+      region('x', 'volatile', 'HX'),
+      e({ id: 'llm', runId: 'r1', type: 'llm.requested', timestamp: 2, payload: { model: 'm' } }),
+    ]
+    const html = renderHtml(events, { regionContent: new Map([['HX', '</script><b>boom</b>']]) })
+    // the raw closing tag must be neutralized in the embedded JSON registry
+    expect(html).not.toContain('</script><b>boom</b>')
+    expect(html).toContain('<\\/script>')   // close-tag-safe escaped form present
+  })
+})
