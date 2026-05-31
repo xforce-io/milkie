@@ -46,6 +46,9 @@ export const cognitiveTools: ToolDefinition[] = [
     handler: async (input: unknown, ctx) => {
       const { steps } = input as { steps: string[] }
       const plan: Plan = {
+        // Raw uuid is fine here: create_plan runs via the cached tool path
+        // (not re-run on replay), and its WM write is frozen into the
+        // wm.mutated snapshot, so the id is reproduced verbatim on replay.
         id:    uuid(),
         steps: steps.map((s, i) => ({ id: i, desc: s, status: 'pending' })),
       }

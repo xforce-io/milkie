@@ -94,7 +94,9 @@ describe('RecordingIOPort — tool output metadata (#25)', () => {
     const p = await respondedPayload(store)
     expect(p.outputHash).toBeUndefined()
     expect(p.outputBytes).toBeUndefined()
-    expect(p.output).toBe(out)
+    // The store now holds an immutable frozen snapshot (like durable stores),
+    // so the recorded output equals — but is no longer identical to — `out`.
+    expect(p.output).toEqual(out)
   })
 
   it('error branch carries no output metadata', async () => {
