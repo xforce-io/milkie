@@ -204,6 +204,30 @@ export async function main(argv: string[]): Promise<MainResult> {
     })
 
   trace
+    .command('execution <runId>')
+    .description('Project <runId> into execution-timeline JSON (steps with cache health + region composition) to stdout')
+    .action(async (runId: string) => {
+      const milkieDir = findMilkieDir(process.cwd())
+      if (!milkieDir) {
+        throw new Error('no .milkie/ directory found upward from cwd')
+      }
+      const runsDir = path.join(milkieDir, 'runs')
+      const eventStore = new JsonlEventStore(runsDir)
+      const { buildExecutionProjection } = await import('../trace/diagnostics/buildExecutionProjection.js')
+
+      const events = await eventStore.readByRunId(runId)
+
+      const traceObjectStore = new FileTraceObjectStore(path.join(milkieDir, 'objects'))
+      const regionContent = new Map<string, string>()
+      for (const h of regionReuseCounts(events).keys()) {
+        const c = await traceObjectStore.getCanonical(h)
+        if (c !== undefined) regionContent.set(h, c)
+      }
+
+      stdout.push(JSON.stringify(buildExecutionProjection(events, { regionContent })) + '\n')
+    })
+
+  trace
     .command('replay <runId>')
     .description('Replay a recorded run from .milkie/runs/<runId>.jsonl')
     .action(async (runId: string) => {

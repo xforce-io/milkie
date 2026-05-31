@@ -705,51 +705,25 @@
     // render them as numbered cards. Internal substrate events (clock,
     // uuid, region, boundary) are intentionally hidden — those belong
     // in dev mode's substrate inspector, not in a per-turn audit.
-    // Stability buckets we group regions by in the expander. Listed in
-    // display order — most-stable first reads top-down like a layered
-    // prompt, which mirrors how the agent's working context is actually
-    // assembled (immutable system prompt at the top, volatile scratch at
-    // the bottom).
-    const STABILITY_ORDER = ['immutable', 'session-stable', 'turn-stable', 'volatile']
-
-    // Cache tiering accounts for BOTH read and creation. A call that hit
-    // 70%+ of its tokens from cache is "hot". A call that read nothing
-    // but wrote new cache entries is "warm" — the substrate is engaged,
-    // a future call sharing this prefix will benefit. A call that did
-    // neither is "cold" (cache subsystem ran but nothing matched and
-    // nothing new was written, e.g. provider didn't report stats).
-    function classifyCacheTier(cache) {
-      if (!cache) return null
-      const hit = cache.hitRate || 0
-      const created = cache.creationTokens || 0
-      if (hit >= 0.7) return 'hot'
-      if (hit >= 0.3 || created > 0) return 'warm'
-      return 'cold'
-    }
-
     function formatTokenCount(n) {
       if (n == null) return ''
       if (n >= 1000) return `${(n / 1000).toFixed(1)}k`
       return String(n)
     }
 
-    function renderRegionExpander(regions) {
-      if (regions.length === 0) {
+    // Render the region composition the projection already grouped by stability
+    // (immutable → session-stable → turn-stable → volatile, empty groups omitted).
+    // The frontend does NOT regroup or reorder — it renders the groups as given.
+    function renderRegionExpander(groups) {
+      if (!groups || groups.length === 0) {
         return `<div class="ap-region-empty">No regions in context at this point.</div>`
       }
-      const byStability = new Map(STABILITY_ORDER.map(k => [k, []]))
-      for (const r of regions) {
-        const bucket = byStability.get(r.stability) || (byStability.set(r.stability, []), byStability.get(r.stability))
-        bucket.push(r)
-      }
       let html = ''
-      for (const stability of STABILITY_ORDER) {
-        const group = byStability.get(stability) || []
-        if (group.length === 0) continue
+      for (const group of groups) {
         html += `<div class="ap-region-group">
-          <div class="rg-title">${esc(stability)} · ${group.length}</div>
-          ${group.map(r => {
-            const preview = r.preview ? `<span class="rr-preview">${esc(r.preview)}</span>` : ''
+          <div class="rg-title">${esc(group.stability)} · ${group.regions.length}</div>
+          ${group.regions.map(r => {
+            const preview = r.content ? `<span class="rr-preview">${esc(r.content)}</span>` : ''
             return `
               <div class="ap-region-row">
                 <span class="rr-id">${esc(r.id)}</span>
@@ -879,100 +853,35 @@
       return html
     }
 
-    function renderStepsTab(runId) {
-      const events    = eventsByRunId.get(runId) || []
-      // The current-turn region's content IS the user's input for this
-      // run. Cache it once so each snapshot can attach it as a preview
-      // without re-scanning events per LLM call.
-      const userInput = userInputForRun(runId)
-      // Pair requests with their responses via requestHash — the
-      // content-addressed cache key both sides carry. Same key both for
-      // tool pairing and for fetching LLM cache stats off the response
-      // payload.
-      const toolResponses = new Map()
-      const llmResponses  = new Map()
-      for (const e of events) {
-        if (e.type === 'tool.responded' && e.payload && e.payload.requestHash) {
-          toolResponses.set(e.payload.requestHash, e)
-        }
-        if (e.type === 'llm.responded' && e.payload && e.payload.requestHash) {
-          llmResponses.set(e.payload.requestHash, e)
-        }
+    // Execution tab is a PURE PROJECTION over the core buildExecutionProjection
+    // (served at GET /run/:runId/execution). The frontend does NO event parsing
+    // or attribution: cache tiering, region grouping by stability, and tool
+    // pairing all live in the core projection (守 ARCHITECTURE.md「UI =
+    // projection over CLI/SDK,前端不自带归因逻辑」). We only render the JSON.
+    async function renderStepsTab(runId) {
+      let steps
+      try {
+        const res = await fetch(`/run/${encodeURIComponent(runId)}/execution`)
+        if (!res.ok) return `<div class="ap-empty">No recorded steps for this turn yet.</div>`
+        steps = (await res.json()).steps || []
+      } catch {
+        return `<div class="ap-empty">Failed to load execution steps.</div>`
       }
-      // Maintain a live region map as we walk events; snapshot it whenever
-      // an llm.requested fires. The snapshot is what was in the model's
-      // working context at the moment of that LLM call — the unique
-      // milkie observation the region.added/removed substrate enables.
-      const activeRegions = new Map()
-      const cards = []
-      for (const e of events) {
-        if (e.type === 'region.added' && e.payload && e.payload.id) {
-          activeRegions.set(e.payload.id, e.payload)
-        } else if (e.type === 'region.removed' && e.payload && e.payload.id) {
-          activeRegions.delete(e.payload.id)
-        } else if (e.type === 'llm.requested') {
-          const messages = e.payload && e.payload.request && countMessages(e.payload.request)
-          const resp     = e.payload && e.payload.requestHash && llmResponses.get(e.payload.requestHash)
-          const cache    = resp && resp.payload && resp.payload.cacheStats
-          // Decorate the snapshot with content previews for regions we
-          // know how to surface (just current-turn for now). Region.added
-          // events don't carry content, so this is a per-id lookup, not
-          // a general mechanism.
-          const snapshot = Array.from(activeRegions.values()).map(r =>
-            r.id === 'current-turn' && userInput
-              ? { ...r, preview: userInput }
-              : r
-          )
-          const req = e.payload && e.payload.request
-          cards.push({
-            kind:    'llm',
-            label:   'LLM call',
-            body:    messages != null
-              ? `Sent <code>${messages}</code> message${messages === 1 ? '' : 's'} to the model`
-              : 'Sent prompt to the model',
-            meta:    null,
-            cache:   cache ? { ...cache, tier: classifyCacheTier(cache) } : null,
-            regions: snapshot,
-            prompt:  req ? {
-              system:   req.system,
-              messages: req.messages || [],
-              tools:    req.tools || [],
-            } : null,
-            response: resp && resp.payload && resp.payload.response ? resp.payload.response : null,
-          })
-        } else if (e.type === 'tool.requested') {
-          const name = (e.payload && e.payload.toolName) || '?'
-          const input = e.payload && e.payload.input
-          const inputPreview = input ? truncateJson(input, 120) : ''
-          const resp = e.payload && e.payload.requestHash && toolResponses.get(e.payload.requestHash)
-          const respMeta = resp && resp.payload
-            ? `→ ok (${describeToolResult(resp.payload.output)})`
-            : '→ pending'
-          cards.push({
-            kind:   'tool',
-            label:  `Tool · ${name}`,
-            body:   inputPreview ? `<code>${esc(inputPreview)}</code>` : '',
-            meta:   respMeta,
-            input,
-            output: resp && resp.payload ? resp.payload.output : undefined,
-            error:  resp && resp.payload ? resp.payload.error  : undefined,
-          })
-        }
-      }
-      if (cards.length === 0) {
+      if (steps.length === 0) {
         return `<div class="ap-empty">No recorded steps for this turn yet.</div>`
       }
-      return cards.map((c, i) => {
-        // Badge surfaces both read AND creation so a "0% hit but cache
-        // was just written" call (substrate engaged, future calls will
-        // benefit) is visibly different from a "no cache at all" call.
+      return steps.map((s, i) => {
+        // Badge surfaces both read AND creation so a "0% hit but cache was just
+        // written" call is visibly different from a "no cache at all" call. The
+        // tier (hot/warm/cold) comes from the projection — not computed here.
         let cacheBadge = ''
-        if (c.cache) {
-          const read    = c.cache.readTokens     || 0
-          const created = c.cache.creationTokens || 0
-          const total   = c.cache.totalInputTokens || 0
-          const hitPct  = Math.round((c.cache.hitRate || 0) * 100)
-          const tierClass = c.cache.tier === 'cold' ? 'cold' : c.cache.tier === 'warm' ? 'warm' : ''
+        if (s.cacheHealth) {
+          const c = s.cacheHealth
+          const read    = c.readTokens     || 0
+          const created = c.creationTokens || 0
+          const total   = c.totalInputTokens || 0
+          const hitPct  = Math.round((c.hitRate || 0) * 100)
+          const tierClass = c.tier === 'cold' ? 'cold' : c.tier === 'warm' ? 'warm' : ''
           let text
           if (read > 0) {
             text = `${hitPct}% read · ${formatTokenCount(read)}/${formatTokenCount(total)} tok`
@@ -983,38 +892,41 @@
           }
           cacheBadge = `<span class="ap-step-cache ${tierClass}" title="read ${read} · wrote ${created} · total ${total}">${text}</span>`
         }
-        const expander = c.kind === 'llm'
-          ? `<div class="ap-step-expand" data-step-idx="${i}">${c.regions.length} region${c.regions.length === 1 ? '' : 's'} in context</div>
-             <div class="ap-step-expanded">${renderRegionExpander(c.regions)}</div>`
-          : ''
-        const details = c.kind === 'llm'
-          ? `<details class="ap-step-details"><summary>Prompt &amp; response</summary>${renderLLMDetails(c)}</details>`
-          : c.kind === 'tool'
-            ? `<details class="ap-step-details"><summary>Full input &amp; output</summary>${renderToolDetails(c)}</details>`
-            : ''
+
+        let body = '', meta = '', expander = '', details = ''
+        if (s.kind === 'llm') {
+          const n = s.messageCount
+          body = n != null
+            ? `Sent <code>${n}</code> message${n === 1 ? '' : 's'} to the model`
+            : 'Sent prompt to the model'
+          const groups = s.regionGroups || []
+          const regionCount = groups.reduce((acc, g) => acc + g.regions.length, 0)
+          expander = `<div class="ap-step-expand" data-step-idx="${i}">${regionCount} region${regionCount === 1 ? '' : 's'} in context</div>
+             <div class="ap-step-expanded">${renderRegionExpander(groups)}</div>`
+          details = `<details class="ap-step-details"><summary>Prompt &amp; response</summary>${renderLLMDetails({ prompt: s.prompt, response: s.response })}</details>`
+        } else {
+          const t = s.tool || {}
+          const inputPreview = t.input ? truncateJson(t.input, 120) : ''
+          body = inputPreview ? `<code>${esc(inputPreview)}</code>` : ''
+          meta = t.status === 'pending' ? '→ pending'
+               : t.status === 'error'   ? '→ error'
+               : `→ ok (${describeToolResult(t.output)})`
+          details = `<details class="ap-step-details"><summary>Full input &amp; output</summary>${renderToolDetails({ input: t.input, output: t.output, error: t.error })}</details>`
+        }
         return `
-          <div class="ap-step kind-${c.kind}" data-step-idx="${i}">
+          <div class="ap-step kind-${s.kind}" data-step-idx="${i}">
             <div class="ap-step-num">${i + 1}</div>
             <div class="ap-step-headerline">
-              <div class="ap-step-kind">${esc(c.label)}</div>
+              <div class="ap-step-kind">${esc(s.label)}</div>
               ${cacheBadge}
             </div>
-            <div class="ap-step-body">${c.body}</div>
-            ${c.meta ? `<div class="ap-step-meta">${esc(c.meta)}</div>` : ''}
+            <div class="ap-step-body">${body}</div>
+            ${meta ? `<div class="ap-step-meta">${esc(meta)}</div>` : ''}
             ${expander}
             ${details}
           </div>
         `
       }).join('')
-    }
-
-    function countMessages(request) {
-      // ModelRequest shape varies by provider; the common case is an
-      // OpenAI-style {messages: [...]} array. Fall back to null when
-      // we can't tell, so the caller renders a generic label.
-      if (!request) return null
-      if (Array.isArray(request.messages)) return request.messages.length
-      return null
     }
 
     function truncateJson(value, max) {
@@ -1253,7 +1165,16 @@
       if (auditActiveTab === 'sources') {
         $auditBody.innerHTML = renderSourcesTab(auditAnchorRunId, msgEl)
       } else if (auditActiveTab === 'steps') {
-        $auditBody.innerHTML = renderStepsTab(auditAnchorRunId)
+        $auditBody.innerHTML = `<div class="ap-empty">Loading execution steps…</div>`
+        // Async render: the steps come from the core projection endpoint.
+        // Capture runId/tab so a fast tab switch doesn't paint stale results.
+        const pendingRunId = auditAnchorRunId
+        const pendingTab   = auditActiveTab
+        renderStepsTab(auditAnchorRunId).then(html => {
+          if (auditAnchorRunId === pendingRunId && auditActiveTab === pendingTab) {
+            $auditBody.innerHTML = html
+          }
+        })
       } else if (auditActiveTab === 'why') {
         // Reuse the core #64 decision viewer wholesale: it is a self-contained
         // HTML document (own CSS + drill-down JS), so an iframe isolates it and

@@ -9,6 +9,7 @@ import { JsonlEventStore } from '../../src/trace/JsonlEventStore.js'
 import { FileTraceObjectStore } from '../../src/trace/TraceObjectStore.js'
 import { regionReuseCounts } from '../../src/trace/RegionContextView.js'
 import { renderViewer } from '../../src/trace/render/viewer.js'
+import { buildExecutionProjection } from '../../src/trace/diagnostics/buildExecutionProjection.js'
 import { ReplayError } from '../../src/trace/ReplayError.js'
 import { ReplayDivergenceError } from '../../src/trace/ReplayDivergenceError.js'
 import type { IModelGateway } from '../../src/types/model.js'
@@ -197,6 +198,26 @@ async function handleViewer(
   res.end(html)
 }
 
+// #70: the Execution tab is a projection over the event log — the core
+// buildExecutionProjection owns all attribution (cache tiering, region
+// grouping, tool pairing); the frontend only renders this JSON.
+async function handleExecution(
+  res: ServerResponse, s: ServerState, runId: string,
+): Promise<void> {
+  const events = await s.eventStore.readByRunId(runId)
+  if (events.length === 0) {
+    sendJson(res, 404, { error: 'run not found' })
+    return
+  }
+  // Hydrate region content the same way handleViewer / `trace report` does.
+  const regionContent = new Map<string, string>()
+  for (const h of regionReuseCounts(events).keys()) {
+    const c = await s.traceObjectStore.getCanonical(h)
+    if (c !== undefined) regionContent.set(h, c)
+  }
+  sendJson(res, 200, buildExecutionProjection(events, { regionContent }))
+}
+
 async function handleSourceFetch(
   res: ServerResponse, s: ServerState, relPath: string, linesQuery: string | null,
 ): Promise<void> {
@@ -299,6 +320,11 @@ export async function startServer(config: ServerConfig): Promise<Server> {
       const viewerMatch = route.match(/^\/run\/([^/]+)\/viewer$/)
       if (req.method === 'GET' && viewerMatch) {
         return handleViewer(res, state, decodeURIComponent(viewerMatch[1]!))
+      }
+
+      const executionMatch = route.match(/^\/run\/([^/]+)\/execution$/)
+      if (req.method === 'GET' && executionMatch) {
+        return handleExecution(res, state, decodeURIComponent(executionMatch[1]!))
       }
 
       const sourceMatch = route.match(/^\/source\/(.+)$/)

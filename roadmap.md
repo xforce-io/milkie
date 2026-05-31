@@ -172,7 +172,16 @@ Last updated: 2026-05-30
   polish (#71): output answer renders markdown, the causal chain is trimmed to
   decision hops, `summarizeEvent` disambiguates repeated tool calls by input,
   and `agent.run.completed.causedBy = final llm.responded` so the output ❓
-  drills. Follow-up #70 (make the Execution/Steps tab projection-driven) open.
+  drills.
+- **#70 landed — the Execution tab is projection-driven.** The example's
+  Execution (formerly Steps) tab no longer re-derives attribution in the
+  browser: a new core pure projection `buildExecutionProjection` owns cache
+  tiering (hot/warm/cold), region grouping by stability, and tool pairing.
+  It ships with a CLI entry point (`milkie trace execution <runId>` → JSON,
+  invariant 13) and a server endpoint (`GET /run/:runId/execution`); the
+  frontend only renders the JSON (no `classifyCacheTier` / `STABILITY_ORDER` /
+  event-walking left in `index.html`). Closes the #68 follow-up so the whole
+  audit panel now honors「UI = projection over CLI/SDK」.
 - **Phase 4.7 — Events as the single source of truth for resume (#73, PR #74).**
   Tool side-effects on working memory are now event-sourced: each tool call
   emits a frozen `wm.mutated` WM snapshot, so `replay()` — which does NOT re-run
@@ -231,8 +240,9 @@ agent-consumable projections before adding richer UI:
   functions as CLI. They are reference projections over Trace, not a
   separate observability product. **Landed:** the #64 causal drill-down viewer
   (decision spine + Why panel) and its embedding into the agent-docs-qa audit
-  panel (#68 / #71). **Open:** #70 (make the example's Execution tab
-  projection-driven instead of re-parsing events in the frontend).
+  panel (#68 / #71), plus #70 (the Execution tab is now projection-driven via
+  `buildExecutionProjection` + `trace execution` CLI + `/run/:id/execution`
+  endpoint; the frontend only renders).
 
 **Phase 5 — fork / structural diff / suite replay** remains the next big
 capability rock. Substrate prerequisites are now stronger thanks to the
