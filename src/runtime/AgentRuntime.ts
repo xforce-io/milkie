@@ -36,7 +36,7 @@ import { canonicalize, contentAddressForCanonicalBytes } from '../trace/hash.js'
 import type { CausalCursor } from '../trace/CausalCursor.js'
 import { checkpointFromEvents } from '../trace/diagnostics/checkpointFromEvents.js'
 import type { Region } from '../context/Region.js'
-import type { SkillLifecyclePayload, AgentRunStartedPayload, AgentRunCompletedPayload, GuardEvaluation } from '../trace/types.js'
+import type { SkillLifecyclePayload, AgentRunStartedPayload, AgentRunCompletedPayload, GuardEvaluation, ToolEmittedPayload } from '../trace/types.js'
 
 export type MakeChildPort = (
   childRunId:  string,
@@ -74,6 +74,11 @@ export interface AgentRuntimeOptions {
    *  Present → replay-restore mode: after each tool call, restore WM from the next
    *  snapshot instead of trusting the (non-re-run) handler. Absent → record mode. */
   replayWmSnapshots?: unknown[]
+  /** #60: recorded business FSM events keyed by toolCallId, for replay. Present →
+   *  replay mode: after each tool call, re-emit the recorded event (the handler is
+   *  not re-run, so ctx.emit never fires) so the emit-driven transition reproduces.
+   *  Absent → record mode (capture & append tool.emitted instead). */
+  replayEmits?: Map<string, { name: string; payload?: unknown; guard?: GuardEvaluation[] }>
 }
 
 type SkillLoadRequest = {
@@ -95,6 +100,7 @@ export class AgentRuntime {
   private readonly eventStore?:      import('../trace/EventStore.js').IEventStore
   private readonly traceObjectStore?: ITraceObjectStore
   private readonly replayWmSnapshots?: unknown[]  // SPIKE(#73)
+  private readonly replayEmits?: Map<string, { name: string; payload?: unknown; guard?: GuardEvaluation[] }>  // #60
   private readonly subAgentConfigs?: Map<string, AgentConfig>
   private readonly childRecorderFactory?: (config: AgentConfig, contextId: string, traceId: string) => ITrajectoryRecorder
   private readonly makeChildPort?: MakeChildPort
@@ -135,6 +141,7 @@ export class AgentRuntime {
     this.recorder        = opts.recorder
     this.eventStore      = opts.eventStore
     this.replayWmSnapshots = opts.replayWmSnapshots
+    this.replayEmits     = opts.replayEmits
     this.traceObjectStore = opts.traceObjectStore
     this.subAgentConfigs = opts.subAgentConfigs
     this.childRecorderFactory = opts.childRecorderFactory
@@ -1109,8 +1116,21 @@ export class AgentRuntime {
     call: { id: string; name: string; input: unknown },
     batchId: string | null,
   ): Promise<ToolResult> {
+    // #60: capture the emit that WON the FSM's single pendingEvent slot
+    // (first-emit-wins). Only the winner drives a transition, so recording just
+    // the winner makes replay reproduce one transition regardless of how a
+    // parallel batch's emits race.
+    let capturedEmit: { name: string; payload?: unknown; guard?: GuardEvaluation[] } | undefined
     const ctx = this.buildToolContext((event, payload, guard) => {
+      const hadPending = this.fsm.hasPendingEvent()
       this.fsm.emitEvent(event, payload, guard)
+      if (!hadPending && this.fsm.hasPendingEvent()) {
+        capturedEmit = {
+          name: event,
+          ...(payload !== undefined ? { payload } : {}),
+          ...(guard ? { guard: Array.isArray(guard) ? guard : [guard] } : {}),
+        }
+      }
     })
 
     const maxRetries = 3
@@ -1148,6 +1168,23 @@ export class AgentRuntime {
             actor:     this.config.agentId,
             timestamp: Date.now(),
             payload:   { snapshot: this.memory.toJSON() },  // toJSON() deep-clones (frozen)
+          })
+        }
+        // #60: event-source the tool's emit side-effect (FSM transition) the same
+        // way. On replay the handler didn't run, so re-emit the recorded business
+        // event (keyed by toolCallId) before runLLMState calls processPendingEvent.
+        // In record mode, append tool.emitted iff this call won the pendingEvent slot.
+        if (this.replayEmits) {
+          const emitted = this.replayEmits.get(call.id)
+          if (emitted) this.fsm.emitEvent(emitted.name, emitted.payload, emitted.guard)
+        } else if (this.eventStore && capturedEmit) {
+          await this.eventStore.append({
+            id:        uuidv4(),
+            runId:     this.agentRunId,
+            type:      'tool.emitted',
+            actor:     this.config.agentId,
+            timestamp: Date.now(),
+            payload:   { toolCallId: call.id, event: capturedEmit } satisfies ToolEmittedPayload,
           })
         }
         const duration = this.ioPort.now() - start

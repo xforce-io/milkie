@@ -24,6 +24,7 @@ import { ReplayingIOPort } from '../trace/ReplayingIOPort.js'
 import { ReplayError } from '../trace/ReplayError.js'
 import { ReplayDivergenceError } from '../trace/ReplayDivergenceError.js'
 import { extractRunSnapshot } from '../trace/RunSnapshot.js'
+import type { ToolEmittedPayload } from '../trace/types.js'
 
 export interface MilkieOptions {
   stateStore?:      IStateStore
@@ -448,6 +449,14 @@ export class Milkie {
       replayWmSnapshots: events
         .filter(e => e.type === 'wm.mutated')
         .map(e => (e.payload as { snapshot: unknown }).snapshot),
+      // #60: recorded emit-driven FSM events keyed by toolCallId → replay re-emits
+      // them so emit-driven transitions reproduce without re-running tool handlers.
+      replayEmits: new Map(events
+        .filter(e => e.type === 'tool.emitted')
+        .map(e => {
+          const p = e.payload as ToolEmittedPayload
+          return [p.toolCallId, p.event] as const
+        })),
     })
 
     const result = await runtime.run(snapshot.input)

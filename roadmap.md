@@ -40,6 +40,14 @@ Last updated: 2026-05-30
   is archived to `.bak/store/`. This supersedes the earlier "stateStore for
   checkpoint" model and unblocks Phase 5 (fork/diff/suite need deterministic
   replay of side-effecting runs).
+- **#60 landed — emit-driven FSM transitions now replay deterministically.**
+  Following #73's template, the tool handler's `ctx.emit` side-effect is
+  event-sourced: a `tool.emitted` event records the business FSM event that won
+  the single pendingEvent slot (keyed by `toolCallId`). `replay()` re-emits it
+  before `processPendingEvent`, so emit-driven hard transitions / intent routing
+  (s-011) reproduce without re-running the handler. Remaining same-root gap:
+  handler-driven `ctx.requestSkill` is still lost on replay — a follow-up for
+  Phase 5 (same event-sourced-side-effect pattern).
 - **8 of 15 stories are `active`** (have green E2E tests). The 7 `draft`
   stories all depend on Phase 5–6 capabilities that haven't shipped yet.
 - **Current active line:** finish the trace projection surface before
@@ -182,9 +190,9 @@ Last updated: 2026-05-30
   recorded events). Supersedes the Phase 2 "stateStore for checkpoint" and
   Phase 4.5 "checkpoint format" notes — checkpoint is no longer a separate
   source of truth. **Unblocks Phase 5** (deterministic replay of side-effecting
-  runs) and is the event-sourced-side-effect template for **#60** (emit-driven
-  FSM transitions in replay — same root cause: replay skips the handler; the WM
-  case is solved, the `ctx.emit` case can follow the same pattern).
+  runs) and is the event-sourced-side-effect template later reused by **#60**
+  (emit-driven FSM transitions in replay — same root cause: replay skips the
+  handler; the WM case and the `ctx.emit` case now both follow this pattern).
 
 ### Stories validated by Phase 1–4 (active)
 
@@ -233,8 +241,9 @@ region snapshot/restore primitive, byte-identical replay, and **#73**
 cognitive-tool runs now replay deterministically — fork/diff/suite all build
 on deterministic replay). Phase 5 is still a multi-PR surface area tracked by
 #58 (side-effect policy), #56 (fork), #55 (diff), and #57 (suite replay).
-The remaining replay determinism gap is **#60** (emit-driven FSM transitions);
-#73's `wm.mutated` event-sourcing is the template to close it.
+Replay determinism for emit-driven FSM transitions is now closed by **#60**
+(`tool.emitted` event-sourcing, following #73's pattern); the remaining
+same-root gap is handler-driven `ctx.requestSkill` (follow-up).
 
 The cross-cutting work below stays valid in parallel — particularly the
 smaller follow-ups inherited from earlier landings: CLI surface spec update
