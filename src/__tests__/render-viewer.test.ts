@@ -50,6 +50,17 @@ describe('renderViewer', () => {
     expect(html).toContain('SYSTEM PROMPT TEXT')
   })
 
+  it('keeps the inactive decision pane hidden so the decision/raw toggle works', () => {
+    const html = renderViewer(scenario())
+    // The decision pane must hide when it loses `.active`. A bare
+    // `#pane-decision { ... display ... }` rule (id selector, specificity 100)
+    // would override `.pane { display: none }` (specificity 10) and keep the
+    // spine permanently visible — breaking the 决策视图/原始时间线 toggle.
+    // Only `#pane-decision.active` may set its display.
+    expect(html).not.toMatch(/#pane-decision\s*\{[^}]*display/)
+    expect(html).toMatch(/#pane-decision\.active\s*\{[^}]*display:\s*flex/)
+  })
+
   it('renders without crashing for a run with no decisions', () => {
     const html = renderViewer([{ id: 's', runId: 'r1', actor: 'a', type: 'agent.run.started', timestamp: 1, payload: {} } as Event])
     expect(html.startsWith('<!doctype html>')).toBe(true)
