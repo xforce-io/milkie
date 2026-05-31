@@ -12,19 +12,22 @@ import type { AgentConfig } from '../types/agent'
 type Step = { tool: string; input: unknown } | { done: string }
 
 // Drives a scripted ReAct run: each step is one LLM response (a tool call or
-// the final answer).
+// the final answer). A step may carry MULTIPLE tool calls (parallel batch).
+type Multi = { tools: Array<{ tool: string; input: unknown }> }
 class ScriptedGateway implements IModelGateway {
   private i = 0
-  constructor(private readonly steps: Step[]) {}
+  constructor(private readonly steps: Array<Step | Multi>) {}
   async complete(_req: ModelRequest): Promise<ModelResponse> {
     const step = this.steps[this.i++]
     if (!step || 'done' in step) {
       return { content: [{ type: 'text', text: step && 'done' in step ? step.done : 'done' }], toolCalls: [], finishReason: 'end_turn' }
     }
-    const id = `c${this.i}`
+    const calls = 'tools' in step
+      ? step.tools.map((t, j) => ({ id: `c${this.i}_${j}`, name: t.tool, input: t.input }))
+      : [{ id: `c${this.i}`, name: step.tool, input: step.input }]
     return {
-      content:   [{ type: 'tool_use', id, name: step.tool, input: step.input }],
-      toolCalls: [{ id, name: step.tool, input: step.input }],
+      content:   calls.map(c => ({ type: 'tool_use' as const, id: c.id, name: c.name, input: c.input })),
+      toolCalls: calls,
       finishReason: 'tool_use',
     }
   }
@@ -37,7 +40,7 @@ const agent: AgentConfig = {
   model: { provider: 'test', model: 'test', adapter: 'test' },
 }
 
-async function runAndReplay(steps: Step[], extraTools: ToolDefinition[] = []) {
+async function runAndReplay(steps: Array<Step | Multi>, extraTools: ToolDefinition[] = []) {
   const eventStore = new MemoryEventStore()
   const milkie = new Milkie({
     stateStore: new MemoryStore(),
@@ -91,6 +94,15 @@ describe('#73 Stage 3: WM side-effects are event-sourced for deterministic repla
       { tool: 'echo', input: { x: 'hi' } },
       { done: 'done' },
     ], [pure])
+    expect(replayed.output).toBe(run.output)
+  })
+
+  it('parallel WM-writing tools (a parallel-safe batch) replay deterministically', async () => {
+    // `think` is parallelSafe → two thinks in one LLM response run as a batch.
+    const { replayed, run } = await runAndReplay([
+      { tools: [{ tool: 'think', input: { thoughts: 'alpha' } }, { tool: 'think', input: { thoughts: 'beta' } }] },
+      { done: 'done' },
+    ])
     expect(replayed.output).toBe(run.output)
   })
 
