@@ -1134,9 +1134,7 @@ export class AgentRuntime {
             type:      'wm.mutated',
             actor:     this.config.agentId,
             timestamp: Date.now(),
-            // Deep-clone to freeze the value at capture time: toJSON() returns the
-            // live `log` array reference, which later tool writes would mutate.
-            payload:   { snapshot: JSON.parse(JSON.stringify(this.memory.toJSON())) },
+            payload:   { snapshot: this.memory.toJSON() },  // toJSON() deep-clones (frozen)
           })
         }
         const duration = this.ioPort.now() - start

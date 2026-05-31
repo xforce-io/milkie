@@ -33,10 +33,14 @@ export class WorkingMemory {
   }
 
   toJSON(): unknown {
-    return {
+    // Deep-clone (JSON round-trip) so the returned snapshot is frozen at capture
+    // time: callers (prompt assembly, checkpoint, wm.mutated events) must not be
+    // aliased to live state — later set()/append()/in-place mutation must not
+    // change it. WM holds JSON-serialisable state, so the round-trip is lossless.
+    return JSON.parse(JSON.stringify({
       data: Object.fromEntries(this.data.entries()),
       log:  this.log,
-    }
+    }))
   }
 
   static fromJSON(raw: unknown): WorkingMemory {
