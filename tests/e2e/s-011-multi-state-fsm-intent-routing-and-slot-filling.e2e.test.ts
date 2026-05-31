@@ -573,6 +573,7 @@ describe('Case 6 Path D: 多轮槽填充（确定性）', () => {
   let trajectoryStore: TrajectoryStore
   let stateStore: MemoryStore
   let eventStore: MemoryEventStore
+  let run1: AgentResult
   let run4: AgentResult
   let trajectory: Trajectory
 
@@ -594,7 +595,7 @@ describe('Case 6 Path D: 多轮槽填充（确定性）', () => {
     milkie.registerAgent(billingSpecialistConfig)
     milkie.registerAgent(customerServiceConfig)
 
-    await milkie.invoke({
+    run1 = await milkie.invoke({
       agentId: 'customer-service',
       goal,
       input: '我想取消订单',
@@ -671,5 +672,14 @@ describe('Case 6 Path D: 多轮槽填充（确定性）', () => {
       .filter(s => s.name === 'tool.call' && s.attributes['toolName'] === 'collect_slot')
       .map(s => (s.attributes['input'] as { name?: string }).name)
     expect(slotNames).toEqual(['orderId', 'reason', 'preferRefund'])
+  })
+
+  // #60: turn-1 is emit-driven (classify_intent → ctx.emit routes the intent
+  // hard-transition into collecting_slots). Before #60 replaying it diverged,
+  // because the handler is not re-run on replay so ctx.emit never fired.
+  it('replays the emit-driven turn-1 run without divergence (#60)', async () => {
+    const replayed = await milkie.replay(run1.agentRunId)
+    expect(replayed.status).toBe(run1.status)
+    expect(replayed.output).toBe(run1.output)
   })
 })

@@ -24,6 +24,7 @@ export type EventKind =
   | 'agent.spawned'
   | 'agent.returned'
   | 'wm.mutated'
+  | 'tool.emitted'
   | 'agent.checkpoint'
 
 export interface Event<P = unknown> {
@@ -200,6 +201,23 @@ export interface GuardEvaluation {
   contextSlice: unknown
 }
 
+/**
+ * #60: a business FSM event a tool handler emitted via ctx.emit, captured so
+ * replay can reproduce the emit-driven transition without re-running the
+ * handler (ReplayingIOPort serves cached tool output and never runs the thunk).
+ * Recorded once per tool call that WON the FSM's single pendingEvent slot
+ * (first-emit-wins); keyed by toolCallId, which comes from the cached LLM
+ * output and is therefore stable across replay.
+ */
+export interface ToolEmittedPayload {
+  toolCallId: string
+  event: {
+    name:     string
+    payload?: unknown
+    guard?:   GuardEvaluation[]
+  }
+}
+
 export interface FsmTransitionPayload {
   from: string
   to:   string
@@ -229,6 +247,7 @@ export type RegionAddedEvent        = Event<RegionAddedPayload>        & { type:
 export type RegionRemovedEvent      = Event<RegionRemovedPayload>      & { type: 'region.removed' }
 export type ContextBoundaryAppliedEvent = Event<ContextBoundaryAppliedPayload> & { type: 'context.boundary.applied' }
 export type FsmTransitionEvent     = Event<FsmTransitionPayload>     & { type: 'fsm.transition' }
+export type ToolEmittedEvent       = Event<ToolEmittedPayload>       & { type: 'tool.emitted' }
 export type SkillLoadedEvent       = Event<SkillLifecyclePayload>    & { type: 'skill.loaded' }
 export type SkillUnloadedEvent     = Event<SkillLifecyclePayload>    & { type: 'skill.unloaded' }
 
@@ -247,5 +266,6 @@ export type AnyEvent =
   | RegionRemovedEvent
   | ContextBoundaryAppliedEvent
   | FsmTransitionEvent
+  | ToolEmittedEvent
   | SkillLoadedEvent
   | SkillUnloadedEvent
