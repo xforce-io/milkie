@@ -73,16 +73,18 @@ export const SCRIPT = `
     document.addEventListener('click', function (ev) {
       if (ev.target.closest && ev.target.closest('.why a')) return;
       var arRow = ev.target.closest('.ar-row');
-      if (arRow && arRow.dataset.hash) {
+      if (arRow) {
         ev.stopPropagation();
-        arRow.classList.toggle('open');
-        var pre = arRow.querySelector('.region-preview');
-        if (pre && !pre.dataset.loaded) {
-          var reg = regOnce();
-          var c = reg[arRow.dataset.hash];
-          // region-preview only emitted when content is available
-          pre.textContent = (c != null) ? c : '';
-          pre.dataset.loaded = '1';
+        if (arRow.dataset.hash) {
+          arRow.classList.toggle('open');
+          var pre = arRow.querySelector('.region-preview');
+          if (pre && !pre.dataset.loaded) {
+            var reg = regOnce();
+            var c = reg[arRow.dataset.hash];
+            // region-preview only emitted when content is available
+            pre.textContent = (c != null) ? c : '';
+            pre.dataset.loaded = '1';
+          }
         }
         return;
       }

@@ -4,6 +4,7 @@ import path from 'path'
 import { Milkie } from '../runtime/Milkie.js'
 import { JsonlEventStore } from '../trace/JsonlEventStore.js'
 import { FileTraceObjectStore } from '../trace/TraceObjectStore.js'
+import { regionReuseCounts } from '../trace/RegionContextView.js'
 import { SQLiteStore } from '../store/SQLiteStore.js'
 import type { AgentCheckpoint } from '../types/store.js'
 
@@ -191,15 +192,8 @@ export async function main(argv: string[]): Promise<MainResult> {
       for (const id of runIds) events.push(...(await eventStore.readByRunId(id)))
 
       const traceObjectStore = new FileTraceObjectStore(path.join(milkieDir, 'objects'))
-      const hashes = new Set<string>()
-      for (const ev of events) {
-        if (ev.type === 'region.added') {
-          const h = (ev.payload as { contentHash?: string }).contentHash
-          if (h) hashes.add(h)
-        }
-      }
       const regionContent = new Map<string, string>()
-      for (const h of hashes) {
+      for (const h of regionReuseCounts(events).keys()) {
         const c = await traceObjectStore.getCanonical(h)
         if (c !== undefined) regionContent.set(h, c)
       }
