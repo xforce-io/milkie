@@ -98,6 +98,31 @@ describe('causedBy densify — RecordingIOPort edges (#30)', () => {
     expect(firstOf(evs, 'tool.responded').causedBy).toBe(firstOf(evs, 'tool.requested').id)
   })
 
+  it('completion edge: agent.run.completed.causedBy is the final llm.responded', async () => {
+    const store = new MemoryEventStore()
+    const port  = new RecordingIOPort(new ExecInnerPort(), store, 'r1', 'runtime', undefined, new CausalCursor())
+
+    await port.attach(START)
+    await port.invokeLLM(req())
+    await port.detach({ status: 'completed' })
+
+    const evs = await events(store)
+    const llmResponded = firstOf(evs, 'llm.responded')
+    const completed    = firstOf(evs, 'agent.run.completed')
+    expect(completed.causedBy).toBe(llmResponded.id)
+  })
+
+  it('agent.run.completed has no causedBy when the run made no LLM call', async () => {
+    const store = new MemoryEventStore()
+    const port  = new RecordingIOPort(new ExecInnerPort(), store, 'r1', 'runtime', undefined, new CausalCursor())
+
+    await port.attach(START)
+    await port.detach({ status: 'completed' })
+
+    const completed = firstOf(await events(store), 'agent.run.completed')
+    expect(completed.causedBy).toBeUndefined()
+  })
+
   it('cursor omitted: no new causedBy edges, no throw', async () => {
     const store = new MemoryEventStore()
     const port  = new RecordingIOPort(new ExecInnerPort(), store, 'r1')   // no cursor
