@@ -160,17 +160,14 @@ function renderNode(
 }
 
 /**
- * Pure projection: flat events → self-contained HTML report.
+ * The timeline body fragment: type filters, one section per root run (children
+ * nested), and the two embedded JSON `<script>` registries (region-content +
+ * trace-data). Reused by `renderHtml` (full document) and the viewer's raw tab.
  *
- * The output is a single HTML document with inline CSS, vanilla JS for
- * fold/unfold + type filter, and the raw events embedded as a JSON script
- * tag so the file is its own re-renderable archive.
- *
- * No I/O, no clock, no randomness. The renderer cannot reach into the event
- * store — this is the architectural firewall behind "UI is a pure projection
- * over CLI / SDK output" (ARCHITECTURE.md `## User-facing surfaces`).
+ * Returns only the inner fragment — no `<html>`/`<head>`/`<h1>` wrapper and no
+ * behavior `<script>${SCRIPT}</script>`.
  */
-export function renderHtml(events: Event[], opts: { regionContent?: Map<string, string> } = {}): string {
+export function renderTimelineSections(events: Event[], opts: { regionContent?: Map<string, string> } = {}): string {
   const tree = buildTimelineTree(events)
   const eventById = new Map<string, Event>()
   for (const evt of events) eventById.set(evt.id, evt)
@@ -187,6 +184,30 @@ export function renderHtml(events: Event[], opts: { regionContent?: Map<string, 
   const dataJson = JSON.stringify(events)
     // close-tag-safe inlining: prevent the JSON from ending the script element.
     .replace(/<\/script/gi, '<\\/script')
+  return `<div class="filters">
+  <span class="chip" data-kind="llm">LLM</span>
+  <span class="chip" data-kind="tool">tool</span>
+  <span class="chip" data-kind="lifecycle">lifecycle</span>
+  <span class="chip" data-kind="region">region</span>
+  <span class="chip" data-kind="fsm">fsm</span>
+</div>
+${tree.map(n => renderNode(n, eventById, explanations, regionCtx)).join('')}
+<script type="application/json" id="region-content">${registryJson}</script>
+<script type="application/json" id="trace-data">${dataJson}</script>`
+}
+
+/**
+ * Pure projection: flat events → self-contained HTML report.
+ *
+ * The output is a single HTML document with inline CSS, vanilla JS for
+ * fold/unfold + type filter, and the raw events embedded as a JSON script
+ * tag so the file is its own re-renderable archive.
+ *
+ * No I/O, no clock, no randomness. The renderer cannot reach into the event
+ * store — this is the architectural firewall behind "UI is a pure projection
+ * over CLI / SDK output" (ARCHITECTURE.md `## User-facing surfaces`).
+ */
+export function renderHtml(events: Event[], opts: { regionContent?: Map<string, string> } = {}): string {
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -196,16 +217,7 @@ export function renderHtml(events: Event[], opts: { regionContent?: Map<string, 
 </head>
 <body>
 <h1>milkie trace report</h1>
-<div class="filters">
-  <span class="chip" data-kind="llm">LLM</span>
-  <span class="chip" data-kind="tool">tool</span>
-  <span class="chip" data-kind="lifecycle">lifecycle</span>
-  <span class="chip" data-kind="region">region</span>
-  <span class="chip" data-kind="fsm">fsm</span>
-</div>
-${tree.map(n => renderNode(n, eventById, explanations, regionCtx)).join('')}
-<script type="application/json" id="region-content">${registryJson}</script>
-<script type="application/json" id="trace-data">${dataJson}</script>
+${renderTimelineSections(events, opts)}
 <script>${SCRIPT}</script>
 </body>
 </html>`

@@ -185,7 +185,7 @@ export async function main(argv: string[]): Promise<MainResult> {
       const runsDir = path.join(milkieDir, 'runs')
       const eventStore = new JsonlEventStore(runsDir)
       const { findDescendantRuns } = await import('../trace/render/children.js')
-      const { renderHtml } = await import('../trace/render/html.js')
+      const { renderViewer } = await import('../trace/render/viewer.js')
 
       const runIds = [runId, ...(await findDescendantRuns(runsDir, runId))]
       const events = []
@@ -198,7 +198,7 @@ export async function main(argv: string[]): Promise<MainResult> {
         if (c !== undefined) regionContent.set(h, c)
       }
 
-      stdout.push(renderHtml(events, { regionContent }))
+      stdout.push(renderViewer(events, { regionContent }))
     })
 
   trace
