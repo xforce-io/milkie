@@ -23,18 +23,25 @@ export const VIEWER_STYLES = `
   .nav-cause { background: #eef6ff; color: #2563eb; }
   .xlink { color: #36a; text-decoration: none; cursor: pointer; }
   .xlink:hover { text-decoration: underline; }
+  .xdim { color: #aaa; }
+  .rdetail { margin: 2px 0; font-family: ui-monospace, monospace; font-size: 11px; }
+  .rdetail summary { cursor: pointer; }
+  .rpre { white-space: pre-wrap; background: #fafafa; padding: 6px; border-radius: 4px; margin-top: 3px; }
+  .ar-na { color: #a13; }
   .rawpre { font-family: ui-monospace, monospace; font-size: 11px; white-space: pre-wrap; background: #fafafa; padding: 8px; border-radius: 4px; max-height: 240px; overflow: auto; }
   #pane-raw { padding: 12px 16px; }
 `
 
 export const VIEWER_SCRIPT = `
 (function () {
-  var spine = JSON.parse(document.getElementById('spine-data').textContent || '{"nodes":[]}');
   var exps  = JSON.parse(document.getElementById('explanations-data').textContent || '{}');
   function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
   function nodeEl(id){ return document.querySelector('.node[data-id="'+CSS.escape(id)+'"]'); }
   function clearMarks(){ document.querySelectorAll('.node.selected,.node.cause').forEach(function(n){ n.classList.remove('selected','cause'); }); }
-  function chainHtml(chain){ return (chain||[]).map(function(c){ return '<a class="xlink" data-go="'+esc(c.eventId)+'">'+esc(c.summary)+'</a>'; }).join(' → '); }
+  function chainHtml(chain){ return (chain||[]).map(function(c){
+    if(exps[c.eventId]){ return '<a class="xlink" data-go="'+esc(c.eventId)+'">'+esc(c.summary)+'</a>'; }
+    return '<span class="xdim">'+esc(c.summary)+'</span>';
+  }).join(' → '); }
   function navHtml(causeId){
     var out='';
     if(causeId){ out += '<a class="nav-link nav-cause" data-go="'+esc(causeId)+'">← 谁导致的:'+esc((exps[causeId]&&exps[causeId].title)||causeId)+'</a>'; }

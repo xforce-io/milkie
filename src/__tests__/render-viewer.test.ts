@@ -38,6 +38,18 @@ describe('renderViewer', () => {
     expect(html).toContain('class="filters"')
   })
 
+  it('embeds LLM region composition with content when regionContent is provided', () => {
+    const events: Event[] = [
+      e({ id: 'start', runId: 'r1', type: 'agent.run.started', timestamp: 1, payload: { agentId: 'x', goal: 'g', input: 'i', contextId: 'c' } }),
+      e({ id: 'h', runId: 'r1', type: 'region.added', timestamp: 2, payload: { id: 'header', target: 'system', section: 'header', stability: 'immutable', reason: 'agent-set', contentHash: 'H1' } }),
+      e({ id: 'llm1', runId: 'r1', type: 'llm.requested', timestamp: 3, causedBy: 'start', payload: { model: 'm' } }),
+    ]
+    const html = renderViewer(events, { regionContent: new Map([['H1', 'SYSTEM PROMPT TEXT']]) })
+    expect(html).toContain('Assembled by 1 regions')
+    expect(html).toContain('header')
+    expect(html).toContain('SYSTEM PROMPT TEXT')
+  })
+
   it('renders without crashing for a run with no decisions', () => {
     const html = renderViewer([{ id: 's', runId: 'r1', actor: 'a', type: 'agent.run.started', timestamp: 1, payload: {} } as Event])
     expect(html.startsWith('<!doctype html>')).toBe(true)

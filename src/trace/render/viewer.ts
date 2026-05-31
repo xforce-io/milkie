@@ -3,6 +3,7 @@ import { buildDecisionSpine, type DecisionNode } from '../diagnostics/buildDecis
 import { explainTransition } from '../diagnostics/explainTransition.js'
 import { explainLlmCall } from '../diagnostics/explainLlmCall.js'
 import { explainToolCall } from '../diagnostics/explainToolCall.js'
+import { contextRefsAt, type RegionContentRef } from '../RegionContextView.js'
 import { renderTimelineSections } from './html.js'
 import { VIEWER_STYLES, VIEWER_SCRIPT } from './viewer-template.js'
 
@@ -19,7 +20,7 @@ interface PanelRecord {
 }
 
 // One panel "explanation" record per node, consumed verbatim by the client JS.
-function panelRecord(events: Event[], node: DecisionNode, eventById: Map<string, Event>): PanelRecord {
+function panelRecord(events: Event[], node: DecisionNode, eventById: Map<string, Event>, regionContent: Map<string, string>): PanelRecord {
   const base = {
     causeDecisionId: node.causeDecisionId,
     chain: [] as Array<{ eventId: string; type: string; summary: string }>,
@@ -28,17 +29,26 @@ function panelRecord(events: Event[], node: DecisionNode, eventById: Map<string,
   if (node.kind === 'transition') {
     const x = explainTransition(events, node.eventId)
     const guards = x.guards.map(g => `${esc(g.guardId)} 判定 ${esc(String(g.result))}`).join('、')
-    return { ...base, chain: x.causalChain, title: `为什么 ${esc(x.from)} → ${esc(x.to)}?`,
+    return { ...base, chain: x.causalChain, title: `为什么 ${x.from} → ${x.to}?`,
       bodyHtml: `触发: ${esc(x.trigger.causedBySummary ?? x.trigger.name)}<br>guard: ${guards || '(无)'}` }
   }
   if (node.kind === 'llm') {
     const x = explainLlmCall(events, node.eventId)
+    const refs: RegionContentRef[] = [...contextRefsAt(events, node.eventId, 'at').values()]
+    const comp = refs.map(r => {
+      const content = r.contentHash && regionContent.has(r.contentHash) ? regionContent.get(r.contentHash)! : undefined
+      const meta = `${esc(r.id)} · ${esc(r.section)} · ${esc(r.stability)}`
+      return content !== undefined
+        ? `<details class="rdetail"><summary>${meta}</summary><pre class="rpre">${esc(content)}</pre></details>`
+        : `<div class="rdetail">${meta} <span class="ar-na">(内容不可用)</span></div>`
+    }).join('')
     return { ...base, chain: x.causalChain, title: `为什么这次 LLM 调用?`,
-      bodyHtml: `state: ${esc(x.fsmState ?? '(未知)')}<br>触发: ${esc(x.trigger.causedBySummary ?? '(无上游)')}<br>prompt 由 ${x.regionCount} 个 region 拼成` }
+      bodyHtml: `state: ${esc(x.fsmState ?? '(未知)')}<br>触发: ${esc(x.trigger.causedBySummary ?? '(无上游)')}`
+        + `<div style="margin-top:8px;font-weight:600">Assembled by ${refs.length} regions</div>${comp}` }
   }
   if (node.kind === 'tool') {
     const x = explainToolCall(events, node.eventId)
-    return { ...base, chain: x.causalChain, title: `工具 ${esc(x.toolName)}`,
+    return { ...base, chain: x.causalChain, title: `工具 ${x.toolName}`,
       bodyHtml: `调用方: ${esc(x.trigger.causedBySummary ?? '(无上游)')}<br>入参: ${esc(JSON.stringify(x.input))}<br>出参: ${esc(JSON.stringify(x.output ?? null))}` }
   }
   // output
@@ -59,8 +69,9 @@ export function renderViewer(events: Event[], opts: { regionContent?: Map<string
   const eventById = new Map<string, Event>()
   for (const e of events) eventById.set(e.id, e)
 
+  const regionContent = opts.regionContent ?? new Map<string, string>()
   const explanations: Record<string, PanelRecord> = {}
-  for (const node of spine.nodes) explanations[node.eventId] = panelRecord(events, node, eventById)
+  for (const node of spine.nodes) explanations[node.eventId] = panelRecord(events, node, eventById, regionContent)
 
   const spineHtml = spine.nodes.map(n => {
     if (n.kind === 'output') {

@@ -160,21 +160,9 @@ function renderNode(
 }
 
 /**
- * Pure projection: flat events → self-contained HTML report.
- *
- * The output is a single HTML document with inline CSS, vanilla JS for
- * fold/unfold + type filter, and the raw events embedded as a JSON script
- * tag so the file is its own re-renderable archive.
- *
- * No I/O, no clock, no randomness. The renderer cannot reach into the event
- * store — this is the architectural firewall behind "UI is a pure projection
- * over CLI / SDK output" (ARCHITECTURE.md `## User-facing surfaces`).
- */
-/**
- * Builds the timeline body fragment: type filters, one section per root run
- * (children nested), and the two embedded JSON `<script>` registries
- * (region-content + trace-data). This is the reusable inner projection shared
- * by `renderHtml` (full document) and the viewer's "raw timeline" tab.
+ * The timeline body fragment: type filters, one section per root run (children
+ * nested), and the two embedded JSON `<script>` registries (region-content +
+ * trace-data). Reused by `renderHtml` (full document) and the viewer's raw tab.
  *
  * Returns only the inner fragment — no `<html>`/`<head>`/`<h1>` wrapper and no
  * behavior `<script>${SCRIPT}</script>`.
@@ -208,6 +196,17 @@ ${tree.map(n => renderNode(n, eventById, explanations, regionCtx)).join('')}
 <script type="application/json" id="trace-data">${dataJson}</script>`
 }
 
+/**
+ * Pure projection: flat events → self-contained HTML report.
+ *
+ * The output is a single HTML document with inline CSS, vanilla JS for
+ * fold/unfold + type filter, and the raw events embedded as a JSON script
+ * tag so the file is its own re-renderable archive.
+ *
+ * No I/O, no clock, no randomness. The renderer cannot reach into the event
+ * store — this is the architectural firewall behind "UI is a pure projection
+ * over CLI / SDK output" (ARCHITECTURE.md `## User-facing surfaces`).
+ */
 export function renderHtml(events: Event[], opts: { regionContent?: Map<string, string> } = {}): string {
   return `<!doctype html>
 <html lang="en">
