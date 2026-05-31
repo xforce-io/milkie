@@ -7,6 +7,8 @@ import { Milkie } from '../../src/runtime/Milkie.js'
 import { MemoryStore } from '../../src/store/MemoryStore.js'
 import { JsonlEventStore } from '../../src/trace/JsonlEventStore.js'
 import { FileTraceObjectStore } from '../../src/trace/TraceObjectStore.js'
+import { regionReuseCounts } from '../../src/trace/RegionContextView.js'
+import { renderViewer } from '../../src/trace/render/viewer.js'
 import { ReplayError } from '../../src/trace/ReplayError.js'
 import { ReplayDivergenceError } from '../../src/trace/ReplayDivergenceError.js'
 import type { IModelGateway } from '../../src/types/model.js'
@@ -175,6 +177,26 @@ async function handleReplay(
   }
 }
 
+async function handleViewer(
+  res: ServerResponse, s: ServerState, runId: string,
+): Promise<void> {
+  const events = await s.eventStore.readByRunId(runId)
+  if (events.length === 0) {
+    sendJson(res, 404, { error: 'run not found' })
+    return
+  }
+  // Hydrate region content the same way `milkie trace report` does
+  // (cli/main.ts): look up each region's canonical content by hash.
+  const regionContent = new Map<string, string>()
+  for (const h of regionReuseCounts(events).keys()) {
+    const c = await s.traceObjectStore.getCanonical(h)
+    if (c !== undefined) regionContent.set(h, c)
+  }
+  const html = renderViewer(events, { regionContent })
+  res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+  res.end(html)
+}
+
 async function handleSourceFetch(
   res: ServerResponse, s: ServerState, relPath: string, linesQuery: string | null,
 ): Promise<void> {
@@ -272,6 +294,11 @@ export async function startServer(config: ServerConfig): Promise<Server> {
       const replayMatch = route.match(/^\/run\/([^/]+)\/replay$/)
       if (req.method === 'POST' && replayMatch) {
         return handleReplay(res, state, decodeURIComponent(replayMatch[1]!))
+      }
+
+      const viewerMatch = route.match(/^\/run\/([^/]+)\/viewer$/)
+      if (req.method === 'GET' && viewerMatch) {
+        return handleViewer(res, state, decodeURIComponent(viewerMatch[1]!))
       }
 
       const sourceMatch = route.match(/^\/source\/(.+)$/)
