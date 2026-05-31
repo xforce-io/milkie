@@ -26,7 +26,6 @@ import {
 import type { ToolSchema, ModelRequest } from '../types/model.js'
 import { ToolRegistry } from '../tools/ToolRegistry.js'
 import { WorkingMemory } from '../store/WorkingMemory.js'
-import { CheckpointManager } from '../store/CheckpointManager.js'
 import { AgentFactory, type AgentSpawnOptions } from './AgentFactory.js'
 import type { IIOPort } from './IOPort.js'
 import { cognitiveTools } from '../tools/cognitive.js'
@@ -35,6 +34,7 @@ import type { InMemoryRecorder } from '../trajectory/InMemoryRecorder.js'
 import type { ITraceObjectStore } from '../trace/TraceObjectStore.js'
 import { canonicalize, contentAddressForCanonicalBytes } from '../trace/hash.js'
 import type { CausalCursor } from '../trace/CausalCursor.js'
+import { checkpointFromEvents } from '../trace/diagnostics/checkpointFromEvents.js'
 import type { Region } from '../context/Region.js'
 import type { SkillLifecyclePayload, AgentRunStartedPayload, AgentRunCompletedPayload, GuardEvaluation } from '../trace/types.js'
 
@@ -70,6 +70,10 @@ export interface AgentRuntimeOptions {
   /** #30: per-run causal cursor shared with this run's RecordingIOPort, so fsm.transition
    *  can stamp causedBy = the last llm/tool event id. Omit → no fsm.transition causedBy. */
   causalCursor?: CausalCursor
+  /** SPIKE(#73): recorded WM snapshots (one per tool call, in order) for replay.
+   *  Present → replay-restore mode: after each tool call, restore WM from the next
+   *  snapshot instead of trusting the (non-re-run) handler. Absent → record mode. */
+  replayWmSnapshots?: unknown[]
 }
 
 type SkillLoadRequest = {
@@ -90,6 +94,7 @@ export class AgentRuntime {
   private readonly ioPort:           IIOPort
   private readonly eventStore?:      import('../trace/EventStore.js').IEventStore
   private readonly traceObjectStore?: ITraceObjectStore
+  private readonly replayWmSnapshots?: unknown[]  // SPIKE(#73)
   private readonly subAgentConfigs?: Map<string, AgentConfig>
   private readonly childRecorderFactory?: (config: AgentConfig, contextId: string, traceId: string) => ITrajectoryRecorder
   private readonly makeChildPort?: MakeChildPort
@@ -100,7 +105,6 @@ export class AgentRuntime {
   private readonly regions:     ContextRegions
   private readonly registry:    ToolRegistry
   private readonly memory:      WorkingMemory
-  private readonly checkpoints: CheckpointManager
   private readonly factory:     AgentFactory
 
   private eventQueue:    Array<{ type: string; payload: unknown }> = []
@@ -130,6 +134,7 @@ export class AgentRuntime {
     this.stateStore      = opts.stateStore
     this.recorder        = opts.recorder
     this.eventStore      = opts.eventStore
+    this.replayWmSnapshots = opts.replayWmSnapshots
     this.traceObjectStore = opts.traceObjectStore
     this.subAgentConfigs = opts.subAgentConfigs
     this.childRecorderFactory = opts.childRecorderFactory
@@ -145,11 +150,6 @@ export class AgentRuntime {
     )
     this.regions.set('header', makeHeaderRegion(opts.config.systemPrompt))
     this.registry    = new ToolRegistry()
-    this.checkpoints = new CheckpointManager(
-      this.stateStore,
-      this.config.agentId,
-      this.agentRunId,
-    )
 
     this.factory = new AgentFactory(async (spawnOpts: AgentSpawnOptions) => {
       const child = new AgentRuntime({
@@ -283,8 +283,9 @@ export class AgentRuntime {
           })
           await finish?.({ status: result.status, lastTextOutput: result.output })
 
-          const childCheckpoint = result.status === 'interrupted'
-            ? await this.stateStore.get(`context:${childContextId}:checkpoint:latest`) as AgentCheckpoint | undefined
+          // #73: read the child's resume state from its event log (source of truth).
+          const childCheckpoint = result.status === 'interrupted' && this.eventStore
+            ? checkpointFromEvents(await this.eventStore.readByRunId(childRunId)) ?? undefined
             : undefined
           await this.recordChild({
             taskId, agentId, runId: childRunId, contextId: childContextId,
@@ -736,11 +737,9 @@ export class AgentRuntime {
       const resumeState = this.fsm.currentState.name
       this.fsm.emitEvent('interrupt')
       this.fsm.processPendingEvent()
-      const checkpoint = await this.saveCheckpoint(resumeState)
+      const checkpoint = this.buildCheckpoint(resumeState)
       await this.tryFlushTraceWrites()
-      // Save to context:latest so Milkie.resume can find it
-      await this.checkpoints.saveForContext(this.contextId, this.turnNumber, checkpoint)
-      await this.stateStore.set(`context:${this.contextId}:checkpoint:latest`, checkpoint)
+      await this.persistCheckpoint(checkpoint)
       const err = new Error('Agent interrupted')
       err.name = 'InterruptSignal'
       throw err
@@ -748,8 +747,12 @@ export class AgentRuntime {
     this.pendingEvents.push(event)
   }
 
-  private async saveCheckpoint(resumeState?: string, currentTurn?: string): Promise<AgentCheckpoint> {
-    return this.checkpoints.save({
+  // #73: build the resume-state checkpoint object. checkpointId is a content-free
+  // uuid (previously minted by the now-archived CheckpointManager). The object is
+  // NOT persisted to the stateStore — persistCheckpoint writes it to the event log.
+  private buildCheckpoint(resumeState?: string, currentTurn?: string): AgentCheckpoint {
+    return {
+      checkpointId: uuidv4(),
       sequence:    this.turnNumber,
       goal:        this.goal,
       currentTurn: currentTurn ?? this.getCurrentTurn() ?? undefined,
@@ -768,7 +771,24 @@ export class AgentRuntime {
         traceId:       (this.recorder as Partial<InMemoryRecorder>).traceId ?? '',
         contextId:      this.contextId,
       },
+    }
+  }
+
+  // #73: persist resume state to the event log (single source of truth) as an
+  // agent.checkpoint event, plus a tiny context->runId routing pointer (an index,
+  // not state). No stateStore checkpoint blob is written. Requires an eventStore:
+  // without one the run cannot be resumed (events are the sole resume substrate).
+  private async persistCheckpoint(checkpoint: AgentCheckpoint): Promise<void> {
+    if (!this.eventStore) return
+    await this.eventStore.append({
+      id:        uuidv4(),
+      runId:     this.agentRunId,
+      type:      'agent.checkpoint',
+      actor:     this.config.agentId,
+      timestamp: Date.now(),
+      payload:   { checkpoint },
     })
+    await this.stateStore.set(`context:${this.contextId}:checkpoint-run:latest`, this.agentRunId)
   }
 
   // Load prior state for multi-turn continuation
@@ -871,10 +891,9 @@ export class AgentRuntime {
             // the (user, finalAssistant) history pair (otherwise the next
             // invoke sees an empty history).
             this.crystallizeTurn()
-            const checkpoint = await this.saveCheckpoint()
+            const checkpoint = this.buildCheckpoint()
             await this.tryFlushTraceWrites()
-            await this.checkpoints.saveForContext(this.contextId, this.turnNumber, checkpoint)
-            await this.stateStore.set(`context:${this.contextId}:checkpoint:latest`, checkpoint)
+            await this.persistCheckpoint(checkpoint)
           }
           break
         }
@@ -1114,6 +1133,23 @@ export class AgentRuntime {
           () => this.registry.execute(call.name, call.input, ctx),
         )
         span.attributes['output'] = output
+        // SPIKE(#73): event-source tool WM side-effects so replay reconstructs them.
+        // Replay does NOT re-run the handler (ReplayingIOPort serves cached output),
+        // so WM writes are lost unless captured here. Record a wm.mutated snapshot;
+        // on replay, restore WM from the recorded snapshot (value frozen → no L1/L2).
+        if (this.replayWmSnapshots) {
+          const snap = this.replayWmSnapshots.shift()
+          if (snap !== undefined) Object.assign(this.memory, WorkingMemory.fromJSON(snap))
+        } else if (this.eventStore) {
+          await this.eventStore.append({
+            id:        uuidv4(),
+            runId:     this.agentRunId,
+            type:      'wm.mutated',
+            actor:     this.config.agentId,
+            timestamp: Date.now(),
+            payload:   { snapshot: this.memory.toJSON() },  // toJSON() deep-clones (frozen)
+          })
+        }
         const duration = this.ioPort.now() - start
         this.recorder.recordEvent(span, 'tool.result', { output })
         this.recorder.endSpan(span, 'ok')

@@ -20,8 +20,21 @@ import { TrajectoryStore } from '../../src/trajectory/TrajectoryStore.js'
 import { RedisStore } from '../../src/store/RedisStore.js'
 import { MemoryStore } from '../../src/store/MemoryStore.js'
 import { MemoryEventStore } from '../../src/trace/MemoryEventStore.js'
+import { checkpointFromEvents } from '../../src/trace/diagnostics/checkpointFromEvents.js'
 import type { FsmTransitionPayload } from '../../src/trace/types.js'
 import { createRedisStore } from './redis.js'
+
+// #73: the resume checkpoint is in the event log; resolve it via the
+// context→runId routing pointer (replaces the removed stateStore blob).
+async function readCheckpoint(
+  stateStore: { get: (k: string) => Promise<unknown> },
+  eventStore: MemoryEventStore,
+  contextId: string,
+): Promise<{ context: { workingMemory: { data: Record<string, unknown> } }; fsm: { currentState: string } } | null> {
+  const runId = await stateStore.get(`context:${contextId}:checkpoint-run:latest`) as string | undefined
+  if (!runId) return null
+  return checkpointFromEvents(await eventStore.readByRunId(runId)) as never
+}
 
 const SKIP = !process.env['VOLCENGINE_TOKEN'] || !process.env['VOLCENGINE_API_BASE']
 const RUN_REDIS_E2E = process.env['REDIS_E2E_REQUIRED'] === '1'
@@ -403,7 +416,7 @@ describe('Case 6 Path A: 主路径 — 取消订单', () => {
 
   live('工作记忆保存了收集的槽位', async () => {
     const store = stateStore
-    const cp = await store.get(`context:${contextId}:checkpoint:latest`) as { context?: { workingMemory?: unknown } }
+    const cp = await readCheckpoint(store, eventStore, contextId) as { context?: { workingMemory?: unknown } } | null
     if (!cp) return  // checkpoint might not be saved if terminal
     const wm = cp.context?.workingMemory as { data?: Record<string, unknown> } | undefined
     if (!wm?.data?.['collectedSlots']) return
@@ -559,6 +572,7 @@ describe('Case 6 Path D: 多轮槽填充（确定性）', () => {
   let milkie: Milkie
   let trajectoryStore: TrajectoryStore
   let stateStore: MemoryStore
+  let eventStore: MemoryEventStore
   let run4: AgentResult
   let trajectory: Trajectory
 
@@ -568,8 +582,10 @@ describe('Case 6 Path D: 多轮槽填充（确定性）', () => {
   beforeAll(async () => {
     trajectoryStore = new TrajectoryStore({ jsonlDir: './test-output/trajectories' })
     stateStore = new MemoryStore()
+    eventStore = new MemoryEventStore()
     milkie = new Milkie({
       stateStore,
+      eventStore,
       trajectoryStore,
       gateway: new SlotFillingGateway(),
       tools: [classifyIntentTool, collectSlotTool, confirmActionTool],
@@ -584,7 +600,7 @@ describe('Case 6 Path D: 多轮槽填充（确定性）', () => {
       input: '我想取消订单',
       contextId,
     })
-    let cp = await stateStore.get(`context:${contextId}:checkpoint:latest`) as { context: { workingMemory: { data: Record<string, unknown> } }; fsm: { currentState: string } }
+    let cp = (await readCheckpoint(stateStore, eventStore, contextId))!
     expect(cp.fsm.currentState).toBe('collecting_slots')
     expect(cp.context.workingMemory.data['collectedSlots']).toMatchObject({ orderId: 'ORD-456' })
 
@@ -594,7 +610,7 @@ describe('Case 6 Path D: 多轮槽填充（确定性）', () => {
       input: '原因是商品损坏',
       contextId,
     })
-    cp = await stateStore.get(`context:${contextId}:checkpoint:latest`) as { context: { workingMemory: { data: Record<string, unknown> } }; fsm: { currentState: string } }
+    cp = (await readCheckpoint(stateStore, eventStore, contextId))!
     expect(cp.fsm.currentState).toBe('collecting_slots')
     expect(cp.context.workingMemory.data['collectedSlots']).toMatchObject({
       orderId: 'ORD-456',
@@ -607,7 +623,7 @@ describe('Case 6 Path D: 多轮槽填充（确定性）', () => {
       input: '需要退款',
       contextId,
     })
-    cp = await stateStore.get(`context:${contextId}:checkpoint:latest`) as { context: { workingMemory: { data: Record<string, unknown> } }; fsm: { currentState: string } }
+    cp = (await readCheckpoint(stateStore, eventStore, contextId))!
     expect(cp.fsm.currentState).toBe('confirming')
     expect(cp.context.workingMemory.data['collectedSlots']).toMatchObject({
       orderId:      'ORD-456',
@@ -631,7 +647,7 @@ describe('Case 6 Path D: 多轮槽填充（确定性）', () => {
   })
 
   it('workingMemory 跨 turn 累积三个槽位', async () => {
-    const cp = await stateStore.get(`context:${contextId}:checkpoint:latest`) as { context?: { workingMemory?: unknown } } | undefined
+    const cp = await readCheckpoint(stateStore, eventStore, contextId) as { context?: { workingMemory?: unknown } } | null
     const wm = cp?.context?.workingMemory as { data?: Record<string, unknown> } | undefined
     expect(wm?.data?.['collectedSlots']).toMatchObject({
       orderId:      'ORD-456',

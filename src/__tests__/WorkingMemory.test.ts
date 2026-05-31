@@ -18,6 +18,22 @@ describe('WorkingMemory', () => {
     expect(wm.getLog()[0]?.type).toBe('thought')
   })
 
+  it('toJSON returns a frozen snapshot unaffected by later mutations (no aliasing)', () => {
+    const wm = new WorkingMemory()
+    wm.set('plan', { steps: ['a'] })
+    wm.append({ type: 'thought', content: 'first' })
+
+    const snap = wm.toJSON() as { data: Record<string, unknown>; log: unknown[] }
+
+    // Mutate WM AFTER taking the snapshot — both the log array and a nested
+    // data value. A correct snapshot must reflect the state at capture time.
+    wm.append({ type: 'thought', content: 'second' })
+    ;(wm.get('plan') as { steps: string[] }).steps.push('b')
+
+    expect(snap.log).toHaveLength(1)
+    expect((snap.data['plan'] as { steps: string[] }).steps).toEqual(['a'])
+  })
+
   it('serialises and deserialises round-trip', () => {
     const wm = new WorkingMemory()
     wm.set('plan', { id: '1', steps: [] })

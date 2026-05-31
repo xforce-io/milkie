@@ -23,6 +23,8 @@ export type EventKind =
   | 'skill.unloaded'
   | 'agent.spawned'
   | 'agent.returned'
+  | 'wm.mutated'
+  | 'agent.checkpoint'
 
 export interface Event<P = unknown> {
   id: string

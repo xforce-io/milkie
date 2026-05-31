@@ -8,7 +8,6 @@ export { ContextRegions } from './context/ContextRegions.js'
 export { assemble, type AssembleScope, type AssembledContext } from './context/assemble.js'
 export { ToolRegistry } from './tools/ToolRegistry.js'
 export { WorkingMemory } from './store/WorkingMemory.js'
-export { CheckpointManager } from './store/CheckpointManager.js'
 
 // State Stores
 export { MemoryStore } from './store/MemoryStore.js'

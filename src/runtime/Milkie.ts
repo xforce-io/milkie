@@ -1,4 +1,5 @@
 import { v4 as uuid } from 'uuid'
+import { checkpointFromEvents } from '../trace/diagnostics/checkpointFromEvents.js'
 import matter from 'gray-matter'
 import fs from 'fs'
 import path from 'path'
@@ -182,11 +183,19 @@ export class Milkie {
     const gateway  = this.gatewayOverride ?? createGateway(config.model)
     const contextId = request.contextId ?? uuid()
 
-    // Check for an existing context checkpoint (multi-turn continuation)
+    // Check for an existing context checkpoint (multi-turn continuation).
+    // #73: the event log is the source of truth for resume state — read the
+    // context's latest checkpointed run via the routing pointer and project the
+    // checkpoint from its events; fall back to the legacy stateStore blob.
     let restoredCheckpoint: AgentCheckpoint | null = null
     if (request.contextId) {
-      const cpKey = `context:${request.contextId}:checkpoint:latest`
-      restoredCheckpoint = (await this.stateStore.get(cpKey) as AgentCheckpoint | null) ?? null
+      const runPtr = await this.stateStore.get(`context:${request.contextId}:checkpoint-run:latest`) as string | undefined
+      if (runPtr && this.eventStore) {
+        restoredCheckpoint = checkpointFromEvents(await this.eventStore.readByRunId(runPtr))
+      }
+      if (!restoredCheckpoint) {
+        restoredCheckpoint = (await this.stateStore.get(`context:${request.contextId}:checkpoint:latest`) as AgentCheckpoint | null) ?? null
+      }
     }
 
     const agentRunId = uuid()
@@ -262,8 +271,11 @@ export class Milkie {
       throw new Error(`Agent not found: "${agentId}". Call registerAgent() or loadAgentFile() first.`)
     }
 
-    // Load checkpoint by its direct store key
-    const checkpoint = await this.stateStore.get(checkpointId) as AgentCheckpoint | null
+    // #73: resolve the resume state from the event log (source of truth). The
+    // checkpointId key identifies a run (directly, or via the context routing
+    // pointer); project the checkpoint from that run's agent.checkpoint event.
+    // Fall back to a stateStore blob under the key (legacy / manually-seeded).
+    const checkpoint = await this.resolveCheckpoint(checkpointId)
     if (!checkpoint) {
       throw new Error(`Checkpoint not found: "${checkpointId}"`)
     }
@@ -316,6 +328,31 @@ export class Milkie {
     await runtime.loadCheckpoint(checkpoint)
 
     return runtime.run(input)
+  }
+
+  /**
+   * #73: resolve a checkpoint from the event log (single source of truth) for a
+   * checkpointId key. The key identifies a run either directly (a
+   * `…:run:<runId>:checkpoint…` key) or via the `context:<id>:checkpoint:latest`
+   * convention (resolved through the context→runId routing pointer). Falls back
+   * to a stateStore blob stored under the key (legacy or test-seeded).
+   */
+  private async resolveCheckpoint(checkpointId: string): Promise<AgentCheckpoint | null> {
+    if (this.eventStore) {
+      let runId: string | undefined
+      const ctxMatch = checkpointId.match(/^context:(.+):checkpoint(?::latest)?$/)
+      const runMatch = checkpointId.match(/:run:([^:]+):checkpoint/)
+      if (ctxMatch) {
+        runId = (await this.stateStore.get(`context:${ctxMatch[1]}:checkpoint-run:latest`) as string | undefined) ?? undefined
+      } else if (runMatch) {
+        runId = runMatch[1]
+      }
+      if (runId) {
+        const cp = checkpointFromEvents(await this.eventStore.readByRunId(runId))
+        if (cp) return cp
+      }
+    }
+    return (await this.stateStore.get(checkpointId) as AgentCheckpoint | null) ?? null
   }
 
   /**
@@ -406,6 +443,11 @@ export class Milkie {
       extraTools:      this.extraTools,
       subAgentConfigs: this.agents,
       childRecorderFactory: undefined,
+      // SPIKE(#73): recorded WM snapshots (one per tool call) → replay restores
+      // tool-written working memory the handler (not re-run) would have produced.
+      replayWmSnapshots: events
+        .filter(e => e.type === 'wm.mutated')
+        .map(e => (e.payload as { snapshot: unknown }).snapshot),
     })
 
     const result = await runtime.run(snapshot.input)

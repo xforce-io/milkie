@@ -6,7 +6,7 @@ import { JsonlEventStore } from '../trace/JsonlEventStore.js'
 import { FileTraceObjectStore } from '../trace/TraceObjectStore.js'
 import { regionReuseCounts } from '../trace/RegionContextView.js'
 import { SQLiteStore } from '../store/SQLiteStore.js'
-import type { AgentCheckpoint } from '../types/store.js'
+import { checkpointFromEvents } from '../trace/diagnostics/checkpointFromEvents.js'
 
 function findMilkieDir(startDir: string): string | undefined {
   let dir = startDir
@@ -24,7 +24,7 @@ function findMilkieDir(startDir: string): string | undefined {
  * (interrupt / resume survive across CLI processes), JsonlEventStore on
  * `.milkie/runs/`, and manifest auto-loaded.
  */
-async function buildCliMilkie(): Promise<{ milkie: Milkie, milkieDir: string, stateStore: SQLiteStore }> {
+async function buildCliMilkie(): Promise<{ milkie: Milkie, milkieDir: string, stateStore: SQLiteStore, eventStore: JsonlEventStore }> {
   const milkieDir = findMilkieDir(process.cwd())
   if (!milkieDir) {
     throw new Error('no .milkie/ directory found upward from cwd')
@@ -35,7 +35,7 @@ async function buildCliMilkie(): Promise<{ milkie: Milkie, milkieDir: string, st
   const traceObjectStore = new FileTraceObjectStore(path.join(milkieDir, 'objects'))
   const milkie = new Milkie({ stateStore, eventStore, traceObjectStore })
   await milkie.loadManifest(path.join(milkieDir, 'agents.json'))
-  return { milkie, milkieDir, stateStore }
+  return { milkie, milkieDir, stateStore, eventStore }
 }
 
 export interface MainResult {
@@ -111,9 +111,11 @@ export async function main(argv: string[]): Promise<MainResult> {
     .command('resume <contextId>')
     .description('Resume a paused agent from its latest checkpoint')
     .action(async (contextId: string) => {
-      const { milkie, stateStore } = await buildCliMilkie()
+      const { milkie, stateStore, eventStore } = await buildCliMilkie()
       const cpKey = `context:${contextId}:checkpoint:latest`
-      const checkpoint = await stateStore.get(cpKey) as AgentCheckpoint | null
+      // #73: resume state lives in the event log; resolve via context→runId pointer.
+      const runId = await stateStore.get(`context:${contextId}:checkpoint-run:latest`) as string | undefined
+      const checkpoint = runId ? checkpointFromEvents(await eventStore.readByRunId(runId)) : null
       if (!checkpoint) {
         throw new Error(`no checkpoint found for contextId "${contextId}"`)
       }
