@@ -75,6 +75,16 @@ describe('server — REST endpoints', () => {
     expect(body.status).toBe('completed')
   })
 
+  it('persists region content to .milkie/objects after a run', async () => {
+    await postJson(`${baseUrl}/chat`, { input: 'hi' })
+    const objectsDir = path.join(exampleDir, '.milkie', 'objects')
+    expect(fs.existsSync(objectsDir)).toBe(true)
+    // A run composes context regions; their canonical content is written to
+    // the trace object store. Non-empty objects dir proves the wiring.
+    const entries = fs.readdirSync(objectsDir)
+    expect(entries.length).toBeGreaterThan(0)
+  })
+
   it('POST /chat with same contextId twice continues the same conversation', async () => {
     await stopServer(server)
     server = await startServer({
@@ -185,6 +195,16 @@ describe('server — REST endpoints', () => {
     const r = await postJson(`${baseUrl}/run/00000000-0000-0000-0000-000000000000/replay`, {})
     expect(r.status).toBe(404)
     expect(JSON.parse(r.body).status).toBe('error')
+  })
+
+  it('persists region content to .milkie/objects after a run', async () => {
+    await postJson(`${baseUrl}/chat`, { input: 'hi' })
+    const objectsDir = path.join(exampleDir, '.milkie', 'objects')
+    expect(fs.existsSync(objectsDir)).toBe(true)
+    // A run composes context regions; their canonical content is written to
+    // the trace object store. Non-empty objects dir proves the wiring.
+    const entries = fs.readdirSync(objectsDir)
+    expect(entries.length).toBeGreaterThan(0)
   })
 })
 
