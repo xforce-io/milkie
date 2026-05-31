@@ -4,6 +4,7 @@
 .milkie/state.sqlite-wal
 .milkie/state.sqlite-shm
 .milkie/runs/
+.milkie/objects/
 
 # Browser cached state (none today; future-proofing)
 *.log
