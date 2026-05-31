@@ -296,4 +296,16 @@ describe('#26 Assembled by', () => {
     expect(html).not.toContain('</script><b>boom</b>')
     expect(html).toContain('<\\/script>')   // close-tag-safe escaped form present
   })
+
+  it('exposes renderTimelineSections returning the timeline body (filters + sections, no <html>)', async () => {
+    const { renderTimelineSections } = await import('../trace/render/html')
+    const events: Event[] = [
+      e({ id: 's', runId: 'r1', type: 'agent.run.started', timestamp: 1,
+          payload: { agentId: 'x', goal: 'g', input: 'i', contextId: 'c' } }),
+    ]
+    const body = renderTimelineSections(events)
+    expect(body).toContain('class="filters"')
+    expect(body).toContain('data-run-id="r1"')
+    expect(body).not.toContain('<!doctype html>')
+  })
 })

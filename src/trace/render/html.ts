@@ -170,7 +170,16 @@ function renderNode(
  * store — this is the architectural firewall behind "UI is a pure projection
  * over CLI / SDK output" (ARCHITECTURE.md `## User-facing surfaces`).
  */
-export function renderHtml(events: Event[], opts: { regionContent?: Map<string, string> } = {}): string {
+/**
+ * Builds the timeline body fragment: type filters, one section per root run
+ * (children nested), and the two embedded JSON `<script>` registries
+ * (region-content + trace-data). This is the reusable inner projection shared
+ * by `renderHtml` (full document) and the viewer's "raw timeline" tab.
+ *
+ * Returns only the inner fragment — no `<html>`/`<head>`/`<h1>` wrapper and no
+ * behavior `<script>${SCRIPT}</script>`.
+ */
+export function renderTimelineSections(events: Event[], opts: { regionContent?: Map<string, string> } = {}): string {
   const tree = buildTimelineTree(events)
   const eventById = new Map<string, Event>()
   for (const evt of events) eventById.set(evt.id, evt)
@@ -187,6 +196,19 @@ export function renderHtml(events: Event[], opts: { regionContent?: Map<string, 
   const dataJson = JSON.stringify(events)
     // close-tag-safe inlining: prevent the JSON from ending the script element.
     .replace(/<\/script/gi, '<\\/script')
+  return `<div class="filters">
+  <span class="chip" data-kind="llm">LLM</span>
+  <span class="chip" data-kind="tool">tool</span>
+  <span class="chip" data-kind="lifecycle">lifecycle</span>
+  <span class="chip" data-kind="region">region</span>
+  <span class="chip" data-kind="fsm">fsm</span>
+</div>
+${tree.map(n => renderNode(n, eventById, explanations, regionCtx)).join('')}
+<script type="application/json" id="region-content">${registryJson}</script>
+<script type="application/json" id="trace-data">${dataJson}</script>`
+}
+
+export function renderHtml(events: Event[], opts: { regionContent?: Map<string, string> } = {}): string {
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -196,16 +218,7 @@ export function renderHtml(events: Event[], opts: { regionContent?: Map<string, 
 </head>
 <body>
 <h1>milkie trace report</h1>
-<div class="filters">
-  <span class="chip" data-kind="llm">LLM</span>
-  <span class="chip" data-kind="tool">tool</span>
-  <span class="chip" data-kind="lifecycle">lifecycle</span>
-  <span class="chip" data-kind="region">region</span>
-  <span class="chip" data-kind="fsm">fsm</span>
-</div>
-${tree.map(n => renderNode(n, eventById, explanations, regionCtx)).join('')}
-<script type="application/json" id="region-content">${registryJson}</script>
-<script type="application/json" id="trace-data">${dataJson}</script>
+${renderTimelineSections(events, opts)}
 <script>${SCRIPT}</script>
 </body>
 </html>`
