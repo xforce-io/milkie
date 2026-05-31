@@ -13,7 +13,7 @@ When code lands that closes a gap, update this file (Completed sections,
 Migration intentions, deferred items) before claiming the gap is closed
 elsewhere.
 
-Last updated: 2026-05-29
+Last updated: 2026-05-30
 
 ---
 
@@ -30,14 +30,24 @@ Last updated: 2026-05-29
   and history are now distinct sections (scratchpad turn-local, history =
   `(user, finalAssistant)` pairs built at turn-end crystallization), skills
   declare `scope: 'turn' | 'session'` lifetime, section schema is cache-aware.
+- **#73 landed — events are the single source of truth for resume.** Tool
+  side-effects on working memory are event-sourced (`wm.mutated` snapshot per
+  tool call), so `replay()` reconstructs tool-written WM without re-running
+  handlers → cognitive-tool / WM-using runs now replay deterministically (they
+  previously diverged). The stateStore **checkpoint blob is logically deleted**:
+  resume state lives only in the event log as an `agent.checkpoint` event; the
+  stateStore keeps a tiny `context→runId` routing pointer. `CheckpointManager`
+  is archived to `.bak/store/`. This supersedes the earlier "stateStore for
+  checkpoint" model and unblocks Phase 5 (fork/diff/suite need deterministic
+  replay of side-effecting runs).
 - **8 of 15 stories are `active`** (have green E2E tests). The 7 `draft`
   stories all depend on Phase 5–6 capabilities that haven't shipped yet.
-- **Active line:** #20 observable substrate (6-capability surface). The
-  observable.P0 substrate is complete — `fsm.transition` / `skill.loaded` /
-  region content-hash / `agent.spawned·returned` (#21–24), sub-agent
-  first-class trace + replay (#47, PR #49), and `tool.responded` product
-  metadata (#25, PR #50) all merged. Remaining: observable.P1 consumption
-  (UI/CLI), then the diagnosable line (#30 causedBy onward).
+- **Current active line:** finish the trace projection surface before
+  adding heavier UI. Observable.P0 and diagnosable.P0 substrate are both
+  complete (`causedBy` #30, guard evidence #31). Next sequencing is
+  CLI/query projections (#29, #36) → UI projections (#26–28, #32–35).
+  `Trace` remains the canonical event-sourced substrate; UI/CLI are
+  projections over it, not separate products.
 - **Next big rock:** Phase 5 fork / diff / suite replay. Phase 4 was its
   prerequisite for honest fork semantics — fork can now share recorded
   prefixes byte-for-byte across forks instead of structurally.
@@ -54,8 +64,12 @@ Last updated: 2026-05-29
   so interrupt / resume work across CLI processes. First runnable
   example at `examples/s-005-replay/` proves SDK ↔ CLI parity end-to-end
   with zero LLM calls.
-- **Evolution and Lineage-by-typed-relations are deferred** — there are
-  open architectural questions before code work starts on either.
+- **Lineage-by-typed-relations is still inside this repo, but must start
+  explicit.** Producer code should declare objects/relations; runtime
+  records typed events. Do not rebuild citation/provenance by parsing LLM
+  text or UI heuristics.
+- **Evolution is deferred** — there are open architectural questions before
+  code work starts.
 - **Reference UI projection — first probe landed.** ARCHITECTURE.md
   promotes UI from "optional" to "deferred reference projection". The
   s-002 static HTML probe is now shipped: `milkie trace report <runId>`
@@ -142,6 +156,36 @@ Last updated: 2026-05-29
   expiry), trace `region.added` / `region.removed` events + cache health
   span attributes (rolled into Phase 4.6 below).
 
+- **agent-docs-qa decision-attribution viewer (#68 PR #69, #71 PR #72).**
+  The #64 causal drill-down viewer (decision spine + Why panel) is now embedded
+  in the example's live audit panel as a `Why` tab (lazy iframe reusing core
+  `renderViewer`, zero duplicated attribution logic); `FileTraceObjectStore`
+  wired into the example so #26 region composition content hydrates. Viewer UX
+  polish (#71): output answer renders markdown, the causal chain is trimmed to
+  decision hops, `summarizeEvent` disambiguates repeated tool calls by input,
+  and `agent.run.completed.causedBy = final llm.responded` so the output ❓
+  drills. Follow-up #70 (make the Execution/Steps tab projection-driven) open.
+- **Phase 4.7 — Events as the single source of truth for resume (#73, PR #74).**
+  Tool side-effects on working memory are now event-sourced: each tool call
+  emits a frozen `wm.mutated` WM snapshot, so `replay()` — which does NOT re-run
+  tool handlers (`ReplayingIOPort` serves cached output) — reconstructs
+  tool-written WM by folding the snapshots. Replay is now deterministic for
+  WM-using / cognitive-tool runs (previously diverged). The stateStore
+  checkpoint blob is **logically deleted**: resume state lives ONLY in the event
+  log as an `agent.checkpoint` event; the stateStore keeps just a tiny
+  `context→runId` routing pointer (an index, not state — cannot drift).
+  `CheckpointManager` archived to `.bak/store/` and removed from the public
+  export; all readers (resume / multi-turn restore / CLI / child) project the
+  checkpoint from events via `checkpointFromEvents`. Two latent replay aliasing
+  bugs fixed: `WorkingMemory.toJSON` returned a live `log` reference;
+  `MemoryEventStore` stored payloads by reference (in-place mutation rewrote
+  recorded events). Supersedes the Phase 2 "stateStore for checkpoint" and
+  Phase 4.5 "checkpoint format" notes — checkpoint is no longer a separate
+  source of truth. **Unblocks Phase 5** (deterministic replay of side-effecting
+  runs) and is the event-sourced-side-effect template for **#60** (emit-driven
+  FSM transitions in replay — same root cause: replay skips the handler; the WM
+  case is solved, the `ctx.emit` case can follow the same pattern).
+
 ### Stories validated by Phase 1–4 (active)
 
 `s-001` ReAct + intra-agent parallel · `s-002` Inspect a completed run ·
@@ -156,47 +200,48 @@ Full readiness view: `docs/stories/INDEX.md`.
 
 ## In progress
 
-**Active line: #20 observable substrate (6-capability surface push).**
-Closing the observable-substrate gaps so the event log is a complete
-source of truth (every state visible as events, not reconstructed from
-runtime structures):
+**Active line: #20 trace projection and diagnostics surface.**
+The observable-substrate gaps are closed; the event log is now the source
+of truth for the run-level objects needed by inspection, replay, and
+diagnostics. The work in front of us is to expose those facts through
+agent-consumable projections before adding richer UI:
 
-- **Merged:** `fsm.transition` (#21), `skill.loaded/unloaded` (#22),
+- **Merged substrate:** `fsm.transition` (#21), `skill.loaded/unloaded` (#22),
   region content-addressing (#23), `agent.spawned` / `agent.returned`
   (#24); sub-agent first-class — independent `childRunId` + nested
   sub-trace + independently replayable, "model I" (#47, PR #49);
   `tool.responded` product metadata `outputHash` / `outputBytes` +
-  object-store write-through (#25, PR #50, incl. child-port wiring).
-- **Next in this line:** `tool.responded` was the last observable.P0
-  substrate gap — observable.P0 is now complete. Remaining #20 work is
-  observable.P1 (consumption UI/CLI: #26–29) and the diagnosable line
-  (#30 causedBy onward).
+  object-store write-through (#25, PR #50, incl. child-port wiring);
+  `causedBy` densification (#30).
+- **Merged diagnostics substrate:** `causedBy` densification (#30) and
+  guard evidence on `fsm.transition` (#31). Diagnosable.P0 is complete.
+- **Next projection surface:** #29 (`trace show/events/region`) and #36
+  (`trace explain/path/why`) should land before richer UI. They define the
+  agent-consumable query contract and keep UI from owning private query
+  logic.
+- **Next UI projections:** #26–28 and #32–35 consume the same projection
+  functions as CLI. They are reference projections over Trace, not a
+  separate observability product. **Landed:** the #64 causal drill-down viewer
+  (decision spine + Why panel) and its embedding into the agent-docs-qa audit
+  panel (#68 / #71). **Open:** #70 (make the example's Execution tab
+  projection-driven instead of re-parsing events in the frontend).
 
-**Other reasonable next pickups:**
+**Phase 5 — fork / structural diff / suite replay** remains the next big
+capability rock. Substrate prerequisites are now stronger thanks to the
+region snapshot/restore primitive, byte-identical replay, and **#73**
+(tool side-effects on working memory are event-sourced, so side-effecting /
+cognitive-tool runs now replay deterministically — fork/diff/suite all build
+on deterministic replay). Phase 5 is still a multi-PR surface area tracked by
+#58 (side-effect policy), #56 (fork), #55 (diff), and #57 (suite replay).
+The remaining replay determinism gap is **#60** (emit-driven FSM transitions);
+#73's `wm.mutated` event-sourcing is the template to close it.
 
-- **Phase 4.6 — region trace events + cache health observability.**
-  Smaller scope (~600 LOC). Adds `region.added` / `region.removed` /
-  `context.boundary.applied` events to the trace stream; surfaces
-  `usage.cache_read_tokens` / `cache_creation_tokens` on `llm.responded`
-  spans; teaches the Anthropic adapter to translate
-  `region.cacheBreakpoint` into `cache_control: { type: 'ephemeral' }`.
-  This is what makes the cache-aware section schema (already in code) and
-  the region lifecycle (already in code) *visible* to agent designers —
-  without it, neither feature delivers user-facing value.
-
-- **Phase 5 — fork / structural diff / suite replay** (the original
-  next big rock). Substrate prerequisites are now stronger thanks to the
-  region snapshot/restore primitive, but Phase 5 is still a multi-PR
-  surface area.
-
-Recommended order: Phase 4.6 first (closes the observability gap on
-Phase 4.5), then Phase 5. The cross-cutting work below stays valid in
-parallel — particularly the smaller follow-ups inherited from earlier
-landings: CLI surface spec update
+The cross-cutting work below stays valid in parallel — particularly the
+smaller follow-ups inherited from earlier landings: CLI surface spec update
 for the three new `trace` verbs (`render-html` / `report` /
-`--include-children`); s-007-shape integration test for 3-sub-agent
-HTML rendering; routing `Milkie.invoke()`'s contextId/agentRunId
-through `ioPort.uuid()` to close the last byte-identical hole.
+`--include-children`); s-007-shape integration test for 3-sub-agent HTML
+rendering; routing `Milkie.invoke()`'s contextId/agentRunId through
+`ioPort.uuid()` to close the last byte-identical hole.
 
 ---
 
@@ -213,15 +258,18 @@ share the cache prefix so only the tail costs new LLM calls, and compare
 two runs structurally to classify divergences.
 
 **Scope.**
+- **Replay side-effect policy.** Decide the per-operator policy surface
+  before fork ships. Default replay stays all-from-cache; fork may need
+  explicit live re-invocation hooks for selected operators. Tracked by #58.
 - **Fork primitive.** Build on the existing `CacheIndex` so a fork at
   event N reuses the prefix cache for events 0..N-1 and only pays
-  fresh model calls for the tail.
+  fresh model calls for the tail. Tracked by #56.
 - **Structural diff.** Typed comparison over two event logs / projected
   graphs. Returns classified divergences (regression / improvement /
-  neutral / structural-only) as structured output.
+  neutral / structural-only) as structured output. Tracked by #55.
 - **Suite definition + batch replay.** Saved sets of runs (e.g.
   `golden_v1`); replay the suite against a new code version; per-run
-  diff reported as structured output for batch analysis.
+  diff reported as structured output for batch analysis. Tracked by #57.
 - **In-flight trace query API.** Stable query contract over running +
   completed runs so a sub-agent can read its parent's trace mid-run.
   Today the event store is writable during a run but query semantics
@@ -250,13 +298,17 @@ produced it. Reverse: given a source identifier, return every run whose
 lineage references it.
 
 **Scope.**
-- New event kinds: `object.created` / `relation.created`. The event log
-  already records I/O — lineage needs **typed graph events** layered on
-  top.
-- Forward query API: artifact → causal chain.
-- Reverse query API: source version → all dependent runs.
-- Index for reverse traversal (today the log is append-only without a
-  reverse index).
+- **Taxonomy first.** Define the object and relation type vocabulary before
+  producers emit lineage events (#39).
+- **Explicit producer API.** New event kinds `object.created` /
+  `relation.created`; producers declare objects and relations, and runtime
+  records typed events. Avoid recovering provenance by parsing LLM text or
+  frontend citation heuristics.
+- **Forward query API.** Artifact → causal chain.
+- **Reverse query API.** Source version → dependent objects/runs.
+- **Rebuildable index first.** Start with scan-and-build projection indexes
+  over EventStore/JSONL; persistent reverse indexes can come after real
+  volume proves the need.
 
 **Unblocks.** Closes `s-004` (forward lineage) and `s-014` (reverse-reference
 lineage).
@@ -461,14 +513,13 @@ Substrate gaps too small to phase but worth not losing:
   the "Replay side-effect policy" open question below.
 - **6-capability vocabulary status.** `ARCHITECTURE.md` describes
   observable / diagnosable / lineage / replay / fork / diff as a
-  6-capability surface. Today: **replay is complete** (incl. runs with
-  sub-agents once #47 lands); **observable.P0 substrate is essentially
-  complete** — `fsm.transition` (#21), `skill.loaded` (#22), region
-  content hash (#23), `agent.spawned/returned` (#24), sub-agent
+  6-capability surface. Today: **replay is complete**; **observable.P0
+  substrate is complete** — `fsm.transition` (#21), `skill.loaded` (#22),
+  region content hash (#23), `agent.spawned/returned` (#24), sub-agent
   first-class trace (#47), `tool.responded` metadata (#25) all merged.
-  Remaining observable work is P1 consumption (UI/CLI, #26–29).
-  **diagnosable** starts at #30 (causedBy); **lineage / fork / diff** are
-  absent or Phase-5/6 work.
+  Remaining observable work is P1 consumption (CLI/query/UI, #26–29).
+  **diagnosable.P0** is complete with `causedBy` (#30) and guard evidence
+  (#31); **lineage / fork / diff** are absent or Phase-5/6 work.
 
 ---
 
