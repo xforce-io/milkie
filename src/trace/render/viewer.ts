@@ -3,7 +3,6 @@ import { buildDecisionSpine, type DecisionNode } from '../diagnostics/buildDecis
 import { explainTransition } from '../diagnostics/explainTransition.js'
 import { explainLlmCall } from '../diagnostics/explainLlmCall.js'
 import { explainToolCall } from '../diagnostics/explainToolCall.js'
-import { regionReuseCounts } from '../RegionContextView.js'
 import { renderTimelineSections } from './html.js'
 import { VIEWER_STYLES, VIEWER_SCRIPT } from './viewer-template.js'
 
