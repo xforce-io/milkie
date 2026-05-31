@@ -1,4 +1,5 @@
 import { v4 as uuid } from 'uuid'
+import { checkpointFromEvents } from '../trace/diagnostics/checkpointFromEvents.js'
 import matter from 'gray-matter'
 import fs from 'fs'
 import path from 'path'
@@ -182,11 +183,19 @@ export class Milkie {
     const gateway  = this.gatewayOverride ?? createGateway(config.model)
     const contextId = request.contextId ?? uuid()
 
-    // Check for an existing context checkpoint (multi-turn continuation)
+    // Check for an existing context checkpoint (multi-turn continuation).
+    // #73: the event log is the source of truth for resume state — read the
+    // context's latest checkpointed run via the routing pointer and project the
+    // checkpoint from its events; fall back to the legacy stateStore blob.
     let restoredCheckpoint: AgentCheckpoint | null = null
     if (request.contextId) {
-      const cpKey = `context:${request.contextId}:checkpoint:latest`
-      restoredCheckpoint = (await this.stateStore.get(cpKey) as AgentCheckpoint | null) ?? null
+      const runPtr = await this.stateStore.get(`context:${request.contextId}:checkpoint-run:latest`) as string | undefined
+      if (runPtr && this.eventStore) {
+        restoredCheckpoint = checkpointFromEvents(await this.eventStore.readByRunId(runPtr))
+      }
+      if (!restoredCheckpoint) {
+        restoredCheckpoint = (await this.stateStore.get(`context:${request.contextId}:checkpoint:latest`) as AgentCheckpoint | null) ?? null
+      }
     }
 
     const agentRunId = uuid()

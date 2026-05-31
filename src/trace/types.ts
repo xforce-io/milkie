@@ -24,6 +24,7 @@ export type EventKind =
   | 'agent.spawned'
   | 'agent.returned'
   | 'wm.mutated'
+  | 'agent.checkpoint'
 
 export interface Event<P = unknown> {
   id: string

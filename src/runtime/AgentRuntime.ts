@@ -743,10 +743,24 @@ export class AgentRuntime {
       this.fsm.emitEvent('interrupt')
       this.fsm.processPendingEvent()
       const checkpoint = await this.saveCheckpoint(resumeState)
+      // #73: the resume state lives in the event log (single source of truth).
+      // Emit it as an event; the stateStore keeps only a tiny context→runId
+      // routing pointer (not state — cannot drift). Legacy checkpoint:latest
+      // blob is still written for backward compatibility during migration.
+      if (this.eventStore) {
+        await this.eventStore.append({
+          id:        uuidv4(),
+          runId:     this.agentRunId,
+          type:      'agent.checkpoint',
+          actor:     this.config.agentId,
+          timestamp: Date.now(),
+          payload:   { checkpoint },
+        })
+      }
       await this.tryFlushTraceWrites()
-      // Save to context:latest so Milkie.resume can find it
       await this.checkpoints.saveForContext(this.contextId, this.turnNumber, checkpoint)
       await this.stateStore.set(`context:${this.contextId}:checkpoint:latest`, checkpoint)
+      await this.stateStore.set(`context:${this.contextId}:checkpoint-run:latest`, this.agentRunId)
       const err = new Error('Agent interrupted')
       err.name = 'InterruptSignal'
       throw err
