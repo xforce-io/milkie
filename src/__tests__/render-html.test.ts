@@ -175,6 +175,17 @@ describe('#34 llm Why?', () => {
     expect(html).toContain('class="why"')
     expect(html).toContain('(未知)')
   })
+
+  it('renders a Why? block for an llm.requested with no upstream trigger (no broken link)', () => {
+    const events: Event[] = [
+      e({ id: 'llm', runId: 'r1', type: 'llm.requested', timestamp: 1, payload: { model: 'm' } }),
+    ]
+    const html = renderHtml(events)
+    expect(html).toContain('class="why"')
+    expect(html).not.toContain('href="#ev-undefined"')
+    expect(html).not.toContain('触发:')              // no trigger line when no causedBy
+    expect(html).toContain('class="why-state"')      // state line present
+  })
 })
 
 describe('#26 Assembled by', () => {

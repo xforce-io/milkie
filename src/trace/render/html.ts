@@ -76,7 +76,7 @@ function renderWhyLlm(exp: LlmCallExplanation): string {
   const trigger = exp.trigger.causedByEventId
     ? `<div class="why-trigger">触发: <a href="#ev-${esc(exp.trigger.causedByEventId)}">${esc(exp.trigger.causedBySummary ?? exp.trigger.causedByEventId)}</a></div>`
     : ''
-  const state = `<div class="why-guards">state: ${esc(exp.fsmState ?? '(未知)')}</div>`
+  const state = `<div class="why-state">state: ${esc(exp.fsmState ?? '(未知)')}</div>`
   const chain = `<div class="why-chain">`
     + exp.causalChain.map(c => `<a href="#ev-${esc(c.eventId)}">${esc(c.summary)}</a>`).join(' → ')
     + `</div>`
