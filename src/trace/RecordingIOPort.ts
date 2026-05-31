@@ -138,6 +138,10 @@ export class RecordingIOPort implements IIOPort {
       runId:     this.runId,
       type:      'agent.run.completed',
       actor:     this.actor,
+      // The final output is produced by the last LLM response; link to it so the
+      // output node can drill to the final decision (nearest-decision-ancestor).
+      // causedBy is trace metadata (a bare uuid) — replay never compares it.
+      ...(this.cursor?.lastLlmRespondedId ? { causedBy: this.cursor.lastLlmRespondedId } : {}),
       timestamp: this.inner.now(),
       payload,
     })

@@ -61,6 +61,38 @@ describe('renderViewer', () => {
     expect(html).toMatch(/#pane-decision\.active\s*\{[^}]*display:\s*flex/)
   })
 
+  it('renders the output answer as markdown (not escaped literal)', () => {
+    const events: Event[] = [
+      e({ id: 'start', runId: 'r1', type: 'agent.run.started', timestamp: 1, payload: { agentId: 'x', goal: 'g', input: 'i', contextId: 'c' } }),
+      e({ id: 'llm1', runId: 'r1', type: 'llm.requested', timestamp: 2, causedBy: 'start', payload: { model: 'm' } }),
+      e({ id: 'lr1', runId: 'r1', type: 'llm.responded', timestamp: 3, causedBy: 'llm1', payload: {} }),
+      e({ id: 'done', runId: 'r1', type: 'agent.run.completed', timestamp: 4, causedBy: 'lr1', payload: { status: 'completed', lastTextOutput: '## 标题\n**重点**' } }),
+    ]
+    const html = renderViewer(events)
+    expect(html).toContain('<h4>标题</h4>')
+    expect(html).toContain('<strong>重点</strong>')
+  })
+
+  it('trims a panel causal chain to spine decisions only', () => {
+    const html = renderViewer(scenario())
+    const exps = JSON.parse(html.match(/id="explanations-data">(.*?)<\/script>/s)![1]!)
+    const fsmChain = exps['fsm'].chain.map((c: { eventId: string }) => c.eventId)
+    expect(fsmChain).not.toContain('lr1')   // llm.responded — non-decision
+    expect(fsmChain).not.toContain('tres')  // tool.responded — non-decision
+    for (const id of fsmChain) expect(['llm1', 'treq', 'fsm', 'done', 'start']).toContain(id)
+  })
+
+  it('shows an honest fallback when the output node has no upstream decision', () => {
+    const events: Event[] = [
+      e({ id: 'start', runId: 'r1', type: 'agent.run.started', timestamp: 1, payload: { agentId: 'x', goal: 'g', input: 'i', contextId: 'c' } }),
+      e({ id: 'done', runId: 'r1', type: 'agent.run.completed', timestamp: 2, payload: { status: 'completed', lastTextOutput: 'ok' } }),
+    ]
+    const html = renderViewer(events)
+    const exps = JSON.parse(html.match(/id="explanations-data">(.*?)<\/script>/s)![1]!)
+    expect(exps['done'].bodyHtml).toContain('无上游决策记录')
+    expect(exps['done'].bodyHtml).not.toContain('点 ← 谁导致的')
+  })
+
   it('renders without crashing for a run with no decisions', () => {
     const html = renderViewer([{ id: 's', runId: 'r1', actor: 'a', type: 'agent.run.started', timestamp: 1, payload: {} } as Event])
     expect(html.startsWith('<!doctype html>')).toBe(true)
