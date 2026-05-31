@@ -289,6 +289,8 @@ export class AgentRuntime {
           })
           await finish?.({ status: result.status, lastTextOutput: result.output })
 
+          // Child resume state is mirrored to the stateStore (derived cache of
+          // the child's agent.checkpoint event); read the checkpointId from it.
           const childCheckpoint = result.status === 'interrupted'
             ? await this.stateStore.get(`context:${childContextId}:checkpoint:latest`) as AgentCheckpoint | undefined
             : undefined
