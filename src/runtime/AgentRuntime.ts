@@ -965,7 +965,7 @@ export class AgentRuntime {
       }
       const assembled = assemble(this.regions, scope)
       const request: ModelRequest = {
-        model:    this.config.model.model,
+        model:    this.config.model?.model ?? '',
         system:   assembled.system,
         messages: assembled.messages,
         ...(assembled.tools ? { tools: assembled.tools } : {}),
@@ -974,8 +974,8 @@ export class AgentRuntime {
       await this.tryFlushTraceWrites()
 
       const llmSpan = this.recorder.startSpan('llm.call', {
-        provider:     this.config.model.provider,
-        model:        this.config.model.model,
+        provider:     this.config.model?.provider ?? '',
+        model:        this.config.model?.model ?? '',
         turn:         this.turnNumber,
         state:        state.name,
         loadedSkills: [...this.regions._allRegions()]

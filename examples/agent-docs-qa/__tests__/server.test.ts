@@ -7,7 +7,6 @@ import path from 'path'
 import { Milkie } from '../../../src/runtime/Milkie'
 import { JsonlEventStore } from '../../../src/trace/JsonlEventStore'
 import { FileTraceObjectStore } from '../../../src/trace/TraceObjectStore'
-import { makeTraceTools } from '../tools/trace-tools'
 
 class StubGateway implements IModelGateway {
   constructor(private readonly responses: ModelResponse[]) {}
@@ -496,14 +495,9 @@ describe('diagnoser agent (stub pipeline + output contract)', () => {
     const milkie = new Milkie({
       eventStore: es,
       traceObjectStore: traceObjStore,
-      // Stub drives only get_execution (real execution); get_run_io is covered by trace-tools.test.ts.
-      gateway: new StubGateway([
-        toolCall('d1', 'get_execution', { runId: chat.runId }),
-        text(JSON.stringify(verdict)),
-      ]),
+      gateway: new StubGateway([toolCall('d1', 'get_execution', { runId: chat.runId }), text(JSON.stringify(verdict))]),
     })
-    for (const t of makeTraceTools(es, traceObjStore)) milkie.registerTool(t)
-    milkie.loadAgentFile(path.join(__dirname, '..', 'agents', 'diagnoser.md'))
+    milkie.loadStandardAgents()   // registers built-in diagnoser + read-Trace tools (replaces manual makeTraceTools + loadAgentFile)
 
     const result = await milkie.invoke({ agentId: 'diagnoser', goal: 'diagnose', input: chat.runId })
     expect(result.status).toBe('completed')

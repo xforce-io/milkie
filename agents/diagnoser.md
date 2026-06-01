@@ -26,9 +26,5 @@ fsm:
         }
         verdict=ok 时 firstBreak 为 null。严格只输出 JSON。
       tools: [get_run_io, get_execution]
-model:
-  provider: volcengine
-  model: doubao-seed-2-0-pro-260215
-  adapter: openai-compatible
 ---
 诊断 agent:读被诊断 run 的 Trace 投影,定位答案与问题之间的相关性断点。

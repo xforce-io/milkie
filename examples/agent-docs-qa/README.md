@@ -206,12 +206,12 @@ Full spec: **`docs/superpowers/specs/2026-05-25-context-region-substrate-design.
   (the design that addresses the limitations listed above)
 - Architecture: [ARCHITECTURE.md](../../ARCHITECTURE.md) — "Reference UI projection"
 
-## diagnoser agent(#88,借住)
+## diagnoser agent(#89,内置标准 agent)
 
-`agents/diagnoser.md` 是一个**横切诊断 agent**(答案错因诊断):读被诊断 run 的 Trace
-投影(`tools/trace-tools.ts`),沿「问题→工具query→证据→答案」定位第一个相关性断点。
+diagnoser 是 milkie **框架内置的横切诊断 agent**(答案错因诊断),自 #89 起已从本 example
+移入标准 agent 层。本 example 通过 `milkie.loadStandardAgents()` 载入它;读-Trace 工具
+(`src/tools/trace.ts`)也由 `loadStandardAgents()` 统一注册,example 本地无需保留任何副本。
 
-- 它**借住**于本 example;归宿是 milkie 的内置/标准 agent 层(见 issue #89),不属于"三国问答"领域。
 - 编程入口:`milkie.invoke({ agentId: 'diagnoser', input: <被诊断的 runId> })`,输出为
   JSON `{ verdict, firstBreak, explanation }`。
 - 确定性测试覆盖读-Trace 工具 + 管道/契约;**诊断判断质量**需真实 LLM,见下方 live 验证。

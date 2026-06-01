@@ -3,7 +3,7 @@ import { checkpointFromEvents } from '../trace/diagnostics/checkpointFromEvents.
 import matter from 'gray-matter'
 import fs from 'fs'
 import path from 'path'
-import type { AgentConfig, FSMDefinition } from '../types/agent.js'
+import type { AgentConfig, FSMDefinition, ModelConfig } from '../types/agent.js'
 import type { AgentInvokeRequest, AgentResult } from '../types/common.js'
 import type { ChildAgentRecord, IStateStore, AgentCheckpoint } from '../types/store.js'
 import type { ToolDefinition } from '../types/tool.js'
@@ -25,10 +25,12 @@ import { ReplayError } from '../trace/ReplayError.js'
 import { ReplayDivergenceError } from '../trace/ReplayDivergenceError.js'
 import { extractRunSnapshot } from '../trace/RunSnapshot.js'
 import type { ToolEmittedPayload } from '../trace/types.js'
+import { makeTraceTools } from '../tools/trace.js'
 
 export interface MilkieOptions {
   stateStore?:      IStateStore
   gateway?:         IModelGateway   // override all agents; if omitted, each agent uses its own adapter
+  defaultModel?:    ModelConfig     // fallback model for agents that declare no model block
   tools?:           ToolDefinition[]
   trajectoryStore?: TrajectoryStore
   /**
@@ -47,6 +49,7 @@ export interface MilkieOptions {
 export class Milkie {
   private readonly stateStore:      IStateStore
   private readonly gatewayOverride: IModelGateway | null
+  private readonly defaultModel:    ModelConfig | null
   private readonly extraTools:      ToolDefinition[]
   private readonly trajectoryStore: TrajectoryStore | null
   private readonly eventStore:      IEventStore | null
@@ -57,10 +60,26 @@ export class Milkie {
   constructor(opts: MilkieOptions = {}) {
     this.stateStore      = opts.stateStore      ?? new MemoryStore()
     this.gatewayOverride = opts.gateway          ?? null
+    this.defaultModel    = opts.defaultModel     ?? null
     this.extraTools      = opts.tools            ?? []
     this.trajectoryStore = opts.trajectoryStore  ?? null
     this.eventStore      = opts.eventStore       ?? null
     this.traceObjectStore = opts.traceObjectStore ?? null
+  }
+
+  private resolveModel(config: AgentConfig): ModelConfig | undefined {
+    return config.model ?? this.defaultModel ?? undefined
+  }
+
+  private resolveGateway(config: AgentConfig): IModelGateway {
+    if (this.gatewayOverride) return this.gatewayOverride
+    const model = this.resolveModel(config)
+    if (!model) {
+      throw new Error(
+        `Agent "${config.agentId}" has no model and Milkie has no gateway or defaultModel; ` +
+        `built-in agents need a gateway or defaultModel at construction.`)
+    }
+    return createGateway(model)
   }
 
   private wrapIOPort(gateway: IModelGateway, runId: string, cursor?: CausalCursor): IIOPort {
@@ -73,10 +92,9 @@ export class Milkie {
   private buildMakeChildPort(): import('./AgentRuntime.js').MakeChildPort | undefined {
     if (!this.eventStore) return undefined
     const eventStore = this.eventStore
-    const gatewayOverride = this.gatewayOverride
     const objectStore = this.traceObjectStore ?? undefined
     return async (childRunId, childConfig, start) => {
-      const gw     = gatewayOverride ?? createGateway(childConfig.model)
+      const gw     = this.resolveGateway(childConfig)
       const cursor = new CausalCursor()
       const port   = new RecordingIOPort(new DefaultIOPort(gw), eventStore, childRunId, undefined, objectStore, cursor)
       await port.attach(start)
@@ -86,6 +104,26 @@ export class Milkie {
 
   registerTool(tool: ToolDefinition): void {
     this.extraTools.push(tool)
+  }
+
+  /**
+   * Opt-in load of milkie's built-in/standard agents (package-root `agents/`).
+   * Also registers the read-Trace tools those agents depend on (when an
+   * eventStore is present). Same-id agents loaded afterwards override these.
+   */
+  loadStandardAgents(): string[] {
+    if (this.eventStore) {
+      for (const t of makeTraceTools(this.eventStore, this.traceObjectStore ?? undefined)) {
+        this.registerTool(t)
+      }
+    }
+    const dir = path.join(__dirname, '..', '..', 'agents')   // src/runtime & dist/runtime both → package-root/agents
+    if (!fs.existsSync(dir)) return []
+    const loaded: string[] = []
+    for (const f of fs.readdirSync(dir)) {
+      if (f.endsWith('.md')) loaded.push(this.loadAgentFile(path.join(dir, f)).agentId)
+    }
+    return loaded
   }
 
   loadAgentFile(filePath: string): AgentConfig {
@@ -181,7 +219,7 @@ export class Milkie {
       throw new Error(`Agent not found: "${request.agentId}". Call registerAgent() or loadAgentFile() first.`)
     }
 
-    const gateway  = this.gatewayOverride ?? createGateway(config.model)
+    const gateway  = this.resolveGateway(config)
     const contextId = request.contextId ?? uuid()
 
     // Check for an existing context checkpoint (multi-turn continuation).
@@ -200,6 +238,7 @@ export class Milkie {
     }
 
     const agentRunId = uuid()
+    const runtimeConfig = { ...config, model: this.resolveModel(config) }
     const childRecorderFactory = this.trajectoryStore
       ? (childConfig: AgentConfig, childContextId: string, childTraceId: string) =>
         this.trajectoryStore!.makeRecorder({
@@ -224,7 +263,7 @@ export class Milkie {
     const makeChildPort = this.buildMakeChildPort()
 
     const runtime = new AgentRuntime({
-      config,
+      config: runtimeConfig,
       goal:            request.goal,
       input:           request.input,
       variables:       request.variables,  // #82: per-turn variables → turn-context region
@@ -283,9 +322,10 @@ export class Milkie {
       throw new Error(`Checkpoint not found: "${checkpointId}"`)
     }
 
-    const gateway = this.gatewayOverride ?? createGateway(config.model)
+    const gateway = this.resolveGateway(config)
     const contextId = checkpoint.meta.contextId ?? uuid()
     const agentRunId = checkpoint.meta.agentRunId
+    const runtimeConfig = { ...config, model: this.resolveModel(config) }
     const childRecorderFactory = this.trajectoryStore
       ? (childConfig: AgentConfig, childContextId: string, childTraceId: string) =>
         this.trajectoryStore!.makeRecorder({
@@ -311,7 +351,7 @@ export class Milkie {
     const causalCursor = new CausalCursor()
 
     const runtime = new AgentRuntime({
-      config,
+      config: runtimeConfig,
       goal,
       input,
       agentRunId,
@@ -390,7 +430,7 @@ export class Milkie {
     }
 
     const cache  = CacheIndex.fromEvents(events)
-    const inner  = new DefaultIOPort(this.gatewayOverride ?? createGateway(config.model))
+    const inner  = new DefaultIOPort(this.resolveGateway(config))
     const ioPort = new ReplayingIOPort(cache, inner)
 
     const recorder = new InMemoryRecorder(undefined, config.agentId)
@@ -433,8 +473,9 @@ export class Milkie {
       },
     }
 
+    const replayRuntimeConfig = { ...config, model: this.resolveModel(config) }
     const runtime = new AgentRuntime({
-      config,
+      config: replayRuntimeConfig,
       goal:            snapshot.goal,
       input:           snapshot.input,
       contextId:       snapshot.contextId,
@@ -509,12 +550,12 @@ export class Milkie {
     return {
       agentId:      config.agentId,
       agentVersion: config.version,
-      model: {
+      model: config.model ? {
         provider: config.model.provider,
         model:    config.model.model,
         adapter:  config.model.adapter,
         baseUrl:  config.model.baseUrl,
-      },
+      } : undefined,
       tools,
       toolboxes: Object.fromEntries(
         Object.entries(config.toolboxes ?? {}).map(([name, version]) => [name, { version }]),
@@ -533,8 +574,8 @@ export class Milkie {
     }
 
     const model = data['model'] as Record<string, string> | undefined
-    if (!model?.provider || !model?.model || !model?.adapter) {
-      throw new Error('Agent config must have model.provider, model.model, model.adapter')
+    if (model && (!model.provider || !model.model || !model.adapter)) {
+      throw new Error('Agent config model must have provider, model, adapter')
     }
 
     const agentId =
@@ -547,12 +588,12 @@ export class Milkie {
       version:      (data['version'] as string | undefined) ?? '0.0.0',
       systemPrompt,
       fsm:          fsm as FSMDefinition,
-      model: {
+      model: model ? {
         provider: model['provider']!,
         model:    model['model']!,
         adapter:  model['adapter']!,
         baseUrl:  model['baseUrl'] as string | undefined,
-      },
+      } : undefined,
       toolboxes:  data['toolboxes']  as Record<string, string> | undefined,
       skills:     data['skills']     as Record<string, string> | undefined,
       skillInstructions: data['skillInstructions'] as Record<string, string> | undefined,
