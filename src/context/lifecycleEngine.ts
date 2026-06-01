@@ -103,6 +103,32 @@ export function makeWmRegion(
   }
 }
 
+// #82/#83: shared compact `key: value` renderer. Sorted keys → byte-identical output
+// for the same vars (deterministic, replay-friendly); non-string values JSON-encoded.
+function formatVarsBlock(title: string, content: unknown): Message {
+  const vars = content as Record<string, JSONValue>
+  const lines = Object.keys(vars).sort().map((k) => {
+    const v = vars[k]
+    return `${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`
+  })
+  return {
+    role:    'user',
+    content: [{ type: 'text', text: `${title}\n${lines.join('\n')}` }],
+  }
+}
+
+export function makeSessionContextRegion(variables: Record<string, JSONValue>): RegionInput {
+  return {
+    target:    'message',
+    section:   'session-context',
+    intraTurn: 'turn-persistent',
+    interTurn: 'session-persistent',
+    stability: 'session-stable',
+    content:   variables,
+    format:    (c): Message => formatVarsBlock('--- Session Context ---', c),
+  }
+}
+
 export function makeTurnContextRegion(variables: Record<string, JSONValue>): RegionInput {
   return {
     target:    'message',
@@ -111,19 +137,7 @@ export function makeTurnContextRegion(variables: Record<string, JSONValue>): Reg
     interTurn: 'turn-local',
     stability: 'volatile',
     content:   variables,
-    // Sorted keys → byte-identical render for the same variables (deterministic,
-    // replay-friendly). Compact `key: value`; non-string values JSON-encoded.
-    format:    (c): Message => {
-      const vars = c as Record<string, JSONValue>
-      const lines = Object.keys(vars).sort().map((k) => {
-        const v = vars[k]
-        return `${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`
-      })
-      return {
-        role:    'user',
-        content: [{ type: 'text', text: `--- Turn Context ---\n${lines.join('\n')}` }],
-      }
-    },
+    format:    (c): Message => formatVarsBlock('--- Turn Context ---', c),
   }
 }
 

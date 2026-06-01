@@ -752,3 +752,105 @@ describe('#81 readable tool payload through a run', () => {
     expect(res.output).toEqual({ results: ['result1'] })
   })
 })
+
+describe('#83 session-context variables', () => {
+  class CaptureGateway implements IModelGateway {
+    captured: ModelRequest[] = []
+    async complete(req: ModelRequest): Promise<ModelResponse> {
+      this.captured.push(req)
+      return textResponse('done')
+    }
+    async *stream(_req: ModelRequest): AsyncIterable<never> { yield* [] }
+  }
+
+  const msgText = (req: ModelRequest): string =>
+    req.messages.flatMap(m => m.content).map(c => (c.type === 'text' ? c.text : '')).join('\n')
+
+  const sectionText = (req: ModelRequest, marker: string): string => {
+    const m = req.messages.find(m => m.content.some(c => c.type === 'text' && c.text.includes(marker)))
+    return m ? m.content.map(c => (c.type === 'text' ? c.text : '')).join('') : ''
+  }
+
+  it('injects sessionVariables into messages, never into the system block', async () => {
+    const gw = new CaptureGateway()
+    await new AgentRuntime({
+      config:     makeConfig(),
+      goal:       'g',
+      input:      'hi',
+      sessionVariables: { workspace_instructions: '用中文', session_id: 's-9' },
+      stateStore: new MemoryStore(),
+      recorder:   new InMemoryRecorder(),
+      ioPort:     new DefaultIOPort(gw),
+    }).run('hi')
+
+    const req = gw.captured[0]!
+    expect(msgText(req)).toContain('Session Context')
+    expect(msgText(req)).toContain('workspace_instructions')
+    expect(msgText(req)).toContain('用中文')
+    expect(msgText(req)).toContain('session_id')
+    // history-cache safety: session vars must never enter the system prefix
+    expect(req.system ?? '').not.toContain('workspace_instructions')
+    expect(req.system ?? '').not.toContain('用中文')
+  })
+
+  it('turn variables override same-named session vars (O2), rendered once', async () => {
+    const gw = new CaptureGateway()
+    await new AgentRuntime({
+      config:     makeConfig(),
+      goal:       'g',
+      input:      'hi',
+      sessionVariables: { workspace_instructions: 'OLD', session_id: 's-9' },
+      variables:        { workspace_instructions: 'NEW', current_time: 'T1' },
+      stateStore: new MemoryStore(),
+      recorder:   new InMemoryRecorder(),
+      ioPort:     new DefaultIOPort(gw),
+    }).run('hi')
+
+    const req = gw.captured[0]!
+    const session = sectionText(req, 'Session Context')
+    const turn    = sectionText(req, 'Turn Context')
+
+    // session-context keeps un-overridden keys, drops the overridden one
+    expect(session).toContain('session_id')
+    expect(session).not.toContain('OLD')
+    expect(session).not.toContain('workspace_instructions')
+    // turn-context carries the override
+    expect(turn).toContain('NEW')
+    // overall the overridden key renders exactly once (in turn-context)
+    expect((msgText(req).match(/workspace_instructions/g) ?? []).length).toBe(1)
+  })
+
+  it('adds no session-context message when no sessionVariables supplied', async () => {
+    const gw = new CaptureGateway()
+    await new AgentRuntime({
+      config:     makeConfig(),
+      goal:       'g',
+      input:      'hi',
+      stateStore: new MemoryStore(),
+      recorder:   new InMemoryRecorder(),
+      ioPort:     new DefaultIOPort(gw),
+    }).run('hi')
+
+    expect(msgText(gw.captured[0]!)).not.toContain('Session Context')
+  })
+
+  it('Milkie.invoke reads stored context vars and makes them visible to the agent', async () => {
+    const gw = new CaptureGateway()
+    const milkie = new Milkie({ stateStore: new MemoryStore(), gateway: gw })
+    milkie.registerAgent(makeConfig({
+      agentId: 'ctx-agent',
+      fsm: { states: [{ name: 'react', type: 'llm' }] },
+    }))
+
+    // a background writer stores a var out-of-band, before any invoke
+    await milkie.setContextVar('ctx-1', 'workspace_instructions', '用中文')
+
+    await milkie.invoke({ agentId: 'ctx-agent', goal: 'g', input: 'hi', contextId: 'ctx-1' })
+
+    const req = gw.captured[0]!
+    expect(msgText(req)).toContain('Session Context')
+    expect(msgText(req)).toContain('workspace_instructions')
+    expect(msgText(req)).toContain('用中文')
+    expect(req.system ?? '').not.toContain('workspace_instructions')
+  })
+})

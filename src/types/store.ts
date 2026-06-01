@@ -5,6 +5,11 @@ export interface IStateStore {
   get(key: string): Promise<unknown>
   delete(key: string): Promise<void>
   exists(key: string): Promise<boolean>
+  /**
+   * #83: enumerate entries whose key starts with `prefix` (expired entries skipped).
+   * Needed for `listContextVars` and for reading all of a context's vars at invoke time.
+   */
+  list(prefix: string): Promise<Array<{ key: string; value: unknown }>>
 }
 
 export interface AgentCheckpoint {

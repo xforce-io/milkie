@@ -339,7 +339,7 @@ alfred 要"枚举一个会话有哪些变量"，P0。
 
 1. `IStateStore.list(prefix)` + 三实现（Memory/SQLite/Redis）+ 单测（红：list 不存在 → 绿）。
 2. `makeSessionContextRegion`（message 段，`section: 'session-context'`，`history` 之后、`turn-context` 之前；`session-stable` / `session-persistent`）+ section 注册 + region 层单测。
-3. **cache breakpoint 改到 history 末**（让 `system + history` 进 cache，session-context 变化只重算其后）+ 单测：仅 session vars 变、history 不变时 history 段渲染逐字节稳定。
+3. ~~cache breakpoint 改到 history 末~~ → **拆为独立 follow-up**。#83 核心不依赖它：session-context 是 message target、不进 system block，当前 `system-end` cache 天然不被 session vars 破坏（已由 `sessionContextRegion` 测试"never touches the system block"锁定）。`history-end` breakpoint 是横切 provider 层优化（assemble 输出 + ModelRequest 类型 + 2 个 adapter），影响所有请求，与 context vars 功能正交，单独 issue 处理。O1 的架构正确性（session-context 放 history 后）在 step 2 已兑现。
 4. `AgentRuntime.setSessionContext(sessionVars)` + run 接线 + 端到端单测（注入可见）。
 5. `Milkie` 4 个 API（get/set/delete/list ContextVar）+ key 编解码 + 单测。
 6. `Milkie.invoke` 入口 `list('context:{id}:var:')` 快照读取 + 叠加去重（O2：turn 覆盖 session）+ 端到端。
