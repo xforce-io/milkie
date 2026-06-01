@@ -25,6 +25,7 @@ import { ReplayError } from '../trace/ReplayError.js'
 import { ReplayDivergenceError } from '../trace/ReplayDivergenceError.js'
 import { extractRunSnapshot } from '../trace/RunSnapshot.js'
 import type { ToolEmittedPayload } from '../trace/types.js'
+import { makeTraceTools } from '../tools/trace.js'
 
 export interface MilkieOptions {
   stateStore?:      IStateStore
@@ -103,6 +104,26 @@ export class Milkie {
 
   registerTool(tool: ToolDefinition): void {
     this.extraTools.push(tool)
+  }
+
+  /**
+   * Opt-in load of milkie's built-in/standard agents (package-root `agents/`).
+   * Also registers the read-Trace tools those agents depend on (when an
+   * eventStore is present). Same-id agents loaded afterwards override these.
+   */
+  loadStandardAgents(): string[] {
+    if (this.eventStore) {
+      for (const t of makeTraceTools(this.eventStore, this.traceObjectStore ?? undefined)) {
+        this.registerTool(t)
+      }
+    }
+    const dir = path.join(__dirname, '..', '..', 'agents')   // src/runtime & dist/runtime both → package-root/agents
+    if (!fs.existsSync(dir)) return []
+    const loaded: string[] = []
+    for (const f of fs.readdirSync(dir)) {
+      if (f.endsWith('.md')) loaded.push(this.loadAgentFile(path.join(dir, f)).agentId)
+    }
+    return loaded
   }
 
   loadAgentFile(filePath: string): AgentConfig {

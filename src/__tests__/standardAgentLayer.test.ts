@@ -1,5 +1,6 @@
 // src/__tests__/standardAgentLayer.test.ts
 import { Milkie } from '../runtime/Milkie'
+import { MemoryEventStore } from '../trace/MemoryEventStore'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -103,5 +104,19 @@ describe('#89 resolveGateway: no-model agent', () => {
     // the code actually does and make the test assert it.
     await expect(milkie.invoke({ agentId: 'nomodel', goal: 'g', input: 'i' }))
       .rejects.toThrow(/gateway.*defaultModel|no model/i)
+  })
+})
+
+import type { ToolDefinition } from '../types/tool'
+
+describe('#89 loadStandardAgents', () => {
+  it('loads the built-in diagnoser and registers the read-Trace tools', () => {
+    const milkie = new Milkie({ eventStore: new MemoryEventStore() })
+    const ids = milkie.loadStandardAgents()
+    expect(ids).toContain('diagnoser')
+    expect(milkie.getAgent('diagnoser')).toBeDefined()
+    expect(milkie.getAgent('diagnoser')!.model).toBeUndefined()
+    const toolNames = (milkie as unknown as { extraTools: Array<{ name: string }> }).extraTools.map(t => t.name)
+    expect(toolNames).toEqual(expect.arrayContaining(['get_run_io', 'get_execution']))
   })
 })
