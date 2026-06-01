@@ -76,7 +76,7 @@ export class Milkie {
     const gatewayOverride = this.gatewayOverride
     const objectStore = this.traceObjectStore ?? undefined
     return async (childRunId, childConfig, start) => {
-      const gw     = gatewayOverride ?? createGateway(childConfig.model)
+      const gw     = gatewayOverride ?? createGateway(childConfig.model!)
       const cursor = new CausalCursor()
       const port   = new RecordingIOPort(new DefaultIOPort(gw), eventStore, childRunId, undefined, objectStore, cursor)
       await port.attach(start)
@@ -181,7 +181,7 @@ export class Milkie {
       throw new Error(`Agent not found: "${request.agentId}". Call registerAgent() or loadAgentFile() first.`)
     }
 
-    const gateway  = this.gatewayOverride ?? createGateway(config.model)
+    const gateway  = this.gatewayOverride ?? createGateway(config.model!)
     const contextId = request.contextId ?? uuid()
 
     // Check for an existing context checkpoint (multi-turn continuation).
@@ -281,7 +281,7 @@ export class Milkie {
       throw new Error(`Checkpoint not found: "${checkpointId}"`)
     }
 
-    const gateway = this.gatewayOverride ?? createGateway(config.model)
+    const gateway = this.gatewayOverride ?? createGateway(config.model!)
     const contextId = checkpoint.meta.contextId ?? uuid()
     const agentRunId = checkpoint.meta.agentRunId
     const childRecorderFactory = this.trajectoryStore
@@ -388,7 +388,7 @@ export class Milkie {
     }
 
     const cache  = CacheIndex.fromEvents(events)
-    const inner  = new DefaultIOPort(this.gatewayOverride ?? createGateway(config.model))
+    const inner  = new DefaultIOPort(this.gatewayOverride ?? createGateway(config.model!))
     const ioPort = new ReplayingIOPort(cache, inner)
 
     const recorder = new InMemoryRecorder(undefined, config.agentId)
@@ -508,10 +508,10 @@ export class Milkie {
       agentId:      config.agentId,
       agentVersion: config.version,
       model: {
-        provider: config.model.provider,
-        model:    config.model.model,
-        adapter:  config.model.adapter,
-        baseUrl:  config.model.baseUrl,
+        provider: config.model!.provider,
+        model:    config.model!.model,
+        adapter:  config.model!.adapter,
+        baseUrl:  config.model!.baseUrl,
       },
       tools,
       toolboxes: Object.fromEntries(
@@ -531,8 +531,8 @@ export class Milkie {
     }
 
     const model = data['model'] as Record<string, string> | undefined
-    if (!model?.provider || !model?.model || !model?.adapter) {
-      throw new Error('Agent config must have model.provider, model.model, model.adapter')
+    if (model && (!model.provider || !model.model || !model.adapter)) {
+      throw new Error('Agent config model must have provider, model, adapter')
     }
 
     const agentId =
@@ -545,12 +545,12 @@ export class Milkie {
       version:      (data['version'] as string | undefined) ?? '0.0.0',
       systemPrompt,
       fsm:          fsm as FSMDefinition,
-      model: {
+      model: model ? {
         provider: model['provider']!,
         model:    model['model']!,
         adapter:  model['adapter']!,
         baseUrl:  model['baseUrl'] as string | undefined,
-      },
+      } : undefined,
       toolboxes:  data['toolboxes']  as Record<string, string> | undefined,
       skills:     data['skills']     as Record<string, string> | undefined,
       skillInstructions: data['skillInstructions'] as Record<string, string> | undefined,

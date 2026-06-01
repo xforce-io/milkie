@@ -26,7 +26,7 @@ export interface AgentConfig {
   version:      string
   systemPrompt: string
   fsm:          FSMDefinition
-  model:        ModelConfig
+  model?:       ModelConfig
   toolboxes?:   Record<string, string>
   skills?:      Record<string, string>
   skillInstructions?: Record<string, string>
