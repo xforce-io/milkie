@@ -1,4 +1,4 @@
-import type { ModelRequest, ModelResponse } from '../types/model.js'
+import type { ModelRequest, ModelResponse, ModelEvent } from '../types/model.js'
 import type { IIOPort } from '../runtime/IOPort.js'
 import type { IEventStore } from './EventStore.js'
 import type {
@@ -147,7 +147,7 @@ export class RecordingIOPort implements IIOPort {
     })
   }
 
-  async invokeLLM(request: ModelRequest): Promise<ModelResponse> {
+  async invokeLLM(request: ModelRequest, onEvent?: (e: ModelEvent) => void): Promise<ModelResponse> {
     await this.flushPendingNondet()
     const requestHash = hashModelRequest(request)
     const reqEventId  = this.inner.uuid()
@@ -163,7 +163,7 @@ export class RecordingIOPort implements IIOPort {
     })
     if (this.cursor) this.cursor.lastIoEventId = reqEventId
 
-    const response = await this.inner.invokeLLM(request)
+    const response = await this.inner.invokeLLM(request, onEvent)
 
     const respEventId = this.inner.uuid()
     await this.store.append({
@@ -191,9 +191,13 @@ export class RecordingIOPort implements IIOPort {
     toolName: string,
     input: unknown,
     execute: () => Promise<unknown>,
+    opts?: { toolCallId?: string },
   ): Promise<unknown> {
     await this.flushPendingNondet()
     const requestHash = hashToolCall(toolName, input)
+    // #81: only stamp toolCallId when supplied, so id-less callers stay clean and
+    // old traces (no id) read back identically.
+    const idField = opts?.toolCallId ? { toolCallId: opts.toolCallId } : {}
     const reqEventId  = this.inner.uuid()
     await this.store.append({
       id:        reqEventId,
@@ -203,12 +207,12 @@ export class RecordingIOPort implements IIOPort {
       // edge 1: this call was decided by the most recent llm.responded (the frame carrying toolCalls).
       ...(this.cursor?.lastLlmRespondedId ? { causedBy: this.cursor.lastLlmRespondedId } : {}),
       timestamp: this.inner.now(),
-      payload:   { toolName, input, requestHash } satisfies ToolRequestedPayload,
+      payload:   { toolName, ...idField, input, requestHash } satisfies ToolRequestedPayload,
     })
     if (this.cursor) this.cursor.lastIoEventId = reqEventId
 
     try {
-      const output = await this.inner.invokeTool(toolName, input, execute)
+      const output = await this.inner.invokeTool(toolName, input, execute, opts)
       const meta = await this.outputMetadata(output)
       const respEventId = this.inner.uuid()
       await this.store.append({
@@ -218,7 +222,7 @@ export class RecordingIOPort implements IIOPort {
         actor:     this.actor,
         causedBy:  reqEventId,
         timestamp: this.inner.now(),
-        payload:   { toolName, output, requestHash, ...meta } satisfies ToolRespondedPayload,
+        payload:   { toolName, ...idField, status: 'ok', output, requestHash, ...meta } satisfies ToolRespondedPayload,
       })
       // tool.responded is a turn terminator for the next llm.requested (edge 2).
       // Under a parallel tool batch, several tool.responded race to write this; the
@@ -247,7 +251,7 @@ export class RecordingIOPort implements IIOPort {
         actor:     this.actor,
         causedBy:  reqEventId,
         timestamp: this.inner.now(),
-        payload:   { toolName, error: errorPayload, requestHash } satisfies ToolRespondedPayload,
+        payload:   { toolName, ...idField, status: 'error', error: errorPayload, requestHash } satisfies ToolRespondedPayload,
       })
       // An errored tool.responded still terminates the turn — the next llm.requested follows it.
       if (this.cursor) {

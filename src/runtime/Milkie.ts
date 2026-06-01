@@ -240,6 +240,7 @@ export class Milkie {
       childRecorderFactory,
       makeChildPort,
       causalCursor,
+      ...(request.onModelEvent ? { onModelEvent: request.onModelEvent } : {}),
     })
 
     if (restoredCheckpoint) {

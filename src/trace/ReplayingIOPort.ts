@@ -1,5 +1,5 @@
 import type { IIOPort } from '../runtime/IOPort.js'
-import type { ModelRequest, ModelResponse } from '../types/model.js'
+import type { ModelRequest, ModelResponse, ModelEvent } from '../types/model.js'
 import { CacheIndex, CacheIndexEmptyError } from './CacheIndex.js'
 import { hashModelRequest, hashToolCall } from './hash.js'
 import { ReplayDivergenceError } from './ReplayDivergenceError.js'
@@ -17,7 +17,7 @@ export class ReplayingIOPort implements IIOPort {
     private readonly inner: IIOPort,
   ) {}
 
-  async invokeLLM(request: ModelRequest): Promise<ModelResponse> {
+  async invokeLLM(request: ModelRequest, _onEvent?: (e: ModelEvent) => void): Promise<ModelResponse> {
     const hash = hashModelRequest(request)
     try {
       return this.cache.consumeLLM(hash)

@@ -1,3 +1,5 @@
+import type { ModelEvent } from './model.js'
+
 export type JSONValue = string | number | boolean | null | JSONValue[] | { [k: string]: JSONValue }
 export type JSONObject = Record<string, JSONValue>
 export type JSONSchema = Record<string, unknown>
@@ -25,6 +27,8 @@ export interface AgentInvokeRequest {
   /** #82: per-turn variables injected into the turn-context region for this turn
    *  only (not persisted). Same shape #83 will reuse for persistent session vars. */
   variables?: Record<string, JSONValue>
+  /** When provided, the run streams token-level ModelEvents to this callback. */
+  onModelEvent?: (e: ModelEvent) => void
 }
 
 export interface AgentResult {
