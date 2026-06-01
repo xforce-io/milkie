@@ -32,7 +32,7 @@ export function makeTraceTools(
   }
   const get_execution: ToolDefinition = {
     name: 'get_execution',
-    description: '取被诊断 run 的执行投影:步骤序列(LLM/工具调用、工具 query、命中证据、region 组成)。入参 { runId }。',
+    description: '取被诊断 run 的执行投影:步骤序列(LLM/工具调用、工具 query、命中证据、region 组成)。steps 按执行顺序排列,下标从 0 起。入参 { runId }。',
     inputSchema: { type: 'object', properties: { runId: { type: 'string' } }, required: ['runId'] },
     handler: async (input) => {
       const { runId } = input as { runId: string }
