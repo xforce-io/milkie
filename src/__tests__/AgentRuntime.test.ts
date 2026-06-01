@@ -608,6 +608,108 @@ describe('#31 guard evaluation capture', () => {
   })
 })
 
+describe('#82 per-turn variables', () => {
+  class CaptureGateway implements IModelGateway {
+    captured: ModelRequest[] = []
+    async complete(req: ModelRequest): Promise<ModelResponse> {
+      this.captured.push(req)
+      return textResponse('done')
+    }
+    async *stream(_req: ModelRequest): AsyncIterable<never> { yield* [] }
+  }
+
+  it('injects variables into the messages, never into the system block', async () => {
+    const gw = new CaptureGateway()
+    const runtime = new AgentRuntime({
+      config:     makeConfig(),
+      goal:       'g',
+      input:      'hi',
+      variables:  { current_time: '2026-06-01T00:00:00Z', workspace: 'demo' },
+      stateStore: new MemoryStore(),
+      recorder:   new InMemoryRecorder(),
+      ioPort:     new DefaultIOPort(gw),
+    })
+
+    await runtime.run('hi')
+
+    const req = gw.captured[0]!
+    const msgText = req.messages
+      .flatMap(m => m.content)
+      .map(c => (c.type === 'text' ? c.text : ''))
+      .join('\n')
+    expect(msgText).toContain('current_time')
+    expect(msgText).toContain('2026-06-01T00:00:00Z')
+    expect(msgText).toContain('demo')
+    // prefix-cache safety: per-turn variables must never enter the system prefix
+    expect(req.system ?? '').not.toContain('current_time')
+    expect(req.system ?? '').not.toContain('demo')
+  })
+
+  it('keeps the system block byte-identical when only variables differ', async () => {
+    const systemFor = async (variables: Record<string, string>): Promise<string> => {
+      const gw = new CaptureGateway()
+      await new AgentRuntime({
+        config:     makeConfig(),
+        goal:       'g',
+        input:      'hi',
+        variables,
+        stateStore: new MemoryStore(),
+        recorder:   new InMemoryRecorder(),
+        ioPort:     new DefaultIOPort(gw),
+      }).run('hi')
+      return gw.captured[0]!.system ?? ''
+    }
+
+    const s1 = await systemFor({ current_time: 'T1' })
+    const s2 = await systemFor({ current_time: 'T2' })
+    expect(s1).toBe(s2)
+  })
+
+  it('adds no turn-context message when no variables are supplied', async () => {
+    const gw = new CaptureGateway()
+    await new AgentRuntime({
+      config:     makeConfig(),
+      goal:       'g',
+      input:      'hi',
+      stateStore: new MemoryStore(),
+      recorder:   new InMemoryRecorder(),
+      ioPort:     new DefaultIOPort(gw),
+    }).run('hi')
+
+    const req = gw.captured[0]!
+    const msgText = req.messages
+      .flatMap(m => m.content)
+      .map(c => (c.type === 'text' ? c.text : ''))
+      .join('\n')
+    expect(msgText).not.toContain('--- Turn Context ---')
+  })
+
+  it('Milkie.invoke forwards request.variables into the turn', async () => {
+    const gw = new CaptureGateway()
+    const milkie = new Milkie({ stateStore: new MemoryStore(), gateway: gw })
+    milkie.registerAgent(makeConfig({
+      agentId: 'var-agent',
+      fsm: { states: [{ name: 'react', type: 'llm' }] },
+    }))
+
+    await milkie.invoke({
+      agentId:   'var-agent',
+      goal:      'g',
+      input:     'hi',
+      variables: { session_id: 'sess-9', foo: 'BAR' },
+    })
+
+    const req = gw.captured[0]!
+    const msgText = req.messages
+      .flatMap(m => m.content)
+      .map(c => (c.type === 'text' ? c.text : ''))
+      .join('\n')
+    expect(msgText).toContain('session_id')
+    expect(msgText).toContain('sess-9')
+    expect(msgText).toContain('BAR')
+  })
+})
+
 describe('#81 readable tool payload through a run', () => {
   it('stamps the LLM tool_use id onto tool.requested/responded so they pair', async () => {
     const eventStore = new MemoryEventStore()

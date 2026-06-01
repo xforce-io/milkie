@@ -15,6 +15,7 @@ export type SystemSection =
 
 export type MessageSection =
   | 'history'
+  | 'turn-context'   // #82: per-turn injected variables (volatile, between history and current-turn)
   | 'current-turn'
   | 'scratchpad'
 

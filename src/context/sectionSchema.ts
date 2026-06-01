@@ -26,6 +26,8 @@ export const SECTION_SCHEMA: {
   ],
   message: [
     'history',
+    // #82: per-turn variables — after stable history, before the volatile current turn.
+    'turn-context',
     'current-turn',
     'scratchpad',
   ],

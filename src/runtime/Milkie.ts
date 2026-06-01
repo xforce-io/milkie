@@ -227,6 +227,7 @@ export class Milkie {
       config,
       goal:            request.goal,
       input:           request.input,
+      variables:       request.variables,  // #82: per-turn variables → turn-context region
       contextId,
       agentRunId,
       stateStore:      this.stateStore,

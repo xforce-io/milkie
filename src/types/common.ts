@@ -24,6 +24,9 @@ export interface AgentInvokeRequest {
   goal: string
   input: string
   contextId?: string
+  /** #82: per-turn variables injected into the turn-context region for this turn
+   *  only (not persisted). Same shape #83 will reuse for persistent session vars. */
+  variables?: Record<string, JSONValue>
   /** When provided, the run streams token-level ModelEvents to this callback. */
   onModelEvent?: (e: ModelEvent) => void
 }
