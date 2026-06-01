@@ -218,6 +218,50 @@ async function handleExecution(
   sendJson(res, 200, buildExecutionProjection(events, { regionContent }))
 }
 
+// Manual diagnosis: invoke the built-in `diagnoser` agent against an
+// already-recorded target run. The diagnosed run and the diagnosing run are
+// two distinct runIds (by design) — the diagnoser only *reads* the target's
+// trace via get_run_io / get_execution tools. Its final output is one JSON
+// blob ({ verdict, firstBreak, explanation }); we parse it into the response,
+// degrading to { error:'unparseable', raw } when the model returns non-JSON.
+async function handleDiagnose(
+  res: ServerResponse, s: ServerState, runId: string,
+): Promise<void> {
+  const events = await s.eventStore.readByRunId(runId)
+  if (events.length === 0) {
+    sendJson(res, 404, { error: 'run not found' })
+    return
+  }
+  const result = await s.milkie.invoke({
+    agentId:   'diagnoser',
+    goal:      runId,
+    input:     runId,
+    contextId: `diagnose:${runId}`,
+  })
+  // A diagnosis run can fail without throwing — the runtime turns it into an
+  // AgentResult with status 'error'/'interrupted'. Don't pass that off as a
+  // normal verdict; surface the failure (200 + error field, same shape as
+  // unparseable so the frontend's error branch renders it uniformly).
+  if (result.status !== 'completed') {
+    sendJson(res, 200, { error: 'diagnose-failed', status: result.status, diagnoseRunId: result.agentRunId })
+    return
+  }
+  const raw = result.output
+  try {
+    const parsed = JSON.parse(raw)
+    // The contract is exactly one object. JSON.parse happily accepts 42, true,
+    // null, "str", [1,2,3] — spreading those into the response would produce a
+    // malformed object (e.g. array → "0","1","2" index keys). Treat any
+    // non-object as unparseable so there's a single fallback exit.
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('not an object')
+    }
+    sendJson(res, 200, { ...parsed, diagnoseRunId: result.agentRunId })
+  } catch {
+    sendJson(res, 200, { error: 'unparseable', raw, diagnoseRunId: result.agentRunId })
+  }
+}
+
 async function handleSourceFetch(
   res: ServerResponse, s: ServerState, relPath: string, linesQuery: string | null,
 ): Promise<void> {
@@ -327,6 +371,11 @@ export async function startServer(config: ServerConfig): Promise<Server> {
       const executionMatch = route.match(/^\/run\/([^/]+)\/execution$/)
       if (req.method === 'GET' && executionMatch) {
         return handleExecution(res, state, decodeURIComponent(executionMatch[1]!))
+      }
+
+      const diagnoseMatch = route.match(/^\/run\/([^/]+)\/diagnose$/)
+      if (req.method === 'POST' && diagnoseMatch) {
+        return handleDiagnose(res, state, decodeURIComponent(diagnoseMatch[1]!))
       }
 
       const sourceMatch = route.match(/^\/source\/(.+)$/)
