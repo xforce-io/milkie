@@ -339,7 +339,9 @@ alfred 要"枚举一个会话有哪些变量"，P0。
 
 1. `IStateStore.list(prefix)` + 三实现（Memory/SQLite/Redis）+ 单测（红：list 不存在 → 绿）。
 2. `makeSessionContextRegion`（message 段，`section: 'session-context'`，`history` 之后、`turn-context` 之前；`session-stable` / `session-persistent`）+ section 注册 + region 层单测。
-3. ~~cache breakpoint 改到 history 末~~ → **拆为独立 follow-up**。#83 核心不依赖它：session-context 是 message target、不进 system block，当前 `system-end` cache 天然不被 session vars 破坏（已由 `sessionContextRegion` 测试"never touches the system block"锁定）。`history-end` breakpoint 是横切 provider 层优化（assemble 输出 + ModelRequest 类型 + 2 个 adapter），影响所有请求，与 context vars 功能正交，单独 issue 处理。O1 的架构正确性（session-context 放 history 后）在 step 2 已兑现。
+3. ~~cache breakpoint 改到 history 末~~ → **评估后决定不做（#102 closed）**。
+   - #83 核心不依赖它：session-context 是 message target、不进 system block，当前 `system-end` cache 天然不被 session vars 破坏（已由 `sessionContextRegion` 测试"never touches the system block"锁定）。
+   - 更关键：**显式 cacheBreakpoint 基本是 Anthropic 专属**（milkie 仅 AnthropicAdapter 翻译）；OpenAI 兼容 / DeepSeek / 多数开源走**自动前缀缓存**，无需标记。#83 真正的 cache 价值是"**前缀稳定性**"（动态内容放 history 后）——这对所有 provider（自动或显式缓存）都已生效，且**不依赖 breakpoint**。`history-end` 显式 breakpoint 仅在主用 Anthropic 时有边际收益、价值局部，故不做。O1 的架构正确性（session-context 放 history 后）在 step 2 已兑现，与是否设 breakpoint 无关。
 4. `AgentRuntime.setSessionContext(sessionVars)` + run 接线 + 端到端单测（注入可见）。
 5. `Milkie` 4 个 API（get/set/delete/list ContextVar）+ key 编解码 + 单测。
 6. `Milkie.invoke` 入口 `list('context:{id}:var:')` 快照读取 + 叠加去重（O2：turn 覆盖 session）+ 端到端。
