@@ -2,6 +2,8 @@ import type { IEventStore } from '../../../src/trace/EventStore'
 import type { ITraceObjectStore } from '../../../src/trace/TraceObjectStore'
 import type { ToolDefinition } from '../../../src/types/tool'
 import type { AgentRunStartedPayload, AgentRunCompletedPayload } from '../../../src/trace/types'
+import { regionReuseCounts } from '../../../src/trace/RegionContextView'
+import { buildExecutionProjection } from '../../../src/trace/diagnostics/buildExecutionProjection'
 
 /**
  * Read-Trace tools for the diagnoser agent: deterministic projections over a
@@ -11,7 +13,7 @@ import type { AgentRunStartedPayload, AgentRunCompletedPayload } from '../../../
  */
 export function makeTraceTools(
   eventStore: IEventStore,
-  _objectStore: ITraceObjectStore,
+  objectStore: ITraceObjectStore,
 ): ToolDefinition[] {
   const get_run_io: ToolDefinition = {
     name: 'get_run_io',
@@ -30,5 +32,21 @@ export function makeTraceTools(
     },
   }
 
-  return [get_run_io]
+  const get_execution: ToolDefinition = {
+    name: 'get_execution',
+    description: '取被诊断 run 的执行投影:步骤序列(LLM/工具调用、工具 query、命中证据、region 组成)。入参 { runId }。',
+    inputSchema: { type: 'object', properties: { runId: { type: 'string' } }, required: ['runId'] },
+    handler: async (input) => {
+      const { runId } = input as { runId: string }
+      const events = await eventStore.readByRunId(runId)
+      const regionContent = new Map<string, string>()
+      for (const h of regionReuseCounts(events).keys()) {
+        const c = await objectStore.getCanonical(h)
+        if (c !== undefined) regionContent.set(h, c)
+      }
+      return buildExecutionProjection(events, { regionContent })
+    },
+  }
+
+  return [get_run_io, get_execution]
 }
