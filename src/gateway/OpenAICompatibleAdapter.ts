@@ -40,14 +40,76 @@ export class OpenAICompatibleAdapter implements IModelGateway {
     const stream = await this.client.chat.completions.create({
       model:    request.model,
       messages: this.convertMessages(request),
-      stream:   true,
+      tools:    request.tools?.map(t => ({
+        type:     'function' as const,
+        function: {
+          name:        t.name,
+          description: t.description,
+          parameters:  t.inputSchema,
+        },
+      })),
+      tool_choice:    request.tools?.length ? 'auto' : undefined,
+      stream:         true,
+      stream_options: { include_usage: true },
     })
 
+    // Accumulate tool_call fragments keyed by their stream `index`.
+    const toolCalls = new Map<number, { id: string; argsBuf: string }>()
+
     for await (const chunk of stream) {
-      const delta = chunk.choices[0]?.delta
-      if (!delta) continue
-      if (delta.content) {
+      const choice = chunk.choices[0]
+      const delta  = choice?.delta
+
+      if (delta?.content) {
         yield { type: 'message_delta', data: { text: delta.content } }
+      }
+
+      for (const tc of delta?.tool_calls ?? []) {
+        const index = tc.index
+        let entry = toolCalls.get(index)
+        if (!entry) {
+          // id 仅在该 index 首片读取（OpenAI 协议保证 id 在首片出现，后续片省略）。
+          const id = tc.id ?? `idx-${index}`
+          entry = { id, argsBuf: '' }
+          toolCalls.set(index, entry)
+          yield { type: 'tool_call_start', data: { toolCallId: id, name: tc.function?.name ?? '' } }
+        }
+        const argsPiece = tc.function?.arguments
+        if (argsPiece) {
+          entry.argsBuf += argsPiece
+          yield { type: 'tool_call_delta', data: { toolCallId: entry.id, delta: argsPiece } }
+        }
+      }
+
+      // finish_reason marks the completion of tool calls — emit done for every
+      // accumulated call, then reset for any subsequent independent batch.
+      if (choice?.finish_reason && toolCalls.size > 0) {
+        for (const entry of toolCalls.values()) {
+          let input: unknown = {}
+          if (entry.argsBuf) {
+            try {
+              input = JSON.parse(entry.argsBuf)
+            } catch {
+              input = {}
+            }
+          }
+          yield { type: 'tool_call_done', data: { toolCallId: entry.id, input } }
+        }
+        toolCalls.clear()
+      }
+
+      const usage = chunk.usage
+      if (usage) {
+        const cachedTokens = (usage as { prompt_tokens_details?: { cached_tokens?: number } })
+          .prompt_tokens_details?.cached_tokens
+        yield {
+          type: 'usage',
+          data: {
+            inputTokens:  usage.prompt_tokens,
+            outputTokens: usage.completion_tokens,
+            ...(cachedTokens !== undefined ? { cacheReadTokens: cachedTokens } : {}),
+          },
+        }
       }
     }
   }

@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from 'uuid'
-import type { ModelRequest, ModelResponse, IModelGateway } from '../types/model.js'
+import type { ModelRequest, ModelResponse, ModelEvent, IModelGateway } from '../types/model.js'
+import { aggregateStream } from '../gateway/StreamAggregator.js'
 
 /**
  * IOPort — the Agent Runtime's declared boundary for non-deterministic
@@ -26,8 +27,18 @@ import type { ModelRequest, ModelResponse, IModelGateway } from '../types/model.
  *     recorded clock / UUID values from the non-determinism log.
  */
 export interface IIOPort {
-  /** Invoke a language model. */
-  invokeLLM(request: ModelRequest): Promise<ModelResponse>
+  /**
+   * Invoke a language model.
+   *
+   * When `onEvent` is provided, the call streams: each `ModelEvent` is
+   * forwarded to `onEvent` as it arrives and the fragments are aggregated into
+   * the resolved `ModelResponse`. When omitted, a single non-streaming
+   * completion is performed.
+   */
+  invokeLLM(
+    request: ModelRequest,
+    onEvent?: (e: ModelEvent) => void,
+  ): Promise<ModelResponse>
 
   /**
    * Invoke a tool. The `execute` thunk is what actually runs the tool's
@@ -58,7 +69,13 @@ export interface IIOPort {
 export class DefaultIOPort implements IIOPort {
   constructor(private readonly gateway: IModelGateway) {}
 
-  invokeLLM(request: ModelRequest): Promise<ModelResponse> {
+  invokeLLM(
+    request: ModelRequest,
+    onEvent?: (e: ModelEvent) => void,
+  ): Promise<ModelResponse> {
+    if (onEvent) {
+      return aggregateStream(this.gateway.stream(request), onEvent)
+    }
     return this.gateway.complete(request)
   }
 

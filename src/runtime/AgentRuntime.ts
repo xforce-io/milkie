@@ -23,7 +23,7 @@ import {
   runInterTurnEngine,
   rehydrateSnapshot,
 } from '../context/lifecycleEngine.js'
-import type { ToolSchema, ModelRequest } from '../types/model.js'
+import type { ToolSchema, ModelRequest, ModelEvent } from '../types/model.js'
 import { ToolRegistry } from '../tools/ToolRegistry.js'
 import { WorkingMemory } from '../store/WorkingMemory.js'
 import { AgentFactory, type AgentSpawnOptions } from './AgentFactory.js'
@@ -54,6 +54,13 @@ export interface AgentRuntimeOptions {
   stateStore:        IStateStore
   recorder:          ITrajectoryRecorder
   ioPort:            IIOPort
+  /**
+   * #80: optional sink for streamed `ModelEvent`s from the main LLM call.
+   * When provided, the main conversation loop's invokeLLM streams and forwards
+   * each event (token / tool-call deltas) here. When omitted, the LLM call runs
+   * in non-streaming (complete) mode and this is never invoked.
+   */
+  onModelEvent?:     (e: ModelEvent) => void
   /**
    * Optional event store for emitting region.added / region.removed /
    * context.boundary.applied events into the live trace stream (so HTML
@@ -97,6 +104,7 @@ export class AgentRuntime {
   private readonly stateStore:       IStateStore
   private readonly recorder:         ITrajectoryRecorder
   private readonly ioPort:           IIOPort
+  private readonly onModelEvent?:    (e: ModelEvent) => void  // #80
   private readonly eventStore?:      import('../trace/EventStore.js').IEventStore
   private readonly traceObjectStore?: ITraceObjectStore
   private readonly replayWmSnapshots?: unknown[]  // SPIKE(#73)
@@ -135,6 +143,7 @@ export class AgentRuntime {
 
   constructor(opts: AgentRuntimeOptions) {
     this.ioPort          = opts.ioPort
+    this.onModelEvent    = opts.onModelEvent
     this.config          = opts.config
     this.goal            = opts.goal
     this.contextId       = opts.contextId ?? this.ioPort.uuid()
@@ -959,7 +968,7 @@ export class AgentRuntime {
         contextEpoch: this.regions.getEpoch(),
       })
 
-      const response = await this.ioPort.invokeLLM(request)
+      const response = await this.ioPort.invokeLLM(request, this.onModelEvent)
 
       this.recorder.recordEvent(llmSpan, 'usage', {
         inputTokens:         response.usage?.inputTokens,

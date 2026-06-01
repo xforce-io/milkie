@@ -1,4 +1,4 @@
-import type { ModelRequest, ModelResponse } from '../types/model.js'
+import type { ModelRequest, ModelResponse, ModelEvent } from '../types/model.js'
 import type { IIOPort } from '../runtime/IOPort.js'
 import type { IEventStore } from './EventStore.js'
 import type {
@@ -147,7 +147,7 @@ export class RecordingIOPort implements IIOPort {
     })
   }
 
-  async invokeLLM(request: ModelRequest): Promise<ModelResponse> {
+  async invokeLLM(request: ModelRequest, onEvent?: (e: ModelEvent) => void): Promise<ModelResponse> {
     await this.flushPendingNondet()
     const requestHash = hashModelRequest(request)
     const reqEventId  = this.inner.uuid()
@@ -163,7 +163,7 @@ export class RecordingIOPort implements IIOPort {
     })
     if (this.cursor) this.cursor.lastIoEventId = reqEventId
 
-    const response = await this.inner.invokeLLM(request)
+    const response = await this.inner.invokeLLM(request, onEvent)
 
     const respEventId = this.inner.uuid()
     await this.store.append({
