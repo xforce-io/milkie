@@ -39,6 +39,20 @@ export class MemoryStore implements IStateStore {
     return true
   }
 
+  async list(prefix: string): Promise<Array<{ key: string; value: unknown }>> {
+    const out: Array<{ key: string; value: unknown }> = []
+    const now = Date.now()
+    for (const [key, entry] of this.store) {
+      if (!key.startsWith(prefix)) continue
+      if (entry.expires && now > entry.expires) {
+        this.store.delete(key)
+        continue
+      }
+      out.push({ key, value: entry.value })
+    }
+    return out
+  }
+
   clear(): void {
     this.store.clear()
   }

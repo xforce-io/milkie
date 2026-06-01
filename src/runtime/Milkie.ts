@@ -4,7 +4,7 @@ import matter from 'gray-matter'
 import fs from 'fs'
 import path from 'path'
 import type { AgentConfig, FSMDefinition, ModelConfig } from '../types/agent.js'
-import type { AgentInvokeRequest, AgentResult } from '../types/common.js'
+import type { AgentInvokeRequest, AgentResult, JSONValue } from '../types/common.js'
 import type { ChildAgentRecord, IStateStore, AgentCheckpoint } from '../types/store.js'
 import type { ToolDefinition } from '../types/tool.js'
 import type { IModelGateway } from '../types/model.js'
@@ -262,11 +262,15 @@ export class Milkie {
     const ioPort = this.wrapIOPort(gateway, agentRunId, causalCursor)
     const makeChildPort = this.buildMakeChildPort()
 
+    // #83: snapshot this context's persistent vars at invoke entry (next-invoke visibility).
+    const sessionVariables = await this.listContextVars(contextId)
+
     const runtime = new AgentRuntime({
       config: runtimeConfig,
       goal:            request.goal,
       input:           request.input,
       variables:       request.variables,  // #82: per-turn variables → turn-context region
+      sessionVariables,                    // #83: persistent session vars → session-context region
       contextId,
       agentRunId,
       stateStore:      this.stateStore,
@@ -533,6 +537,36 @@ export class Milkie {
         await this.stateStore.set(`context:${child.contextId}:interrupt`, true)
       }
     }
+  }
+
+  // ---- #83: session context variables (key contract: context:{id}:var:{name}) ----
+  // Storage handles JSON (de)serialization; this layer only namespaces keys.
+  // The `:var:` segment keeps these isolated from checkpoint/interrupt/children keys.
+
+  private varKey(contextId: string, name: string): string {
+    return `context:${contextId}:var:${name}`
+  }
+
+  async getContextVar(contextId: string, name: string): Promise<JSONValue | undefined> {
+    return (await this.stateStore.get(this.varKey(contextId, name))) as JSONValue | undefined
+  }
+
+  async setContextVar(contextId: string, name: string, value: JSONValue, ttl?: number): Promise<void> {
+    await this.stateStore.set(this.varKey(contextId, name), value, ttl)
+  }
+
+  async deleteContextVar(contextId: string, name: string): Promise<void> {
+    await this.stateStore.delete(this.varKey(contextId, name))
+  }
+
+  async listContextVars(contextId: string): Promise<Record<string, JSONValue>> {
+    const prefix = `context:${contextId}:var:`
+    const entries = await this.stateStore.list(prefix)
+    const out: Record<string, JSONValue> = {}
+    for (const { key, value } of entries) {
+      out[key.slice(prefix.length)] = value as JSONValue
+    }
+    return out
   }
 
   private buildResolvedManifest(config: AgentConfig): ResolvedManifest {

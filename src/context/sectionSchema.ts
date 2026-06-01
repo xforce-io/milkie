@@ -26,6 +26,9 @@ export const SECTION_SCHEMA: {
   ],
   message: [
     'history',
+    // ─── cacheBreakpoint candidate: history end (#83) — system+history 进 cache ───
+    // #83: persistent session vars — after stable history, before per-turn / current turn.
+    'session-context',
     // #82: per-turn variables — after stable history, before the volatile current turn.
     'turn-context',
     'current-turn',

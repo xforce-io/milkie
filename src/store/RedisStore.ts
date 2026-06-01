@@ -78,6 +78,26 @@ export class RedisStore implements IStateStore {
     return count > 0
   }
 
+  async list(prefix: string): Promise<Array<{ key: string; value: unknown }>> {
+    if (!this.client) throw new Error('RedisStore is not initialized')
+    // SCAN (not KEYS) to avoid blocking on large keyspaces.
+    const keys: string[] = []
+    let cursor = '0'
+    do {
+      const [next, batch] = await this.client.scan(cursor, 'MATCH', `${prefix}*`, 'COUNT', 100)
+      cursor = next
+      keys.push(...batch)
+    } while (cursor !== '0')
+    if (keys.length === 0) return []
+    const values = await this.client.mget(keys)
+    const out: Array<{ key: string; value: unknown }> = []
+    keys.forEach((key, i) => {
+      const raw = values[i]
+      if (raw !== null && raw !== undefined) out.push({ key, value: JSON.parse(raw) as unknown })
+    })
+    return out
+  }
+
   async flushdb(): Promise<void> {
     if (!this.client) return
     await this.client.flushdb()

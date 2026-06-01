@@ -16,6 +16,7 @@ import {
   makeSkillRegion,
   makeCurrentTurnRegion,
   makeTurnContextRegion,
+  makeSessionContextRegion,
   makeScratchpadAssistantRegion,
   makeScratchpadToolResultRegion,
   makeStateInstructionsRegion,
@@ -55,6 +56,9 @@ export interface AgentRuntimeOptions {
   /** #82: per-turn variables injected into the volatile turn-context region (message
    *  section, after history, before current-turn). Not persisted; this turn only. */
   variables?:        Record<string, JSONValue>
+  /** #83: persistent session variables (read from store by Milkie.invoke), rendered
+   *  into the session-stable session-context region. turn `variables` override same keys. */
+  sessionVariables?: Record<string, JSONValue>
   stateStore:        IStateStore
   recorder:          ITrajectoryRecorder
   ioPort:            IIOPort
@@ -103,6 +107,7 @@ export class AgentRuntime {
   private readonly config:           AgentConfig
   private readonly goal:             string
   private readonly variables?:       Record<string, JSONValue>  // #82: per-turn injected vars
+  private readonly sessionVariables?: Record<string, JSONValue>  // #83: persistent session vars
   readonly contextId:        string
   private readonly agentRunId:       string
   private readonly parentId?:        string
@@ -152,6 +157,7 @@ export class AgentRuntime {
     this.config          = opts.config
     this.goal            = opts.goal
     this.variables       = opts.variables
+    this.sessionVariables = opts.sessionVariables
     this.contextId       = opts.contextId ?? this.ioPort.uuid()
     this.agentRunId      = opts.agentRunId ?? this.ioPort.uuid()
     this.parentId        = opts.parentId
@@ -421,6 +427,21 @@ export class AgentRuntime {
   private setTurnContext(): void {
     if (this.variables && Object.keys(this.variables).length > 0) {
       this.regions.set('turn-context', makeTurnContextRegion(this.variables))
+    }
+  }
+
+  // #83: inject persistent session vars into the session-stable session-context region
+  // (message section, after history, before turn-context). O2: turn `variables` override
+  // same-named keys — drop them here so they don't render twice.
+  private setSessionContext(): void {
+    if (!this.sessionVariables || Object.keys(this.sessionVariables).length === 0) return
+    const turnKeys = new Set(this.variables ? Object.keys(this.variables) : [])
+    const effective: Record<string, JSONValue> = {}
+    for (const [k, v] of Object.entries(this.sessionVariables)) {
+      if (!turnKeys.has(k)) effective[k] = v
+    }
+    if (Object.keys(effective).length > 0) {
+      this.regions.set('session-context', makeSessionContextRegion(effective))
     }
   }
 
@@ -865,6 +886,7 @@ export class AgentRuntime {
 
     const turnInput = `Goal: ${this.goal}\n\n${input}`
     this.setCurrentTurn(turnInput)
+    this.setSessionContext()
     this.setTurnContext()
     this.turnNumber++
 

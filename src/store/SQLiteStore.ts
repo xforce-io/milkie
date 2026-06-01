@@ -52,6 +52,16 @@ export class SQLiteStore implements IStateStore {
     return result !== undefined
   }
 
+  async list(prefix: string): Promise<Array<{ key: string; value: unknown }>> {
+    // Escape LIKE wildcards in the (normally wildcard-free) prefix for safety.
+    const escaped = prefix.replace(/[\\%_]/g, c => '\\' + c)
+    const stmt = this.db.prepare(
+      "SELECT key, value FROM kv WHERE key LIKE ? ESCAPE '\\' AND (expires IS NULL OR expires > ?)"
+    )
+    const rows = stmt.all(escaped + '%', Date.now()) as Array<{ key: string; value: string }>
+    return rows.map(r => ({ key: r.key, value: JSON.parse(r.value) as unknown }))
+  }
+
   close(): void {
     this.db.close()
   }
