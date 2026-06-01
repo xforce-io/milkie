@@ -7,7 +7,7 @@ import type { IStateStore, AgentCheckpoint, ChildAgentRecord } from '../types/st
 import type { ITrajectoryRecorder, Span } from '../types/trajectory.js'
 import type { ToolDefinition, ToolContext, ToolResult, ToolResultStrategy } from '../types/tool.js'
 import { applyShape, serializeOutput } from './toolResultStrategy.js'
-import type { MessageContent } from '../types/common.js'
+import type { MessageContent, JSONValue } from '../types/common.js'
 import { FSMEngine } from '../fsm/FSMEngine.js'
 import { ContextRegions } from '../context/ContextRegions.js'
 import { assemble, type AssembleScope } from '../context/assemble.js'
@@ -15,6 +15,7 @@ import {
   makeHeaderRegion,
   makeSkillRegion,
   makeCurrentTurnRegion,
+  makeTurnContextRegion,
   makeScratchpadAssistantRegion,
   makeScratchpadToolResultRegion,
   makeStateInstructionsRegion,
@@ -51,6 +52,9 @@ export interface AgentRuntimeOptions {
   contextId?:        string
   agentRunId?:       string  // if provided, use this (allows caller to correlate with recorder meta)
   parentId?:         string
+  /** #82: per-turn variables injected into the volatile turn-context region (message
+   *  section, after history, before current-turn). Not persisted; this turn only. */
+  variables?:        Record<string, JSONValue>
   stateStore:        IStateStore
   recorder:          ITrajectoryRecorder
   ioPort:            IIOPort
@@ -91,6 +95,7 @@ type SkillLoadRequest = {
 export class AgentRuntime {
   private readonly config:           AgentConfig
   private readonly goal:             string
+  private readonly variables?:       Record<string, JSONValue>  // #82: per-turn injected vars
   readonly contextId:        string
   private readonly agentRunId:       string
   private readonly parentId?:        string
@@ -137,6 +142,7 @@ export class AgentRuntime {
     this.ioPort          = opts.ioPort
     this.config          = opts.config
     this.goal            = opts.goal
+    this.variables       = opts.variables
     this.contextId       = opts.contextId ?? this.ioPort.uuid()
     this.agentRunId      = opts.agentRunId ?? this.ioPort.uuid()
     this.parentId        = opts.parentId
@@ -398,6 +404,15 @@ export class AgentRuntime {
 
   private setCurrentTurn(input: string): void {
     this.regions.set('current-turn', makeCurrentTurnRegion(input))
+  }
+
+  // #82: inject per-turn variables into the volatile turn-context region (message
+  // section, after history, before current-turn). Skipped when no variables → no
+  // empty region, and the system prefix stays byte-stable for prefix cache.
+  private setTurnContext(): void {
+    if (this.variables && Object.keys(this.variables).length > 0) {
+      this.regions.set('turn-context', makeTurnContextRegion(this.variables))
+    }
   }
 
   private getCurrentTurn(): string | null {
@@ -841,6 +856,7 @@ export class AgentRuntime {
 
     const turnInput = `Goal: ${this.goal}\n\n${input}`
     this.setCurrentTurn(turnInput)
+    this.setTurnContext()
     this.turnNumber++
 
     try {

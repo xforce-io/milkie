@@ -9,7 +9,7 @@
 
 import type { ContextRegions } from './ContextRegions'
 import type { Region, RegionInput, RegionSnapshot } from './Region'
-import type { Message, MessageContent } from '../types/common.js'
+import type { Message, MessageContent, JSONValue } from '../types/common.js'
 import type { ToolSchema } from '../types/model.js'
 
 interface ScratchAssistantContent {
@@ -100,6 +100,30 @@ export function makeWmRegion(
     content:   { data: sortedData, log },
     format:    (c) =>
       '\n--- Working Memory ---\n' + JSON.stringify(c, null, 2),
+  }
+}
+
+export function makeTurnContextRegion(variables: Record<string, JSONValue>): RegionInput {
+  return {
+    target:    'message',
+    section:   'turn-context',
+    intraTurn: 'turn-persistent',
+    interTurn: 'turn-local',
+    stability: 'volatile',
+    content:   variables,
+    // Sorted keys → byte-identical render for the same variables (deterministic,
+    // replay-friendly). Compact `key: value`; non-string values JSON-encoded.
+    format:    (c): Message => {
+      const vars = c as Record<string, JSONValue>
+      const lines = Object.keys(vars).sort().map((k) => {
+        const v = vars[k]
+        return `${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`
+      })
+      return {
+        role:    'user',
+        content: [{ type: 'text', text: `--- Turn Context ---\n${lines.join('\n')}` }],
+      }
+    },
   }
 }
 
