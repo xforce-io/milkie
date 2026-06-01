@@ -455,10 +455,18 @@ describe('e2e: skill loading through full chat flow', () => {
 })
 
 describe('diagnoser agent (stub pipeline + output contract)', () => {
-  it('reads the target run via tools and returns a JSON verdict', async () => {
-    const exampleDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-docs-qa-diag-'))
-    fs.mkdirSync(path.join(exampleDir, '.milkie', 'runs'), { recursive: true })
+  let exampleDir: string
 
+  beforeEach(() => {
+    exampleDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-docs-qa-diag-'))
+    fs.mkdirSync(path.join(exampleDir, '.milkie', 'runs'), { recursive: true })
+  })
+
+  afterEach(() => {
+    fs.rmSync(exampleDir, { recursive: true, force: true })
+  })
+
+  it('reads the target run via tools and returns a JSON verdict', async () => {
     const toolCall = (id: string, name: string, input: unknown) => ({
       content: [{ type: 'tool_use' as const, id, name, input }],
       toolCalls: [{ id, name, input }],
@@ -483,17 +491,18 @@ describe('diagnoser agent (stub pipeline + output contract)', () => {
     const runsDir = path.join(exampleDir, '.milkie', 'runs')
     const objsDir = path.join(exampleDir, '.milkie', 'objects')
     const es = new JsonlEventStore(runsDir)
-    const os2 = new FileTraceObjectStore(objsDir)
+    const traceObjStore = new FileTraceObjectStore(objsDir)
     const verdict = { verdict: 'suspect', firstBreak: { step: '2', what: 'grep 赤壁', why: '与问题(曹操爸爸)不相关' }, explanation: '工具查询跑偏' }
     const milkie = new Milkie({
       eventStore: es,
-      traceObjectStore: os2,
+      traceObjectStore: traceObjStore,
+      // Stub drives only get_execution (real execution); get_run_io is covered by trace-tools.test.ts.
       gateway: new StubGateway([
         toolCall('d1', 'get_execution', { runId: chat.runId }),
         text(JSON.stringify(verdict)),
       ]),
     })
-    for (const t of makeTraceTools(es, os2)) milkie.registerTool(t)
+    for (const t of makeTraceTools(es, traceObjStore)) milkie.registerTool(t)
     milkie.loadAgentFile(path.join(__dirname, '..', 'agents', 'diagnoser.md'))
 
     const result = await milkie.invoke({ agentId: 'diagnoser', goal: 'diagnose', input: chat.runId })
@@ -514,7 +523,5 @@ describe('diagnoser agent (stub pipeline + output contract)', () => {
     expect(execPayload.error).toBeUndefined()                                                   // ran successfully, not swallowed error
     expect(Array.isArray(execPayload.output?.steps)).toBe(true)                                 // produced a real ExecutionProjection
     expect(execPayload.output!.steps!.length).toBeGreaterThan(0)                                // over the (non-empty) target run
-
-    fs.rmSync(exampleDir, { recursive: true, force: true })
   }, 15_000)
 })
