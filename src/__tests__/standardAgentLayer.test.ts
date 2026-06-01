@@ -5,6 +5,17 @@ import os from 'os'
 import path from 'path'
 import type { IModelGateway, ModelRequest, ModelResponse } from '../types/model'
 
+describe('#89 built-in agents/diagnoser.md', () => {
+  it('the built-in diagnoser.md template loads with no model', () => {
+    const milkie = new Milkie()
+    const agentPath = path.resolve(__dirname, '../../agents/diagnoser.md')
+    const cfg = milkie.loadAgentFile(agentPath)
+    expect(cfg.agentId).toBe('diagnoser')
+    expect(cfg.model).toBeUndefined()
+    expect(cfg.fsm!.states[0]!.tools).toEqual(['get_run_io', 'get_execution'])
+  })
+})
+
 class StubGateway implements IModelGateway {
   constructor(private readonly responses: ModelResponse[]) {}
   async complete(_req: ModelRequest): Promise<ModelResponse> {

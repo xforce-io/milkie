@@ -1,6 +1,7 @@
 {
   "name": "milkie",
   "version": "0.1.0",
+  "files": ["dist", "agents"],
   "description": "TypeScript Agent framework — Agent = FSM",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
