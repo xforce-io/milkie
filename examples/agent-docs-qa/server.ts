@@ -16,7 +16,6 @@ import type { IModelGateway } from '../../src/types/model.js'
 import { BroadcastingEventStore } from './trace/broadcast-event-store.js'
 import { scanConversations, readEventsForContext } from './trace/conversation-scanner.js'
 import { makeCorpusToolDefinitions } from './tools/corpus-tools.js'
-import { makeTraceTools } from './tools/trace-tools.js'
 
 export interface ServerConfig {
   port:        number
@@ -277,18 +276,14 @@ export async function startServer(config: ServerConfig): Promise<Server> {
     gateway:    config.gateway,   // when omitted, Milkie falls back to createGateway(agent.model) per-invoke
     eventStore,
     traceObjectStore,
+    defaultModel: { provider: 'volcengine', model: 'doubao-seed-2-0-pro-260215', adapter: 'openai-compatible' },
   })
 
   for (const tool of makeCorpusToolDefinitions(config.corpusRoot)) {
     milkie.registerTool(tool)
   }
-  for (const tool of makeTraceTools(eventStore, traceObjectStore)) {
-    milkie.registerTool(tool)
-  }
   milkie.loadAgentFile(config.agentFile)
-  // The diagnoser is a cross-cutting agent living alongside the domain agent.
-  const diagnoserPath = path.join(path.dirname(config.agentFile), 'diagnoser.md')
-  if (existsSync(diagnoserPath)) milkie.loadAgentFile(diagnoserPath)
+  milkie.loadStandardAgents()   // built-in diagnoser + read-Trace tools
 
   // Public dir resolution: prefer co-located public/ when present (production
   // mode using the real example dir), else fall back to this file's
