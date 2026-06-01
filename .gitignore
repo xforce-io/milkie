@@ -38,3 +38,6 @@ yarn-error.log*
 yarn.lock
 pnpm-lock.yaml
 bun.lockb
+
+# git worktrees (isolated workspaces)
+.worktrees/

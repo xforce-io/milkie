@@ -16,6 +16,7 @@ import type { IModelGateway } from '../../src/types/model.js'
 import { BroadcastingEventStore } from './trace/broadcast-event-store.js'
 import { scanConversations, readEventsForContext } from './trace/conversation-scanner.js'
 import { makeCorpusToolDefinitions } from './tools/corpus-tools.js'
+import { makeTraceTools } from './tools/trace-tools.js'
 
 export interface ServerConfig {
   port:        number
@@ -281,7 +282,13 @@ export async function startServer(config: ServerConfig): Promise<Server> {
   for (const tool of makeCorpusToolDefinitions(config.corpusRoot)) {
     milkie.registerTool(tool)
   }
+  for (const tool of makeTraceTools(eventStore, traceObjectStore)) {
+    milkie.registerTool(tool)
+  }
   milkie.loadAgentFile(config.agentFile)
+  // The diagnoser is a cross-cutting agent living alongside the domain agent.
+  const diagnoserPath = path.join(path.dirname(config.agentFile), 'diagnoser.md')
+  if (existsSync(diagnoserPath)) milkie.loadAgentFile(diagnoserPath)
 
   // Public dir resolution: prefer co-located public/ when present (production
   // mode using the real example dir), else fall back to this file's

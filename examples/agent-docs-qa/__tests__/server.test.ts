@@ -4,6 +4,10 @@ import type { IModelGateway, ModelRequest, ModelResponse } from '../../../src/ty
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import { Milkie } from '../../../src/runtime/Milkie'
+import { JsonlEventStore } from '../../../src/trace/JsonlEventStore'
+import { FileTraceObjectStore } from '../../../src/trace/TraceObjectStore'
+import { makeTraceTools } from '../tools/trace-tools'
 
 class StubGateway implements IModelGateway {
   constructor(private readonly responses: ModelResponse[]) {}
@@ -448,4 +452,76 @@ describe('e2e: skill loading through full chat flow', () => {
     const systemText = stub.requests[0]!.system ?? ''
     expect(systemText).not.toContain('你已进入 verifier 模式')
   }, 10_000)
+})
+
+describe('diagnoser agent (stub pipeline + output contract)', () => {
+  let exampleDir: string
+
+  beforeEach(() => {
+    exampleDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-docs-qa-diag-'))
+    fs.mkdirSync(path.join(exampleDir, '.milkie', 'runs'), { recursive: true })
+  })
+
+  afterEach(() => {
+    fs.rmSync(exampleDir, { recursive: true, force: true })
+  })
+
+  it('reads the target run via tools and returns a JSON verdict', async () => {
+    const toolCall = (id: string, name: string, input: unknown) => ({
+      content: [{ type: 'tool_use' as const, id, name, input }],
+      toolCalls: [{ id, name, input }],
+      finishReason: 'tool_use' as const,
+    })
+
+    // 1) Record a target run (a normal sanguo-researcher chat) that goes off-topic.
+    let server = await startServer({
+      port: 0, exampleDir,
+      gateway: new StubGateway([text('赤壁之战发生在公元208年。')]),
+      agentFile: path.join(__dirname, '..', 'agents', 'sanguo-researcher.md'),
+      corpusRoot: path.join(__dirname, '..', 'corpus'),
+    })
+    const addr = server.address() as { port: number }
+    const baseUrl = `http://localhost:${addr.port}`
+    const chat = JSON.parse((await postJson(`${baseUrl}/chat`, { input: '曹操爸爸是谁' })).body) as { runId: string }
+    await stopServer(server)
+
+    // 2) Run the diagnoser against that runId.
+    //    Share ONE explicit JsonlEventStore over the same runsDir so both the
+    //    trace tools and the diagnoser Milkie read the same recorded events.
+    const runsDir = path.join(exampleDir, '.milkie', 'runs')
+    const objsDir = path.join(exampleDir, '.milkie', 'objects')
+    const es = new JsonlEventStore(runsDir)
+    const traceObjStore = new FileTraceObjectStore(objsDir)
+    const verdict = { verdict: 'suspect', firstBreak: { step: '2', what: 'grep 赤壁', why: '与问题(曹操爸爸)不相关' }, explanation: '工具查询跑偏' }
+    const milkie = new Milkie({
+      eventStore: es,
+      traceObjectStore: traceObjStore,
+      // Stub drives only get_execution (real execution); get_run_io is covered by trace-tools.test.ts.
+      gateway: new StubGateway([
+        toolCall('d1', 'get_execution', { runId: chat.runId }),
+        text(JSON.stringify(verdict)),
+      ]),
+    })
+    for (const t of makeTraceTools(es, traceObjStore)) milkie.registerTool(t)
+    milkie.loadAgentFile(path.join(__dirname, '..', 'agents', 'diagnoser.md'))
+
+    const result = await milkie.invoke({ agentId: 'diagnoser', goal: 'diagnose', input: chat.runId })
+    expect(result.status).toBe('completed')
+    const parsed = JSON.parse(result.output)
+    expect(parsed).toHaveProperty('verdict')
+    expect(parsed).toHaveProperty('firstBreak')
+    expect(parsed).toHaveProperty('explanation')
+
+    // Non-hollow assertion: verify get_execution actually executed successfully
+    // and produced a real ExecutionProjection over the target run.
+    const diagEvents = await es.readByRunId(result.agentRunId)
+    const execResp = diagEvents.find(
+      e => e.type === 'tool.responded' && (e.payload as { toolName?: string }).toolName === 'get_execution'
+    )
+    expect(execResp).toBeDefined()                                                              // get_execution actually ran
+    const execPayload = execResp!.payload as { error?: unknown; output?: { steps?: unknown[] } }
+    expect(execPayload.error).toBeUndefined()                                                   // ran successfully, not swallowed error
+    expect(Array.isArray(execPayload.output?.steps)).toBe(true)                                 // produced a real ExecutionProjection
+    expect(execPayload.output!.steps!.length).toBeGreaterThan(0)                                // over the (non-empty) target run
+  }, 15_000)
 })
