@@ -449,3 +449,61 @@ describe('e2e: skill loading through full chat flow', () => {
     expect(systemText).not.toContain('你已进入 verifier 模式')
   }, 10_000)
 })
+
+import { Milkie } from '../../../src/runtime/Milkie'
+import { JsonlEventStore } from '../../../src/trace/JsonlEventStore'
+import { FileTraceObjectStore } from '../../../src/trace/TraceObjectStore'
+import { makeTraceTools } from '../tools/trace-tools'
+
+describe('diagnoser agent (stub pipeline + output contract)', () => {
+  it('reads the target run via tools and returns a JSON verdict', async () => {
+    const exampleDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-docs-qa-diag-'))
+    fs.mkdirSync(path.join(exampleDir, '.milkie', 'runs'), { recursive: true })
+
+    const toolCall = (id: string, name: string, input: unknown) => ({
+      content: [{ type: 'tool_use' as const, id, name, input }],
+      toolCalls: [{ id, name, input }],
+      finishReason: 'tool_use' as const,
+    })
+
+    // 1) Record a target run (a normal sanguo-researcher chat) that goes off-topic.
+    let server = await startServer({
+      port: 0, exampleDir,
+      gateway: new StubGateway([text('赤壁之战发生在公元208年。')]),
+      agentFile: path.join(__dirname, '..', 'agents', 'sanguo-researcher.md'),
+      corpusRoot: path.join(__dirname, '..', 'corpus'),
+    })
+    const addr = server.address() as { port: number }
+    const baseUrl = `http://localhost:${addr.port}`
+    const chat = JSON.parse((await postJson(`${baseUrl}/chat`, { input: '曹操爸爸是谁' })).body) as { runId: string }
+    await stopServer(server)
+
+    // 2) Run the diagnoser against that runId.
+    //    Share ONE explicit JsonlEventStore over the same runsDir so both the
+    //    trace tools and the diagnoser Milkie read the same recorded events.
+    const runsDir = path.join(exampleDir, '.milkie', 'runs')
+    const objsDir = path.join(exampleDir, '.milkie', 'objects')
+    const es = new JsonlEventStore(runsDir)
+    const os2 = new FileTraceObjectStore(objsDir)
+    const verdict = { verdict: 'suspect', firstBreak: { step: '2', what: 'grep 赤壁', why: '与问题(曹操爸爸)不相关' }, explanation: '工具查询跑偏' }
+    const milkie = new Milkie({
+      eventStore: es,
+      traceObjectStore: os2,
+      gateway: new StubGateway([
+        toolCall('d1', 'get_execution', { runId: chat.runId }),
+        text(JSON.stringify(verdict)),
+      ]),
+    })
+    for (const t of makeTraceTools(es, os2)) milkie.registerTool(t)
+    milkie.loadAgentFile(path.join(__dirname, '..', 'agents', 'diagnoser.md'))
+
+    const result = await milkie.invoke({ agentId: 'diagnoser', goal: 'diagnose', input: chat.runId })
+    expect(result.status).toBe('completed')
+    const parsed = JSON.parse(result.output)
+    expect(parsed).toHaveProperty('verdict')
+    expect(parsed).toHaveProperty('firstBreak')
+    expect(parsed).toHaveProperty('explanation')
+
+    fs.rmSync(exampleDir, { recursive: true, force: true })
+  }, 15_000)
+})
