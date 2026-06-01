@@ -1234,8 +1234,8 @@
         return
       }
       // Switching to a different run's audit invalidates any prior replay
-      // result — it pertains to the previous run, not this one.
-      if (auditAnchorRunId !== runId) hideReplayBanner()
+      // or diagnosis result — they pertain to the previous run, not this one.
+      if (auditAnchorRunId !== runId) { hideReplayBanner(); hideDiagnoseBanner() }
       auditAnchorRunId = runId
       $audit.classList.add('open')
       document.body.classList.add('audit-open')
