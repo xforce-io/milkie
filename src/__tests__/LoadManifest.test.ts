@@ -1,4 +1,5 @@
 import { Milkie } from '../runtime/Milkie'
+import { MemoryStore } from '../store/MemoryStore'
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
@@ -44,7 +45,7 @@ test prompt`
       { id: 'verifier', file: '../agents/verifier.md' },
     ])
 
-    const milkie = new Milkie()
+    const milkie = new Milkie({ stateStore: new MemoryStore() })
     const result = await milkie.loadManifest(manifestPath)
 
     expect(result.loaded).toEqual(['router', 'verifier'])
@@ -61,7 +62,7 @@ test prompt`
       { id: 'verifier', file: '../agents/verifier.md' },
     ])
 
-    const milkie = new Milkie()
+    const milkie = new Milkie({ stateStore: new MemoryStore() })
     const result = await milkie.loadManifest(manifestPath)
 
     expect(result.loaded).toEqual(['router'])
@@ -77,7 +78,7 @@ test prompt`
       { id: 'router', file: '../agents/router.md' },
     ])
 
-    const milkie = new Milkie()
+    const milkie = new Milkie({ stateStore: new MemoryStore() })
     const result = await milkie.loadManifest(manifestPath)
 
     expect(result.loaded).toEqual([])
@@ -90,7 +91,7 @@ test prompt`
 
   it('throws when the manifest file itself is missing', async () => {
     const nonexistent = path.join(tmpDir, '.milkie', 'agents.json')   // never written
-    const milkie = new Milkie()
+    const milkie = new Milkie({ stateStore: new MemoryStore() })
     await expect(milkie.loadManifest(nonexistent)).rejects.toThrow(/no such file|not found/i)
   })
 
@@ -102,7 +103,7 @@ test prompt`
     const subDir = fs.mkdtempSync(path.join(tmpDir, 'sub-'))
     const cwdSpy = jest.spyOn(process, 'cwd').mockReturnValue(subDir)
     try {
-      const milkie = new Milkie()
+      const milkie = new Milkie({ stateStore: new MemoryStore() })
       const result = await milkie.loadManifest()
       expect(result.loaded).toEqual(['router'])
     } finally {
@@ -114,7 +115,7 @@ test prompt`
     // beforeEach made tmpDir/.milkie but no agents.json inside it; nothing to find
     const cwdSpy = jest.spyOn(process, 'cwd').mockReturnValue(tmpDir)
     try {
-      const milkie = new Milkie()
+      const milkie = new Milkie({ stateStore: new MemoryStore() })
       const result = await milkie.loadManifest()
       expect(result.loaded).toEqual([])
       expect(result.skipped).toEqual([])
@@ -130,7 +131,7 @@ test prompt`
       { id: 'router',   file: '../agents/router.md' },
       { id: 'verifier', file: '../agents/verifier.md' },
     ])
-    const milkie = new Milkie()
+    const milkie = new Milkie({ stateStore: new MemoryStore() })
     await milkie.loadManifest(manifestPath)
     expect(milkie.listAgents().sort()).toEqual(['router', 'verifier'])
   })
@@ -138,7 +139,7 @@ test prompt`
   it('throws when the manifest is not valid JSON', async () => {
     const manifestPath = path.join(tmpDir, '.milkie', 'agents.json')
     fs.writeFileSync(manifestPath, '{ not valid json')
-    const milkie = new Milkie()
+    const milkie = new Milkie({ stateStore: new MemoryStore() })
     await expect(milkie.loadManifest(manifestPath)).rejects.toThrow()
   })
 
@@ -150,7 +151,7 @@ test prompt`
       { id: 'router', file: '../agents/router-v2.md' },
     ])
 
-    const milkie = new Milkie()
+    const milkie = new Milkie({ stateStore: new MemoryStore() })
     const result = await milkie.loadManifest(manifestPath)
 
     expect(result.loaded).toEqual(['router'])

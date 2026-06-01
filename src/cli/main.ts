@@ -6,6 +6,7 @@ import { JsonlEventStore } from '../trace/JsonlEventStore.js'
 import { FileTraceObjectStore } from '../trace/TraceObjectStore.js'
 import { regionReuseCounts } from '../trace/RegionContextView.js'
 import { SQLiteStore } from '../store/SQLiteStore.js'
+import { MemoryStore } from '../store/MemoryStore.js'
 import { checkpointFromEvents } from '../trace/diagnostics/checkpointFromEvents.js'
 
 function findMilkieDir(startDir: string): string | undefined {
@@ -75,7 +76,8 @@ export async function main(argv: string[]): Promise<MainResult> {
     .command('list')
     .description('List registered agents (loaded from .milkie/agents.json)')
     .action(async () => {
-      const milkie = new Milkie()
+      // ephemeral: only lists manifest agents, no persistent state needed.
+      const milkie = new Milkie({ stateStore: new MemoryStore() })
       await milkie.loadManifest()
       for (const id of milkie.listAgents()) {
         stdout.push(JSON.stringify({ id, source: 'manifest' }) + '\n')
@@ -237,7 +239,8 @@ export async function main(argv: string[]): Promise<MainResult> {
       }
       const eventStore = new JsonlEventStore(path.join(milkieDir, 'runs'))
       const traceObjectStore = new FileTraceObjectStore(path.join(milkieDir, 'objects'))
-      const milkie = new Milkie({ eventStore, traceObjectStore })
+      // ephemeral: replay is deterministic from the event log, no persistent state needed.
+      const milkie = new Milkie({ stateStore: new MemoryStore(), eventStore, traceObjectStore })
       await milkie.loadManifest(path.join(milkieDir, 'agents.json'))
       const result = await milkie.replay(runId)
       stdout.push(JSON.stringify({

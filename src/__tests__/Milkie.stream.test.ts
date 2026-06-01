@@ -1,4 +1,5 @@
 import { Milkie } from '../runtime/Milkie'
+import { MemoryStore } from '../store/MemoryStore'
 import type { AgentConfig } from '../types/agent'
 import type { IModelGateway, ModelRequest, ModelResponse, ModelEvent } from '../types/model'
 import type { ToolDefinition } from '../types/tool'
@@ -78,7 +79,7 @@ describe('Milkie.invoke — onModelEvent end-to-end pass-through (#80)', () => {
       [textCompletion('Hello, world!')],
     )
 
-    const milkie = new Milkie({ gateway })
+    const milkie = new Milkie({ stateStore: new MemoryStore(), gateway })
     milkie.registerAgent(makeConfig())
 
     const events: ModelEvent[] = []
@@ -111,7 +112,7 @@ describe('Milkie.invoke — onModelEvent end-to-end pass-through (#80)', () => {
       [textCompletion('Hello, world!')],
     )
 
-    const milkie = new Milkie({ gateway })
+    const milkie = new Milkie({ stateStore: new MemoryStore(), gateway })
     milkie.registerAgent(makeConfig())
 
     const result = await milkie.invoke({
@@ -162,7 +163,7 @@ describe('Milkie.invoke — onModelEvent end-to-end pass-through (#80)', () => {
       ],
     )
 
-    const milkie = new Milkie({ gateway, tools: [searchTool] })
+    const milkie = new Milkie({ stateStore: new MemoryStore(), gateway, tools: [searchTool] })
     milkie.registerAgent(makeConfig())
 
     const events: ModelEvent[] = []

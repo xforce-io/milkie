@@ -4,6 +4,7 @@
  */
 
 import { Milkie } from '../runtime/Milkie'
+import { MemoryStore } from '../store/MemoryStore'
 import { ConsoleRecorder } from '../trajectory/ConsoleRecorder'
 import type { AgentConfig } from '../types/agent'
 
@@ -27,7 +28,7 @@ describe('VolcEngine smoke test', () => {
   let milkie: Milkie
 
   beforeAll(() => {
-    milkie = new Milkie()
+    milkie = new Milkie({ stateStore: new MemoryStore() })
     milkie.registerAgent(reactAgent)
   })
 

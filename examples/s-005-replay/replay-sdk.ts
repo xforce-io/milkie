@@ -12,6 +12,7 @@ import fs from 'fs'
 import path from 'path'
 import { Milkie } from '../../src/runtime/Milkie'
 import { JsonlEventStore } from '../../src/trace/JsonlEventStore'
+import { MemoryStore } from '../../src/store/MemoryStore'
 
 async function main(): Promise<void> {
   const exampleDir = __dirname
@@ -21,6 +22,7 @@ async function main(): Promise<void> {
   const runId = process.argv[2] ?? fs.readFileSync(path.join(milkieDir, 'last-run.txt'), 'utf-8').trim()
 
   const milkie = new Milkie({
+    stateStore: new MemoryStore(),  // ephemeral: replay is deterministic from the event log
     eventStore: new JsonlEventStore(runsDir),
   })
   await milkie.loadManifest(path.join(milkieDir, 'agents.json'))

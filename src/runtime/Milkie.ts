@@ -28,7 +28,13 @@ import type { ToolEmittedPayload } from '../trace/types.js'
 import { makeTraceTools } from '../tools/trace.js'
 
 export interface MilkieOptions {
-  stateStore?:      IStateStore
+  /**
+   * #99: required — no silent in-memory fallback. Choose the backend explicitly:
+   * MemoryStore (tests / single-process), SQLiteStore (same-host persistence),
+   * RedisStore (cross-process production). MemoryStore does NOT satisfy #83's
+   * cross-process context vars.
+   */
+  stateStore:       IStateStore
   gateway?:         IModelGateway   // override all agents; if omitted, each agent uses its own adapter
   defaultModel?:    ModelConfig     // fallback model for agents that declare no model block
   tools?:           ToolDefinition[]
@@ -57,8 +63,14 @@ export class Milkie {
 
   private readonly agents:   Map<string, AgentConfig> = new Map()
 
-  constructor(opts: MilkieOptions = {}) {
-    this.stateStore      = opts.stateStore      ?? new MemoryStore()
+  constructor(opts: MilkieOptions) {
+    if (!opts?.stateStore) {
+      throw new Error(
+        'Milkie requires an explicit stateStore. Pass MemoryStore for tests/single-process, ' +
+        'SQLiteStore for same-host persistence, or RedisStore for cross-process production.',
+      )
+    }
+    this.stateStore      = opts.stateStore
     this.gatewayOverride = opts.gateway          ?? null
     this.defaultModel    = opts.defaultModel     ?? null
     this.extraTools      = opts.tools            ?? []
