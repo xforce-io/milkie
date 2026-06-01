@@ -1290,7 +1290,7 @@
 
     function showReplayBanner(state, html) {
       $auditBanner.className = `ap-replay-banner shown ${state}`
-      $auditBanner.innerHTML = html + `<button class="rb-close" aria-label="Dismiss">×</button>`
+      $auditBanner.innerHTML = html + `<button class="rb-close" aria-label="关闭">×</button>`
     }
 
     function fmtCachePct(read, total) {
@@ -1492,7 +1492,7 @@
         if (!rawPre) return
         const opening = rawPre.style.display === 'none'
         rawPre.style.display = opening ? 'block' : 'none'
-        target.textContent = opening ? 'Hide raw JSON' : 'Show raw JSON'
+        target.textContent = opening ? '收起原始 JSON' : '查看原始 JSON'
         return
       }
     })
@@ -1593,7 +1593,7 @@
           && event.payload && event.payload.toolName === 'skill_request') {
         const skillName = (event.payload.input && event.payload.input.name) || '?'
         div.classList.add('skill-loaded')
-        div.title = `Skill load requested: ${skillName}`
+        div.title = `请求加载 skill：${skillName}`
       }
 
       div.addEventListener('click', () => {
@@ -1735,9 +1735,9 @@
         // see the agent is actively doing things, not stuck.
         if ($pendingBubble) {
           if (event.type === 'tool.requested' && event.payload && event.payload.toolName) {
-            updatePendingStatus(`Calling tool: ${event.payload.toolName}…`)
+            updatePendingStatus(`正在调用工具：${event.payload.toolName}…`)
           } else if (event.type === 'llm.requested') {
-            updatePendingStatus('Thinking…')
+            updatePendingStatus('思考中…')
           }
         }
         if (event.type === 'agent.run.completed' && event.payload && event.payload.lastTextOutput) {
