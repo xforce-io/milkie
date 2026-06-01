@@ -6,6 +6,7 @@ import os from 'os'
 import path from 'path'
 import { Milkie } from '../../../src/runtime/Milkie'
 import { JsonlEventStore } from '../../../src/trace/JsonlEventStore'
+import { MemoryStore } from '../../../src/store/MemoryStore'
 import { FileTraceObjectStore } from '../../../src/trace/TraceObjectStore'
 
 class StubGateway implements IModelGateway {
@@ -497,6 +498,7 @@ describe('diagnoser agent (stub pipeline + output contract)', () => {
     const traceObjStore = new FileTraceObjectStore(objsDir)
     const verdict = { verdict: 'suspect', firstBreak: { step: 2, what: 'grep 赤壁', why: '与问题(曹操爸爸)不相关' }, explanation: '工具查询跑偏' }
     const milkie = new Milkie({
+      stateStore: new MemoryStore(),
       eventStore: es,
       traceObjectStore: traceObjStore,
       gateway: new StubGateway([toolCall('d1', 'get_execution', { runId: chat.runId }), text(JSON.stringify(verdict))]),

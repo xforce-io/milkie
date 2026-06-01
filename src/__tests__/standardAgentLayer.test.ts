@@ -1,5 +1,6 @@
 // src/__tests__/standardAgentLayer.test.ts
 import { Milkie } from '../runtime/Milkie'
+import { MemoryStore } from '../store/MemoryStore'
 import { MemoryEventStore } from '../trace/MemoryEventStore'
 import fs from 'fs'
 import os from 'os'
@@ -8,7 +9,7 @@ import type { IModelGateway, ModelRequest, ModelResponse } from '../types/model'
 
 describe('#89 built-in agents/diagnoser.md', () => {
   it('the built-in diagnoser.md template loads with no model', () => {
-    const milkie = new Milkie()
+    const milkie = new Milkie({ stateStore: new MemoryStore() })
     const agentPath = path.resolve(__dirname, '../../agents/diagnoser.md')
     const cfg = milkie.loadAgentFile(agentPath)
     expect(cfg.agentId).toBe('diagnoser')
@@ -61,7 +62,7 @@ fsm:
       type: llm
 ---
 sys prompt`)
-    const milkie = new Milkie()
+    const milkie = new Milkie({ stateStore: new MemoryStore() })
     const cfg = milkie.loadAgentFile(file)
     expect(cfg.agentId).toBe('tpl')
     expect(cfg.model).toBeUndefined()
@@ -78,7 +79,7 @@ model:
   provider: x
 ---
 p`)
-    const milkie = new Milkie()
+    const milkie = new Milkie({ stateStore: new MemoryStore() })
     expect(() => milkie.loadAgentFile(file)).toThrow(/model/)
   })
 })
@@ -89,14 +90,14 @@ describe('#89 resolveGateway: no-model agent', () => {
   afterEach(() => { fs.rmSync(tmp, { recursive: true, force: true }) })
 
   it('runs a no-model agent using the gateway override', async () => {
-    const milkie = new Milkie({ gateway: new StubGateway([textResp('hi')]) })
+    const milkie = new Milkie({ stateStore: new MemoryStore(), gateway: new StubGateway([textResp('hi')]) })
     milkie.loadAgentFile(writeAgent(tmp, 'a.md', NO_MODEL_AGENT))
     const r = await milkie.invoke({ agentId: 'nomodel', goal: 'g', input: 'i' })
     expect(r.status).toBe('completed')
   })
 
   it('errors clearly when a no-model agent has neither gateway nor defaultModel', async () => {
-    const milkie = new Milkie()
+    const milkie = new Milkie({ stateStore: new MemoryStore() })
     milkie.loadAgentFile(writeAgent(tmp, 'a.md', NO_MODEL_AGENT))
     // resolveGateway is called synchronously near the top of invoke; it should surface
     // a clear error. If invoke rejects, use rejects.toThrow; if invoke swallows it into
@@ -111,7 +112,7 @@ import type { ToolDefinition } from '../types/tool'
 
 describe('#89 loadStandardAgents', () => {
   it('loads the built-in diagnoser and registers the read-Trace tools', () => {
-    const milkie = new Milkie({ eventStore: new MemoryEventStore() })
+    const milkie = new Milkie({ stateStore: new MemoryStore(), eventStore: new MemoryEventStore() })
     const ids = milkie.loadStandardAgents()
     expect(ids).toContain('diagnoser')
     expect(milkie.getAgent('diagnoser')).toBeDefined()
