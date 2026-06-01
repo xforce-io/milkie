@@ -495,7 +495,7 @@ describe('diagnoser agent (stub pipeline + output contract)', () => {
     const objsDir = path.join(exampleDir, '.milkie', 'objects')
     const es = new JsonlEventStore(runsDir)
     const traceObjStore = new FileTraceObjectStore(objsDir)
-    const verdict = { verdict: 'suspect', firstBreak: { step: '2', what: 'grep 赤壁', why: '与问题(曹操爸爸)不相关' }, explanation: '工具查询跑偏' }
+    const verdict = { verdict: 'suspect', firstBreak: { step: 2, what: 'grep 赤壁', why: '与问题(曹操爸爸)不相关' }, explanation: '工具查询跑偏' }
     const milkie = new Milkie({
       eventStore: es,
       traceObjectStore: traceObjStore,
@@ -553,7 +553,7 @@ describe('POST /run/:runId/diagnose', () => {
   it('A: suspect run returns structured verdict with a distinct diagnoseRunId', async () => {
     const verdict = {
       verdict: 'suspect',
-      firstBreak: { step: 'evt-tool-1', what: "grep('赤壁')", why: '工具 query 与「曹操爸爸」无关' },
+      firstBreak: { step: 1, what: "grep('赤壁')", why: '工具 query 与「曹操爸爸」无关' },
       explanation: '检索跑偏到赤壁，未回答父亲是谁。',
     }
     await startWith(new StubGateway([
@@ -567,9 +567,10 @@ describe('POST /run/:runId/diagnose', () => {
     const r = await postJson(`${baseUrl}/run/${runId}/diagnose`, {})
     expect(r.status).toBe(200)
     const body = JSON.parse(r.body) as {
-      verdict: string; firstBreak: { why: string }; diagnoseRunId: string
+      verdict: string; firstBreak: { step: number; why: string }; diagnoseRunId: string
     }
     expect(body.verdict).toBe('suspect')
+    expect(body.firstBreak.step).toBe(1)          // 0-based step index passes through verbatim
     expect(body.firstBreak.why).toMatch(/赤壁|无关/)
     expect(body.diagnoseRunId).toBeTruthy()
     expect(body.diagnoseRunId).not.toBe(runId)

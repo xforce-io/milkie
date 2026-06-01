@@ -184,33 +184,40 @@
       background: none; border: none; font-size: 14px; line-height: 1; color: var(--muted);
     }
     #audit-panel .ap-replay-banner .rb-close:hover { color: var(--text) }
-    #audit-panel .ap-diagnose {
-      margin-left: 8px; padding: 4px 10px; font-size: 12px; cursor: pointer;
-      border: 1px solid var(--border); border-radius: 6px; background: var(--bg);
-      color: var(--text);
+    /* Diagnose verdict strip (#98): a persistent conclusion row between the
+       header and the tabs — the "verdict" above the evidence (tabs). */
+    #audit-panel .ap-verdict { display: none; margin: 8px 16px 0 }
+    #audit-panel .ap-verdict.shown { display: block }
+    #audit-panel .vd-row {
+      display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+      border-radius: 6px; border-left: 4px solid var(--border); background: var(--bg); font-size: 13px;
     }
-    #audit-panel .ap-diagnose:hover { opacity: 0.9 }
-    #audit-panel .ap-diagnose:disabled { opacity: 0.5; cursor: progress }
-    #audit-panel .ap-diagnose-banner {
-      display: none; margin: 8px 16px 0; padding: 10px 12px;
-      border-radius: 6px; font-size: 13px; position: relative;
+    #audit-panel .ap-verdict.ok      .vd-row { background: #f0faf3; border-left-color: #2da14b }
+    #audit-panel .ap-verdict.suspect .vd-row { background: #fdf2e6; border-left-color: #e07a00 }
+    #audit-panel .ap-verdict.error   .vd-row { background: #fdf0f0; border-left-color: #d93030 }
+    #audit-panel .vd-label { font-weight: 600; color: var(--muted); white-space: nowrap }
+    #audit-panel .vd-summary { flex: 1 }
+    #audit-panel .vd-summary.toggle { cursor: pointer }
+    #audit-panel .ap-verdict.ok      .vd-summary { color: #2da14b; font-weight: 600 }
+    #audit-panel .ap-verdict.suspect .vd-summary { color: #c66800; font-weight: 600 }
+    #audit-panel .ap-verdict.error   .vd-summary { color: #c02020; font-weight: 600 }
+    #audit-panel .vd-run {
+      padding: 4px 10px; font-size: 12px; cursor: pointer; white-space: nowrap;
+      border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text);
     }
-    #audit-panel .ap-diagnose-banner.shown { display: block }
-    #audit-panel .ap-diagnose-banner.ok      { background: #f0faf3; border-left: 4px solid #2da14b }
-    #audit-panel .ap-diagnose-banner.suspect { background: #fdf2e6; border-left: 4px solid #e07a00 }
-    #audit-panel .ap-diagnose-banner.error   { background: #fdf0f0; border-left: 4px solid #d93030 }
-    #audit-panel .ap-diagnose-banner .db-title { font-weight: 600; margin-bottom: 4px }
-    #audit-panel .ap-diagnose-banner.ok      .db-title { color: #2da14b }
-    #audit-panel .ap-diagnose-banner.suspect .db-title { color: #c66800 }
-    #audit-panel .ap-diagnose-banner.error   .db-title { color: #c02020 }
-    #audit-panel .ap-diagnose-banner .db-break { color: var(--text); margin-top: 4px }
-    #audit-panel .ap-diagnose-banner .db-break b { color: var(--muted); font-weight: 600 }
-    #audit-panel .ap-diagnose-banner .db-expl { color: var(--muted); font-size: 12px; margin-top: 6px }
-    #audit-panel .ap-diagnose-banner .db-close {
-      position: absolute; top: 6px; right: 8px; cursor: pointer; color: var(--muted);
-      background: none; border: none; font-size: 16px; line-height: 1;
+    #audit-panel .vd-run:hover { opacity: 0.9 }
+    #audit-panel .vd-run:disabled { opacity: 0.5; cursor: progress }
+    #audit-panel .vd-jump {
+      margin-left: 6px; padding: 1px 8px; font-size: 12px; cursor: pointer;
+      border: 1px solid #e0a060; border-radius: 10px; background: #fff7ee; color: #c66800;
     }
-    #audit-panel .ap-diagnose-banner .db-close:hover { color: var(--text) }
+    #audit-panel .vd-jump:hover { background: #ffe9d2 }
+    #audit-panel .vd-detail { margin: 6px 2px 0; font-size: 12px; color: var(--muted) }
+    #audit-panel .vd-detail.collapsed { display: none }
+    #audit-panel .vd-detail .vd-break { margin-top: 2px }
+    #audit-panel .vd-detail .vd-break b { color: var(--text); font-weight: 600 }
+    @keyframes stepFlash { 0% { background: #fff3d6 } 100% { background: transparent } }
+    #audit-panel .ap-step.flash { animation: stepFlash 1.6s ease-out }
     #audit-panel .ap-tabs {
       display: flex; gap: 4px; padding: 0 12px; border-bottom: 1px solid var(--border); background: var(--bg);
     }
@@ -488,11 +495,10 @@
     <div class="ap-header">
       <div class="ap-title">How this answer was built</div>
       <button class="ap-replay" aria-label="Replay this turn deterministically" title="Re-run this turn deterministically from the recorded trace">↻ Replay</button>
-      <button class="ap-diagnose" aria-label="Diagnose answer correctness" title="诊断这次回答是否答到问题上、第一处跑偏在哪">⚖ 诊断</button>
       <button class="ap-close" aria-label="Close audit panel">×</button>
     </div>
     <div class="ap-replay-banner" role="status"></div>
-    <div class="ap-diagnose-banner" role="status"></div>
+    <div class="ap-verdict" role="status"></div>
     <div class="ap-tabs">
       <div class="ap-tab active" data-tab="sources">Sources</div>
       <div class="ap-tab" data-tab="steps">Execution</div>
@@ -546,8 +552,7 @@
     const $auditTabs   = $audit.querySelectorAll('.ap-tab')
     const $auditReplay = $audit.querySelector('.ap-replay')
     const $auditBanner = $audit.querySelector('.ap-replay-banner')
-    const $auditDiagnose = $audit.querySelector('.ap-diagnose')
-    const $auditDiagBanner = $audit.querySelector('.ap-diagnose-banner')
+    const $auditVerdict = $audit.querySelector('.ap-verdict')
 
     // ─── Utilities ─────────────────────────────────────────────────────
     function esc(s) {
@@ -1204,6 +1209,12 @@
         renderStepsTab(auditAnchorRunId).then(html => {
           if (auditAnchorRunId === pendingRunId && auditActiveTab === pendingTab) {
             $auditBody.innerHTML = html
+            // A firstBreak chip asked to jump here — flash the target step row.
+            if (pendingStepFlash != null) {
+              const el = $auditBody.querySelector(`.ap-step[data-step-idx="${pendingStepFlash}"]`)
+              if (el) { el.scrollIntoView({ block: 'center' }); el.classList.add('flash') }
+              pendingStepFlash = null
+            }
           }
         })
       } else if (auditActiveTab === 'why') {
@@ -1233,13 +1244,16 @@
         closeAudit()
         return
       }
-      // Switching to a different run's audit invalidates any prior replay
-      // or diagnosis result — they pertain to the previous run, not this one.
-      if (auditAnchorRunId !== runId) { hideReplayBanner(); hideDiagnoseBanner() }
+      // Switching to a different run's audit invalidates the prior replay
+      // banner (it pertains to the previous run). The diagnosis verdict is
+      // keyed by runId and repainted below, so it follows the run rather than
+      // being cleared.
+      if (auditAnchorRunId !== runId) hideReplayBanner()
       auditAnchorRunId = runId
       $audit.classList.add('open')
       document.body.classList.add('audit-open')
       updateAuditTitle()
+      renderVerdict()
       // Restore last active tab across openings; never land on a disabled tab.
       setAuditTab(auditActiveTab || 'sources')
     }
@@ -1249,7 +1263,7 @@
       $audit.classList.remove('open')
       document.body.classList.remove('audit-open')
       hideReplayBanner()
-      hideDiagnoseBanner()
+      renderVerdict()   // anchor is null → clears & hides the verdict strip
     }
 
     // ─── Replay (Phase 4b) ────────────────────────────────────────────
@@ -1324,64 +1338,104 @@
       if (t instanceof HTMLElement && t.classList.contains('rb-close')) hideReplayBanner()
     })
 
-    // ─── Diagnose (#94) ───────────────────────────────────────────────
-    function hideDiagnoseBanner() {
-      $auditDiagBanner.className = 'ap-diagnose-banner'
-      $auditDiagBanner.innerHTML = ''
-    }
-    function showDiagnoseBanner(state, html) {
-      $auditDiagBanner.className = `ap-diagnose-banner shown ${state}`
-      $auditDiagBanner.innerHTML = html + `<button class="db-close" aria-label="Dismiss">×</button>`
-    }
-    function renderDiagnoseResult(data) {
+    // ─── Diagnose verdict strip (#98) ─────────────────────────────────
+    // The verdict (是否答到问题上) is a conclusion that sits above the evidence
+    // (the tabs). Results are cached per runId so switching away and back keeps
+    // the verdict; a suspect's firstBreak.step (0-based index into the Execution
+    // projection) is a chip that jumps to & flashes that row in the Execution tab.
+    const diagnosisByRun = new Map()   // runId → diagnose response (or {error})
+    let pendingStepFlash = null        // step idx to highlight after Execution paints
+
+    function renderVerdict() {
+      if (!auditAnchorRunId) { $auditVerdict.className = 'ap-verdict'; $auditVerdict.innerHTML = ''; return }
+      const data = diagnosisByRun.get(auditAnchorRunId)
+      const runBtn = (label) => `<button class="vd-run">${esc(label)}</button>`
+
+      // Not yet diagnosed this run.
+      if (!data) {
+        $auditVerdict.className = 'ap-verdict shown'
+        $auditVerdict.innerHTML =
+          `<div class="vd-row"><span class="vd-label">⚖ 诊断</span>` +
+          `<span class="vd-summary">判断答案是否答到问题上</span>${runBtn('诊断')}</div>`
+        return
+      }
+      // In-flight.
+      if (data.pending) {
+        $auditVerdict.className = 'ap-verdict shown'
+        $auditVerdict.innerHTML =
+          `<div class="vd-row"><span class="vd-label">⚖ 诊断</span>` +
+          `<span class="vd-summary">诊断中…</span>` +
+          `<button class="vd-run" disabled>诊断中…</button></div>`
+        return
+      }
+
+      let state, summary, detail
       if (data.error === 'unparseable') {
-        showDiagnoseBanner('error',
-          `<div class="db-title">诊断输出无法解析</div>` +
-          `<div class="db-expl">${esc(data.raw || '')}</div>`)
-        return
-      }
-      if (data.error) {
-        showDiagnoseBanner('error',
-          `<div class="db-title">诊断失败</div>` +
-          `<div class="db-expl">${esc(data.error)}</div>`)
-        return
-      }
-      if (data.verdict === 'ok') {
-        showDiagnoseBanner('ok',
-          `<div class="db-title">✓ 答案与问题相关</div>` +
-          `<div class="db-expl">${esc(data.explanation || '')}</div>`)
+        state = 'error'; summary = '诊断输出无法解析'
+        detail = `<div class="vd-detail collapsed">${esc(data.raw || '')}</div>`
+      } else if (data.error) {
+        state = 'error'; summary = '诊断失败'
+        detail = `<div class="vd-detail collapsed">${esc(data.error)}</div>`
+      } else if (data.verdict === 'ok') {
+        state = 'ok'; summary = '✓ 答案与问题相关'
+        detail = `<div class="vd-detail collapsed">${esc(data.explanation || '')}</div>`
       } else {
+        state = 'suspect'; summary = '⚠ 检出跑偏（suspect）'
         const fb = data.firstBreak || {}
-        showDiagnoseBanner('suspect',
-          `<div class="db-title">⚠ 检出跑偏（suspect）</div>` +
-          `<div class="db-break"><b>断点</b> ${esc(fb.step || '?')} · ${esc(fb.what || '')}</div>` +
-          `<div class="db-break"><b>原因</b> ${esc(fb.why || '')}</div>` +
-          `<div class="db-expl">${esc(data.explanation || '')}</div>`)
+        const stepChip = Number.isInteger(fb.step)
+          ? `<button class="vd-jump" data-step-idx="${fb.step}" title="跳到 Execution 第 ${fb.step} 步">步 ${fb.step}</button>`
+          : `<span>${esc(String(fb.step ?? '?'))}</span>`
+        detail =
+          `<div class="vd-detail">` +
+          `<div class="vd-break"><b>断点</b> ${stepChip} · ${esc(fb.what || '')}</div>` +
+          `<div class="vd-break"><b>原因</b> ${esc(fb.why || '')}</div>` +
+          (data.explanation ? `<div class="vd-break">${esc(data.explanation)}</div>` : '') +
+          `</div>`
       }
+      $auditVerdict.className = `ap-verdict shown ${state}`
+      $auditVerdict.innerHTML =
+        `<div class="vd-row"><span class="vd-label">⚖ 诊断</span>` +
+        `<span class="vd-summary toggle" title="点开/收起详情">${esc(summary)}</span>${runBtn('重新诊断')}</div>` +
+        detail
     }
+
     async function runDiagnose() {
-      if (!auditAnchorRunId) return
-      $auditDiagnose.disabled = true
-      const orig = $auditDiagnose.textContent
-      $auditDiagnose.textContent = '诊断中…'
-      hideDiagnoseBanner()
+      const runId = auditAnchorRunId
+      if (!runId) return
+      diagnosisByRun.set(runId, { pending: true })
+      if (auditAnchorRunId === runId) renderVerdict()
+      let result
       try {
-        const resp = await fetch(`/run/${encodeURIComponent(auditAnchorRunId)}/diagnose`, { method: 'POST' })
-        renderDiagnoseResult(await resp.json())
+        const resp = await fetch(`/run/${encodeURIComponent(runId)}/diagnose`, { method: 'POST' })
+        result = await resp.json()
       } catch (err) {
-        renderDiagnoseResult({ error: (err && err.message) || String(err) })
-      } finally {
-        $auditDiagnose.disabled = false
-        $auditDiagnose.textContent = orig
+        result = { error: (err && err.message) || String(err) }
       }
+      diagnosisByRun.set(runId, result)
+      if (auditAnchorRunId === runId) renderVerdict()
     }
-    $auditDiagnose.addEventListener('click', runDiagnose)
-    $auditDiagBanner.addEventListener('click', (ev) => {
+
+    function jumpToStep(idx) {
+      pendingStepFlash = idx
+      setAuditTab('steps')
+    }
+
+    $auditVerdict.addEventListener('click', (ev) => {
       const t = ev.target
-      if (t instanceof HTMLElement && t.classList.contains('db-close')) hideDiagnoseBanner()
+      if (!(t instanceof HTMLElement)) return
+      if (t.classList.contains('vd-run')) { runDiagnose(); return }
+      if (t.classList.contains('vd-jump')) { jumpToStep(Number(t.dataset.stepIdx)); return }
+      const summary = t.closest('.vd-summary.toggle')
+      if (summary) {
+        const detail = $auditVerdict.querySelector('.vd-detail')
+        if (detail) detail.classList.toggle('collapsed')
+      }
     })
 
     function setAuditTab(name) {
+      // Any tab switch that isn't the firstBreak jump cancels a pending flash,
+      // so a stale highlight can never surface on a later visit to Execution.
+      if (name !== 'steps') pendingStepFlash = null
       auditActiveTab = name
       $auditTabs.forEach(t => {
         if (t.classList.contains('disabled')) return
