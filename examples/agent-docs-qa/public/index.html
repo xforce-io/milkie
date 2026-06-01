@@ -1433,6 +1433,9 @@
     })
 
     function setAuditTab(name) {
+      // Any tab switch that isn't the firstBreak jump cancels a pending flash,
+      // so a stale highlight can never surface on a later visit to Execution.
+      if (name !== 'steps') pendingStepFlash = null
       auditActiveTab = name
       $auditTabs.forEach(t => {
         if (t.classList.contains('disabled')) return
