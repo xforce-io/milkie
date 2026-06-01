@@ -152,9 +152,12 @@
       font-size: 18px; line-height: 1; color: var(--muted);
     }
     #audit-panel .ap-close:hover { color: var(--text) }
+    /* Secondary (outline) action — Replay is a verification action, not the
+       panel's primary operation, so it stays quiet. Filled emphasis is reserved
+       for true primary actions (e.g. + 新对话). */
     #audit-panel .ap-replay {
-      cursor: pointer; background: var(--accent); color: white; border: none;
-      padding: 4px 10px; border-radius: 4px; font: inherit; font-size: 11px;
+      cursor: pointer; background: var(--bg); color: var(--text); border: 1px solid var(--border);
+      padding: 4px 10px; border-radius: 6px; font: inherit; font-size: 11px;
       font-weight: 500;
     }
     #audit-panel .ap-replay:hover { opacity: 0.9 }
@@ -469,11 +472,11 @@
   <header>
     <h1>milkie agent playground — 三国 Q&A</h1>
     <div class="controls">
-      <span class="dev-badge">dev mode</span>
+      <span class="dev-badge">开发模式</span>
       <select id="conversation-picker">
-        <option value="">(new conversation)</option>
+        <option value="">(新对话)</option>
       </select>
-      <button id="new-chat">+ new chat</button>
+      <button id="new-chat">+ 新对话</button>
     </div>
   </header>
   <main>
@@ -485,25 +488,25 @@
       </form>
     </section>
     <section id="trace">
-      <div id="trace-header">Trace timeline</div>
+      <div id="trace-header">Trace 时间线</div>
       <div id="trace-timeline"></div>
       <div id="payload-detail"></div>
     </section>
   </main>
-  <div id="cite-popover" role="dialog" aria-label="Citation source"></div>
-  <aside id="audit-panel" role="dialog" aria-label="Decision audit">
+  <div id="cite-popover" role="dialog" aria-label="引用来源"></div>
+  <aside id="audit-panel" role="dialog" aria-label="决策审计">
     <div class="ap-header">
-      <div class="ap-title">How this answer was built</div>
-      <button class="ap-replay" aria-label="Replay this turn deterministically" title="Re-run this turn deterministically from the recorded trace">↻ Replay</button>
-      <button class="ap-close" aria-label="Close audit panel">×</button>
+      <div class="ap-title">这个答案是怎么来的</div>
+      <button class="ap-replay" aria-label="确定性重放本轮" title="从记录的 trace 确定性地重跑这一轮">↻ 重放</button>
+      <button class="ap-close" aria-label="关闭审计面板">×</button>
     </div>
     <div class="ap-replay-banner" role="status"></div>
     <div class="ap-verdict" role="status"></div>
     <div class="ap-tabs">
-      <div class="ap-tab active" data-tab="sources">Sources</div>
-      <div class="ap-tab" data-tab="steps">Execution</div>
-      <div class="ap-tab" data-tab="provenance">Provenance</div>
-      <div class="ap-tab" data-tab="why">Why</div>
+      <div class="ap-tab active" data-tab="sources">来源</div>
+      <div class="ap-tab" data-tab="steps">执行</div>
+      <div class="ap-tab" data-tab="provenance">溯源</div>
+      <div class="ap-tab" data-tab="why">归因</div>
     </div>
     <div class="ap-body"></div>
   </aside>
@@ -660,8 +663,8 @@
       const line = citeEl.dataset.line
       $popover.innerHTML =
         `<div class="cp-source">${esc(file)}</div>` +
-        `<div class="cp-line">Line ${esc(line)}</div>` +
-        `<div class="cp-hint">Source excerpt preview coming in a future update.</div>`
+        `<div class="cp-line">第 ${esc(line)} 行</div>` +
+        `<div class="cp-hint">来源片段预览将在后续更新中提供。</div>`
       // Position below the chip, clamped to viewport.
       const rect = citeEl.getBoundingClientRect()
       $popover.classList.add('open')
@@ -716,7 +719,7 @@
     function renderSourcesTab(runId, msgEl) {
       const cites = msgEl ? citationsFromMessage(msgEl) : []
       if (cites.length === 0) {
-        return `<div class="ap-empty">This answer cites no sources.</div>`
+        return `<div class="ap-empty">本回答未引用任何来源。</div>`
       }
       // Group line ranges by file, preserving first-seen order.
       const byFile = new Map()
@@ -726,7 +729,7 @@
       }
       let html = ''
       for (const [file, lines] of byFile) {
-        const lineChips = lines.map(l => `<span class="ln">L${esc(l)}</span>`).join('')
+        const lineChips = lines.map(l => `<span class="ln">行${esc(l)}</span>`).join('')
         html += `<div class="ap-source-file">
           <div class="sf-path">${esc(file)}</div>
           <div class="sf-lines">${lineChips}</div>
@@ -750,14 +753,27 @@
     // Render the region composition the projection already grouped by stability
     // (immutable → session-stable → turn-stable → volatile, empty groups omitted).
     // The frontend does NOT regroup or reorder — it renders the groups as given.
+    // Display labels for the projection's stability enum (identifiers stay English
+    // in the data; only the shown text is localized).
+    const STABILITY_LABEL = {
+      'immutable': '不可变', 'session-stable': '会话稳定',
+      'turn-stable': '轮内稳定', 'volatile': '易变',
+    }
+    function stabilityLabel(s) { return STABILITY_LABEL[s] || s }
+    // Display labels for chat roles and run/conversation status (data values
+    // stay English; only the shown text is localized).
+    const ROLE_LABEL = { user: '用户', assistant: '助手', system: '系统', tool: '工具' }
+    function roleLabel(r) { return ROLE_LABEL[r] || r }
+    const STATUS_LABEL = { active: '进行中', completed: '已完成', error: '出错', interrupted: '已中断' }
+    function statusLabel(s) { return STATUS_LABEL[s] || s }
     function renderRegionExpander(groups) {
       if (!groups || groups.length === 0) {
-        return `<div class="ap-region-empty">No regions in context at this point.</div>`
+        return `<div class="ap-region-empty">此处上下文中没有 region。</div>`
       }
       let html = ''
       for (const group of groups) {
         html += `<div class="ap-region-group">
-          <div class="rg-title">${esc(group.stability)} · ${group.regions.length}</div>
+          <div class="rg-title">${esc(stabilityLabel(group.stability))} · ${group.regions.length}</div>
           ${group.regions.map(r => {
             const preview = r.content ? `<span class="rr-preview">${esc(r.content)}</span>` : ''
             return `
@@ -789,7 +805,7 @@
         <div class="ap-msg-card role-${esc(role)}" data-msg-idx="${idx}">
           <span class="mc-role">${esc(role)}</span>
           <span class="mc-preview">${esc(previewText.slice(0, 600))}</span>
-          ${needsMore ? `<span class="mc-more">Show raw JSON</span>
+          ${needsMore ? `<span class="mc-more">查看原始 JSON</span>
             <pre class="ap-json mc-raw" style="display:none; margin-top:6px">${esc(rawJson)}</pre>` : ''}
         </div>`
     }
@@ -817,13 +833,13 @@
       if (value === undefined) return `<pre class="ap-json empty">undefined</pre>`
       let s
       try { s = JSON.stringify(value, null, 2) } catch { s = String(value) }
-      if (s === '' || s === '""') return `<pre class="ap-json empty">empty</pre>`
+      if (s === '' || s === '""') return `<pre class="ap-json empty">空</pre>`
       return `<pre class="ap-json">${esc(s)}</pre>`
     }
 
     function renderLLMDetails(card) {
       if (!card.prompt && !card.response) {
-        return `<div class="ap-empty">No request / response payload recorded.</div>`
+        return `<div class="ap-empty">未记录请求 / 响应载荷。</div>`
       }
       let html = ''
       if (card.prompt) {
@@ -832,20 +848,20 @@
         const tools = card.prompt.tools || []
         if (sys) {
           html += `<div class="ap-sub">
-            <div class="ap-sub-title">System (${(typeof sys === 'string' ? sys.length : JSON.stringify(sys).length)} chars)</div>
+            <div class="ap-sub-title">System（${(typeof sys === 'string' ? sys.length : JSON.stringify(sys).length)} 字符）</div>
             <pre class="ap-json">${esc(typeof sys === 'string' ? sys : JSON.stringify(sys, null, 2))}</pre>
           </div>`
         }
         html += `<div class="ap-sub">
-          <div class="ap-sub-title">Messages (${msgs.length})</div>
+          <div class="ap-sub-title">消息（${msgs.length}）</div>
           ${msgs.length === 0
-            ? `<pre class="ap-json empty">none</pre>`
+            ? `<pre class="ap-json empty">无</pre>`
             : msgs.map((m, i) => renderMsgCard(m, i)).join('')}
         </div>`
         if (tools.length > 0) {
           const names = tools.map(t => t.name || '?').join(', ')
           html += `<div class="ap-sub">
-            <div class="ap-sub-title">Tools (${tools.length})</div>
+            <div class="ap-sub-title">工具（${tools.length}）</div>
             <pre class="ap-json">${esc(names)}</pre>
           </div>`
         }
@@ -856,12 +872,12 @@
           .filter(b => b && b.type === 'text').map(b => b.text || '').join('\n').trim()
         const toolUses = (r.toolCalls || []).map(tc => `${tc.name}(${truncateJson(tc.input ?? {}, 120)})`).join('\n')
         html += `<div class="ap-sub">
-          <div class="ap-sub-title">Response · text</div>
-          ${text ? `<pre class="ap-json">${esc(text)}</pre>` : `<pre class="ap-json empty">no text content</pre>`}
+          <div class="ap-sub-title">响应 · 文本</div>
+          ${text ? `<pre class="ap-json">${esc(text)}</pre>` : `<pre class="ap-json empty">无文本内容</pre>`}
         </div>`
         if (toolUses) {
           html += `<div class="ap-sub">
-            <div class="ap-sub-title">Response · tool calls</div>
+            <div class="ap-sub-title">响应 · 工具调用</div>
             <pre class="ap-json">${esc(toolUses)}</pre>
           </div>`
         }
@@ -872,17 +888,17 @@
     function renderToolDetails(card) {
       let html = ''
       html += `<div class="ap-sub">
-        <div class="ap-sub-title">Input</div>
+        <div class="ap-sub-title">输入</div>
         ${jsonBlock(card.input)}
       </div>`
       if (card.error) {
         html += `<div class="ap-sub">
-          <div class="ap-sub-title">Error</div>
+          <div class="ap-sub-title">错误</div>
           ${jsonBlock(card.error)}
         </div>`
       } else {
         html += `<div class="ap-sub">
-          <div class="ap-sub-title">Output</div>
+          <div class="ap-sub-title">输出</div>
           ${jsonBlock(card.output)}
         </div>`
       }
@@ -898,13 +914,13 @@
       let steps
       try {
         const res = await fetch(`/run/${encodeURIComponent(runId)}/execution`)
-        if (!res.ok) return `<div class="ap-empty">No recorded steps for this turn yet.</div>`
+        if (!res.ok) return `<div class="ap-empty">本轮还没有记录的执行步骤。</div>`
         steps = (await res.json()).steps || []
       } catch {
-        return `<div class="ap-empty">Failed to load execution steps.</div>`
+        return `<div class="ap-empty">加载执行步骤失败。</div>`
       }
       if (steps.length === 0) {
-        return `<div class="ap-empty">No recorded steps for this turn yet.</div>`
+        return `<div class="ap-empty">本轮还没有记录的执行步骤。</div>`
       }
       return steps.map((s, i) => {
         // Badge surfaces both read AND creation so a "0% hit but cache was just
@@ -920,34 +936,34 @@
           const tierClass = c.tier === 'cold' ? 'cold' : c.tier === 'warm' ? 'warm' : ''
           let text
           if (read > 0) {
-            text = `${hitPct}% read · ${formatTokenCount(read)}/${formatTokenCount(total)} tok`
+            text = `命中 ${hitPct}% · ${formatTokenCount(read)}/${formatTokenCount(total)} token`
           } else if (created > 0) {
-            text = `wrote ${formatTokenCount(created)} cache · ${formatTokenCount(total)} tok`
+            text = `写入缓存 ${formatTokenCount(created)} · ${formatTokenCount(total)} token`
           } else {
-            text = `no cache · ${formatTokenCount(total)} tok`
+            text = `无缓存 · ${formatTokenCount(total)} token`
           }
-          cacheBadge = `<span class="ap-step-cache ${tierClass}" title="read ${read} · wrote ${created} · total ${total}">${text}</span>`
+          cacheBadge = `<span class="ap-step-cache ${tierClass}" title="读取 ${read} · 写入 ${created} · 合计 ${total}">${text}</span>`
         }
 
         let body = '', meta = '', expander = '', details = ''
         if (s.kind === 'llm') {
           const n = s.messageCount
           body = n != null
-            ? `Sent <code>${n}</code> message${n === 1 ? '' : 's'} to the model`
-            : 'Sent prompt to the model'
+            ? `向模型发送了 <code>${n}</code> 条消息`
+            : '向模型发送了 prompt'
           const groups = s.regionGroups || []
           const regionCount = groups.reduce((acc, g) => acc + g.regions.length, 0)
-          expander = `<div class="ap-step-expand" data-step-idx="${i}">${regionCount} region${regionCount === 1 ? '' : 's'} in context</div>
+          expander = `<div class="ap-step-expand" data-step-idx="${i}">上下文中 ${regionCount} 个 region</div>
              <div class="ap-step-expanded">${renderRegionExpander(groups)}</div>`
-          details = `<details class="ap-step-details"><summary>Prompt &amp; response</summary>${renderLLMDetails({ prompt: s.prompt, response: s.response })}</details>`
+          details = `<details class="ap-step-details"><summary>Prompt 与响应</summary>${renderLLMDetails({ prompt: s.prompt, response: s.response })}</details>`
         } else {
           const t = s.tool || {}
           const inputPreview = t.input ? truncateJson(t.input, 120) : ''
           body = inputPreview ? `<code>${esc(inputPreview)}</code>` : ''
-          meta = t.status === 'pending' ? '→ pending'
-               : t.status === 'error'   ? '→ error'
-               : `→ ok (${describeToolResult(t.output)})`
-          details = `<details class="ap-step-details"><summary>Full input &amp; output</summary>${renderToolDetails({ input: t.input, output: t.output, error: t.error })}</details>`
+          meta = t.status === 'pending' ? '→ 等待中'
+               : t.status === 'error'   ? '→ 出错'
+               : `→ 成功 (${describeToolResult(t.output)})`
+          details = `<details class="ap-step-details"><summary>完整输入与输出</summary>${renderToolDetails({ input: t.input, output: t.output, error: t.error })}</details>`
         }
         return `
           <div class="ap-step kind-${s.kind}" data-step-idx="${i}">
@@ -972,20 +988,20 @@
     }
 
     function describeToolResult(output) {
-      if (output == null) return 'no output'
-      if (typeof output === 'string') return `${output.length} chars`
-      if (Array.isArray(output)) return `array · ${output.length} items`
+      if (output == null) return '无输出'
+      if (typeof output === 'string') return `${output.length} 字符`
+      if (Array.isArray(output)) return `数组 · ${output.length} 项`
       if (typeof output === 'object') {
         // Common tool-output shapes: {entries: [...]}, {content: "..."},
         // {matches: [...]}, {hits: [...]}. Report the principal array
         // length where it exists, else fall back to JSON byte size.
         for (const k of ['entries', 'matches', 'hits', 'results']) {
-          if (Array.isArray(output[k])) return `${output[k].length} ${k}`
+          if (Array.isArray(output[k])) return `${output[k].length} 条 ${k}`
         }
-        if (typeof output.content === 'string') return `${output.content.length} chars`
+        if (typeof output.content === 'string') return `${output.content.length} 字符`
         let bytes
         try { bytes = JSON.stringify(output).length } catch { bytes = 0 }
-        return `${bytes} bytes`
+        return `${bytes} 字节`
       }
       return String(output).slice(0, 40)
     }
@@ -1110,18 +1126,18 @@
     }
 
     const STATE_LABELS = {
-      supported:   'Directly supported by source',
-      paraphrased: 'Cited paraphrase (no verbatim quote)',
-      tenuous:     'Quote not found in source — verify',
-      unsupported: 'No source citation — model-generated',
-      unverified:  'Cited but source could not be fetched',
+      supported:   '有来源直接支撑',
+      paraphrased: '引用转述（无逐字引文）',
+      tenuous:     '引文在来源中未找到——需核实',
+      unsupported: '无来源引用——模型生成',
+      unverified:  '已引用但来源无法获取',
     }
 
     async function renderProvenanceTab(runId) {
       const text = assistantTextByRunId.get(runId)
-      if (!text) return `<div class="ap-empty">Answer text unavailable.</div>`
+      if (!text) return `<div class="ap-empty">答案文本不可用。</div>`
       const segments = segmentAnswer(text)
-      if (segments.length === 0) return `<div class="ap-empty">Empty answer.</div>`
+      if (segments.length === 0) return `<div class="ap-empty">答案为空。</div>`
 
       // Resolve all unique (file, line) pairs in parallel, populating
       // sourceCache as a side effect. Subsequent renders are zero-fetch.
@@ -1142,11 +1158,11 @@
 
       const legend = `
         <div class="ap-prov-legend">
-          <span class="lg-dot s-supported"></span>supported
-          <span class="lg-dot s-paraphrased"></span>paraphrased
-          <span class="lg-dot s-tenuous"></span>tenuous
-          <span class="lg-dot s-unsupported"></span>no source
-          <span class="lg-dot s-unverified"></span>unverified
+          <span class="lg-dot s-supported"></span>有支撑
+          <span class="lg-dot s-paraphrased"></span>转述
+          <span class="lg-dot s-tenuous"></span>存疑
+          <span class="lg-dot s-unsupported"></span>无来源
+          <span class="lg-dot s-unverified"></span>未核实
         </div>`
 
       const segHtml = segments.map(seg => {
@@ -1160,7 +1176,7 @@
         if (klass.state === 'supported' && klass.quotes && klass.quotes.length > 0) {
           quoteBlock = `<span class="ap-seg-quote">${esc(klass.quotes.join('\n'))}</span>`
         } else if (klass.state === 'tenuous' && klass.missingQuotes && klass.missingQuotes.length > 0) {
-          quoteBlock = `<span class="ap-seg-quote">Missing from source:\n${esc(klass.missingQuotes.join('\n'))}</span>`
+          quoteBlock = `<span class="ap-seg-quote">来源中缺失：\n${esc(klass.missingQuotes.join('\n'))}</span>`
         }
         return `
           <div class="ap-seg s-${klass.state}">
@@ -1190,8 +1206,8 @@
     function updateAuditTitle() {
       const q = auditAnchorRunId ? userInputForRun(auditAnchorRunId) : null
       $auditTitle.innerHTML = q
-        ? `How this answer was built<span class="ap-title-q" title="${esc(q)}">${esc(q)}</span>`
-        : `How this answer was built`
+        ? `这个答案是怎么来的<span class="ap-title-q" title="${esc(q)}">${esc(q)}</span>`
+        : `这个答案是怎么来的`
     }
 
     function renderAuditBody() {
@@ -1201,7 +1217,7 @@
       if (auditActiveTab === 'sources') {
         $auditBody.innerHTML = renderSourcesTab(auditAnchorRunId, msgEl)
       } else if (auditActiveTab === 'steps') {
-        $auditBody.innerHTML = `<div class="ap-empty">Loading execution steps…</div>`
+        $auditBody.innerHTML = `<div class="ap-empty">正在加载执行步骤…</div>`
         // Async render: the steps come from the core projection endpoint.
         // Capture runId/tab so a fast tab switch doesn't paint stale results.
         const pendingRunId = auditAnchorRunId
@@ -1224,7 +1240,7 @@
         $auditBody.innerHTML =
           `<iframe class="ap-viewer-frame" src="/run/${encodeURIComponent(auditAnchorRunId)}/viewer"></iframe>`
       } else if (auditActiveTab === 'provenance') {
-        $auditBody.innerHTML = `<div class="ap-empty">Analyzing answer against sources…</div>`
+        $auditBody.innerHTML = `<div class="ap-empty">正在比对答案与来源…</div>`
         // Async render: classifies each segment after fetching its source.
         // Capture runId so a fast tab switch doesn't paint stale results
         // over a panel that has since changed anchor.
@@ -1274,7 +1290,7 @@
 
     function showReplayBanner(state, html) {
       $auditBanner.className = `ap-replay-banner shown ${state}`
-      $auditBanner.innerHTML = html + `<button class="rb-close" aria-label="Dismiss">×</button>`
+      $auditBanner.innerHTML = html + `<button class="rb-close" aria-label="关闭">×</button>`
     }
 
     function fmtCachePct(read, total) {
@@ -1288,29 +1304,29 @@
         const sav = fmtCachePct(cs.readTokens, cs.totalInputTokens)
         const matches = result.matchesOriginal
         const title = matches
-          ? '✓ Bit-exact replay'
-          : '✓ Replay completed (output differs)'
+          ? '✓ 逐字节一致重放'
+          : '✓ 重放完成（输出有差异）'
         const detail = matches
-          ? `Re-running this turn from the recorded trace produced the same answer character-for-character. All ${cs.totalInputTokens} input tokens served from the local cache — zero new model calls.`
-          : `Replay finished without divergence, but its final text differs from the original. This is rare and suggests downstream non-determinism outside IOPort (e.g. random sampling in formatting code).`
+          ? `从记录的 trace 重跑这一轮，得到了与原答案逐字符相同的结果。全部 ${cs.totalInputTokens} 个输入 token 都由本地缓存供给——零次新模型调用。`
+          : `重放未发生偏离，但最终文本与原答案不同。这种情况罕见，提示 IOPort 之外存在下游非确定性（如格式化代码里的随机采样）。`
         const meta = cs.totalInputTokens
-          ? `Original turn: ${formatTokenCount(cs.totalInputTokens)} input tokens · ${sav} were cache-read · ${formatTokenCount(cs.creationTokens)} written to cache.`
-          : `Original turn: cache stats not reported by provider.`
+          ? `原始这一轮：${formatTokenCount(cs.totalInputTokens)} 个输入 token · 其中 ${sav} 为缓存命中读取 · ${formatTokenCount(cs.creationTokens)} 写入缓存。`
+          : `原始这一轮：provider 未上报缓存统计。`
         showReplayBanner('deterministic',
           `<div class="rb-title">${esc(title)}</div>` +
           `<div class="rb-detail">${esc(detail)}</div>` +
           `<div class="rb-meta">${esc(meta)}</div>`)
       } else if (result.status === 'divergent') {
         showReplayBanner('divergent',
-          `<div class="rb-title">⚠ Replay diverged on ${esc(result.kind)}</div>` +
-          `<div class="rb-detail">${esc(result.summary || 'No detail.')}</div>` +
+          `<div class="rb-title">⚠ 重放在 ${esc(result.kind)} 处偏离</div>` +
+          `<div class="rb-detail">${esc(result.summary || '无详情。')}</div>` +
           (result.actualHashPrefix
-            ? `<div class="rb-meta">Unexpected ${esc(result.kind)} call: hash ${esc(result.actualHashPrefix)}… (cache has ${result.availableCount} alternatives)</div>`
+            ? `<div class="rb-meta">未预期的 ${esc(result.kind)} 调用：hash ${esc(result.actualHashPrefix)}…（缓存有 ${result.availableCount} 个候选）</div>`
             : ''))
       } else {
         showReplayBanner('error',
-          `<div class="rb-title">Replay failed</div>` +
-          `<div class="rb-detail">${esc(result.message || 'unknown error')}</div>`)
+          `<div class="rb-title">重放失败</div>` +
+          `<div class="rb-detail">${esc(result.message || '未知错误')}</div>`)
       }
     }
 
@@ -1318,7 +1334,7 @@
       if (!auditAnchorRunId) return
       $auditReplay.disabled = true
       const originalLabel = $auditReplay.textContent
-      $auditReplay.textContent = 'Replaying…'
+      $auditReplay.textContent = '重放中…'
       hideReplayBanner()
       try {
         const resp = await fetch(`/run/${encodeURIComponent(auditAnchorRunId)}/replay`, { method: 'POST' })
@@ -1369,34 +1385,35 @@
         return
       }
 
-      let state, summary, detail
+      let state, summary, detailInner
       if (data.error === 'unparseable') {
         state = 'error'; summary = '诊断输出无法解析'
-        detail = `<div class="vd-detail collapsed">${esc(data.raw || '')}</div>`
+        detailInner = esc(data.raw || '')
       } else if (data.error) {
         state = 'error'; summary = '诊断失败'
-        detail = `<div class="vd-detail collapsed">${esc(data.error)}</div>`
+        detailInner = esc(data.error)
       } else if (data.verdict === 'ok') {
         state = 'ok'; summary = '✓ 答案与问题相关'
-        detail = `<div class="vd-detail collapsed">${esc(data.explanation || '')}</div>`
+        detailInner = esc(data.explanation || '')
       } else {
         state = 'suspect'; summary = '⚠ 检出跑偏（suspect）'
         const fb = data.firstBreak || {}
         const stepChip = Number.isInteger(fb.step)
           ? `<button class="vd-jump" data-step-idx="${fb.step}" title="跳到 Execution 第 ${fb.step} 步">步 ${fb.step}</button>`
           : `<span>${esc(String(fb.step ?? '?'))}</span>`
-        detail =
-          `<div class="vd-detail">` +
+        detailInner =
           `<div class="vd-break"><b>断点</b> ${stepChip} · ${esc(fb.what || '')}</div>` +
           `<div class="vd-break"><b>原因</b> ${esc(fb.why || '')}</div>` +
-          (data.explanation ? `<div class="vd-break">${esc(data.explanation)}</div>` : '') +
-          `</div>`
+          (data.explanation ? `<div class="vd-break">${esc(data.explanation)}</div>` : '')
       }
+      // Collapse state persists per run: default collapsed for ok/error, expanded
+      // for suspect; a manual toggle (stored on the entry) survives repaints.
+      const collapsed = data._collapsed != null ? data._collapsed : (state !== 'suspect')
       $auditVerdict.className = `ap-verdict shown ${state}`
       $auditVerdict.innerHTML =
         `<div class="vd-row"><span class="vd-label">⚖ 诊断</span>` +
         `<span class="vd-summary toggle" title="点开/收起详情">${esc(summary)}</span>${runBtn('重新诊断')}</div>` +
-        detail
+        `<div class="vd-detail${collapsed ? ' collapsed' : ''}">${detailInner}</div>`
     }
 
     async function runDiagnose() {
@@ -1428,7 +1445,12 @@
       const summary = t.closest('.vd-summary.toggle')
       if (summary) {
         const detail = $auditVerdict.querySelector('.vd-detail')
-        if (detail) detail.classList.toggle('collapsed')
+        if (detail) {
+          const collapsed = detail.classList.toggle('collapsed')
+          // Persist on the entry so a repaint (re-open / switch back) keeps it.
+          const entry = diagnosisByRun.get(auditAnchorRunId)
+          if (entry) entry._collapsed = collapsed
+        }
       }
     })
 
@@ -1470,7 +1492,7 @@
         if (!rawPre) return
         const opening = rawPre.style.display === 'none'
         rawPre.style.display = opening ? 'block' : 'none'
-        target.textContent = opening ? 'Hide raw JSON' : 'Show raw JSON'
+        target.textContent = opening ? '收起原始 JSON' : '查看原始 JSON'
         return
       }
     })
@@ -1506,7 +1528,7 @@
       for (const c of data.conversations) {
         const opt = document.createElement('option')
         opt.value = c.contextId
-        opt.textContent = `${c.contextId.slice(0, 8)}… · ${c.status} · ${c.runIds.length} turns`
+        opt.textContent = `${c.contextId.slice(0, 8)}… · ${statusLabel(c.status)} · ${c.runIds.length} 轮`
         $picker.appendChild(opt)
       }
       $picker.value = currentContextId ?? ''
@@ -1533,7 +1555,7 @@
       $input.disabled = false
       $submit.disabled = false
       $input.placeholder = '问《三国演义》相关问题...'
-      $traceHd.textContent = 'Trace timeline (new conversation — send a message to start)'
+      $traceHd.textContent = 'Trace 时间线（新对话——发送消息开始）'
       if (eventSource) { eventSource.close(); eventSource = null }
       seenEventIds = new Set()
       eventsByRunId = new Map()
@@ -1571,7 +1593,7 @@
           && event.payload && event.payload.toolName === 'skill_request') {
         const skillName = (event.payload.input && event.payload.input.name) || '?'
         div.classList.add('skill-loaded')
-        div.title = `Skill load requested: ${skillName}`
+        div.title = `请求加载 skill：${skillName}`
       }
 
       div.addEventListener('click', () => {
@@ -1595,12 +1617,12 @@
     }
     function summaryFor(event) {
       const t = event.type
-      if (t === 'agent.run.started')   return `run started · ${(event.payload && event.payload.input || '').slice(0, 60)}`
-      if (t === 'agent.run.completed') return `run completed · ${event.payload && event.payload.status}`
-      if (t === 'llm.requested')       return 'LLM request'
-      if (t === 'llm.responded')       return 'LLM response'
-      if (t === 'tool.requested')      return `tool: ${event.payload && event.payload.toolName}`
-      if (t === 'tool.responded')      return `tool: ${event.payload && event.payload.toolName} → ok`
+      if (t === 'agent.run.started')   return `运行开始 · ${(event.payload && event.payload.input || '').slice(0, 60)}`
+      if (t === 'agent.run.completed') return `运行完成 · ${statusLabel(event.payload && event.payload.status)}`
+      if (t === 'llm.requested')       return 'LLM 请求'
+      if (t === 'llm.responded')       return 'LLM 响应'
+      if (t === 'tool.requested')      return `工具：${event.payload && event.payload.toolName}`
+      if (t === 'tool.responded')      return `工具：${event.payload && event.payload.toolName} → 成功`
       if (t === 'clock.read')          return `clock.read · ${event.payload && event.payload.value}`
       if (t === 'uuid.generated')      return `uuid.generated · ${(event.payload && event.payload.value || '').slice(0, 8)}…`
       return t
@@ -1616,9 +1638,9 @@
       const div = document.createElement('div')
       div.className = 'msg assistant pending'
       div.innerHTML =
-        `<div class="speaker">assistant</div>` +
+        `<div class="speaker">助手</div>` +
         `<span class="pending-dots"></span>` +
-        `<span class="pending-status">Thinking…</span>`
+        `<span class="pending-status">思考中…</span>`
       $log.appendChild(div)
       $log.scrollTop = $log.scrollHeight
       $pendingBubble = div
@@ -1646,15 +1668,15 @@
         // the decision flow that produced it. Tied to runId so the panel
         // can look up the relevant events when opened.
         const trigger = runId
-          ? `<span class="audit-trigger" data-run-id="${esc(runId)}">View audit ▾</span>`
+          ? `<span class="audit-trigger" data-run-id="${esc(runId)}">查看审计 ▾</span>`
           : ''
-        div.innerHTML = `<div class="speaker">${role}</div>${renderAssistantHtml(text)}${trigger}`
+        div.innerHTML = `<div class="speaker">${roleLabel(role)}</div>${renderAssistantHtml(text)}${trigger}`
         if (runId) {
           div.dataset.runId = runId
           assistantTextByRunId.set(runId, text)
         }
       } else {
-        div.innerHTML = `<div class="speaker">${role}</div>${esc(text)}`
+        div.innerHTML = `<div class="speaker">${roleLabel(role)}</div>${esc(text)}`
       }
       $log.appendChild(div)
       $log.scrollTop = $log.scrollHeight
@@ -1668,7 +1690,7 @@
     // ─── Load existing conversation (past events + maybe SSE) ──────────
     async function loadConversation(ctxId) {
       resetUI()
-      $traceHd.textContent = `Trace timeline — conversation ${ctxId.slice(0, 8)}…`
+      $traceHd.textContent = `Trace 时间线 — 对话 ${ctxId.slice(0, 8)}…`
 
       const convResp = await fetch('/conversations')
       const conv = (await convResp.json()).conversations.find(c => c.contextId === ctxId)
@@ -1713,9 +1735,9 @@
         // see the agent is actively doing things, not stuck.
         if ($pendingBubble) {
           if (event.type === 'tool.requested' && event.payload && event.payload.toolName) {
-            updatePendingStatus(`Calling tool: ${event.payload.toolName}…`)
+            updatePendingStatus(`正在调用工具：${event.payload.toolName}…`)
           } else if (event.type === 'llm.requested') {
-            updatePendingStatus('Thinking…')
+            updatePendingStatus('思考中…')
           }
         }
         if (event.type === 'agent.run.completed' && event.payload && event.payload.lastTextOutput) {

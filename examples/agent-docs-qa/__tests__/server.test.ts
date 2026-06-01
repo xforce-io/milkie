@@ -270,8 +270,8 @@ describe('server — REST endpoints', () => {
   it('serves the audit panel with a Why tab', async () => {
     const r = await get(`${baseUrl}/`)
     expect(r.status).toBe(200)
+    // Assert on the stable identifier, not the (localized) display label.
     expect(r.body).toContain('data-tab="why"')
-    expect(r.body).toContain('>Why<')
   })
 })
 
