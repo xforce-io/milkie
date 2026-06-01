@@ -218,6 +218,35 @@ async function handleExecution(
   sendJson(res, 200, buildExecutionProjection(events, { regionContent }))
 }
 
+// Manual diagnosis: invoke the built-in `diagnoser` agent against an
+// already-recorded target run. The diagnosed run and the diagnosing run are
+// two distinct runIds (by design) — the diagnoser only *reads* the target's
+// trace via get_run_io / get_execution tools. Its final output is one JSON
+// blob ({ verdict, firstBreak, explanation }); we parse it into the response,
+// degrading to { error:'unparseable', raw } when the model returns non-JSON.
+async function handleDiagnose(
+  res: ServerResponse, s: ServerState, runId: string,
+): Promise<void> {
+  const events = await s.eventStore.readByRunId(runId)
+  if (events.length === 0) {
+    sendJson(res, 404, { error: 'run not found' })
+    return
+  }
+  const result = await s.milkie.invoke({
+    agentId:   'diagnoser',
+    goal:      runId,
+    input:     runId,
+    contextId: `diagnose:${runId}`,
+  })
+  const raw = String(result.output ?? '')
+  try {
+    const parsed = JSON.parse(raw)
+    sendJson(res, 200, { ...parsed, diagnoseRunId: result.agentRunId })
+  } catch {
+    sendJson(res, 200, { error: 'unparseable', raw, diagnoseRunId: result.agentRunId })
+  }
+}
+
 async function handleSourceFetch(
   res: ServerResponse, s: ServerState, relPath: string, linesQuery: string | null,
 ): Promise<void> {
@@ -327,6 +356,11 @@ export async function startServer(config: ServerConfig): Promise<Server> {
       const executionMatch = route.match(/^\/run\/([^/]+)\/execution$/)
       if (req.method === 'GET' && executionMatch) {
         return handleExecution(res, state, decodeURIComponent(executionMatch[1]!))
+      }
+
+      const diagnoseMatch = route.match(/^\/run\/([^/]+)\/diagnose$/)
+      if (req.method === 'POST' && diagnoseMatch) {
+        return handleDiagnose(res, state, decodeURIComponent(diagnoseMatch[1]!))
       }
 
       const sourceMatch = route.match(/^\/source\/(.+)$/)

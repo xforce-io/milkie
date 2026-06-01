@@ -22,6 +22,10 @@ const text = (s: string): ModelResponse => ({
   content: [{ type: 'text', text: s }], toolCalls: [], finishReason: 'end_turn',
 })
 
+const toolCall = (name: string, args: unknown): ModelResponse => ({
+  content: [], finishReason: 'tool_use', toolCalls: [{ id: 'tc-' + name, name, input: args }],
+})
+
 async function get(url: string): Promise<{ status: number; body: string }> {
   const res = await fetch(url)
   return { status: res.status, body: await res.text() }
@@ -517,5 +521,77 @@ describe('diagnoser agent (stub pipeline + output contract)', () => {
     expect(execPayload.error).toBeUndefined()                                                   // ran successfully, not swallowed error
     expect(Array.isArray(execPayload.output?.steps)).toBe(true)                                 // produced a real ExecutionProjection
     expect(execPayload.output!.steps!.length).toBeGreaterThan(0)                                // over the (non-empty) target run
+  }, 15_000)
+})
+
+describe('POST /run/:runId/diagnose', () => {
+  let server: Server
+  let baseUrl: string
+  let exampleDir: string
+
+  const startWith = async (gateway: IModelGateway) => {
+    server = await startServer({
+      port: 0, exampleDir, gateway,
+      agentFile:  path.join(__dirname, '..', 'agents', 'sanguo-researcher.md'),
+      corpusRoot: path.join(__dirname, '..', 'corpus'),
+    })
+    const addr = server.address()
+    if (!addr || typeof addr === 'string') throw new Error('server address unavailable')
+    baseUrl = `http://localhost:${addr.port}`
+  }
+
+  beforeEach(() => {
+    exampleDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-docs-qa-diagnose-'))
+    fs.mkdirSync(path.join(exampleDir, '.milkie', 'runs'), { recursive: true })
+  })
+
+  afterEach(async () => {
+    if (server) await stopServer(server)
+    fs.rmSync(exampleDir, { recursive: true, force: true })
+  })
+
+  it('A: suspect run returns structured verdict with a distinct diagnoseRunId', async () => {
+    const verdict = {
+      verdict: 'suspect',
+      firstBreak: { step: 'evt-tool-1', what: "grep('赤壁')", why: '工具 query 与「曹操爸爸」无关' },
+      explanation: '检索跑偏到赤壁，未回答父亲是谁。',
+    }
+    await startWith(new StubGateway([
+      text('占位答案'),                                  // the target run's answer
+      toolCall('get_run_io', { runId: 'x' }),            // diagnoser step 1
+      toolCall('get_execution', { runId: 'x' }),         // diagnoser step 2
+      text(JSON.stringify(verdict)),                     // diagnoser final JSON
+    ]))
+
+    const { runId } = JSON.parse((await postJson(`${baseUrl}/chat`, { input: '曹操爸爸是谁' })).body) as { runId: string }
+    const r = await postJson(`${baseUrl}/run/${runId}/diagnose`, {})
+    expect(r.status).toBe(200)
+    const body = JSON.parse(r.body) as {
+      verdict: string; firstBreak: { why: string }; diagnoseRunId: string
+    }
+    expect(body.verdict).toBe('suspect')
+    expect(body.firstBreak.why).toMatch(/赤壁|无关/)
+    expect(body.diagnoseRunId).toBeTruthy()
+    expect(body.diagnoseRunId).not.toBe(runId)
+  }, 15_000)
+
+  it('B: unknown run returns 404', async () => {
+    await startWith(new StubGateway([]))
+    const r = await postJson(`${baseUrl}/run/nope/diagnose`, {})
+    expect(r.status).toBe(404)
+  }, 15_000)
+
+  it('C: non-JSON diagnoser output degrades gracefully', async () => {
+    await startWith(new StubGateway([
+      text('占位答案'),
+      toolCall('get_run_io', { runId: 'x' }),
+      toolCall('get_execution', { runId: 'x' }),
+      text('这不是 JSON'),
+    ]))
+
+    const { runId } = JSON.parse((await postJson(`${baseUrl}/chat`, { input: '曹操爸爸是谁' })).body) as { runId: string }
+    const r = await postJson(`${baseUrl}/run/${runId}/diagnose`, {})
+    expect(r.status).toBe(200)
+    expect(JSON.parse(r.body).error).toBe('unparseable')
   }, 15_000)
 })
