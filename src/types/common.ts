@@ -1,3 +1,5 @@
+import type { ModelEvent } from './model.js'
+
 export type JSONValue = string | number | boolean | null | JSONValue[] | { [k: string]: JSONValue }
 export type JSONObject = Record<string, JSONValue>
 export type JSONSchema = Record<string, unknown>
@@ -22,6 +24,8 @@ export interface AgentInvokeRequest {
   goal: string
   input: string
   contextId?: string
+  /** When provided, the run streams token-level ModelEvents to this callback. */
+  onModelEvent?: (e: ModelEvent) => void
 }
 
 export interface AgentResult {
