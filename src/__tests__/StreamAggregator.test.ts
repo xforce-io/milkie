@@ -395,3 +395,83 @@ describe('StreamAggregator — tool_call TC-8: 空 argsBuf → input={}', () => 
     })
   })
 })
+
+// ===========================================================================
+// 健壮性边界：乱序 / null input
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// ROBUSTNESS-1. 孤儿 delta / done（无 start）被安全忽略
+// ---------------------------------------------------------------------------
+describe('StreamAggregator — robustness / out-of-order: 孤儿 delta/done 被安全忽略', () => {
+  test('只发 tool_call_delta（无 start）→ 不抛错，toolCalls=[], content=[]', async () => {
+    const input: ModelEvent[] = [
+      { type: 'tool_call_delta', data: { toolCallId: 'x', delta: '{"orphan":true}' } },
+    ]
+    const result = await aggregateStream(events(input))
+
+    // 不抛错，Map 中无对应 id，delta 被静默跳过
+    expect(result.toolCalls).toEqual([])
+    expect(result.content).toEqual([])
+  })
+
+  test('只发 tool_call_done（无 start）→ 不抛错，toolCalls=[], content=[]', async () => {
+    const input: ModelEvent[] = [
+      { type: 'tool_call_done', data: { toolCallId: 'y', input: { should: 'be ignored' } } },
+    ]
+    const result = await aggregateStream(events(input))
+
+    // 不抛错，Map 中无对应 id，done 被静默跳过
+    expect(result.toolCalls).toEqual([])
+    expect(result.content).toEqual([])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// ROBUSTNESS-2. done.input 为 null → null 是权威值，toolCalls[0].input === null
+// ---------------------------------------------------------------------------
+describe('StreamAggregator — robustness / null input: done.input=null 的语义契约', () => {
+  test('start→done(input:null)，null !== undefined 走权威分支，toolCalls[0].input === null', async () => {
+    const input: ModelEvent[] = [
+      { type: 'tool_call_start', data: { toolCallId: 't', name: 'n' } },
+      { type: 'tool_call_done',  data: { toolCallId: 't', input: null } },
+    ]
+    const result = await aggregateStream(events(input))
+
+    expect(result.toolCalls).toHaveLength(1)
+    // null !== undefined → JSON.stringify(null)='null' → JSON.parse('null')=null
+    expect(result.toolCalls[0]!.input).toBeNull()
+    expect(result.content[0]).toEqual({
+      type: 'tool_use',
+      id: 't',
+      name: 'n',
+      input: null,
+    })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// ROBUSTNESS-3. 先 delta 后 start（乱序）→ delta 被忽略，最终 input={}
+// ---------------------------------------------------------------------------
+describe('StreamAggregator — robustness / out-of-order: delta 先于 start 到达', () => {
+  test('delta(z) 在 start(z) 之前：delta 静默丢弃，argsBuf 为空，最终 input={}', async () => {
+    const input: ModelEvent[] = [
+      // delta 先到，此时 Map 中还没有 'z'，守卫 if(acc) 静默跳过
+      { type: 'tool_call_delta', data: { toolCallId: 'z', delta: '{"a":1}' } },
+      // start 后到，建立空 argsBuf
+      { type: 'tool_call_start', data: { toolCallId: 'z', name: 'late-start' } },
+      { type: 'tool_call_done',  data: { toolCallId: 'z', input: undefined } },
+    ]
+    const result = await aggregateStream(events(input))
+
+    expect(result.toolCalls).toHaveLength(1)
+    // delta 被丢弃 → argsBuf='' → 空字符串走 falsy 分支 → input={}
+    expect(result.toolCalls[0]).toEqual({ id: 'z', name: 'late-start', input: {} })
+    expect(result.content[0]).toEqual({
+      type: 'tool_use',
+      id: 'z',
+      name: 'late-start',
+      input: {},
+    })
+  })
+})
