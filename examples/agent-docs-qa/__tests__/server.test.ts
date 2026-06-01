@@ -4,6 +4,10 @@ import type { IModelGateway, ModelRequest, ModelResponse } from '../../../src/ty
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import { Milkie } from '../../../src/runtime/Milkie'
+import { JsonlEventStore } from '../../../src/trace/JsonlEventStore'
+import { FileTraceObjectStore } from '../../../src/trace/TraceObjectStore'
+import { makeTraceTools } from '../tools/trace-tools'
 
 class StubGateway implements IModelGateway {
   constructor(private readonly responses: ModelResponse[]) {}
@@ -450,11 +454,6 @@ describe('e2e: skill loading through full chat flow', () => {
   }, 10_000)
 })
 
-import { Milkie } from '../../../src/runtime/Milkie'
-import { JsonlEventStore } from '../../../src/trace/JsonlEventStore'
-import { FileTraceObjectStore } from '../../../src/trace/TraceObjectStore'
-import { makeTraceTools } from '../tools/trace-tools'
-
 describe('diagnoser agent (stub pipeline + output contract)', () => {
   it('reads the target run via tools and returns a JSON verdict', async () => {
     const exampleDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-docs-qa-diag-'))
@@ -503,6 +502,18 @@ describe('diagnoser agent (stub pipeline + output contract)', () => {
     expect(parsed).toHaveProperty('verdict')
     expect(parsed).toHaveProperty('firstBreak')
     expect(parsed).toHaveProperty('explanation')
+
+    // Non-hollow assertion: verify get_execution actually executed successfully
+    // and produced a real ExecutionProjection over the target run.
+    const diagEvents = await es.readByRunId(result.agentRunId)
+    const execResp = diagEvents.find(
+      e => e.type === 'tool.responded' && (e.payload as { toolName?: string }).toolName === 'get_execution'
+    )
+    expect(execResp).toBeDefined()                                                              // get_execution actually ran
+    const execPayload = execResp!.payload as { error?: unknown; output?: { steps?: unknown[] } }
+    expect(execPayload.error).toBeUndefined()                                                   // ran successfully, not swallowed error
+    expect(Array.isArray(execPayload.output?.steps)).toBe(true)                                 // produced a real ExecutionProjection
+    expect(execPayload.output!.steps!.length).toBeGreaterThan(0)                                // over the (non-empty) target run
 
     fs.rmSync(exampleDir, { recursive: true, force: true })
   }, 15_000)
