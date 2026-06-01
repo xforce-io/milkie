@@ -238,9 +238,24 @@ async function handleDiagnose(
     input:     runId,
     contextId: `diagnose:${runId}`,
   })
-  const raw = String(result.output ?? '')
+  // A diagnosis run can fail without throwing — the runtime turns it into an
+  // AgentResult with status 'error'/'interrupted'. Don't pass that off as a
+  // normal verdict; surface the failure (200 + error field, same shape as
+  // unparseable so the frontend's error branch renders it uniformly).
+  if (result.status !== 'completed') {
+    sendJson(res, 200, { error: 'diagnose-failed', status: result.status, diagnoseRunId: result.agentRunId })
+    return
+  }
+  const raw = result.output
   try {
     const parsed = JSON.parse(raw)
+    // The contract is exactly one object. JSON.parse happily accepts 42, true,
+    // null, "str", [1,2,3] — spreading those into the response would produce a
+    // malformed object (e.g. array → "0","1","2" index keys). Treat any
+    // non-object as unparseable so there's a single fallback exit.
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('not an object')
+    }
     sendJson(res, 200, { ...parsed, diagnoseRunId: result.agentRunId })
   } catch {
     sendJson(res, 200, { error: 'unparseable', raw, diagnoseRunId: result.agentRunId })

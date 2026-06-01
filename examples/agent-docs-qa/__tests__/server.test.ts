@@ -594,4 +594,27 @@ describe('POST /run/:runId/diagnose', () => {
     expect(r.status).toBe(200)
     expect(JSON.parse(r.body).error).toBe('unparseable')
   }, 15_000)
+
+  it('D: well-formed-but-non-object JSON degrades to unparseable (no array index keys leak through)', async () => {
+    // JSON.parse('[1,2,3]') succeeds, so the old code skipped the catch branch
+    // and spread the array into the response, leaking "0"/"1"/"2" index keys.
+    // The type guard must reroute non-objects into the unparseable fallback.
+    await startWith(new StubGateway([
+      text('占位答案'),
+      toolCall('get_run_io', { runId: 'x' }),
+      toolCall('get_execution', { runId: 'x' }),
+      text('[1,2,3]'),
+    ]))
+
+    const { runId } = JSON.parse((await postJson(`${baseUrl}/chat`, { input: '曹操爸爸是谁' })).body) as { runId: string }
+    const r = await postJson(`${baseUrl}/run/${runId}/diagnose`, {})
+    expect(r.status).toBe(200)
+    const body = JSON.parse(r.body) as Record<string, unknown>
+    expect(body.error).toBe('unparseable')
+    expect(body.raw).toBe('[1,2,3]')
+    // No array-index-shaped fields leaked into the object.
+    expect(body['0']).toBeUndefined()
+    expect(body['1']).toBeUndefined()
+    expect(body['2']).toBeUndefined()
+  }, 15_000)
 })
