@@ -11,6 +11,11 @@ export interface AnthropicAdapterOptions {
 export class AnthropicAdapter implements IModelGateway {
   private readonly client: Anthropic
 
+  // Cross-event state for streaming tool_use: maps a content block `index` to
+  // its tool call id and accumulating partial_json buffer (Anthropic splits
+  // tool input across multiple input_json_delta fragments).
+  private streamTools: Map<number, { id: string; buf: string }> = new Map()
+
   constructor(options: AnthropicAdapterOptions = {}) {
     this.client = new Anthropic({
       apiKey:  options.apiKey ?? process.env['ANTHROPIC_API_KEY'],
@@ -145,11 +150,41 @@ export class AnthropicAdapter implements IModelGateway {
   }
 
   private *parseStreamEvent(event: unknown): Iterable<ModelEvent> {
-    const e = event as { type: string; [k: string]: unknown }
-    if (e.type === 'content_block_delta') {
-      const delta = e['delta'] as { type: string; text?: string } | undefined
+    const e = event as { type: string; index?: number; [k: string]: unknown }
+
+    if (e.type === 'content_block_start') {
+      const block = e['content_block'] as { type?: string; id?: string; name?: string } | undefined
+      if (block?.type === 'tool_use' && e.index !== undefined) {
+        const id = block.id ?? ''
+        this.streamTools.set(e.index, { id, buf: '' })
+        yield { type: 'tool_call_start', data: { toolCallId: id, name: block.name ?? '' } }
+      }
+    } else if (e.type === 'content_block_delta') {
+      const delta = e['delta'] as { type: string; text?: string; partial_json?: string } | undefined
       if (delta?.type === 'text_delta' && delta.text) {
         yield { type: 'message_delta', data: { text: delta.text } }
+      } else if (delta?.type === 'input_json_delta' && delta.partial_json !== undefined && e.index !== undefined) {
+        const slot = this.streamTools.get(e.index)
+        if (slot) {
+          slot.buf += delta.partial_json
+          yield { type: 'tool_call_delta', data: { toolCallId: slot.id, delta: delta.partial_json } }
+        }
+      }
+    } else if (e.type === 'content_block_stop') {
+      if (e.index !== undefined) {
+        const slot = this.streamTools.get(e.index)
+        if (slot) {
+          let input: unknown = {}
+          if (slot.buf !== '') {
+            try {
+              input = JSON.parse(slot.buf)
+            } catch {
+              input = {}
+            }
+          }
+          this.streamTools.delete(e.index)
+          yield { type: 'tool_call_done', data: { toolCallId: slot.id, input } }
+        }
       }
     } else if (e.type === 'message_delta') {
       const usage = (e['usage'] as { output_tokens?: number } | undefined)
