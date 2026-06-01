@@ -62,12 +62,28 @@ export interface LlmRespondedPayload {
 export interface ToolRequestedPayload {
   toolName: string
   input: unknown
+  /**
+   * #81: LLM 侧 tool_use id（来自 ModelResponse.toolCalls[].id）。外部消费方
+   * （如 alfred turn orchestrator）按此与 tool.responded 配对。旧 trace 无此字段
+   * → optional。
+   */
+  toolCallId?: string
   /** Phase 3: hash of canonicalized (toolName + input); cache key for replay. */
   requestHash: string
 }
 
 export interface ToolRespondedPayload {
   toolName: string
+  /**
+   * #81: 与对应 tool.requested 相同的 LLM 侧 tool_use id，用于配对 requested↔responded。
+   * 旧 trace 无此字段 → optional。
+   */
+  toolCallId?: string
+  /**
+   * #81: 显式成功/失败标志。'ok' = output 分支，'error' = error 分支。
+   * 外部消费方据此判断而无需推导 output/error 的存在性。旧 trace 无此字段 → optional。
+   */
+  status?: 'ok' | 'error'
   output?: unknown
   /** Phase 3: structured to preserve retryable/code/name; replay rebuilds Error. */
   error?: {

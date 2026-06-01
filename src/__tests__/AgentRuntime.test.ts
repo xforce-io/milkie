@@ -4,6 +4,7 @@ import { Milkie } from '../runtime/Milkie'
 import { MemoryStore } from '../store/MemoryStore'
 import { InMemoryRecorder } from '../trajectory/InMemoryRecorder'
 import { MemoryEventStore } from '../trace/MemoryEventStore'
+import { RecordingIOPort } from '../trace/RecordingIOPort'
 import { checkpointFromEvents } from '../trace/diagnostics/checkpointFromEvents'
 import { MemoryTraceObjectStore } from '../trace/TraceObjectStore'
 import type { AgentConfig } from '../types/agent'
@@ -604,5 +605,48 @@ describe('#31 guard evaluation capture', () => {
     )
     expect((transition!.payload as import('../trace/types').FsmTransitionPayload).guardEvaluations)
       .toBeUndefined()
+  })
+})
+
+describe('#81 readable tool payload through a run', () => {
+  it('stamps the LLM tool_use id onto tool.requested/responded so they pair', async () => {
+    const eventStore = new MemoryEventStore()
+    const toolDef: ToolDefinition = {
+      name:        'search',
+      description: 'search the web',
+      inputSchema: { type: 'object', properties: { q: { type: 'string' } } },
+      handler:     async () => ({ results: ['result1'] }),
+    }
+    const runId  = 'run-81'
+    const ioPort = new RecordingIOPort(
+      new DefaultIOPort(new SequentialGateway([
+        toolCallResponse('tc-xyz', 'search', { q: 'test' }),
+        textResponse('done'),
+      ])),
+      eventStore,
+      runId,
+    )
+    const runtime = new AgentRuntime({
+      config:     makeConfig(),
+      goal:       'search something',
+      input:      'go',
+      stateStore: new MemoryStore(),
+      recorder:   new InMemoryRecorder(),
+      ioPort,
+      extraTools: [toolDef],
+      eventStore,
+      agentRunId: runId,
+    })
+
+    const result = await runtime.run('go')
+    const events = await eventStore.readByRunId(result.agentRunId)
+    const req = events.find(e => e.type === 'tool.requested')!.payload as import('../trace/types').ToolRequestedPayload
+    const res = events.find(e => e.type === 'tool.responded')!.payload as import('../trace/types').ToolRespondedPayload
+
+    expect(req.toolCallId).toBe('tc-xyz')
+    expect(res.toolCallId).toBe('tc-xyz')
+    expect(res.toolCallId).toBe(req.toolCallId)
+    expect(res.status).toBe('ok')
+    expect(res.output).toEqual({ results: ['result1'] })
   })
 })

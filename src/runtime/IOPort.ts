@@ -36,11 +36,15 @@ export interface IIOPort {
    *
    * `toolName` and `input` are exposed so future implementations can hash
    * them as a cache key without inspecting the thunk.
+   *
+   * `opts.toolCallId` (#81) is the LLM-side tool_use id; recording IOPorts stamp
+   * it onto tool.requested / tool.responded so external consumers can pair them.
    */
   invokeTool(
     toolName: string,
     input: unknown,
     execute: () => Promise<unknown>,
+    opts?: { toolCallId?: string },
   ): Promise<unknown>
 
   /** Current epoch milliseconds. Replacement for direct `Date.now()`. */
