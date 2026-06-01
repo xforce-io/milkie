@@ -184,6 +184,33 @@
       background: none; border: none; font-size: 14px; line-height: 1; color: var(--muted);
     }
     #audit-panel .ap-replay-banner .rb-close:hover { color: var(--text) }
+    #audit-panel .ap-diagnose {
+      margin-left: 8px; padding: 4px 10px; font-size: 12px; cursor: pointer;
+      border: 1px solid var(--border); border-radius: 6px; background: var(--bg);
+      color: var(--text);
+    }
+    #audit-panel .ap-diagnose:hover { opacity: 0.9 }
+    #audit-panel .ap-diagnose:disabled { opacity: 0.5; cursor: progress }
+    #audit-panel .ap-diagnose-banner {
+      display: none; margin: 8px 16px 0; padding: 10px 12px;
+      border-radius: 6px; font-size: 13px; position: relative;
+    }
+    #audit-panel .ap-diagnose-banner.shown { display: block }
+    #audit-panel .ap-diagnose-banner.ok      { background: #f0faf3; border-left: 4px solid #2da14b }
+    #audit-panel .ap-diagnose-banner.suspect { background: #fdf2e6; border-left: 4px solid #e07a00 }
+    #audit-panel .ap-diagnose-banner.error   { background: #fdf0f0; border-left: 4px solid #d93030 }
+    #audit-panel .ap-diagnose-banner .db-title { font-weight: 600; margin-bottom: 4px }
+    #audit-panel .ap-diagnose-banner.ok      .db-title { color: #2da14b }
+    #audit-panel .ap-diagnose-banner.suspect .db-title { color: #c66800 }
+    #audit-panel .ap-diagnose-banner.error   .db-title { color: #c02020 }
+    #audit-panel .ap-diagnose-banner .db-break { color: var(--text); margin-top: 4px }
+    #audit-panel .ap-diagnose-banner .db-break b { color: var(--muted); font-weight: 600 }
+    #audit-panel .ap-diagnose-banner .db-expl { color: var(--muted); font-size: 12px; margin-top: 6px }
+    #audit-panel .ap-diagnose-banner .db-close {
+      position: absolute; top: 6px; right: 8px; cursor: pointer; color: var(--muted);
+      background: none; border: none; font-size: 16px; line-height: 1;
+    }
+    #audit-panel .ap-diagnose-banner .db-close:hover { color: var(--text) }
     #audit-panel .ap-tabs {
       display: flex; gap: 4px; padding: 0 12px; border-bottom: 1px solid var(--border); background: var(--bg);
     }
@@ -461,9 +488,11 @@
     <div class="ap-header">
       <div class="ap-title">How this answer was built</div>
       <button class="ap-replay" aria-label="Replay this turn deterministically" title="Re-run this turn deterministically from the recorded trace">↻ Replay</button>
+      <button class="ap-diagnose" aria-label="Diagnose answer correctness" title="诊断这次回答是否答到问题上、第一处跑偏在哪">⚖ 诊断</button>
       <button class="ap-close" aria-label="Close audit panel">×</button>
     </div>
     <div class="ap-replay-banner" role="status"></div>
+    <div class="ap-diagnose-banner" role="status"></div>
     <div class="ap-tabs">
       <div class="ap-tab active" data-tab="sources">Sources</div>
       <div class="ap-tab" data-tab="steps">Execution</div>
@@ -517,6 +546,8 @@
     const $auditTabs   = $audit.querySelectorAll('.ap-tab')
     const $auditReplay = $audit.querySelector('.ap-replay')
     const $auditBanner = $audit.querySelector('.ap-replay-banner')
+    const $auditDiagnose = $audit.querySelector('.ap-diagnose')
+    const $auditDiagBanner = $audit.querySelector('.ap-diagnose-banner')
 
     // ─── Utilities ─────────────────────────────────────────────────────
     function esc(s) {
@@ -1218,6 +1249,7 @@
       $audit.classList.remove('open')
       document.body.classList.remove('audit-open')
       hideReplayBanner()
+      hideDiagnoseBanner()
     }
 
     // ─── Replay (Phase 4b) ────────────────────────────────────────────
@@ -1290,6 +1322,63 @@
     $auditBanner.addEventListener('click', (ev) => {
       const t = ev.target
       if (t instanceof HTMLElement && t.classList.contains('rb-close')) hideReplayBanner()
+    })
+
+    // ─── Diagnose (#94) ───────────────────────────────────────────────
+    function hideDiagnoseBanner() {
+      $auditDiagBanner.className = 'ap-diagnose-banner'
+      $auditDiagBanner.innerHTML = ''
+    }
+    function showDiagnoseBanner(state, html) {
+      $auditDiagBanner.className = `ap-diagnose-banner shown ${state}`
+      $auditDiagBanner.innerHTML = html + `<button class="db-close" aria-label="Dismiss">×</button>`
+    }
+    function renderDiagnoseResult(data) {
+      if (data.error === 'unparseable') {
+        showDiagnoseBanner('error',
+          `<div class="db-title">诊断输出无法解析</div>` +
+          `<div class="db-expl">${esc(data.raw || '')}</div>`)
+        return
+      }
+      if (data.error) {
+        showDiagnoseBanner('error',
+          `<div class="db-title">诊断失败</div>` +
+          `<div class="db-expl">${esc(data.error)}</div>`)
+        return
+      }
+      if (data.verdict === 'ok') {
+        showDiagnoseBanner('ok',
+          `<div class="db-title">✓ 答案与问题相关</div>` +
+          `<div class="db-expl">${esc(data.explanation || '')}</div>`)
+      } else {
+        const fb = data.firstBreak || {}
+        showDiagnoseBanner('suspect',
+          `<div class="db-title">⚠ 检出跑偏（suspect）</div>` +
+          `<div class="db-break"><b>断点</b> ${esc(fb.step || '?')} · ${esc(fb.what || '')}</div>` +
+          `<div class="db-break"><b>原因</b> ${esc(fb.why || '')}</div>` +
+          `<div class="db-expl">${esc(data.explanation || '')}</div>`)
+      }
+    }
+    async function runDiagnose() {
+      if (!auditAnchorRunId) return
+      $auditDiagnose.disabled = true
+      const orig = $auditDiagnose.textContent
+      $auditDiagnose.textContent = '诊断中…'
+      hideDiagnoseBanner()
+      try {
+        const resp = await fetch(`/run/${encodeURIComponent(auditAnchorRunId)}/diagnose`, { method: 'POST' })
+        renderDiagnoseResult(await resp.json())
+      } catch (err) {
+        renderDiagnoseResult({ error: (err && err.message) || String(err) })
+      } finally {
+        $auditDiagnose.disabled = false
+        $auditDiagnose.textContent = orig
+      }
+    }
+    $auditDiagnose.addEventListener('click', runDiagnose)
+    $auditDiagBanner.addEventListener('click', (ev) => {
+      const t = ev.target
+      if (t instanceof HTMLElement && t.classList.contains('db-close')) hideDiagnoseBanner()
     })
 
     function setAuditTab(name) {
