@@ -28,7 +28,7 @@ export interface ITrajectoryRecorder {
 export interface ResolvedManifest {
   agentId:      string
   agentVersion: string
-  model: {
+  model?: {
     provider: string
     model:    string
     adapter:  string
