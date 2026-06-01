@@ -48,17 +48,15 @@ export class OpenAICompatibleAdapter implements IModelGateway {
           parameters:  t.inputSchema,
         },
       })),
-      tool_choice: request.tools?.length ? 'auto' : undefined,
-      stream:      true,
-      // stream_options is missing from this SDK version's create() params type,
-      // but the OpenAI streaming API accepts it to surface a trailing usage chunk.
+      tool_choice:    request.tools?.length ? 'auto' : undefined,
+      stream:         true,
       stream_options: { include_usage: true },
-    } as OpenAI.ChatCompletionCreateParamsStreaming)
+    })
 
     // Accumulate tool_call fragments keyed by their stream `index`.
     const toolCalls = new Map<number, { id: string; argsBuf: string }>()
 
-    for await (const chunk of stream as AsyncIterable<OpenAI.ChatCompletionChunk>) {
+    for await (const chunk of stream) {
       const choice = chunk.choices[0]
       const delta  = choice?.delta
 
@@ -70,6 +68,7 @@ export class OpenAICompatibleAdapter implements IModelGateway {
         const index = tc.index
         let entry = toolCalls.get(index)
         if (!entry) {
+          // id 仅在该 index 首片读取（OpenAI 协议保证 id 在首片出现，后续片省略）。
           const id = tc.id ?? `idx-${index}`
           entry = { id, argsBuf: '' }
           toolCalls.set(index, entry)

@@ -286,6 +286,25 @@ describe('OpenAICompatibleAdapter.stream — token-level streaming', () => {
     expect(events).toEqual([{ type: 'message_delta', data: { text: 'done' } }])
   })
 
+  test('protocol assumption: id on first chunk only — subsequent chunks without id do not overwrite toolCallId', async () => {
+    // OpenAI protocol: id appears only in the first delta for a given index.
+    // Subsequent deltas carry only arguments. This test locks that assumption:
+    // the done event must use the real id from the first chunk, not a fallback.
+    const { adapter } = adapterWithChunks([
+      toolChunk([{ index: 0, id: 'real_id_abc', name: 'search', arguments: '{"q":' }]),
+      // second chunk: same index, no id, no name — only arguments fragment
+      toolChunk([{ index: 0, arguments: '"hello"}' }]),
+      toolChunk([], 'tool_calls'),
+    ])
+    const events = await collect(adapter)
+    expect(events).toEqual([
+      { type: 'tool_call_start', data: { toolCallId: 'real_id_abc', name: 'search' } },
+      { type: 'tool_call_delta', data: { toolCallId: 'real_id_abc', delta: '{"q":' } },
+      { type: 'tool_call_delta', data: { toolCallId: 'real_id_abc', delta: '"hello"}' } },
+      { type: 'tool_call_done', data: { toolCallId: 'real_id_abc', input: { q: 'hello' } } },
+    ])
+  })
+
   test('full sequence: text + tool_call + usage in one stream', async () => {
     const { adapter } = adapterWithChunks([
       contentChunk('Sure. '),
