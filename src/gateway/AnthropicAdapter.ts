@@ -36,9 +36,13 @@ export class AnthropicAdapter implements IModelGateway {
   async *stream(request: ModelRequest): AsyncIterable<ModelEvent> {
     const params = this.buildParams(request)
     const stream = (this.client.messages.stream as (p: unknown) => AsyncIterable<unknown>)(params)
-
-    for await (const event of stream) {
-      yield* this.parseStreamEvent(event)
+    this.streamTools.clear()
+    try {
+      for await (const event of stream) {
+        yield* this.parseStreamEvent(event)
+      }
+    } finally {
+      this.streamTools.clear()
     }
   }
 

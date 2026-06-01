@@ -275,3 +275,69 @@ describe('AnthropicAdapter.parseStreamEvent — edge cases', () => {
     ])
   })
 })
+
+// ---------------------------------------------------------------------------
+// stream() 层级：流级别 streamTools 清理测试
+// ---------------------------------------------------------------------------
+
+function adapterWithStreamEvents(events: unknown[]): AnthropicAdapter {
+  const adapter = new AnthropicAdapter({ apiKey: 'sk-test' })
+  ;(adapter as unknown as { client: { messages: { stream: (...a: unknown[]) => unknown } } })
+    .client = { messages: { stream: () => (async function* () { for (const e of events) yield e })() } }
+  return adapter
+}
+
+async function collectStream(adapter: AnthropicAdapter): Promise<ModelEvent[]> {
+  const out: ModelEvent[] = []
+  for await (const e of adapter.stream({ model: 'm', messages: [] })) out.push(e)
+  return out
+}
+
+describe('AnthropicAdapter.stream() — 流级别 streamTools 清理', () => {
+  test('12. 中断流的残留不污染下一流：第一流无 stop 留下 OLD，第二流 start NEW 正确覆盖', async () => {
+    const adapter = new AnthropicAdapter({ apiKey: 'sk-test' })
+
+    // 第一次流：content_block_start + delta，无 content_block_stop（模拟中断）
+    const firstEvents = [
+      { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'OLD', name: 'a' } },
+      { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{"old":' } },
+    ]
+    ;(adapter as unknown as { client: { messages: { stream: (...a: unknown[]) => unknown } } })
+      .client = { messages: { stream: () => (async function* () { for (const e of firstEvents) yield e })() } }
+    const first = await collectStream(adapter)
+
+    // 第一次：应有 start + delta，无 done
+    expect(first).toEqual([
+      { type: 'tool_call_start', data: { toolCallId: 'OLD', name: 'a' } },
+      { type: 'tool_call_delta', data: { toolCallId: 'OLD', delta: '{"old":' } },
+    ])
+
+    // 第二次流：完整序列，index 0，id='NEW'
+    const secondEvents = [
+      { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'NEW', name: 'b' } },
+      { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{"x":1}' } },
+      { type: 'content_block_stop', index: 0 },
+    ]
+    ;(adapter as unknown as { client: { messages: { stream: (...a: unknown[]) => unknown } } })
+      .client = { messages: { stream: () => (async function* () { for (const e of secondEvents) yield e })() } }
+    const second = await collectStream(adapter)
+
+    // 断言第二次流使用 NEW（而非 OLD 残留）
+    const startEvent = second.find(e => e.type === 'tool_call_start')
+    const doneEvent  = second.find(e => e.type === 'tool_call_done')
+    expect(startEvent).toEqual({ type: 'tool_call_start', data: { toolCallId: 'NEW', name: 'b' } })
+    expect(doneEvent).toEqual({ type: 'tool_call_done', data: { toolCallId: 'NEW', input: { x: 1 } } })
+  })
+
+  test('13. 正常流结束后 streamTools 为空（无泄漏）', async () => {
+    const events = [
+      { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'toolu_z', name: 'fn' } },
+      { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{"z":9}' } },
+      { type: 'content_block_stop', index: 0 },
+    ]
+    const adapter = adapterWithStreamEvents(events)
+    await collectStream(adapter)
+    // stream() finally 块保证 streamTools 清空
+    expect((adapter as unknown as { streamTools: Map<unknown, unknown> }).streamTools.size).toBe(0)
+  })
+})
