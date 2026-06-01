@@ -205,3 +205,19 @@ Full spec: **`docs/superpowers/specs/2026-05-25-context-region-substrate-design.
 - Spec: [Context Region Substrate](../../docs/superpowers/specs/2026-05-25-context-region-substrate-design.md)
   (the design that addresses the limitations listed above)
 - Architecture: [ARCHITECTURE.md](../../ARCHITECTURE.md) — "Reference UI projection"
+
+## diagnoser agent(#88,借住)
+
+`agents/diagnoser.md` 是一个**横切诊断 agent**(答案错因诊断):读被诊断 run 的 Trace
+投影(`tools/trace-tools.ts`),沿「问题→工具query→证据→答案」定位第一个相关性断点。
+
+- 它**借住**于本 example;归宿是 milkie 的内置/标准 agent 层(见 issue #89),不属于"三国问答"领域。
+- 编程入口:`milkie.invoke({ agentId: 'diagnoser', input: <被诊断的 runId> })`,输出为
+  JSON `{ verdict, firstBreak, explanation }`。
+- 确定性测试覆盖读-Trace 工具 + 管道/契约;**诊断判断质量**需真实 LLM,见下方 live 验证。
+
+### live 验证(手动,需 VOLCENGINE_TOKEN/API_BASE)
+
+启动 server,问一个会跑偏的问题(stub 或真实),拿到 runId 后:
+`milkie.invoke({ agentId: 'diagnoser', input: '<runId>' })` —— 人工核对 `firstBreak`
+是否指向真正跑偏的那一步(例:问"曹操爸爸"却 grep"赤壁")。
