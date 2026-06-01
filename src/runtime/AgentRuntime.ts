@@ -1163,6 +1163,7 @@ export class AgentRuntime {
           call.name,
           call.input,
           () => this.registry.execute(call.name, call.input, ctx),
+          { toolCallId: call.id },  // #81: stamp the LLM tool_use id onto tool.requested/responded for pairing
         )
         span.attributes['output'] = output
         // SPIKE(#73): event-source tool WM side-effects so replay reconstructs them.
