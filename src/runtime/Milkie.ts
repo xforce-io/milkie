@@ -449,13 +449,15 @@ export class Milkie {
       replayWmSnapshots: events
         .filter(e => e.type === 'wm.mutated')
         .map(e => (e.payload as { snapshot: unknown }).snapshot),
-      // #60: recorded emit-driven FSM events keyed by toolCallId → replay re-emits
-      // them so emit-driven transitions reproduce without re-running tool handlers.
+      // #60: recorded emit-driven FSM events keyed by (toolCallId, occurrence) →
+      // replay re-emits them so emit-driven transitions reproduce without re-running
+      // tool handlers. The occurrence suffix keeps a tool_call id reused across
+      // responses from collapsing in the map (provider ids are only unique per response).
       replayEmits: new Map(events
         .filter(e => e.type === 'tool.emitted')
         .map(e => {
           const p = e.payload as ToolEmittedPayload
-          return [p.toolCallId, p.event] as const
+          return [`${p.toolCallId}#${p.occurrence ?? 0}`, p.event] as const
         })),
     })
 

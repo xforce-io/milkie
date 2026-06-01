@@ -206,11 +206,14 @@ export interface GuardEvaluation {
  * replay can reproduce the emit-driven transition without re-running the
  * handler (ReplayingIOPort serves cached tool output and never runs the thunk).
  * Recorded once per tool call that WON the FSM's single pendingEvent slot
- * (first-emit-wins); keyed by toolCallId, which comes from the cached LLM
- * output and is therefore stable across replay.
+ * (first-emit-wins); keyed by (toolCallId, occurrence). toolCallId comes from
+ * the cached LLM output so it is stable across replay, but provider ids are only
+ * unique within ONE response — `occurrence` disambiguates a reused id across the run.
  */
 export interface ToolEmittedPayload {
   toolCallId: string
+  /** 0-based count of how many times toolCallId was seen in this run before this call. */
+  occurrence: number
   event: {
     name:     string
     payload?: unknown

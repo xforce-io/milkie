@@ -511,6 +511,52 @@ describe('Milkie.replay', () => {
     expect(replayGateway.callCount).toBe(0)  // cache served everything; no live LLM
   })
 
+  it('replays two emit-driven steps that REUSE a toolCallId across FSM states (#60 dup-id)', async () => {
+    // Providers only guarantee tool_call ids are unique within ONE response, not
+    // across a run. Two states here each emit via a tool call that reuses id
+    // 'tc-1'. Keying recorded emits by toolCallId alone collapses both into one
+    // map entry → replay injects the wrong (second) event at the first call.
+    const toolA: ToolDefinition = {
+      name: 'tool_a', description: 'a', inputSchema: { type: 'object', properties: {} },
+      handler: async (_i, ctx) => { ctx.emit('A_DONE'); return {} },
+    }
+    const toolB: ToolDefinition = {
+      name: 'tool_b', description: 'b', inputSchema: { type: 'object', properties: {} },
+      handler: async (_i, ctx) => { ctx.emit('B_DONE'); return {} },
+    }
+    const config: AgentConfig = {
+      agentId: 'dup-id-agent', version: '0.0.0', systemPrompt: 'sys',
+      fsm: { states: [
+        { name: 's0', type: 'llm', tools: ['tool_a'], on: { A_DONE: 's1' } },
+        { name: 's1', type: 'llm', tools: ['tool_b'], on: { B_DONE: 'end' } },
+        { name: 'end', type: 'action', terminal: true },
+      ] },
+      model: { provider: 'stub', model: 'stub', adapter: 'stub' },
+    }
+    const store = new MemoryEventStore()
+    const recordMilkie = new Milkie({
+      stateStore: new MemoryStore(),
+      gateway: new SequentialGateway([
+        toolCallResponse('tc-1', 'tool_a', {}),  // s0 — id tc-1
+        toolCallResponse('tc-1', 'tool_b', {}),  // s1 — SAME id tc-1
+      ]),
+      eventStore: store, tools: [toolA, toolB],
+    })
+    recordMilkie.registerAgent(config)
+    const original = await recordMilkie.invoke({ agentId: 'dup-id-agent', goal: 'g', input: 'i' })
+    expect(original.status).toBe('completed')  // sanity: record completes fine
+
+    const replayMilkie = new Milkie({
+      stateStore: new MemoryStore(),
+      gateway: new SequentialGateway([]), eventStore: store, tools: [toolA, toolB],
+    })
+    replayMilkie.registerAgent(config)
+
+    const replayed = await replayMilkie.replay(original.agentRunId)
+    expect(replayed.status).toBe('completed')
+    expect(replayed.output).toBe(original.output)
+  })
+
   it('records the emit with its guard and replays without divergence (#60)', async () => {
     const guard = { guardId: 'intent', result: 'INTENT_DONE', contextSlice: { confidence: 0.9 } }
     const tool = classifyIntentTool(ctx => ctx.emit('INTENT_DONE', { slot: 'x' }, guard as never))
@@ -530,6 +576,7 @@ describe('Milkie.replay', () => {
     expect(emitted).toHaveLength(1)
     expect(emitted[0]!.payload).toEqual({
       toolCallId: 'tc-1',
+      occurrence: 0,
       event: { name: 'INTENT_DONE', payload: { slot: 'x' }, guard: [guard] },
     })
 
