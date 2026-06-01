@@ -101,6 +101,9 @@ export class AgentRuntime {
   private readonly traceObjectStore?: ITraceObjectStore
   private readonly replayWmSnapshots?: unknown[]  // SPIKE(#73)
   private readonly replayEmits?: Map<string, { name: string; payload?: unknown; guard?: GuardEvaluation[] }>  // #60
+  /** #60: per-run count of successful calls per toolCallId, to disambiguate a
+   *  tool_call id reused across responses when keying tool.emitted record/replay. */
+  private readonly toolEmitOccurrence = new Map<string, number>()
   private readonly subAgentConfigs?: Map<string, AgentConfig>
   private readonly childRecorderFactory?: (config: AgentConfig, contextId: string, traceId: string) => ITrajectoryRecorder
   private readonly makeChildPort?: MakeChildPort
@@ -1172,10 +1175,19 @@ export class AgentRuntime {
         }
         // #60: event-source the tool's emit side-effect (FSM transition) the same
         // way. On replay the handler didn't run, so re-emit the recorded business
-        // event (keyed by toolCallId) before runLLMState calls processPendingEvent.
-        // In record mode, append tool.emitted iff this call won the pendingEvent slot.
+        // event before runLLMState calls processPendingEvent. In record mode,
+        // append tool.emitted iff this call won the pendingEvent slot.
+        //
+        // Key by (toolCallId, occurrence): providers only guarantee tool_call ids
+        // are unique within ONE response, not across a run — the same id can recur
+        // in a later FSM state. occurrence = how many times this id has been seen
+        // in this run (incremented per successful call, identically in record and
+        // replay), so duplicate ids never collapse or cross-inject. The counter
+        // ticks for EVERY call (even non-emitting ones) so the two sides stay aligned.
+        const occurrence = this.toolEmitOccurrence.get(call.id) ?? 0
+        this.toolEmitOccurrence.set(call.id, occurrence + 1)
         if (this.replayEmits) {
-          const emitted = this.replayEmits.get(call.id)
+          const emitted = this.replayEmits.get(`${call.id}#${occurrence}`)
           if (emitted) this.fsm.emitEvent(emitted.name, emitted.payload, emitted.guard)
         } else if (this.eventStore && capturedEmit) {
           await this.eventStore.append({
@@ -1184,7 +1196,7 @@ export class AgentRuntime {
             type:      'tool.emitted',
             actor:     this.config.agentId,
             timestamp: Date.now(),
-            payload:   { toolCallId: call.id, event: capturedEmit } satisfies ToolEmittedPayload,
+            payload:   { toolCallId: call.id, occurrence, event: capturedEmit } satisfies ToolEmittedPayload,
           })
         }
         const duration = this.ioPort.now() - start
