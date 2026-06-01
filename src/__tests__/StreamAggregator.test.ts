@@ -176,3 +176,222 @@ describe('StreamAggregator — onEvent ordering', () => {
     expect(received).toEqual(input)
   })
 })
+
+// ===========================================================================
+// tool_call 聚合完备测试
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// TC-1. 正常单 tool_call 全流程（delta 拼接 + done 无 input）
+// ---------------------------------------------------------------------------
+describe('StreamAggregator — tool_call TC-1: 正常单 tool_call 全流程', () => {
+  test('start → delta(片段1) → delta(片段2) → done(无 input)，toolCalls 和 content 正确', async () => {
+    const input: ModelEvent[] = [
+      { type: 'tool_call_start', data: { toolCallId: 'tc-1', name: 'search' } },
+      { type: 'tool_call_delta', data: { toolCallId: 'tc-1', delta: '{"k"' } },
+      { type: 'tool_call_delta', data: { toolCallId: 'tc-1', delta: ':"v"}' } },
+      { type: 'tool_call_done',  data: { toolCallId: 'tc-1', input: undefined } },
+    ]
+    const received: ModelEvent[] = []
+    const result = await aggregateStream(events(input), (e) => received.push(e))
+
+    // onEvent 收到全部 4 个事件
+    expect(received).toHaveLength(4)
+    expect(received).toEqual(input)
+
+    // toolCalls 正确
+    expect(result.toolCalls).toHaveLength(1)
+    expect(result.toolCalls[0]).toEqual({ id: 'tc-1', name: 'search', input: { k: 'v' } })
+
+    // content 含对应 tool_use
+    expect(result.content).toHaveLength(1)
+    expect(result.content[0]).toEqual({
+      type: 'tool_use',
+      id: 'tc-1',
+      name: 'search',
+      input: { k: 'v' },
+    })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// TC-2. done 携带 input 时以其为权威，覆盖 delta 拼出的 argsBuf
+// ---------------------------------------------------------------------------
+describe('StreamAggregator — tool_call TC-2: done.input authoritative', () => {
+  test('delta 累加错误 JSON，done 携带 input:{correct:true}，最终 input 以 done 为准', async () => {
+    const input: ModelEvent[] = [
+      { type: 'tool_call_start', data: { toolCallId: 'tc-2', name: 'calc' } },
+      { type: 'tool_call_delta', data: { toolCallId: 'tc-2', delta: '{"wrong":"data"}' } },
+      { type: 'tool_call_done',  data: { toolCallId: 'tc-2', input: { correct: true } } },
+    ]
+    const result = await aggregateStream(events(input))
+
+    expect(result.toolCalls).toHaveLength(1)
+    const tc2 = result.toolCalls[0]!
+    expect(tc2.input).toEqual({ correct: true })
+
+    expect(result.content[0]).toEqual({
+      type: 'tool_use',
+      id: 'tc-2',
+      name: 'calc',
+      input: { correct: true },
+    })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// TC-3. JSON.parse 失败 → input 回退到 {}
+// ---------------------------------------------------------------------------
+describe('StreamAggregator — tool_call TC-3: JSON.parse 失败回退 {}', () => {
+  test('delta 为非法 JSON，done 无 input，toolCalls[0].input = {}', async () => {
+    const input: ModelEvent[] = [
+      { type: 'tool_call_start', data: { toolCallId: 'tc-3', name: 'broken' } },
+      { type: 'tool_call_delta', data: { toolCallId: 'tc-3', delta: 'invalid-json{' } },
+      { type: 'tool_call_done',  data: { toolCallId: 'tc-3', input: undefined } },
+    ]
+    const received: ModelEvent[] = []
+    const result = await aggregateStream(events(input), (e) => received.push(e))
+
+    // onEvent 透传验证
+    expect(received).toHaveLength(3)
+
+    expect(result.toolCalls).toHaveLength(1)
+    const tc3 = result.toolCalls[0]!
+    expect(tc3.input).toEqual({})
+
+    // content 里也是 {}
+    expect(result.content[0]).toEqual({
+      type: 'tool_use',
+      id: 'tc-3',
+      name: 'broken',
+      input: {},
+    })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// TC-4. delta 为非 string 类型 → JSON.stringify 后聚合
+// ---------------------------------------------------------------------------
+describe('StreamAggregator — tool_call TC-4: delta 非 string 类型', () => {
+  test('tool_call_delta.data.delta 为对象时，JSON.stringify 后追加到 argsBuf，最终 input 等于该对象', async () => {
+    // delta 是对象 {key:'val'}，JSON.stringify 得 '{"key":"val"}'，parse 后还原
+    const input: ModelEvent[] = [
+      { type: 'tool_call_start', data: { toolCallId: 'tc-4', name: 'obj-delta' } },
+      { type: 'tool_call_delta', data: { toolCallId: 'tc-4', delta: { key: 'val' } } },
+      { type: 'tool_call_done',  data: { toolCallId: 'tc-4', input: undefined } },
+    ]
+    const result = await aggregateStream(events(input))
+
+    expect(result.toolCalls).toHaveLength(1)
+    const tc4 = result.toolCalls[0]!
+    // argsBuf = '{"key":"val"}' → JSON.parse → {key:'val'}
+    expect(tc4.input).toEqual({ key: 'val' })
+
+    expect(result.content[0]).toEqual({
+      type: 'tool_use',
+      id: 'tc-4',
+      name: 'obj-delta',
+      input: { key: 'val' },
+    })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// TC-5. 同 id 重复 tool_call_start 被忽略，保留首个 name
+// ---------------------------------------------------------------------------
+describe('StreamAggregator — tool_call TC-5: 重复 start 被忽略', () => {
+  test('同 toolCallId 发两次 start，toolCalls.length === 1，保留首个 name', async () => {
+    const input: ModelEvent[] = [
+      { type: 'tool_call_start', data: { toolCallId: 'tc-5', name: 'first-name' } },
+      { type: 'tool_call_start', data: { toolCallId: 'tc-5', name: 'second-name' } },
+      { type: 'tool_call_delta', data: { toolCallId: 'tc-5', delta: '{"x":1}' } },
+      { type: 'tool_call_done',  data: { toolCallId: 'tc-5', input: undefined } },
+    ]
+    const result = await aggregateStream(events(input))
+
+    expect(result.toolCalls).toHaveLength(1)
+    const tc5 = result.toolCalls[0]!
+    expect(tc5.name).toBe('first-name')
+    expect(tc5.input).toEqual({ x: 1 })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// TC-6. 并行多 tool_call 保序且 buffer 隔离
+// ---------------------------------------------------------------------------
+describe('StreamAggregator — tool_call TC-6: 并行多 tool_call 保序', () => {
+  test('start(a)→start(b)→delta(a)→delta(b)→done(a)→done(b)，顺序为 a 在前，buffer 隔离', async () => {
+    const input: ModelEvent[] = [
+      { type: 'tool_call_start', data: { toolCallId: 'a', name: 'tool-a' } },
+      { type: 'tool_call_start', data: { toolCallId: 'b', name: 'tool-b' } },
+      { type: 'tool_call_delta', data: { toolCallId: 'a', delta: '{"f":"x"}' } },
+      { type: 'tool_call_delta', data: { toolCallId: 'b', delta: '{"p":"y"}' } },
+      { type: 'tool_call_done',  data: { toolCallId: 'a', input: undefined } },
+      { type: 'tool_call_done',  data: { toolCallId: 'b', input: undefined } },
+    ]
+    const result = await aggregateStream(events(input))
+
+    expect(result.toolCalls).toHaveLength(2)
+    // 顺序：a 在前
+    expect(result.toolCalls[0]).toEqual({ id: 'a', name: 'tool-a', input: { f: 'x' } })
+    expect(result.toolCalls[1]).toEqual({ id: 'b', name: 'tool-b', input: { p: 'y' } })
+
+    // content 顺序一致
+    expect(result.content[0]).toEqual({ type: 'tool_use', id: 'a', name: 'tool-a', input: { f: 'x' } })
+    expect(result.content[1]).toEqual({ type: 'tool_use', id: 'b', name: 'tool-b', input: { p: 'y' } })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// TC-7. text + tool_call 共存，content 顺序：text 在前
+// ---------------------------------------------------------------------------
+describe('StreamAggregator — tool_call TC-7: text + tool_call 共存', () => {
+  test('message_delta 在前，tool_call 在后，content = [text, tool_use]', async () => {
+    const input: ModelEvent[] = [
+      { type: 'message_delta',   data: { text: 'let me search' } },
+      { type: 'tool_call_start', data: { toolCallId: 'tc-7', name: 'web_search' } },
+      { type: 'tool_call_delta', data: { toolCallId: 'tc-7', delta: '{"q":"ts"}' } },
+      { type: 'tool_call_done',  data: { toolCallId: 'tc-7', input: undefined } },
+    ]
+    const received: ModelEvent[] = []
+    const result = await aggregateStream(events(input), (e) => received.push(e))
+
+    // onEvent 透传验证
+    expect(received).toHaveLength(4)
+
+    expect(result.content).toHaveLength(2)
+    expect(result.content[0]).toEqual({ type: 'text', text: 'let me search' })
+    expect(result.content[1]).toEqual({
+      type: 'tool_use',
+      id: 'tc-7',
+      name: 'web_search',
+      input: { q: 'ts' },
+    })
+
+    expect(result.toolCalls).toHaveLength(1)
+    expect(result.toolCalls[0]).toEqual({ id: 'tc-7', name: 'web_search', input: { q: 'ts' } })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// TC-8. 空 argsBuf（start → done，无 delta，无 done.input）→ input={}
+// ---------------------------------------------------------------------------
+describe('StreamAggregator — tool_call TC-8: 空 argsBuf → input={}', () => {
+  test('只有 start 和 done（无 delta，done 无 input），toolCalls[0].input = {}', async () => {
+    const input: ModelEvent[] = [
+      { type: 'tool_call_start', data: { toolCallId: 'tc-8', name: 'ping' } },
+      { type: 'tool_call_done',  data: { toolCallId: 'tc-8', input: undefined } },
+    ]
+    const result = await aggregateStream(events(input))
+
+    expect(result.toolCalls).toHaveLength(1)
+    expect(result.toolCalls[0]).toEqual({ id: 'tc-8', name: 'ping', input: {} })
+
+    expect(result.content[0]).toEqual({
+      type: 'tool_use',
+      id: 'tc-8',
+      name: 'ping',
+      input: {},
+    })
+  })
+})
