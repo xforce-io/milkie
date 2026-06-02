@@ -96,6 +96,15 @@
       border-left: 3px solid var(--accent); margin-left: 2px;
       color: #3a3a3d;
     }
+    .msg.assistant .body .md-h { font-weight: 600; margin: .5em 0 .25em; line-height: 1.3 }
+    .msg.assistant .body h1.md-h { font-size: 1.25em }
+    .msg.assistant .body h2.md-h { font-size: 1.15em }
+    .msg.assistant .body h3.md-h { font-size: 1.05em }
+    .msg.assistant .body h4.md-h,
+    .msg.assistant .body h5.md-h,
+    .msg.assistant .body h6.md-h { font-size: 1em }
+    .msg.assistant .body .md-list { margin: .25em 0; padding-left: 1.5em }
+    .msg.assistant .body .md-list li { margin: .15em 0 }
     .cite {
       display: inline-block; cursor: pointer; user-select: none;
       color: var(--cite-fg); background: var(--cite-bg); border-radius: 4px;
@@ -413,6 +422,8 @@
     .ap-seg.s-supported   .ap-seg-label { color: #2da14b }
     .ap-seg.s-paraphrased { border-color: #d4a017; background: #fdf8ec }
     .ap-seg.s-paraphrased .ap-seg-label { color: #b8860b }
+    .ap-seg.s-misattributed { border-color: #3b6fd4; background: #eef3fc }
+    .ap-seg.s-misattributed .ap-seg-label { color: #2c54a8 }
     .ap-seg.s-tenuous     { border-color: #e07a00; background: #fdf2e6 }
     .ap-seg.s-tenuous     .ap-seg-label { color: #c66800 }
     .ap-seg.s-unsupported { border-color: #d93030; background: #fdf0f0 }
@@ -432,6 +443,7 @@
     .ap-prov-legend .lg-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin: 0 4px 0 8px; vertical-align: middle }
     .ap-prov-legend .lg-dot.s-supported   { background: #2da14b }
     .ap-prov-legend .lg-dot.s-paraphrased { background: #d4a017 }
+    .ap-prov-legend .lg-dot.s-misattributed { background: #3b6fd4 }
     .ap-prov-legend .lg-dot.s-tenuous     { background: #e07a00 }
     .ap-prov-legend .lg-dot.s-unsupported { background: #d93030 }
     .ap-prov-legend .lg-dot.s-unverified  { background: #b0b0b5 }
@@ -467,6 +479,10 @@
     }
     #payload-detail:empty { display: none }
   </style>
+  <!-- OpenCC 繁→简 bundle. Loaded before the inline script (which runs at end
+       of <body>) so provenance matching can normalize 繁/简 before comparing
+       model quotes to the traditional corpus. Degrades to exact match if absent. -->
+  <script src="/vendor/opencc-t2cn.js"></script>
 </head>
 <body>
   <header>
@@ -593,17 +609,47 @@
     // need tight control over substitution order. Operates on already-
     // HTML-escaped input; emits HTML.
     function renderMinimalMarkdown(escaped) {
+      // Inline pass first, so bold/code also render inside headings & list items.
       let s = escaped
-      // Bold first (non-greedy, single-line so unmatched stars don't eat
-      // across paragraphs).
+      // Bold (non-greedy, single-line so unmatched stars don't eat paragraphs).
       s = s.replace(/\*\*([^*\n]+?)\*\*/g, '<strong>$1</strong>')
       // Inline code (avoid crossing newlines).
       s = s.replace(/`([^`\n]+)`/g, '<code>$1</code>')
-      // Blockquote line prefix: "> " at start of text or after a newline.
-      // (esc() turned > into &gt;, so we match that form here.) Wrap the
-      // remainder of the line so CSS can style it with a border ribbon.
-      s = s.replace(/(^|\n)&gt;\s?(.*)/g, '$1<span class="md-quote">$2</span>')
-      return s
+
+      // Block pass: line by line. Headings (#..######), unordered (-/*) and
+      // ordered (1.) list items become block elements; consecutive list items
+      // group into one <ul>/<ol>. Blockquote (> , escaped to &gt;) keeps its
+      // ribbon span. Bare prose lines pass through with newlines intact — the
+      // .body container is white-space: pre-wrap, so prose breaks survive
+      // without <p> wrapping.
+      const lines = s.split('\n')
+      const out = []
+      let listType = null
+      const closeList = () => { if (listType) { out.push('</' + listType + '>'); listType = null } }
+      for (const line of lines) {
+        let m
+        if ((m = line.match(/^(#{1,6})\s+(.*)$/))) {
+          closeList()
+          const level = m[1].length
+          out.push('<h' + level + ' class="md-h">' + m[2] + '</h' + level + '>')
+        } else if ((m = line.match(/^[-*]\s+(.*)$/))) {
+          if (listType !== 'ul') { closeList(); out.push('<ul class="md-list">'); listType = 'ul' }
+          out.push('<li>' + m[1] + '</li>')
+        } else if ((m = line.match(/^\d+\.\s+(.*)$/))) {
+          if (listType !== 'ol') { closeList(); out.push('<ol class="md-list">'); listType = 'ol' }
+          out.push('<li>' + m[1] + '</li>')
+        } else if ((m = line.match(/^&gt;\s?(.*)$/))) {
+          closeList()
+          out.push('<span class="md-quote">' + m[1] + '</span>')
+        } else {
+          closeList()
+          out.push(line)
+        }
+      }
+      closeList()
+      // Collapse newlines adjacent to block-level tags so pre-wrap doesn't add
+      // blank lines around them; their spacing is owned by CSS margins.
+      return out.join('\n').replace(/\n?(<\/?(?:h[1-6]|ul|ol|li)[^>]*>)\n?/g, '$1')
     }
 
     // Render the assistant body: scan for citation markers, replace each
@@ -1011,6 +1057,19 @@
     // markers in each. The segment "text" is the paragraph with citation
     // markers stripped, so the comparison against source content is
     // against the prose only (citation markers are formatting noise).
+    // Strip markdown markers so a provenance segment reads as clean prose.
+    // The corpus has no markdown, so removing #/-/1./> and **/` also keeps
+    // verbatim-substring matching (classifySegment) from being defeated by
+    // formatting noise. Quote extraction uses seg.raw, so it's unaffected.
+    function stripMarkdownMarkers(s) {
+      return s.split('\n')
+        .map(line => line.replace(/^\s*(?:#{1,6}\s+|[-*]\s+|\d+\.\s+|>\s?)/, ''))
+        .join('\n')
+        .replace(/\*\*([^*\n]+?)\*\*/g, '$1')
+        .replace(/`([^`\n]+)`/g, '$1')
+        .trim()
+    }
+
     function segmentAnswer(text) {
       const paragraphs = text.split(/\n\n+/).map(p => p.trim()).filter(Boolean)
       return paragraphs.map(p => {
@@ -1019,7 +1078,7 @@
           cites.push({ file, line })
           return ''
         }).trim()
-        return { text: stripped, raw: p, citations: cites }
+        return { text: stripMarkdownMarkers(stripped), raw: p, citations: cites }
       })
     }
 
@@ -1077,14 +1136,50 @@
       }
     }
 
+    // Fetch a cited file in full (no lines query → server returns whole file).
+    // Used as the fallback when a quote is absent from the cited line slice:
+    // if it exists anywhere in the file, the line number is wrong, not the
+    // quote. Cached under a distinct key so it coexists with line slices.
+    async function fetchSourceFull(file) {
+      const key = `${file}::__full__`
+      if (sourceCache.has(key)) return sourceCache.get(key)
+      try {
+        const r = await fetch(`/source/${encodeURIComponent(file)}`)
+        if (r.status !== 200) { sourceCache.set(key, null); return null }
+        const j = await r.json()
+        sourceCache.set(key, j)
+        return j
+      } catch {
+        sourceCache.set(key, null)
+        return null
+      }
+    }
+
     // Substring match between a segment and its source. Catches the
     // "verbatim copy without quote wrappers" case — e.g. when the agent
     // pastes a passage into a markdown blockquote (`> …`) or just inlines
     // it bare. Markdown formatting chars are stripped before comparison
     // since the source corpus has none of them.
+    // Traditional/simplified normalizer for provenance matching. The corpus is
+    // traditional; the model may quote in either script. Normalizing both sides
+    // to simplified before comparison turns a 繁/简 字形 difference into a match
+    // instead of a false "not found". Degrades to identity if the OpenCC bundle
+    // didn't load (matching reverts to the pre-fix exact comparison).
+    const _t2s = (typeof OpenCC !== 'undefined' && OpenCC.Converter)
+      ? OpenCC.Converter({ from: 't', to: 'cn' })
+      : (s => s)
+    // Also strip whitespace (incl. \n and 全角空格 U+3000): the model often
+    // merges a quote spanning several source lines into one run, dropping the
+    // line breaks the corpus has between them. Comparing 字-only turns that
+    // into a match — for 引文核对 a quote means the characters, not the layout.
+    function normForMatch(s) {
+      try { return _t2s(s).replace(/[\s　]/g, '') }
+      catch { return s.replace(/[\s　]/g, '') }
+    }
+
     const SUBSTRING_MIN_LEN = 20
     function hasVerbatimSubstring(segText, sourceText) {
-      const strip = s => s.replace(/[*`>]/g, '')
+      const strip = s => normForMatch(s.replace(/[*`>]/g, ''))
       const seg = strip(segText)
       const src = strip(sourceText)
       if (seg.length < SUBSTRING_MIN_LEN) return false
@@ -1106,7 +1201,7 @@
     //      a markdown blockquote header followed by pasted text) →
     //      supported (green).
     //   5. Otherwise (citation, summary in own words) → paraphrased (yellow).
-    function classifySegment(seg, sourceSlices) {
+    function classifySegment(seg, sourceSlices, fullTexts) {
       if (seg.citations.length === 0) return { state: 'unsupported' }
       const okSlices = sourceSlices.filter(s => s != null)
       if (okSlices.length === 0) return { state: 'unverified' }
@@ -1114,9 +1209,22 @@
 
       const quotes = extractQuotedSnippets(seg.raw)
       if (quotes.length > 0) {
-        const missing = quotes.filter(q => !allSrc.includes(q))
-        if (missing.length === 0) return { state: 'supported', quotes }
-        return { state: 'tenuous', quotes, missingQuotes: missing }
+        // Normalize 繁/简 on both sides before matching (corpus is traditional;
+        // the model may quote in simplified). The arrays keep the ORIGINAL
+        // quote text for display — only the comparison is normalized.
+        const allSrcN = normForMatch(allSrc)
+        const notInSlice = quotes.filter(q => !allSrcN.includes(normForMatch(q)))
+        if (notInSlice.length === 0) return { state: 'supported', quotes }
+        // Some quotes aren't at the cited lines. Before flagging a possible
+        // hallucination, check the FULL text of the cited files — models often
+        // get the quote verbatim right but the line number wrong (the same
+        // off-by-N that LINE_TOLERANCE only partly covers). A quote that lives
+        // in the cited file but not at the cited line is misattribution, not
+        // fabrication; only a quote absent from the whole file is tenuous.
+        const allFullN = normForMatch((fullTexts || []).filter(t => t != null).map(t => t.content).join('\n'))
+        const trulyMissing = notInSlice.filter(q => !allFullN.includes(normForMatch(q)))
+        if (trulyMissing.length > 0) return { state: 'tenuous', quotes, missingQuotes: trulyMissing }
+        return { state: 'misattributed', quotes, misattributedQuotes: notInSlice }
       }
 
       if (hasVerbatimSubstring(seg.text, allSrc)) {
@@ -1126,11 +1234,12 @@
     }
 
     const STATE_LABELS = {
-      supported:   '有来源直接支撑',
-      paraphrased: '引用转述（无逐字引文）',
-      tenuous:     '引文在来源中未找到——需核实',
-      unsupported: '无来源引用——模型生成',
-      unverified:  '已引用但来源无法获取',
+      supported:     '有来源直接支撑',
+      paraphrased:   '引用转述（无逐字引文）',
+      misattributed: '引文属实，但标注行号不符',
+      tenuous:       '引文在来源中未找到——需核实',
+      unsupported:   '无来源引用——模型生成',
+      unverified:    '已引用但来源无法获取',
     }
 
     async function renderProvenanceTab(runId) {
@@ -1156,10 +1265,16 @@
       }
       await Promise.all(toFetch.map(([file, line]) => fetchVerifySlice(file, line)))
 
+      // Also fetch each cited file in full, for the misattribution fallback in
+      // classifySegment (quote present in the file but not at the cited line).
+      const citedFiles = [...new Set(segments.flatMap(s => s.citations.map(c => c.file)))]
+      await Promise.all(citedFiles.map(f => fetchSourceFull(f)))
+
       const legend = `
         <div class="ap-prov-legend">
           <span class="lg-dot s-supported"></span>有支撑
           <span class="lg-dot s-paraphrased"></span>转述
+          <span class="lg-dot s-misattributed"></span>行号不符
           <span class="lg-dot s-tenuous"></span>存疑
           <span class="lg-dot s-unsupported"></span>无来源
           <span class="lg-dot s-unverified"></span>未核实
@@ -1167,7 +1282,9 @@
 
       const segHtml = segments.map(seg => {
         const slices = seg.citations.map(c => sourceCache.get(verifyCacheKey(c.file, c.line)))
-        const klass = classifySegment(seg, slices)
+        const segFiles = [...new Set(seg.citations.map(c => c.file))]
+        const fulls = segFiles.map(f => sourceCache.get(`${f}::__full__`))
+        const klass = classifySegment(seg, slices, fulls)
         const label = STATE_LABELS[klass.state]
         const citeMeta = seg.citations.length > 0
           ? seg.citations.map(c => `${c.file}:${c.line}`).join(' · ')
@@ -1175,6 +1292,8 @@
         let quoteBlock = ''
         if (klass.state === 'supported' && klass.quotes && klass.quotes.length > 0) {
           quoteBlock = `<span class="ap-seg-quote">${esc(klass.quotes.join('\n'))}</span>`
+        } else if (klass.state === 'misattributed' && klass.misattributedQuotes && klass.misattributedQuotes.length > 0) {
+          quoteBlock = `<span class="ap-seg-quote">引文属实，但不在标注行（已在引用文件中找到）：\n${esc(klass.misattributedQuotes.join('\n'))}</span>`
         } else if (klass.state === 'tenuous' && klass.missingQuotes && klass.missingQuotes.length > 0) {
           quoteBlock = `<span class="ap-seg-quote">来源中缺失：\n${esc(klass.missingQuotes.join('\n'))}</span>`
         }
@@ -1440,7 +1559,12 @@
     $auditVerdict.addEventListener('click', (ev) => {
       const t = ev.target
       if (!(t instanceof HTMLElement)) return
-      if (t.classList.contains('vd-run')) { runDiagnose(); return }
+      // stopPropagation: runDiagnose() synchronously calls renderVerdict(),
+      // which rewrites $auditVerdict.innerHTML — destroying this very button.
+      // Without this, the click bubbles to the document outside-click handler
+      // (below), where $audit.contains(detachedTarget) is false and the panel
+      // self-closes. See also the document.contains guard in that handler.
+      if (t.classList.contains('vd-run')) { ev.stopPropagation(); runDiagnose(); return }
       if (t.classList.contains('vd-jump')) { jumpToStep(Number(t.dataset.stepIdx)); return }
       const summary = t.closest('.vd-summary.toggle')
       if (summary) {
@@ -1514,6 +1638,11 @@
       if (!$audit.classList.contains('open')) return
       const target = ev.target
       if (!(target instanceof HTMLElement)) return
+      // A target that was synchronously detached from the document before this
+      // handler ran (e.g. a button replaced by an innerHTML rewrite during its
+      // own click) is not an "outside" click — ignore it so the panel doesn't
+      // self-close. Without this, $audit.contains(detached) is false → close.
+      if (!document.contains(target)) return
       if ($audit.contains(target)) return
       if (target.classList.contains('audit-trigger')) return
       if (target.classList.contains('cite')) return
