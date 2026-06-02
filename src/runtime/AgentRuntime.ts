@@ -38,7 +38,7 @@ import { canonicalize, contentAddressForCanonicalBytes } from '../trace/hash.js'
 import type { CausalCursor } from '../trace/CausalCursor.js'
 import { checkpointFromEvents } from '../trace/diagnostics/checkpointFromEvents.js'
 import type { Region } from '../context/Region.js'
-import type { SkillLifecyclePayload, AgentRunStartedPayload, AgentRunCompletedPayload, GuardEvaluation, ToolEmittedPayload, LineageBuffer } from '../trace/types.js'
+import type { SkillLifecyclePayload, AgentRunStartedPayload, AgentRunCompletedPayload, GuardEvaluation, ToolEmittedPayload, LineageBuffer, ObjectType } from '../trace/types.js'
 
 export type MakeChildPort = (
   childRunId:  string,
@@ -122,6 +122,10 @@ export class AgentRuntime {
   /** #60: per-run count of successful calls per toolCallId, to disambiguate a
    *  tool_call id reused across responses when keying tool.emitted record/replay. */
   private readonly toolEmitOccurrence = new Map<string, number>()
+  /** #113 P1: per-run registry of objectIds minted via ctx.createObject (read/grep),
+   *  so a later producer (cite) can fail-fast on a fabricated/hallucinated id and
+   *  P2 lazy-promote can look up meta. Record-only: replay doesn't run handlers. */
+  private readonly mintedObjects = new Map<string, { type: ObjectType; meta?: Record<string, unknown> }>()
   private readonly subAgentConfigs?: Map<string, AgentConfig>
   private readonly childRecorderFactory?: (config: AgentConfig, contextId: string, traceId: string) => ITrajectoryRecorder
   private readonly makeChildPort?: MakeChildPort
@@ -375,8 +379,11 @@ export class AgentRuntime {
           canonicalize({ type: spec.type, meta: spec.meta ?? null, hash: spec.hash ?? null }),
         )
         lineage.objects.push({ objectId, type: spec.type, ...(spec.hash ? { hash: spec.hash } : {}), ...(spec.meta ? { meta: spec.meta } : {}) })
+        // #113 P1: register in the per-run table so later producers can resolve it.
+        this.mintedObjects.set(objectId, { type: spec.type, ...(spec.meta ? { meta: spec.meta } : {}) })
         return { objectId }
       }
+      ctx.resolveObject = (objectId) => this.mintedObjects.get(objectId)
       ctx.createRelation = (spec) => {
         const relationId = 'rel:' + contentAddressForCanonicalBytes(
           canonicalize({ type: spec.type, from: spec.fromObjectId, to: spec.toObjectId }),
