@@ -213,14 +213,17 @@ their own [README](./docs/stories/README.md) and
 
 ## Examples
 
-Runnable demos paired with their stories live under
-[examples/](./examples/). Each example ships an SDK script and the
-equivalent CLI invocation over a frozen fixture — no API key required.
+Runnable demos live under [examples/](./examples/) — see its
+[README](./examples/README.md) for the full index. In short:
 
-- [`s-005-replay`](./examples/s-005-replay/) — deterministic replay
-  (Phase 3): record a run with an in-process stub gateway, then replay
-  the recorded run twice (once via SDK, once via CLI) and observe
-  identical output with zero live LLM calls.
+- [`s-005-replay`](./examples/s-005-replay/) — deterministic replay over
+  a frozen fixture: record with an in-process stub gateway, replay via
+  SDK and CLI, identical output, zero live LLM calls. No API key.
+- [`s-002-inspect`](./examples/s-002-inspect/) — render a recorded run as
+  a self-contained HTML `trace report`. No API key.
+- [`agent-docs-qa`](./examples/agent-docs-qa/) — a real 三国演义 Q&A agent
+  with live trace observation and skill loading in a local web UI.
+  Requires an API key.
 
 ---
 
