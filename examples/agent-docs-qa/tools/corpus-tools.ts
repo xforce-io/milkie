@@ -99,6 +99,12 @@ export function makeCorpusTools(corpusRoot: string) {
   // can't be guessed). Replaces the old "(chapter:line)" prose convention.
   async function cite(input: unknown, ctx?: ToolContext): Promise<unknown> {
     const { claim, objectId } = input as { claim: string; objectId: string }
+    // #113 P1 fail-fast: reject a fabricated/hallucinated objectId before declaring
+    // anything, so the model can self-correct (re-grep/read for a real id) and no
+    // dangling edge enters the lineage graph. Skips the check if lineage isn't wired.
+    if (ctx?.resolveObject && !ctx.resolveObject(objectId)) {
+      return { ok: false, error: `objectId '${objectId}' 不存在；请使用 read_file/grep 返回的真实 objectId` }
+    }
     const claimObj = ctx?.createObject?.({ type: 'claim', meta: { text: claim } })
     if (claimObj && ctx?.createRelation) {
       ctx.createRelation({ type: 'cites', fromObjectId: claimObj.objectId, toObjectId: objectId })

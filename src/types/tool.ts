@@ -24,6 +24,13 @@ export interface ToolContext {
    * `relation.created` event after `tool.responded`.
    */
   createRelation?: (spec: { type: RelationType; fromObjectId: string; toObjectId: string; meta?: Record<string, unknown> }) => { relationId: string }
+  /**
+   * #113 P1: resolve an objectId minted earlier this run via createObject
+   * (read/grep), or undefined if it was never minted. Lets a producer fail-fast on
+   * a fabricated/hallucinated id — e.g. cite rejecting an objectId the agent invented
+   * — and underpins lazy-promote (P2). Present only when the runtime wired lineage.
+   */
+  resolveObject?:  (objectId: string) => { type: ObjectType; meta?: Record<string, unknown> } | undefined
 }
 
 export interface ToolDefinition {

@@ -90,9 +90,13 @@ describe('lineage emit end-to-end (#37/#38/新) — real runtime path', () => {
     expect(rp.type).toBe('cites')
     expect(rp.toObjectId).toBe(objId)
     expect(rp.fromObjectId).toBe((claim!.payload as ObjectCreatedPayload).objectId)
+
+    // P1: a real cited objectId passes the registry check → cite reports ok:true.
+    const okCite = events.find(e => e.type === 'tool.responded' && (e.payload as ToolRespondedPayload).toolName === 'cite')!
+    expect((okCite.payload as ToolRespondedPayload).output).toMatchObject({ ok: true })
   })
 
-  it('a fabricated objectId still records a cites edge, but it dangles (no matching object.created)', async () => {
+  it('P1 fail-fast: cite with a fabricated objectId → ok:false, NO relation/claim recorded', async () => {
     await start([
       toolCall('cite', { claim: '编造的引用', objectId: 'obj:fabricated-not-real' }, 'tc-1'),
       text('answer'),
@@ -101,11 +105,60 @@ describe('lineage emit end-to-end (#37/#38/新) — real runtime path', () => {
     const runId = JSON.parse(chat.body).runId as string
     const events = await new JsonlEventStore(runsDir).readByRunId(runId)
 
-    const rel = events.find(e => e.type === 'relation.created')!
-    const toId = (rel.payload as RelationCreatedPayload).toObjectId
-    expect(toId).toBe('obj:fabricated-not-real')
-    // Unforgeable: no object.created mints that id, so the edge resolves to nothing.
-    const resolved = events.some(e => e.type === 'object.created' && (e.payload as ObjectCreatedPayload).objectId === toId)
-    expect(resolved).toBe(false)
+    // Fail-fast bailed before declaring anything: no cites edge, no claim object.
+    expect(events.some(e => e.type === 'relation.created')).toBe(false)
+    expect(events.some(e => e.type === 'object.created')).toBe(false)
+    // The structured error rides back on cite's tool.responded so the model can self-correct.
+    const citeResp = events.find(e => e.type === 'tool.responded' && (e.payload as ToolRespondedPayload).toolName === 'cite')!
+    const out = (citeResp.payload as ToolRespondedPayload).output as { ok: boolean; error?: string }
+    expect(out.ok).toBe(false)
+    expect(out.error).toMatch(/不存在|objectId/)
+  })
+
+  it('P1: the registry is run-level — an id minted in one call resolves in a later cite', async () => {
+    const file = 'chapter-01-桃园三结义.txt'
+    const idA = passageId(file, 1, 5)
+    const idB = passageId(file, 10, 15)
+    await start([
+      toolCall('read_file', { relPath: file, lineStart: 1, lineEnd: 5 }, 'tc-1'),
+      toolCall('read_file', { relPath: file, lineStart: 10, lineEnd: 15 }, 'tc-2'),
+      toolCall('cite', { claim: 'A 段', objectId: idA }, 'tc-3'),  // minted 2 calls earlier
+      toolCall('cite', { claim: 'B 段', objectId: idB }, 'tc-4'),
+      text('done'),
+    ])
+    const chat = await postJson(`${baseUrl}/chat`, { input: 'x' })
+    const runId = JSON.parse(chat.body).runId as string
+    const events = await new JsonlEventStore(runsDir).readByRunId(runId)
+
+    const cites = events.filter(e => e.type === 'relation.created')
+    expect(cites.length).toBe(2)
+    expect(cites.map(e => (e.payload as RelationCreatedPayload).toObjectId).sort()).toEqual([idA, idB].sort())
+    const citeOks = events
+      .filter(e => e.type === 'tool.responded' && (e.payload as ToolRespondedPayload).toolName === 'cite')
+      .map(e => (e.payload as ToolRespondedPayload).output as { ok: boolean })
+    expect(citeOks.length).toBe(2)
+    expect(citeOks.every(o => o.ok)).toBe(true)
+  })
+
+  it('P1: a run mixing cite ok + fail-fast replays deterministically (registry is record-only)', async () => {
+    const file = 'chapter-49-赤壁借东风.txt'
+    const okId = passageId(file, 4, 5)
+    await start([
+      toolCall('read_file', { relPath: file, lineStart: 4, lineEnd: 5 }, 'tc-1'),
+      toolCall('cite', { claim: '真引用', objectId: okId }, 'tc-2'),       // ok
+      toolCall('cite', { claim: '假引用', objectId: 'obj:fake' }, 'tc-3'), // fail-fast
+      text('赤壁之战的结局……'),
+    ])
+    const chat = await postJson(`${baseUrl}/chat`, { input: '赤壁' })
+    const runId = JSON.parse(chat.body).runId as string
+
+    // Replay re-runs from cache (zero live calls); handlers don't run, so the
+    // mintedObjects registry stays empty on replay — yet the cached cite outputs
+    // (ok:true / ok:false) are served verbatim, so the run reproduces identically.
+    const replay = await postJson(`${baseUrl}/run/${runId}/replay`, {})
+    expect(replay.status).toBe(200)
+    const body = JSON.parse(replay.body)
+    expect(body.status).toBe('deterministic')
+    expect(body.matchesOriginal).toBe(true)
   })
 })
