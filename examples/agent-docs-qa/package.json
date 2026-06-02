@@ -5,8 +5,5 @@
   "description": "milkie example — 三国 Q&A agent with skill loading + live trace UI",
   "scripts": {
     "start": "npx tsx server.ts"
-  },
-  "dependencies": {
-    "opencc-js": "^1.3.1"
   }
 }

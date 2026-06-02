@@ -422,8 +422,6 @@
     .ap-seg.s-supported   .ap-seg-label { color: #2da14b }
     .ap-seg.s-paraphrased { border-color: #d4a017; background: #fdf8ec }
     .ap-seg.s-paraphrased .ap-seg-label { color: #b8860b }
-    .ap-seg.s-misattributed { border-color: #3b6fd4; background: #eef3fc }
-    .ap-seg.s-misattributed .ap-seg-label { color: #2c54a8 }
     .ap-seg.s-tenuous     { border-color: #e07a00; background: #fdf2e6 }
     .ap-seg.s-tenuous     .ap-seg-label { color: #c66800 }
     .ap-seg.s-unsupported { border-color: #d93030; background: #fdf0f0 }
@@ -443,7 +441,6 @@
     .ap-prov-legend .lg-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin: 0 4px 0 8px; vertical-align: middle }
     .ap-prov-legend .lg-dot.s-supported   { background: #2da14b }
     .ap-prov-legend .lg-dot.s-paraphrased { background: #d4a017 }
-    .ap-prov-legend .lg-dot.s-misattributed { background: #3b6fd4 }
     .ap-prov-legend .lg-dot.s-tenuous     { background: #e07a00 }
     .ap-prov-legend .lg-dot.s-unsupported { background: #d93030 }
     .ap-prov-legend .lg-dot.s-unverified  { background: #b0b0b5 }
@@ -479,10 +476,6 @@
     }
     #payload-detail:empty { display: none }
   </style>
-  <!-- OpenCC 繁→简 bundle. Loaded before the inline script (which runs at end
-       of <body>) so provenance matching can normalize 繁/简 before comparing
-       model quotes to the traditional corpus. Degrades to exact match if absent. -->
-  <script src="/vendor/opencc-t2cn.js"></script>
 </head>
 <body>
   <header>
@@ -585,22 +578,6 @@
       history.replaceState(null, '', url.toString())
     }
 
-    // ─── Citation parsing ──────────────────────────────────────────────
-    // The sanguo-researcher agent emits citations in several shapes —
-    // the prompt asks for "chapter:行号" but the model picks its own
-    // syntactic frame. Observed in the wild:
-    //   (引用：chapter-01-桃园三结义.txt:33)
-    //   (引用：`chapter-01-桃园三结义.txt:33-34`)
-    //   （引用：chapter-01-桃园三结义.txt:34）            ← fullwidth parens
-    //   > **chapter-01-桃园三结义.txt:33**     殺到…    ← markdown blockquote header
-    //   请看 chapter-01-桃园三结义.txt:42 这行         ← bare inline mention
-    //
-    // The regex anchors on the corpus file shape (chapter-NN-…txt) and
-    // optionally eats the surrounding decoration: any of "(引用：…)",
-    // markdown bold "**…**", backticks, or full-/half-width parens.
-    // Captures: 1 = relative file path, 2 = line number ("N" or "N-M").
-    const CITATION_RE = /(?:[（(]\s*引用\s*[：:]\s*)?\*{0,2}`?(chapter-[^\s`)）"<>:*]+\.txt):(\d+(?:-\d+)?)`?\*{0,2}(?:\s*[)）])?/g
-
     // Minimal markdown subset the agent actually emits: bold (**), inline
     // code (`), and blockquote line prefix (> ). We deliberately do NOT
     // pull in a general-purpose markdown parser because (a) the corpus
@@ -663,42 +640,19 @@
     //   2. Escape the (still placeholder-bearing) text.
     //   3. Apply markdown — placeholders are inert.
     //   4. Substitute placeholders back with the final <sup> chip HTML.
-    function renderAssistantHtml(text) {
-      const cites = []
-      let cursor  = 0
-      let buffer  = ''
-      let m
-      CITATION_RE.lastIndex = 0
-      while ((m = CITATION_RE.exec(text)) !== null) {
-        const [match, file, line] = m
-        buffer += text.slice(cursor, m.index)
-        const n = cites.length + 1
-        cites.push({ file, line })
-        //  is non-printable and never appears in plain prose; it
-        // survives esc() because the regex below doesn't touch it.
-        buffer += `CITE${n}`
-        cursor = m.index + match.length
-      }
-      buffer += text.slice(cursor)
-
-      let html = renderMinimalMarkdown(esc(buffer))
-      html = html.replace(/CITE(\d+)/g, (_match, idx) => {
-        const c = cites[parseInt(idx, 10) - 1]
-        return `<sup class="cite" data-n="${esc(idx)}" data-file="${esc(c.file)}" data-line="${esc(c.line)}">${esc(idx)}</sup>`
-      })
-
+    // #40: the answer prose carries NO citation markers (the agent declares
+    // sources via the cite tool). Body is plain markdown; the Sources footer is
+    // derived from the run's lineage events (object.created/relation.created),
+    // not parsed from text. See buildLineage() in the Provenance section.
+    function renderAssistantHtml(text, runId) {
+      const html = renderMinimalMarkdown(esc(text))
       let footer = ''
-      if (cites.length > 0) {
-        const seenFiles = new Set()
-        const fileList  = []
-        for (const c of cites) {
-          if (!seenFiles.has(c.file)) {
-            seenFiles.add(c.file)
-            fileList.push(c.file)
-          }
+      if (runId) {
+        const { files } = buildLineage(runId)
+        if (files.length > 0) {
+          const srcChips = files.map(f => `<span class="src">${esc(f)}</span>`).join(' ')
+          footer = `<div class="sources-footer">Sourced from ${files.length} file${files.length > 1 ? 's' : ''} · ${srcChips}</div>`
         }
-        const srcChips = fileList.map(f => `<span class="src">${esc(f)}</span>`).join(' ')
-        footer = `<div class="sources-footer">Sourced from ${fileList.length} file${fileList.length > 1 ? 's' : ''} · ${srcChips}</div>`
       }
       return `<div class="body">${html}</div>${footer}`
     }
@@ -754,28 +708,24 @@
     // Extract citations from an assistant message DOM node — we already
     // rendered them as <sup class="cite" data-file data-line>, so reuse
     // those rather than re-running the regex.
-    function citationsFromMessage(msgEl) {
-      const cites = []
-      msgEl.querySelectorAll('.cite').forEach(el => {
-        cites.push({ file: el.dataset.file, line: el.dataset.line })
-      })
-      return cites
-    }
-
-    function renderSourcesTab(runId, msgEl) {
-      const cites = msgEl ? citationsFromMessage(msgEl) : []
-      if (cites.length === 0) {
-        return `<div class="ap-empty">本回答未引用任何来源。</div>`
+    // #40: Sources tab from lineage events (was: parsed from .cite chips, now
+    // deleted). Group the cited passages by file with their real line ranges.
+    function renderSourcesTab(runId) {
+      const { citations } = buildLineage(runId)
+      const passages = citations.filter(c => c.passage && c.passage.meta)
+      if (passages.length === 0) {
+        return `<div class="ap-empty">本回答未引用任何来源（agent 未调用 cite）。</div>`
       }
-      // Group line ranges by file, preserving first-seen order.
       const byFile = new Map()
-      for (const c of cites) {
-        if (!byFile.has(c.file)) byFile.set(c.file, [])
-        byFile.get(c.file).push(c.line)
+      for (const c of passages) {
+        const m = c.passage.meta
+        const range = m.lineStart === m.lineEnd ? `${m.lineStart}` : `${m.lineStart}-${m.lineEnd}`
+        if (!byFile.has(m.file)) byFile.set(m.file, [])
+        if (!byFile.get(m.file).includes(range)) byFile.get(m.file).push(range)
       }
       let html = ''
-      for (const [file, lines] of byFile) {
-        const lineChips = lines.map(l => `<span class="ln">行${esc(l)}</span>`).join('')
+      for (const [file, ranges] of byFile) {
+        const lineChips = ranges.map(l => `<span class="ln">行${esc(l)}</span>`).join('')
         html += `<div class="ap-source-file">
           <div class="sf-path">${esc(file)}</div>
           <div class="sf-lines">${lineChips}</div>
@@ -1052,261 +1002,76 @@
       return String(output).slice(0, 40)
     }
 
-    // ─── Provenance ────────────────────────────────────────────────────
-    // Split the answer into paragraph segments and pull out the citation
-    // markers in each. The segment "text" is the paragraph with citation
-    // markers stripped, so the comparison against source content is
-    // against the prose only (citation markers are formatting noise).
-    // Strip markdown markers so a provenance segment reads as clean prose.
-    // The corpus has no markdown, so removing #/-/1./> and **/` also keeps
-    // verbatim-substring matching (classifySegment) from being defeated by
-    // formatting noise. Quote extraction uses seg.raw, so it's unaffected.
-    function stripMarkdownMarkers(s) {
-      return s.split('\n')
-        .map(line => line.replace(/^\s*(?:#{1,6}\s+|[-*]\s+|\d+\.\s+|>\s?)/, ''))
-        .join('\n')
-        .replace(/\*\*([^*\n]+?)\*\*/g, '$1')
-        .replace(/`([^`\n]+)`/g, '$1')
-        .trim()
-    }
-
-    function segmentAnswer(text) {
-      const paragraphs = text.split(/\n\n+/).map(p => p.trim()).filter(Boolean)
-      return paragraphs.map(p => {
-        const cites = []
-        const stripped = p.replace(CITATION_RE, (_match, file, line) => {
-          cites.push({ file, line })
-          return ''
-        }).trim()
-        return { text: stripMarkdownMarkers(stripped), raw: p, citations: cites }
-      })
-    }
-
-    // Extract verbatim quoted snippets from a segment. The agent wraps
-    // direct quotes in any of: straight " ", Chinese curly “ ”
-    // (U+201C/U+201D), Chinese corner 「 」 (U+300C/U+300D), or Chinese
-    // double corner 『 』 (U+300E/U+300F). The negated set inside the
-    // capture group lists all of these so a greedy match stops at the
-    // first closing quote of any flavor.
-    function extractQuotedSnippets(text) {
-      const QUOTE_CHARS = '"“”「」『』'
-      const re = new RegExp(`[${QUOTE_CHARS}]([^${QUOTE_CHARS}]+)[${QUOTE_CHARS}]`, 'g')
-      const out = []
-      let m
-      while ((m = re.exec(text)) !== null) {
-        if (m[1].trim().length > 0) out.push(m[1].trim())
+    // ─── Provenance (lineage-driven, #40) ──────────────────────────────
+    // Citations come from the run's object.created / relation.created events
+    // (the agent declared them via the cite tool); we never parse answer prose.
+    // A `cites` relation links a claim object → a passage object whose meta is
+    // {file, lineStart, lineEnd} from the real read_file call — so 出处 is fact,
+    // not text the model wrote. No substring matching, no 繁简, no line tolerance.
+    function buildLineage(runId) {
+      const events = eventsByRunId.get(runId) || []
+      const objects = new Map()
+      for (const e of events) {
+        if (e.type === 'object.created') objects.set(e.payload.objectId, e.payload)
       }
-      return out
-    }
-
-    // LLM-emitted citation line numbers are often off by 1-2 lines —
-    // models eyeball line counts from tool output and round, or pick the
-    // line containing the chapter break rather than the line containing
-    // the prose. To make Provenance verification robust to this, we
-    // widen every cited range by ±2 lines before fetching. Display still
-    // shows the agent's original line numbers.
-    const LINE_TOLERANCE = 2
-    function expandedLineRange(line) {
-      const m = line.match(/^(\d+)(?:-(\d+))?$/)
-      if (!m) return line
-      const start = Math.max(1, parseInt(m[1], 10) - LINE_TOLERANCE)
-      const end   = (m[2] ? parseInt(m[2], 10) : parseInt(m[1], 10)) + LINE_TOLERANCE
-      return `${start}-${end}`
-    }
-    function verifyCacheKey(file, line) {
-      return `${file}::${expandedLineRange(line)}`
-    }
-
-    async function fetchVerifySlice(file, line) {
-      const key = verifyCacheKey(file, line)
-      if (sourceCache.has(key)) return sourceCache.get(key)
-      const expanded = expandedLineRange(line)
-      try {
-        const r = await fetch(`/source/${encodeURIComponent(file)}?lines=${encodeURIComponent(expanded)}`)
-        if (r.status !== 200) {
-          sourceCache.set(key, null)
-          return null
+      const citations = []
+      for (const e of events) {
+        if (e.type === 'relation.created' && e.payload.type === 'cites') {
+          const claim = objects.get(e.payload.fromObjectId)
+          const passage = objects.get(e.payload.toObjectId)
+          citations.push({
+            claimText:  claim && claim.meta ? claim.meta.text : null,
+            passage:    passage || null,
+            toObjectId: e.payload.toObjectId,
+          })
         }
-        const j = await r.json()
-        sourceCache.set(key, j)
-        return j
-      } catch {
-        sourceCache.set(key, null)
-        return null
       }
+      const files = [...new Set(citations.filter(c => c.passage && c.passage.meta && c.passage.meta.file).map(c => c.passage.meta.file))]
+      return { objects, citations, files }
     }
 
-    // Fetch a cited file in full (no lines query → server returns whole file).
-    // Used as the fallback when a quote is absent from the cited line slice:
-    // if it exists anywhere in the file, the line number is wrong, not the
-    // quote. Cached under a distinct key so it coexists with line slices.
-    async function fetchSourceFull(file) {
-      const key = `${file}::__full__`
+    // Fetch the exact cited lines for display. file:line is a fact from the
+    // object's meta (the real read range), so no tolerance / normalization.
+    async function fetchLines(file, lineStart, lineEnd) {
+      const key = `${file}:${lineStart}-${lineEnd}`
       if (sourceCache.has(key)) return sourceCache.get(key)
       try {
-        const r = await fetch(`/source/${encodeURIComponent(file)}`)
-        if (r.status !== 200) { sourceCache.set(key, null); return null }
-        const j = await r.json()
-        sourceCache.set(key, j)
-        return j
-      } catch {
-        sourceCache.set(key, null)
-        return null
-      }
-    }
-
-    // Substring match between a segment and its source. Catches the
-    // "verbatim copy without quote wrappers" case — e.g. when the agent
-    // pastes a passage into a markdown blockquote (`> …`) or just inlines
-    // it bare. Markdown formatting chars are stripped before comparison
-    // since the source corpus has none of them.
-    // Traditional/simplified normalizer for provenance matching. The corpus is
-    // traditional; the model may quote in either script. Normalizing both sides
-    // to simplified before comparison turns a 繁/简 字形 difference into a match
-    // instead of a false "not found". Degrades to identity if the OpenCC bundle
-    // didn't load (matching reverts to the pre-fix exact comparison).
-    const _t2s = (typeof OpenCC !== 'undefined' && OpenCC.Converter)
-      ? OpenCC.Converter({ from: 't', to: 'cn' })
-      : (s => s)
-    // Also strip whitespace (incl. \n and 全角空格 U+3000): the model often
-    // merges a quote spanning several source lines into one run, dropping the
-    // line breaks the corpus has between them. Comparing 字-only turns that
-    // into a match — for 引文核对 a quote means the characters, not the layout.
-    function normForMatch(s) {
-      try { return _t2s(s).replace(/[\s　]/g, '') }
-      catch { return s.replace(/[\s　]/g, '') }
-    }
-
-    const SUBSTRING_MIN_LEN = 20
-    function hasVerbatimSubstring(segText, sourceText) {
-      const strip = s => normForMatch(s.replace(/[*`>]/g, ''))
-      const seg = strip(segText)
-      const src = strip(sourceText)
-      if (seg.length < SUBSTRING_MIN_LEN) return false
-      for (let i = 0; i + SUBSTRING_MIN_LEN <= seg.length; i++) {
-        if (src.includes(seg.slice(i, i + SUBSTRING_MIN_LEN))) return true
-      }
-      return false
-    }
-
-    // Decide a segment's provenance state from its citations and the
-    // (already-fetched) source slices. Rules in priority order:
-    //   1. No citation → unsupported (red).
-    //   2. Citation but every source fetch failed → unverified (gray).
-    //   3. Citation + explicit quoted snippets (curly/corner quotes):
-    //        all snippets in source → supported (green)
-    //        any snippet absent → tenuous (orange, possible hallucination)
-    //   4. Citation + a ≥20-char contiguous substring of source appears
-    //      in the segment (verbatim copy without quote wrappers, e.g.
-    //      a markdown blockquote header followed by pasted text) →
-    //      supported (green).
-    //   5. Otherwise (citation, summary in own words) → paraphrased (yellow).
-    function classifySegment(seg, sourceSlices, fullTexts) {
-      if (seg.citations.length === 0) return { state: 'unsupported' }
-      const okSlices = sourceSlices.filter(s => s != null)
-      if (okSlices.length === 0) return { state: 'unverified' }
-      const allSrc = okSlices.map(s => s.content).join('\n')
-
-      const quotes = extractQuotedSnippets(seg.raw)
-      if (quotes.length > 0) {
-        // Normalize 繁/简 on both sides before matching (corpus is traditional;
-        // the model may quote in simplified). The arrays keep the ORIGINAL
-        // quote text for display — only the comparison is normalized.
-        const allSrcN = normForMatch(allSrc)
-        const notInSlice = quotes.filter(q => !allSrcN.includes(normForMatch(q)))
-        if (notInSlice.length === 0) return { state: 'supported', quotes }
-        // Some quotes aren't at the cited lines. Before flagging a possible
-        // hallucination, check the FULL text of the cited files — models often
-        // get the quote verbatim right but the line number wrong (the same
-        // off-by-N that LINE_TOLERANCE only partly covers). A quote that lives
-        // in the cited file but not at the cited line is misattribution, not
-        // fabrication; only a quote absent from the whole file is tenuous.
-        const allFullN = normForMatch((fullTexts || []).filter(t => t != null).map(t => t.content).join('\n'))
-        const trulyMissing = notInSlice.filter(q => !allFullN.includes(normForMatch(q)))
-        if (trulyMissing.length > 0) return { state: 'tenuous', quotes, missingQuotes: trulyMissing }
-        return { state: 'misattributed', quotes, misattributedQuotes: notInSlice }
-      }
-
-      if (hasVerbatimSubstring(seg.text, allSrc)) {
-        return { state: 'supported' }
-      }
-      return { state: 'paraphrased' }
-    }
-
-    const STATE_LABELS = {
-      supported:     '有来源直接支撑',
-      paraphrased:   '引用转述（无逐字引文）',
-      misattributed: '引文属实，但标注行号不符',
-      tenuous:       '引文在来源中未找到——需核实',
-      unsupported:   '无来源引用——模型生成',
-      unverified:    '已引用但来源无法获取',
+        const r = await fetch(`/source/${encodeURIComponent(file)}?lines=${encodeURIComponent(lineStart + '-' + lineEnd)}`)
+        const j = r.status === 200 ? await r.json() : null
+        sourceCache.set(key, j); return j
+      } catch { sourceCache.set(key, null); return null }
     }
 
     async function renderProvenanceTab(runId) {
-      const text = assistantTextByRunId.get(runId)
-      if (!text) return `<div class="ap-empty">答案文本不可用。</div>`
-      const segments = segmentAnswer(text)
-      if (segments.length === 0) return `<div class="ap-empty">答案为空。</div>`
-
-      // Resolve all unique (file, line) pairs in parallel, populating
-      // sourceCache as a side effect. Subsequent renders are zero-fetch.
-      // We dedupe across the expanded line ranges so two adjacent
-      // citations (e.g. :33 and :33-34) hit the server only once each
-      // after tolerance expansion.
-      const toFetch = []
-      const seen    = new Set()
-      for (const s of segments) {
-        for (const c of s.citations) {
-          const k = verifyCacheKey(c.file, c.line)
-          if (seen.has(k)) continue
-          seen.add(k)
-          toFetch.push([c.file, c.line])
-        }
+      const { citations } = buildLineage(runId)
+      if (citations.length === 0) {
+        return `<div class="ap-empty">本回答没有登记任何来源（agent 未调用 cite）。</div>`
       }
-      await Promise.all(toFetch.map(([file, line]) => fetchVerifySlice(file, line)))
-
-      // Also fetch each cited file in full, for the misattribution fallback in
-      // classifySegment (quote present in the file but not at the cited line).
-      const citedFiles = [...new Set(segments.flatMap(s => s.citations.map(c => c.file)))]
-      await Promise.all(citedFiles.map(f => fetchSourceFull(f)))
-
+      await Promise.all(citations.map(c => (c.passage && c.passage.meta)
+        ? fetchLines(c.passage.meta.file, c.passage.meta.lineStart, c.passage.meta.lineEnd)
+        : Promise.resolve(null)))
       const legend = `
         <div class="ap-prov-legend">
-          <span class="lg-dot s-supported"></span>有支撑
-          <span class="lg-dot s-paraphrased"></span>转述
-          <span class="lg-dot s-misattributed"></span>行号不符
-          <span class="lg-dot s-tenuous"></span>存疑
-          <span class="lg-dot s-unsupported"></span>无来源
-          <span class="lg-dot s-unverified"></span>未核实
+          <span class="lg-dot s-supported"></span>有来源（grounded）
+          <span class="lg-dot s-unsupported"></span>来源失效（dangling）
         </div>`
-
-      const segHtml = segments.map(seg => {
-        const slices = seg.citations.map(c => sourceCache.get(verifyCacheKey(c.file, c.line)))
-        const segFiles = [...new Set(seg.citations.map(c => c.file))]
-        const fulls = segFiles.map(f => sourceCache.get(`${f}::__full__`))
-        const klass = classifySegment(seg, slices, fulls)
-        const label = STATE_LABELS[klass.state]
-        const citeMeta = seg.citations.length > 0
-          ? seg.citations.map(c => `${c.file}:${c.line}`).join(' · ')
-          : ''
-        let quoteBlock = ''
-        if (klass.state === 'supported' && klass.quotes && klass.quotes.length > 0) {
-          quoteBlock = `<span class="ap-seg-quote">${esc(klass.quotes.join('\n'))}</span>`
-        } else if (klass.state === 'misattributed' && klass.misattributedQuotes && klass.misattributedQuotes.length > 0) {
-          quoteBlock = `<span class="ap-seg-quote">引文属实，但不在标注行（已在引用文件中找到）：\n${esc(klass.misattributedQuotes.join('\n'))}</span>`
-        } else if (klass.state === 'tenuous' && klass.missingQuotes && klass.missingQuotes.length > 0) {
-          quoteBlock = `<span class="ap-seg-quote">来源中缺失：\n${esc(klass.missingQuotes.join('\n'))}</span>`
-        }
+      const rows = citations.map(c => {
+        const meta = c.passage && c.passage.meta
+        const grounded = !!meta
+        const slice = grounded ? sourceCache.get(`${meta.file}:${meta.lineStart}-${meta.lineEnd}`) : null
+        const cite = grounded
+          ? `${meta.file}:${meta.lineStart}${meta.lineEnd !== meta.lineStart ? '-' + meta.lineEnd : ''}`
+          : c.toObjectId
+        const label = grounded ? '有来源直接支撑' : '来源失效——objectId 未对应任何已读段落'
         return `
-          <div class="ap-seg s-${klass.state}">
-            <span class="ap-seg-text">${esc(seg.text)}</span>
+          <div class="ap-seg s-${grounded ? 'supported' : 'unsupported'}">
+            <span class="ap-seg-text">${esc(c.claimText || '(未记录陈述)')}</span>
             <span class="ap-seg-label">${esc(label)}</span>
-            ${citeMeta ? `<span class="ap-seg-meta">${esc(citeMeta)}</span>` : ''}
-            ${quoteBlock}
+            <span class="ap-seg-meta">${esc(cite)}</span>
+            ${slice ? `<span class="ap-seg-quote">${esc(slice.content)}</span>` : ''}
           </div>`
       }).join('')
-
-      return legend + segHtml
+      return legend + rows
     }
 
     // Find the user input that started this run, so the audit panel can
@@ -1799,7 +1564,7 @@
         const trigger = runId
           ? `<span class="audit-trigger" data-run-id="${esc(runId)}">查看审计 ▾</span>`
           : ''
-        div.innerHTML = `<div class="speaker">${roleLabel(role)}</div>${renderAssistantHtml(text)}${trigger}`
+        div.innerHTML = `<div class="speaker">${roleLabel(role)}</div>${renderAssistantHtml(text, runId)}${trigger}`
         if (runId) {
           div.dataset.runId = runId
           assistantTextByRunId.set(runId, text)

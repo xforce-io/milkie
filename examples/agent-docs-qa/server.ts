@@ -387,20 +387,6 @@ export async function startServer(config: ServerConfig): Promise<Server> {
         )
       }
 
-      // Serve the OpenCC traditional→simplified UMD bundle to the browser so
-      // provenance matching can normalize 繁/简 before comparing model quotes
-      // to the (traditional) corpus. Fixed path; no user input touches the FS.
-      if (req.method === 'GET' && route === '/vendor/opencc-t2cn.js') {
-        const f = path.join(__dirname, 'node_modules', 'opencc-js', 'dist', 'umd', 't2cn.js')
-        try {
-          const js = await fs.readFile(f, 'utf-8')
-          res.writeHead(200, { 'content-type': 'application/javascript; charset=utf-8' }).end(js)
-        } catch {
-          res.writeHead(404).end()
-        }
-        return
-      }
-
       if (req.method === 'GET' && (route === '/' || route === '/index.html')) {
         return serveStatic(res, path.join(state.publicDir, 'index.html'))
       }
