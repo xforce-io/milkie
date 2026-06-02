@@ -160,6 +160,47 @@ writes to Trajectory but **not** to Trace — for an event to be
 replay-visible or appear in event-log–backed UI, it must reach the event
 log too.
 
+### Object
+
+A content-addressable artifact an agent read or produced — a document passage,
+a generated claim, an output blob. An Object is not stored in a side table: it
+exists as one `object.created` Event in the log, which **mints a stable
+`objectId` handle** for some content and tags it with a `type` (from the closed
+vocabulary in `docs/lineage-taxonomy.md`) and locating `meta` (e.g. `{file,
+lineStart, lineEnd}` for a `passage`). The Event's `producerEventId` points back
+to the real Event that produced the content (a `tool.responded` from `read_file`,
+an `llm.responded`, an `agent.returned`). The `objectId` is the only way to refer
+to that content downstream.
+
+*Example:* `read_file(chapter-49, 4-5)` produces a `tool.responded`; an
+`object.created` with `type:'passage'`, `meta:{file, lineStart:4, lineEnd:5}`,
+`producerEventId:<that tool.responded>` mints `obj#1` for those two lines.
+*Not:* the content itself, and not the `tool.responded`. The Object is a typed,
+addressable **handle layer** over content a base Event already produced — it adds
+an id and a type, it does not re-store the bytes. *Not:* agent prose. An Object's
+origin is a tool-call record, never text the agent wrote (`file:26` in an answer
+is a string the agent can fabricate; an `objectId` is a handle the runtime only
+issues after a real read).
+
+### Relation
+
+A typed, directed edge between two Objects, recorded as one `relation.created`
+Event: `{type, fromObjectId, toObjectId, causedByEventId}`, with `type` from the
+closed vocabulary (`cites`, `derives_from`, `supersedes`, `equivalent_to`). Both
+endpoints MUST resolve to `object.created` Events; the edge also carries
+`causedByEventId` onto the trace's causal chain. Objects are nodes, Relations are
+edges, and together they form a **lineage graph** projected from the log — a
+provenance query walks edges (claim ──`cites`──> passage ──`meta`──> `file:line`)
+rather than parsing or string-matching agent text.
+
+*Example:* a `claim` Object「曹操败于火攻」and a `passage` Object (ch-49:4-5) joined
+by a `relation.created` of `type:'cites'` from the claim to the passage.
+*Not:* an edge between Events. Relations connect **Objects** (via `objectId`), not
+raw Events; the `causedByEventId` records which Event triggered the link, separate
+from the `from`/`to` object handles. *Not:* a citation parsed from LLM output —
+producers declare Relations explicitly; the runtime never infers them from text
+(see `docs/lineage-taxonomy.md` and `docs/design/40-lineage-citation-goal.md`).
+
 ### FSM
 
 The finite state machine that structures an agent's control flow: each agent
