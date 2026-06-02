@@ -169,6 +169,43 @@ describe('lineage emit end-to-end (#37/#38/新) — real runtime path', () => {
     expect(body.matchesOriginal).toBe(true)
   })
 
+  it('P3: built-in declare_relation links two existing objects with a typed edge', async () => {
+    const file = 'chapter-01-桃园三结义.txt'
+    const idA = passageId(file, 1, 5)
+    const idB = passageId(file, 6, 10)
+    await start([
+      toolCall('read_file', { relPath: file, lineStart: 1, lineEnd: 5 }, 'tc-1'),
+      toolCall('read_file', { relPath: file, lineStart: 6, lineEnd: 10 }, 'tc-2'),
+      toolCall('declare_relation', { type: 'equivalent_to', fromObjectId: idA, toObjectId: idB }, 'tc-3'),
+      text('done'),
+    ])
+    const chat = await postJson(`${baseUrl}/chat`, { input: 'x' })
+    const runId = JSON.parse(chat.body).runId as string
+    const events = await new JsonlEventStore(runsDir).readByRunId(runId)
+
+    const rel = events.find(e => e.type === 'relation.created' && (e.payload as RelationCreatedPayload).type === 'equivalent_to')
+    expect(rel).toBeTruthy()
+    expect((rel!.payload as RelationCreatedPayload).fromObjectId).toBe(idA)
+    expect((rel!.payload as RelationCreatedPayload).toObjectId).toBe(idB)
+  })
+
+  it('P3: declare_relation fail-fasts on an unknown objectId (no edge written)', async () => {
+    const file = 'chapter-01-桃园三结义.txt'
+    const idA = passageId(file, 1, 5)
+    await start([
+      toolCall('read_file', { relPath: file, lineStart: 1, lineEnd: 5 }, 'tc-1'),
+      toolCall('declare_relation', { type: 'derives_from', fromObjectId: idA, toObjectId: 'obj:fake' }, 'tc-2'),
+      text('done'),
+    ])
+    const chat = await postJson(`${baseUrl}/chat`, { input: 'x' })
+    const runId = JSON.parse(chat.body).runId as string
+    const events = await new JsonlEventStore(runsDir).readByRunId(runId)
+
+    expect(events.some(e => e.type === 'relation.created')).toBe(false)
+    const resp = events.find(e => e.type === 'tool.responded' && (e.payload as ToolRespondedPayload).toolName === 'declare_relation')!
+    expect((resp.payload as ToolRespondedPayload).output).toMatchObject({ ok: false })
+  })
+
   it('P2 lazy: grep registers passages but emits ZERO object.created until cited', async () => {
     await start([
       toolCall('grep', { pattern: '阿瞞' }, 'tc-1'),

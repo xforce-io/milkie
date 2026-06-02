@@ -32,6 +32,7 @@ import { AgentFactory, type AgentSpawnOptions } from './AgentFactory.js'
 import type { IIOPort } from './IOPort.js'
 import { cognitiveTools } from '../tools/cognitive.js'
 import { systemTools } from '../tools/system.js'
+import { lineageTools } from '../tools/lineage.js'
 import type { InMemoryRecorder } from '../trajectory/InMemoryRecorder.js'
 import type { ITraceObjectStore } from '../trace/TraceObjectStore.js'
 import { canonicalize, contentAddressForCanonicalBytes } from '../trace/hash.js'
@@ -253,6 +254,7 @@ export class AgentRuntime {
   private registerTools(extraTools: ToolDefinition[]): void {
     for (const tool of systemTools)    this.registry.register(tool)
     for (const tool of cognitiveTools) this.registry.register(tool)
+    for (const tool of lineageTools)   this.registry.register(tool)  // #113 P3
     for (const tool of extraTools)     this.registry.register(tool)
     for (const [agentId] of Object.entries(this.config.subAgents ?? {})) {
       this.registry.register(this.makeSubAgentTool(agentId))
