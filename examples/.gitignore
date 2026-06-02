@@ -1,0 +1,4 @@
+# Runtime SQLite working state — re-created on demand by any example.
+# Unanchored names, so they match .milkie/ in every sub-example.
+state.sqlite
+state.sqlite-*

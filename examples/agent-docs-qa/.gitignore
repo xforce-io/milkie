@@ -1,10 +1,5 @@
-# Runtime state — re-created on demand
-.milkie/state.sqlite
-.milkie/state.sqlite-journal
-.milkie/state.sqlite-wal
-.milkie/state.sqlite-shm
+# Live runs and content-addressed objects — NOT fixtures for this example,
+# so they stay out of git (unlike s-002 / s-005, which commit theirs).
+# Runtime SQLite state is ignored by examples/.gitignore; *.log by the root.
 .milkie/runs/
 .milkie/objects/
-
-# Browser cached state (none today; future-proofing)
-*.log

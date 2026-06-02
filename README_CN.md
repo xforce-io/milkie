@@ -208,12 +208,16 @@ milkie 由三个 peer 子系统构成：
 
 ## Examples
 
-可跑的 demo 跟对应 story 配对放在 [examples/](./examples/) 下。每个 example
-都有一份 SDK 脚本和一份等价 CLI 调用，跑在固化 fixture 上，**无需 API key**。
+可跑的 demo 放在 [examples/](./examples/) 下，完整索引见其
+[README](./examples/README.md)。简述：
 
-- [`s-005-replay`](./examples/s-005-replay/) — 确定性 replay（Phase 3）：
-  用 in-process stub gateway 录一个 run，然后 replay 两遍（一次 SDK、
-  一次 CLI），输出完全一致，**零真实 LLM 调用**。
+- [`s-005-replay`](./examples/s-005-replay/) — 在固化 fixture 上做确定性
+  replay：用 in-process stub gateway 录一个 run，再经 SDK 与 CLI 各 replay
+  一遍，输出完全一致、**零真实 LLM 调用**。无需 API key。
+- [`s-002-inspect`](./examples/s-002-inspect/) — 把录好的 run 渲染成自包含的
+  HTML `trace report`。无需 API key。
+- [`agent-docs-qa`](./examples/agent-docs-qa/) — 一个真实可用的三国演义 Q&A
+  agent，在本地 web UI 里演示实时 trace 观测与 skill 加载。**需要 API key**。
 
 ---
 

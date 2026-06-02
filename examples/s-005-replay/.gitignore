@@ -1,5 +1,0 @@
-# Runtime state — re-created on demand, not part of the example
-.milkie/state.sqlite
-.milkie/state.sqlite-journal
-.milkie/state.sqlite-wal
-.milkie/state.sqlite-shm

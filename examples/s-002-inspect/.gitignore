@@ -1,6 +1,3 @@
-# Runtime state — re-created on demand, not part of the example
-.milkie/state.sqlite
-.milkie/state.sqlite-journal
-.milkie/state.sqlite-wal
-.milkie/state.sqlite-shm
+# Generated report artifact (re-created by report.sh).
+# Runtime SQLite state is ignored by examples/.gitignore.
 report.html
