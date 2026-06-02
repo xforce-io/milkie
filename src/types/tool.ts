@@ -19,6 +19,18 @@ export interface ToolContext {
    */
   createObject?:   (spec: { type: ObjectType; meta?: Record<string, unknown>; hash?: string }) => { objectId: string }
   /**
+   * #113 P2 (lazy): register a candidate object (e.g. a wide-recall grep hit)
+   * WITHOUT emitting object.created. Returns its content-addressed objectId so the
+   * agent can cite it; it only becomes an event if a later cite promotes it. Keeps
+   * large recall from flooding the event log with never-cited candidates.
+   */
+  registerObject?: (spec: { type: ObjectType; meta?: Record<string, unknown>; hash?: string }) => { objectId: string }
+  /**
+   * #113 P2: emit object.created for a previously registered (lazy) object, the
+   * first time it is cited. Idempotent and a no-op for already-emitted objects.
+   */
+  promoteObject?:  (objectId: string) => void
+  /**
    * #38: declare a typed edge between two objects (e.g. a claim `cites` a passage).
    * Both ids must be objectIds minted by createObject. Runtime records a
    * `relation.created` event after `tool.responded`.
