@@ -34,7 +34,7 @@ fsm:
 
         verifier 是一次性加载——同一会话内不要反复 request;如果用户
         再次怀疑、且 verifier 已加载,直接以严格模式重新验证即可。
-      tools: [list_dir, read_file, grep, cite, skill_request]
+      tools: [list_dir, read_file, grep, cite, declare_relation, skill_request]
 model:
   provider: volcengine
   model: doubao-seed-2-0-pro-260215

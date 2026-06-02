@@ -70,7 +70,9 @@ export function makeCorpusTools(corpusRoot: string) {
   async function grep(input: unknown, ctx?: ToolContext): Promise<unknown> {
     const { pattern, caseInsensitive = false } = input as { pattern: string; caseInsensitive?: boolean }
     const maxMatches = 50
-    const flags = caseInsensitive ? 'gi' : 'g'
+    // No `g` flag: we call re.test() once per line, and a /g/ RegExp carries
+    // lastIndex state across calls, which would skip matches on alternate lines.
+    const flags = caseInsensitive ? 'i' : ''
     const re = new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), flags)
     const matches: Array<{ file: string; line: number; text: string; objectId?: string }> = []
 
@@ -87,8 +89,10 @@ export function makeCorpusTools(corpusRoot: string) {
           for (let i = 0; i < lines.length; i++) {
             if (re.test(lines[i]!)) {
               const file = path.relative(root, abs)
-              // #37: each hit is a citable single-line passage object.
-              const obj = ctx?.createObject?.({ type: 'passage', meta: { file, lineStart: i + 1, lineEnd: i + 1 } })
+              // #113 P2: grep is wide recall — register each hit lazily (no event)
+              // so dozens of never-cited candidates don't flood the log; cite promotes
+              // only the one the agent actually uses.
+              const obj = ctx?.registerObject?.({ type: 'passage', meta: { file, lineStart: i + 1, lineEnd: i + 1 } })
               matches.push({
                 file,
                 line: i + 1,
@@ -108,27 +112,10 @@ export function makeCorpusTools(corpusRoot: string) {
     }
   }
 
-  // 【新 issue】#38 producer: the agent declares "this claim is sourced from that
-  // passage". Mints a `claim` object and a `cites` relation claim → passage. The
-  // objectId must be one the agent received from read_file/grep — a fabricated id
-  // produces a dangling edge the UI renders as ungrounded (content-addressed ids
-  // can't be guessed). Replaces the old "(chapter:line)" prose convention.
-  async function cite(input: unknown, ctx?: ToolContext): Promise<unknown> {
-    const { claim, objectId } = input as { claim: string; objectId: string }
-    // #113 P1 fail-fast: reject a fabricated/hallucinated objectId before declaring
-    // anything, so the model can self-correct (re-grep/read for a real id) and no
-    // dangling edge enters the lineage graph. Skips the check if lineage isn't wired.
-    if (ctx?.resolveObject && !ctx.resolveObject(objectId)) {
-      return { ok: false, error: `objectId '${objectId}' 不存在；请使用 read_file/grep 返回的真实 objectId` }
-    }
-    const claimObj = ctx?.createObject?.({ type: 'claim', meta: { text: claim } })
-    if (claimObj && ctx?.createRelation) {
-      ctx.createRelation({ type: 'cites', fromObjectId: claimObj.objectId, toObjectId: objectId })
-    }
-    return { ok: true, claimId: claimObj?.objectId, cites: objectId }
-  }
-
-  return { list_dir, read_file, grep, cite }
+  // #113 P3: `cite` is now a framework built-in (src/tools/lineage.ts), available
+  // to any agent. The corpus tools only produce objects (read_file/grep); the
+  // lineage-declaration tools are framework-level.
+  return { list_dir, read_file, grep }
 }
 
 /**
@@ -180,19 +167,6 @@ export function makeCorpusToolDefinitions(corpusRoot: string) {
         required: ['pattern'],
       },
       handler: t.grep,
-    },
-    {
-      name:        'cite',
-      description: 'Record that a specific claim in your answer is sourced from a passage. Pass the exact claim text and the objectId returned by read_file or grep. Call once per cited claim. Do NOT write "(chapter:line)" in prose — cite via this tool instead.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          claim:    { type: 'string', description: 'The exact statement in your answer this source supports.' },
-          objectId: { type: 'string', description: 'objectId of the passage (from read_file/grep) that supports the claim.' },
-        },
-        required: ['claim', 'objectId'],
-      },
-      handler: t.cite,
     },
   ]
 }
