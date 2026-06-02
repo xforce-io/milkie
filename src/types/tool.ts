@@ -2,7 +2,7 @@ import type { JSONSchema } from './common.js'
 import type { WorkingMemory } from '../store/WorkingMemory.js'
 import type { IStateStore } from './store.js'
 import type { AgentFactory } from '../runtime/AgentFactory.js'
-import type { GuardEvaluation } from '../trace/types.js'
+import type { GuardEvaluation, ObjectType, RelationType } from '../trace/types.js'
 
 export interface ToolContext {
   workingMemory: WorkingMemory
@@ -10,6 +10,20 @@ export interface ToolContext {
   stateStore:    IStateStore
   emit:          (event: string, payload?: unknown, guard?: GuardEvaluation | GuardEvaluation[]) => void
   requestSkill?: (name: string, scope?: 'turn' | 'session') => { requested: string; status: string; version?: string; scope?: 'turn' | 'session' }
+  /**
+   * #37: declare a content-addressable object (a passage read, a claim produced).
+   * Returns a stable `objectId` handle (content-addressed → identical across
+   * record/replay) the handler should surface in its result so the agent can later
+   * cite it. Runtime records an `object.created` event after this tool's
+   * `tool.responded`. Present only when the runtime wired a lineage sink.
+   */
+  createObject?:   (spec: { type: ObjectType; meta?: Record<string, unknown>; hash?: string }) => { objectId: string }
+  /**
+   * #38: declare a typed edge between two objects (e.g. a claim `cites` a passage).
+   * Both ids must be objectIds minted by createObject. Runtime records a
+   * `relation.created` event after `tool.responded`.
+   */
+  createRelation?: (spec: { type: RelationType; fromObjectId: string; toObjectId: string; meta?: Record<string, unknown> }) => { relationId: string }
 }
 
 export interface ToolDefinition {

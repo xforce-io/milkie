@@ -1,5 +1,6 @@
 import type { IIOPort } from '../runtime/IOPort.js'
 import type { ModelRequest, ModelResponse, ModelEvent } from '../types/model.js'
+import type { LineageBuffer } from './types.js'
 import { CacheIndex, CacheIndexEmptyError } from './CacheIndex.js'
 import { hashModelRequest, hashToolCall } from './hash.js'
 import { ReplayDivergenceError } from './ReplayDivergenceError.js'
@@ -39,7 +40,11 @@ export class ReplayingIOPort implements IIOPort {
     toolName: string,
     input: unknown,
     _execute: () => Promise<unknown>,
+    _opts?: { toolCallId?: string; lineage?: LineageBuffer },
   ): Promise<unknown> {
+    // Replay serves cached output and never runs the handler, so no lineage is
+    // declared and `_opts.lineage` stays empty — object.created/relation.created
+    // are not re-emitted (the original run's log already has them).
     const hash = hashToolCall(toolName, input)
     try {
       return this.cache.consumeTool(hash)

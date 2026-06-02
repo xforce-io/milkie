@@ -1,0 +1,88 @@
+import { RecordingIOPort } from '../trace/RecordingIOPort'
+import { MemoryEventStore } from '../trace/MemoryEventStore'
+import type { IIOPort } from '../runtime/IOPort'
+import type { ModelRequest, ModelResponse } from '../types/model'
+import type { LineageBuffer, ObjectCreatedPayload, RelationCreatedPayload, ToolRespondedPayload } from '../trace/types'
+
+class ExecInnerPort implements IIOPort {
+  private nextClock = 1000
+  private nextUuid  = 1
+  async invokeLLM(_req: ModelRequest): Promise<ModelResponse> {
+    return { content: [], toolCalls: [], finishReason: 'end_turn' }
+  }
+  async invokeTool(_n: string, _i: unknown, execute: () => Promise<unknown>): Promise<unknown> {
+    return execute()
+  }
+  now():  number { return this.nextClock++ }
+  uuid(): string { return `uuid-${this.nextUuid++}` }
+}
+
+describe('RecordingIOPort — lineage flush (#37/#38)', () => {
+  it('emits object.created after tool.responded with producerEventId resolving to it', async () => {
+    const store = new MemoryEventStore()
+    const port  = new RecordingIOPort(new ExecInnerPort(), store, 'r1')
+    // The handler "declares" a passage object mid-execute (what ctx.createObject does).
+    const lineage: LineageBuffer = { objects: [], relations: [] }
+    await port.invokeTool('read_file', { relPath: 'ch.txt' }, async () => {
+      lineage.objects.push({ objectId: 'obj:abc', type: 'passage', meta: { file: 'ch.txt', lineStart: 4, lineEnd: 5 } })
+      return { content: '诗两行', objectId: 'obj:abc' }
+    }, { lineage })
+
+    const events = await store.readByRunId('r1')
+    const respIdx = events.findIndex(e => e.type === 'tool.responded')
+    const objIdx  = events.findIndex(e => e.type === 'object.created')
+    expect(respIdx).toBeGreaterThanOrEqual(0)
+    // object.created comes AFTER tool.responded.
+    expect(objIdx).toBeGreaterThan(respIdx)
+
+    const resp = events[respIdx]!.payload as ToolRespondedPayload
+    const obj  = events[objIdx]!.payload as ObjectCreatedPayload
+    // producerEventId points at the tool.responded event id.
+    expect(obj.producerEventId).toBe(events[respIdx]!.id)
+    expect(obj).toMatchObject({ objectId: 'obj:abc', type: 'passage', meta: { file: 'ch.txt', lineStart: 4, lineEnd: 5 } })
+    // tool.responded lists the produced object via artifactRefs.
+    expect(resp.artifactRefs).toEqual(['obj:abc'])
+  })
+
+  it('emits relation.created with from/to and causedByEventId at the tool.responded', async () => {
+    const store = new MemoryEventStore()
+    const port  = new RecordingIOPort(new ExecInnerPort(), store, 'r1')
+    const lineage: LineageBuffer = { objects: [], relations: [] }
+    await port.invokeTool('cite', { objectId: 'obj:p' }, async () => {
+      lineage.relations.push({ relationId: 'rel:1', type: 'cites', fromObjectId: 'obj:claim', toObjectId: 'obj:p' })
+      return { ok: true }
+    }, { lineage })
+
+    const events = await store.readByRunId('r1')
+    const resp = events.find(e => e.type === 'tool.responded')!
+    const rel  = events.find(e => e.type === 'relation.created')!
+    const p = rel.payload as RelationCreatedPayload
+    expect(p).toMatchObject({ type: 'cites', fromObjectId: 'obj:claim', toObjectId: 'obj:p' })
+    expect(p.causedByEventId).toBe(resp.id)
+  })
+
+  it('records nothing when no lineage buffer is passed (back-compat)', async () => {
+    const store = new MemoryEventStore()
+    const port  = new RecordingIOPort(new ExecInnerPort(), store, 'r1')
+    await port.invokeTool('t', {}, async () => 'x')
+    const events = await store.readByRunId('r1')
+    expect(events.some(e => e.type === 'object.created')).toBe(false)
+    const resp = events.find(e => e.type === 'tool.responded')!.payload as ToolRespondedPayload
+    expect(resp.artifactRefs).toBeUndefined()
+  })
+
+  it('does not emit object.created on the error branch (no output, no objects)', async () => {
+    const store = new MemoryEventStore()
+    const port  = new RecordingIOPort(new ExecInnerPort(), store, 'r1')
+    const lineage: LineageBuffer = { objects: [], relations: [] }
+    await expect(
+      port.invokeTool('read_file', {}, async () => {
+        // even if something got pushed before throwing, the error branch skips flush
+        lineage.objects.push({ objectId: 'obj:x', type: 'passage' })
+        throw new Error('boom')
+      }, { lineage })
+    ).rejects.toThrow('boom')
+    const events = await store.readByRunId('r1')
+    expect(events.some(e => e.type === 'object.created')).toBe(false)
+  })
+})

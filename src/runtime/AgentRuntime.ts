@@ -38,7 +38,7 @@ import { canonicalize, contentAddressForCanonicalBytes } from '../trace/hash.js'
 import type { CausalCursor } from '../trace/CausalCursor.js'
 import { checkpointFromEvents } from '../trace/diagnostics/checkpointFromEvents.js'
 import type { Region } from '../context/Region.js'
-import type { SkillLifecyclePayload, AgentRunStartedPayload, AgentRunCompletedPayload, GuardEvaluation, ToolEmittedPayload } from '../trace/types.js'
+import type { SkillLifecyclePayload, AgentRunStartedPayload, AgentRunCompletedPayload, GuardEvaluation, ToolEmittedPayload, LineageBuffer } from '../trace/types.js'
 
 export type MakeChildPort = (
   childRunId:  string,
@@ -355,14 +355,37 @@ export class AgentRuntime {
     )
   }
 
-  private buildToolContext(emitFn: (event: string, payload?: unknown, guard?: GuardEvaluation | GuardEvaluation[]) => void): ToolContext {
-    return {
+  private buildToolContext(
+    emitFn: (event: string, payload?: unknown, guard?: GuardEvaluation | GuardEvaluation[]) => void,
+    lineage?: LineageBuffer,
+  ): ToolContext {
+    const ctx: ToolContext = {
       workingMemory: this.memory,
       agentFactory:  this.factory,
       stateStore:    this.stateStore,
       emit:          emitFn,
       requestSkill:  (name: string, scope?: 'turn' | 'session') => this.requestSkill(name, scope),
     }
+    // #37/#38: only wire lineage when a sink is present (LLM-state tool calls go
+    // through ioPort.invokeTool, which drains the buffer). objectId/relationId are
+    // content-addressed so they are identical in record and replay.
+    if (lineage) {
+      ctx.createObject = (spec) => {
+        const objectId = 'obj:' + contentAddressForCanonicalBytes(
+          canonicalize({ type: spec.type, meta: spec.meta ?? null, hash: spec.hash ?? null }),
+        )
+        lineage.objects.push({ objectId, type: spec.type, ...(spec.hash ? { hash: spec.hash } : {}), ...(spec.meta ? { meta: spec.meta } : {}) })
+        return { objectId }
+      }
+      ctx.createRelation = (spec) => {
+        const relationId = 'rel:' + contentAddressForCanonicalBytes(
+          canonicalize({ type: spec.type, from: spec.fromObjectId, to: spec.toObjectId }),
+        )
+        lineage.relations.push({ relationId, type: spec.type, fromObjectId: spec.fromObjectId, toObjectId: spec.toObjectId, ...(spec.meta ? { meta: spec.meta } : {}) })
+        return { relationId }
+      }
+    }
+    return ctx
   }
 
   private requestSkill(name: string, scope: 'turn' | 'session' = 'turn'): { requested: string; status: string; version?: string; scope?: 'turn' | 'session' } {
@@ -1171,6 +1194,9 @@ export class AgentRuntime {
     // the winner makes replay reproduce one transition regardless of how a
     // parallel batch's emits race.
     let capturedEmit: { name: string; payload?: unknown; guard?: GuardEvaluation[] } | undefined
+    // #37/#38: handler declares objects/relations into this buffer; RecordingIOPort
+    // drains it into object.created/relation.created right after tool.responded.
+    const lineage: LineageBuffer = { objects: [], relations: [] }
     const ctx = this.buildToolContext((event, payload, guard) => {
       const hadPending = this.fsm.hasPendingEvent()
       this.fsm.emitEvent(event, payload, guard)
@@ -1181,7 +1207,7 @@ export class AgentRuntime {
           ...(guard ? { guard: Array.isArray(guard) ? guard : [guard] } : {}),
         }
       }
-    })
+    }, lineage)
 
     const maxRetries = 3
 
@@ -1201,7 +1227,7 @@ export class AgentRuntime {
           call.name,
           call.input,
           () => this.registry.execute(call.name, call.input, ctx),
-          { toolCallId: call.id },  // #81: stamp the LLM tool_use id onto tool.requested/responded for pairing
+          { toolCallId: call.id, lineage },  // #81 pairing id; #37/#38 lineage sink
         )
         span.attributes['output'] = output
         // SPIKE(#73): event-source tool WM side-effects so replay reconstructs them.
