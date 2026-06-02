@@ -465,9 +465,9 @@ export class Milkie {
           throw err
         }
       },
-      async invokeTool(name, input, execute) {
+      async invokeTool(name, input, execute, opts) {
         try {
-          return await ioPort.invokeTool(name, input, execute)
+          return await ioPort.invokeTool(name, input, execute, opts)
         } catch (err) {
           if (err instanceof ReplayDivergenceError) divergenceError = err
           throw err

@@ -10,6 +10,9 @@ import type {
   AgentRunCompletedPayload,
   ClockReadPayload,
   UuidGeneratedPayload,
+  ObjectCreatedPayload,
+  RelationCreatedPayload,
+  LineageBuffer,
 } from './types.js'
 import { hashModelRequest, hashToolCall, canonicalize, contentAddressForCanonicalBytes } from './hash.js'
 import type { ITraceObjectStore } from './TraceObjectStore.js'
@@ -187,11 +190,43 @@ export class RecordingIOPort implements IIOPort {
     return response
   }
 
+  /**
+   * #37/#38: drain the lineage buffer the handler filled, as object.created /
+   * relation.created events anchored to the just-written tool.responded
+   * (`producerEventId` / `causedByEventId` = respEventId). Each event's own id is
+   * infrastructure bookkeeping (inner.uuid), like the nondet flush above.
+   */
+  private async flushLineage(lineage: LineageBuffer | undefined, producerEventId: string): Promise<void> {
+    if (!lineage) return
+    for (const o of lineage.objects) {
+      await this.store.append({
+        id:        this.inner.uuid(),
+        runId:     this.runId,
+        type:      'object.created',
+        actor:     this.actor,
+        causedBy:  producerEventId,
+        timestamp: this.inner.now(),
+        payload:   { objectId: o.objectId, type: o.type, producerEventId, ...(o.hash ? { hash: o.hash } : {}), ...(o.meta ? { meta: o.meta } : {}) } satisfies ObjectCreatedPayload,
+      })
+    }
+    for (const r of lineage.relations) {
+      await this.store.append({
+        id:        this.inner.uuid(),
+        runId:     this.runId,
+        type:      'relation.created',
+        actor:     this.actor,
+        causedBy:  producerEventId,
+        timestamp: this.inner.now(),
+        payload:   { relationId: r.relationId, type: r.type, fromObjectId: r.fromObjectId, toObjectId: r.toObjectId, causedByEventId: producerEventId, ...(r.meta ? { meta: r.meta } : {}) } satisfies RelationCreatedPayload,
+      })
+    }
+  }
+
   async invokeTool(
     toolName: string,
     input: unknown,
     execute: () => Promise<unknown>,
-    opts?: { toolCallId?: string },
+    opts?: { toolCallId?: string; lineage?: LineageBuffer },
   ): Promise<unknown> {
     await this.flushPendingNondet()
     const requestHash = hashToolCall(toolName, input)
@@ -214,6 +249,9 @@ export class RecordingIOPort implements IIOPort {
     try {
       const output = await this.inner.invokeTool(toolName, input, execute, opts)
       const meta = await this.outputMetadata(output)
+      // #37: the handler may have declared objects during execute; list their ids
+      // on tool.responded (artifactRefs) and emit object.created/relation.created.
+      const artifactRefs = opts?.lineage?.objects.map(o => o.objectId)
       const respEventId = this.inner.uuid()
       await this.store.append({
         id:        respEventId,
@@ -222,8 +260,9 @@ export class RecordingIOPort implements IIOPort {
         actor:     this.actor,
         causedBy:  reqEventId,
         timestamp: this.inner.now(),
-        payload:   { toolName, ...idField, status: 'ok', output, requestHash, ...meta } satisfies ToolRespondedPayload,
+        payload:   { toolName, ...idField, status: 'ok', output, requestHash, ...meta, ...(artifactRefs && artifactRefs.length ? { artifactRefs } : {}) } satisfies ToolRespondedPayload,
       })
+      await this.flushLineage(opts?.lineage, respEventId)
       // tool.responded is a turn terminator for the next llm.requested (edge 2).
       // Under a parallel tool batch, several tool.responded race to write this; the
       // last-completed wins. That is intentional and harmless: any of the batch's

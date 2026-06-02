@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from 'uuid'
 import type { ModelRequest, ModelResponse, ModelEvent, IModelGateway } from '../types/model.js'
+import type { LineageBuffer } from '../trace/types.js'
 import { aggregateStream } from '../gateway/StreamAggregator.js'
 
 /**
@@ -50,12 +51,16 @@ export interface IIOPort {
    *
    * `opts.toolCallId` (#81) is the LLM-side tool_use id; recording IOPorts stamp
    * it onto tool.requested / tool.responded so external consumers can pair them.
+   *
+   * `opts.lineage` (#37/#38) is a buffer the handler fills via ctx.createObject /
+   * ctx.createRelation; recording IOPorts drain it into object.created /
+   * relation.created events right after tool.responded.
    */
   invokeTool(
     toolName: string,
     input: unknown,
     execute: () => Promise<unknown>,
-    opts?: { toolCallId?: string },
+    opts?: { toolCallId?: string; lineage?: LineageBuffer },
   ): Promise<unknown>
 
   /** Current epoch milliseconds. Replacement for direct `Date.now()`. */

@@ -26,6 +26,8 @@ export type EventKind =
   | 'wm.mutated'
   | 'tool.emitted'
   | 'agent.checkpoint'
+  | 'object.created'
+  | 'relation.created'
 
 export interface Event<P = unknown> {
   id: string
@@ -250,6 +252,77 @@ export interface FsmTransitionPayload {
   guardEvaluations?: GuardEvaluation[]
 }
 
+// ---- Lineage payloads (#37 / #38; vocabulary in docs/lineage-taxonomy.md) ----
+
+/** Object types — closed vocabulary (#39). v1 ships `passage`. */
+export type ObjectType = 'passage' | 'file' | 'claim' | 'artifact-blob'
+
+/** Relation types — closed vocabulary (#39). v1 ships `cites`. */
+export type RelationType = 'cites' | 'derives_from' | 'supersedes' | 'equivalent_to'
+
+/**
+ * #37: a content-addressable artifact an agent read or produced. Mints a stable
+ * `objectId` handle (content-addressed → identical across record/replay). Recorded
+ * by RecordingIOPort right after the producing `tool.responded`; replay does not
+ * re-run the handler, so this is NOT re-emitted on replay (the cached tool output
+ * already carries the id). Pure lineage metadata — does not touch the cache/replay
+ * sequence.
+ */
+export interface ObjectCreatedPayload {
+  objectId: string
+  type:     ObjectType
+  /** The real event that produced the content (e.g. the `tool.responded`). */
+  producerEventId: string
+  /** Aligns with the producer's `outputHash` (#25) when alignable. */
+  hash?:    string
+  /** Type-specific locator, e.g. {file, lineStart, lineEnd} for a passage. */
+  meta?:    Record<string, unknown>
+}
+
+/**
+ * #38: a typed, directed edge between two Objects (by objectId). Producer declares
+ * it explicitly (e.g. a `cite` tool); the runtime never infers it from LLM text.
+ */
+export interface RelationCreatedPayload {
+  relationId: string
+  type:       RelationType
+  fromObjectId: string
+  toObjectId:   string
+  /** The event that triggered the link (onto the causal chain). */
+  causedByEventId: string
+  meta?:      Record<string, unknown>
+}
+
+// ---- Lineage buffer (declared during a tool call, flushed by RecordingIOPort) ----
+
+/** A createObject declaration, buffered during a tool call. */
+export interface PendingObject {
+  objectId: string
+  type:     ObjectType
+  hash?:    string
+  meta?:    Record<string, unknown>
+}
+
+/** A createRelation declaration, buffered during a tool call (#38). */
+export interface PendingRelation {
+  relationId:   string
+  type:         RelationType
+  fromObjectId: string
+  toObjectId:   string
+  meta?:        Record<string, unknown>
+}
+
+/**
+ * Per-tool-call sink for lineage declarations. `ctx.createObject` /
+ * `ctx.createRelation` push here during the handler; RecordingIOPort drains it
+ * right after appending `tool.responded` (so `producerEventId` / `causedByEventId`
+ * resolve to that event). On replay the handler never runs → buffer stays empty.
+ */
+export interface LineageBuffer {
+  objects:   PendingObject[]
+  relations: PendingRelation[]
+}
+
 // ---- Typed event aliases ----
 
 export type LlmRequestedEvent       = Event<LlmRequestedPayload>       & { type: 'llm.requested' }
@@ -269,6 +342,8 @@ export type FsmTransitionEvent     = Event<FsmTransitionPayload>     & { type: '
 export type ToolEmittedEvent       = Event<ToolEmittedPayload>       & { type: 'tool.emitted' }
 export type SkillLoadedEvent       = Event<SkillLifecyclePayload>    & { type: 'skill.loaded' }
 export type SkillUnloadedEvent     = Event<SkillLifecyclePayload>    & { type: 'skill.unloaded' }
+export type ObjectCreatedEvent     = Event<ObjectCreatedPayload>     & { type: 'object.created' }
+export type RelationCreatedEvent   = Event<RelationCreatedPayload>   & { type: 'relation.created' }
 
 export type AnyEvent =
   | LlmRequestedEvent
@@ -288,3 +363,5 @@ export type AnyEvent =
   | ToolEmittedEvent
   | SkillLoadedEvent
   | SkillUnloadedEvent
+  | ObjectCreatedEvent
+  | RelationCreatedEvent
