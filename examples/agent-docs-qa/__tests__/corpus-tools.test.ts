@@ -77,6 +77,16 @@ describe('corpus-tools (sandboxed)', () => {
     expect(result.matches.length).toBeGreaterThan(0)
   })
 
+  it('grep matches the pattern on EVERY consecutive line (no g-flag lastIndex skipping)', async () => {
+    // Regression: a /g/ RegExp reused across lines via .test() carries lastIndex
+    // state, so the same pattern on consecutive lines gets skipped on alternate
+    // lines. All three "foo" lines must be matched, not just lines 1 and 3.
+    fs.writeFileSync(path.join(tmpDir, 'repeat.txt'), 'foo\nfoo\nfoo\n')
+    const result = await grep({ pattern: 'foo' }) as { matches: Array<{ file: string; line: number }> }
+    const repeatHits = result.matches.filter(m => m.file === 'repeat.txt').map(m => m.line)
+    expect(repeatHits).toEqual([1, 2, 3])
+  })
+
   it('grep limits results to maxMatches (default 50)', async () => {
     const lines = Array.from({ length: 100 }, (_, i) => `match-line-${i}`).join('\n')
     fs.writeFileSync(path.join(tmpDir, 'big.txt'), lines + '\n')

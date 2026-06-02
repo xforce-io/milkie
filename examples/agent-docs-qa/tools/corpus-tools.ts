@@ -70,7 +70,9 @@ export function makeCorpusTools(corpusRoot: string) {
   async function grep(input: unknown, ctx?: ToolContext): Promise<unknown> {
     const { pattern, caseInsensitive = false } = input as { pattern: string; caseInsensitive?: boolean }
     const maxMatches = 50
-    const flags = caseInsensitive ? 'gi' : 'g'
+    // No `g` flag: we call re.test() once per line, and a /g/ RegExp carries
+    // lastIndex state across calls, which would skip matches on alternate lines.
+    const flags = caseInsensitive ? 'i' : ''
     const re = new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), flags)
     const matches: Array<{ file: string; line: number; text: string; objectId?: string }> = []
 
