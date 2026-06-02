@@ -3,6 +3,26 @@ import path from 'path'
 import type { ToolContext } from '../../../src/types/tool.js'
 
 /**
+ * Split file text into lines, dropping the single trailing newline a POSIX file
+ * conventionally ends with — otherwise "a\nb\n".split('\n') yields a phantom
+ * empty last element and the line count is off by one. After this, line N (1-based)
+ * is `lines[N-1]`, and read_file / grep share the same line numbering.
+ */
+function splitLines(text: string): string[] {
+  return text.replace(/\n$/, '').split('\n')
+}
+
+/**
+ * Join lines for the 1-based **inclusive** range [start, end] (both ends kept).
+ * `slice` is 0-based and half-open [a, b): line `start` is index `start-1`, and
+ * line `end` is index `end-1` but slice's exclusive upper bound wants `end`.
+ * Caller is responsible for clamping start/end into range.
+ */
+function sliceLines(lines: string[], start: number, end: number): string {
+  return lines.slice(start - 1, end).join('\n')
+}
+
+/**
  * Build a sandboxed set of corpus tools rooted at `corpusRoot`.
  * Every tool resolves user-provided relPath against corpusRoot, then
  * verifies the resolved absolute path is still inside corpusRoot
@@ -37,13 +57,10 @@ export function makeCorpusTools(corpusRoot: string) {
   async function read_file(input: unknown, ctx?: ToolContext): Promise<unknown> {
     const { relPath, lineStart, lineEnd } = input as { relPath: string; lineStart?: number; lineEnd?: number }
     const abs = resolveInsideRoot(relPath)
-    const full = await fs.readFile(abs, 'utf-8')
-    // Strip a single trailing newline so a file ending in "\n" doesn't report a
-    // phantom extra line; 1-based line numbers then match grep's view.
-    const allLines = full.replace(/\n$/, '').split('\n')
+    const allLines = splitLines(await fs.readFile(abs, 'utf-8'))
     const start = typeof lineStart === 'number' && lineStart >= 1 ? lineStart : 1
     const end   = typeof lineEnd === 'number' && lineEnd >= start ? Math.min(lineEnd, allLines.length) : allLines.length
-    const content = allLines.slice(start - 1, end).join('\n')
+    const content = sliceLines(allLines, start, end)
     const obj = ctx?.createObject?.({ type: 'passage', meta: { file: relPath, lineStart: start, lineEnd: end } })
     // objectId + locator FIRST so they survive the truncate(2000) result strategy
     // even when `content` is a long whole-file read — the agent must see objectId to cite.
@@ -66,8 +83,7 @@ export function makeCorpusTools(corpusRoot: string) {
         if (e.isDirectory()) {
           await walk(abs)
         } else if (e.isFile()) {
-          const content = await fs.readFile(abs, 'utf-8')
-          const lines = content.split('\n')
+          const lines = splitLines(await fs.readFile(abs, 'utf-8'))
           for (let i = 0; i < lines.length; i++) {
             if (re.test(lines[i]!)) {
               const file = path.relative(root, abs)

@@ -105,33 +105,11 @@
     .msg.assistant .body h6.md-h { font-size: 1em }
     .msg.assistant .body .md-list { margin: .25em 0; padding-left: 1.5em }
     .msg.assistant .body .md-list li { margin: .15em 0 }
-    .cite {
-      display: inline-block; cursor: pointer; user-select: none;
-      color: var(--cite-fg); background: var(--cite-bg); border-radius: 4px;
-      padding: 0 4px; margin: 0 1px; font-size: 0.72em; font-weight: 600;
-      vertical-align: super; line-height: 1.4;
-    }
-    .cite:hover { background: #e1d5ff }
     #chat-input { display: flex; padding: 14px 20px; border-top: 1px solid var(--border); gap: 8px; background: var(--panel) }
     #chat-input input { flex: 1; padding: 9px 13px; font: inherit; border: 1px solid var(--border); border-radius: 6px }
     #chat-input input:disabled { background: #f5f5f7; color: var(--muted) }
     #chat-input button { padding: 9px 18px; background: var(--accent); color: white; border: none; border-radius: 6px; cursor: pointer; font: inherit }
     #chat-input button:disabled { opacity: 0.5; cursor: not-allowed }
-
-    /* ── Citation popover (anchored, dismissable) ───────────────────── */
-    #cite-popover {
-      position: absolute; z-index: 100; max-width: 320px;
-      background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
-      box-shadow: 0 8px 24px rgba(0,0,0,0.12); padding: 12px 14px;
-      font-size: 13px; line-height: 1.5; display: none;
-    }
-    #cite-popover.open { display: block }
-    #cite-popover .cp-source {
-      font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px;
-      color: var(--text); word-break: break-all;
-    }
-    #cite-popover .cp-line { color: var(--muted); margin-top: 4px; font-size: 11px }
-    #cite-popover .cp-hint { color: var(--muted); margin-top: 8px; font-size: 11px; font-style: italic }
 
     /* ── Audit panel (Layer 2: per-message decision audit) ──────────── */
     #audit-panel {
@@ -502,7 +480,6 @@
       <div id="payload-detail"></div>
     </section>
   </main>
-  <div id="cite-popover" role="dialog" aria-label="引用来源"></div>
   <aside id="audit-panel" role="dialog" aria-label="决策审计">
     <div class="ap-header">
       <div class="ap-title">这个答案是怎么来的</div>
@@ -535,10 +512,6 @@
     // describes), or null if closed. Used to toggle re-clicks.
     let auditAnchorRunId    = null
     let auditActiveTab      = 'sources'
-    // Raw assistant text per runId, kept so the Provenance tab can re-
-    // segment the answer rather than parse it back out of the rendered
-    // DOM (which has already been esc()'d and citation-substituted).
-    const assistantTextByRunId = new Map()
     // file+lineRange → fetched source slice, so opening Provenance for a
     // message with 10 citations doesn't hit the server 10 times if the
     // same source is referenced multiple times.
@@ -556,7 +529,6 @@
     const $tl      = document.getElementById('trace-timeline')
     const $detail  = document.getElementById('payload-detail')
     const $traceHd = document.getElementById('trace-header')
-    const $popover = document.getElementById('cite-popover')
     const $audit   = document.getElementById('audit-panel')
     const $auditTitle = $audit.querySelector('.ap-title')
     const $auditBody  = $audit.querySelector('.ap-body')
@@ -657,59 +629,9 @@
       return `<div class="body">${html}</div>${footer}`
     }
 
-    // ─── Citation popover ──────────────────────────────────────────────
-    function showCitePopover(citeEl) {
-      const file = citeEl.dataset.file
-      const line = citeEl.dataset.line
-      $popover.innerHTML =
-        `<div class="cp-source">${esc(file)}</div>` +
-        `<div class="cp-line">第 ${esc(line)} 行</div>` +
-        `<div class="cp-hint">来源片段预览将在后续更新中提供。</div>`
-      // Position below the chip, clamped to viewport.
-      const rect = citeEl.getBoundingClientRect()
-      $popover.classList.add('open')
-      const pw = $popover.offsetWidth
-      const ph = $popover.offsetHeight
-      const vw = document.documentElement.clientWidth
-      let left = rect.left + window.scrollX
-      if (left + pw > vw - 8) left = vw - pw - 8
-      if (left < 8) left = 8
-      let top = rect.bottom + window.scrollY + 6
-      // If popover would overflow viewport bottom, flip above the chip.
-      if (rect.bottom + ph + 14 > window.innerHeight) {
-        top = rect.top + window.scrollY - ph - 6
-      }
-      $popover.style.left = `${left}px`
-      $popover.style.top  = `${top}px`
-    }
-    function hideCitePopover() {
-      $popover.classList.remove('open')
-    }
-    document.addEventListener('click', (ev) => {
-      const target = ev.target
-      if (target instanceof HTMLElement && target.classList.contains('cite')) {
-        ev.stopPropagation()
-        // Re-clicking the same chip toggles closed.
-        if ($popover.classList.contains('open') && $popover.dataset.anchor === target.dataset.n + ':' + target.dataset.file) {
-          hideCitePopover()
-          return
-        }
-        $popover.dataset.anchor = target.dataset.n + ':' + target.dataset.file
-        showCitePopover(target)
-        return
-      }
-      // Click outside popover dismisses it.
-      if (!$popover.contains(target)) hideCitePopover()
-    })
-    window.addEventListener('resize', hideCitePopover)
-    window.addEventListener('scroll', hideCitePopover, true)
-
     // ─── Audit panel ───────────────────────────────────────────────────
-    // Extract citations from an assistant message DOM node — we already
-    // rendered them as <sup class="cite" data-file data-line>, so reuse
-    // those rather than re-running the regex.
-    // #40: Sources tab from lineage events (was: parsed from .cite chips, now
-    // deleted). Group the cited passages by file with their real line ranges.
+    // #40: Sources tab from lineage events (object.created/relation.created).
+    // Group the cited passages by file with their real line ranges.
     function renderSourcesTab(runId) {
       const { citations } = buildLineage(runId)
       const passages = citations.filter(c => c.passage && c.passage.meta)
@@ -1410,7 +1332,6 @@
       if (!document.contains(target)) return
       if ($audit.contains(target)) return
       if (target.classList.contains('audit-trigger')) return
-      if (target.classList.contains('cite')) return
       closeAudit()
     })
 
@@ -1453,9 +1374,7 @@
       if (eventSource) { eventSource.close(); eventSource = null }
       seenEventIds = new Set()
       eventsByRunId = new Map()
-      assistantTextByRunId.clear()
       sourceCache.clear()
-      hideCitePopover()
       closeAudit()
       removePendingBubble()
     }
@@ -1567,7 +1486,6 @@
         div.innerHTML = `<div class="speaker">${roleLabel(role)}</div>${renderAssistantHtml(text, runId)}${trigger}`
         if (runId) {
           div.dataset.runId = runId
-          assistantTextByRunId.set(runId, text)
         }
       } else {
         div.innerHTML = `<div class="speaker">${roleLabel(role)}</div>${esc(text)}`
