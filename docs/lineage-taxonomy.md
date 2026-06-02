@@ -63,6 +63,24 @@ Shared object/relation fields (carried in the event payloads, see #37/#38):
 `tag`, `source-uri`, `version`. These are reserved names; v1 does not require them
 but producers must not repurpose them.
 
+**Extensible types (#113 P4).** `ObjectType` / `RelationType` are no longer hard
+closed unions: the core kinds above stay the framework's controlled vocabulary,
+but an application MAY introduce its own kind using a `namespace:kind` convention
+— e.g. `code:function`, `db:row` (objects), `app:tested_by` (relations). The
+namespace keeps cross-run queries meaningful: a consumer can group by core kind
+*and* distinguish app kinds, instead of colliding in one flat space. Core kinds
+carry no namespace; app kinds MUST. Apps that need a custom-typed object/relation
+define their own producer tool (using `ctx.createObject` / `ctx.createRelation`);
+the framework's built-in `cite` / `declare_relation` cover the core vocabulary.
+
+> **Deferred (not built — avoids premature abstraction).** The taxonomy also
+> anticipates splitting an object's type into a closed `role` (source / claim /
+> derived) and an open `resourceKind` (passage / file / function / …), plus a
+> `resourceKind → resolver` registration so a UI/verifier can fetch any cited
+> resource's real bytes. With a single resource kind (`passage`) today, building
+> that registry would be premature; it lands when a second resource kind exists.
+> See #113 (P4 scope note).
+
 ## Emit hook locations (三国 example — indicative, not implemented by #39)
 
 - **`object.created` (passage):** `examples/agent-docs-qa/tools/corpus-tools.ts`

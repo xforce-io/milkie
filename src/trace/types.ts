@@ -254,11 +254,21 @@ export interface FsmTransitionPayload {
 
 // ---- Lineage payloads (#37 / #38; vocabulary in docs/lineage-taxonomy.md) ----
 
-/** Object types — closed vocabulary (#39). v1 ships `passage`. */
-export type ObjectType = 'passage' | 'file' | 'claim' | 'artifact-blob'
+/** Core object types — the framework's controlled vocabulary (#39). */
+export type CoreObjectType = 'passage' | 'file' | 'claim' | 'artifact-blob'
+/**
+ * Object type (#113 P4 — extensible). Apps MAY add their own kinds using a
+ * `namespace:kind` convention, e.g. `code:function`, `db:row`, so cross-run
+ * queries can still group by core kind while distinguishing app kinds (see
+ * docs/lineage-taxonomy.md). The `(string & {})` keeps autocomplete for the core
+ * set while permitting namespaced extensions — no longer a hard closed union.
+ */
+export type ObjectType = CoreObjectType | (string & {})
 
-/** Relation types — closed vocabulary (#39). v1 ships `cites`. */
-export type RelationType = 'cites' | 'derives_from' | 'supersedes' | 'equivalent_to'
+/** Core relation types — the framework's controlled vocabulary (#39). */
+export type CoreRelationType = 'cites' | 'derives_from' | 'supersedes' | 'equivalent_to'
+/** Relation type (#113 P4 — extensible, same `namespace:kind` convention). */
+export type RelationType = CoreRelationType | (string & {})
 
 /**
  * #37: a content-addressable artifact an agent read or produced. Mints a stable
