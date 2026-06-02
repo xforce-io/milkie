@@ -54,6 +54,7 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
 }
 
 function writeSSE(res: ServerResponse, event: string, data: unknown): void {
+  if (res.writableEnded || res.destroyed) return
   res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
 }
 
@@ -79,6 +80,11 @@ export function createServeServer(opts: ServeOptions): Server {
     const unsub = broadcaster.subscribe(contextId, ev => {
       if (STREAM_EVENT_WHITELIST.has(ev.type)) writeSSE(res, ev.type, ev.payload)
     })
+    // If the client disconnects mid-run, release the subscription immediately
+    // (the run keeps going — a later /resume can continue it) and swallow any
+    // late write errors on the dead socket so they can't crash the process.
+    res.on('close', unsub)
+    res.on('error', () => { /* client-side disconnect; writes are guarded by writeSSE */ })
     try {
       const result = await run(e => {
         if (e.type === 'message_delta') writeSSE(res, 'message_delta', e.data)
@@ -90,7 +96,7 @@ export function createServeServer(opts: ServeOptions): Server {
       writeSSE(res, 'agent.run.completed', { status: 'error', output: '', error: message })
     } finally {
       unsub()
-      res.end()
+      if (!res.writableEnded && !res.destroyed) res.end()
     }
   }
 
@@ -144,7 +150,8 @@ export function createServeServer(opts: ServeOptions): Server {
  */
 export function runServeServer(server: Server, opts: { port: number; host?: string }): Promise<void> {
   return new Promise<void>((resolve, reject) => {
-    server.on('error', reject)
+    const onError = (err: Error): void => reject(err)
+    server.on('error', onError)
     server.listen(opts.port, opts.host ?? '127.0.0.1', () => {
       const addr = server.address() as { port: number }
       process.stdout.write(`MILKIE_SERVE_READY ${addr.port}\n`)
@@ -153,9 +160,15 @@ export function runServeServer(server: Server, opts: { port: number; host?: stri
     const shutdown = (): void => {
       if (closing) return
       closing = true
-      // Release the event loop: stdin.resume() (below) keeps the process alive
-      // to watch for stdin close, so we must pause it for the process to exit
-      // once the server closes. The parent relies on this for clean teardown.
+      // Detach every listener we registered so repeated serve sessions in one
+      // process don't accumulate handlers, and release the event loop —
+      // stdin.resume() (below) keeps the process alive to watch for stdin close,
+      // so it must be paused for the process to exit once the server closes.
+      process.off('SIGTERM', shutdown)
+      process.off('SIGINT', shutdown)
+      process.stdin.off('end', shutdown)
+      process.stdin.off('close', shutdown)
+      server.off('error', onError)
       process.stdin.pause()
       server.close(() => resolve())
       // Force-resolve if connections linger past a grace period.

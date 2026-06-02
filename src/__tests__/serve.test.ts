@@ -242,4 +242,20 @@ describe('createServeServer', () => {
     expect(terminal).toBeDefined()
     expect((terminal!.data as { status: string }).status).toBe('error')
   })
+
+  it('a client disconnecting mid-stream does not crash the server', async () => {
+    const { milkie, agentId, broadcaster } = buildSteppingMilkie({ totalSteps: 20, stepMs: 30 })
+    const port = await listen(createServeServer({ milkie, agentId, broadcaster }))
+
+    const { done, req } = sse(port, 'POST', '/chat', { contextId: 'disc', input: 'go' })
+    done.catch(() => { /* client aborts on purpose */ })
+    await new Promise(r => setTimeout(r, 100))   // a few steps in
+    req.destroy()                                 // client disconnects mid-stream
+    await new Promise(r => setTimeout(r, 250))    // run keeps going; would-be writes fire at the dead socket
+
+    // the server must still be alive and serving
+    const res = await request(port, 'GET', '/health')
+    expect(res.status).toBe(200)
+    expect(res.json).toEqual({ ok: true })
+  })
 })
