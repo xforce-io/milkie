@@ -8,6 +8,7 @@ import { regionReuseCounts } from '../trace/RegionContextView.js'
 import { SQLiteStore } from '../store/SQLiteStore.js'
 import { MemoryStore } from '../store/MemoryStore.js'
 import { checkpointFromEvents } from '../trace/diagnostics/checkpointFromEvents.js'
+import { serveMain } from './serve.js'
 
 function findMilkieDir(startDir: string): string | undefined {
   let dir = startDir
@@ -248,6 +249,16 @@ export async function main(argv: string[]): Promise<MainResult> {
         status:   result.status,
         output:   result.output,
       }) + '\n')
+    })
+
+  program
+    .command('serve')
+    .description('Run an HTTP + SSE server driving an agent (for external process integration, e.g. alfred). Foreground process; SIGTERM / closing stdin shuts it down.')
+    .requiredOption('--agent <file>', 'agent definition file (.md with frontmatter)')
+    .requiredOption('--port <port>', 'port to listen on (0 = OS-assigned)', v => parseInt(v, 10))
+    .option('--host <host>', 'host/interface to bind', '127.0.0.1')
+    .action(async (opts: { agent: string; port: number; host: string }) => {
+      await serveMain({ agent: opts.agent, port: opts.port, host: opts.host })
     })
 
   try {

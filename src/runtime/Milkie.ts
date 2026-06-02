@@ -7,7 +7,7 @@ import type { AgentConfig, FSMDefinition, ModelConfig } from '../types/agent.js'
 import type { AgentInvokeRequest, AgentResult, JSONValue } from '../types/common.js'
 import type { ChildAgentRecord, IStateStore, AgentCheckpoint } from '../types/store.js'
 import type { ToolDefinition } from '../types/tool.js'
-import type { IModelGateway } from '../types/model.js'
+import type { IModelGateway, ModelEvent } from '../types/model.js'
 import type { ResolvedManifest } from '../types/trajectory.js'
 import { MemoryStore } from '../store/MemoryStore.js'
 import { InMemoryRecorder } from '../trajectory/InMemoryRecorder.js'
@@ -328,7 +328,7 @@ export class Milkie {
   /**
    * Resume execution from a saved checkpoint.
    */
-  async resume(checkpointId: string, agentId: string, goal: string, input: string): Promise<AgentResult> {
+  async resume(checkpointId: string, agentId: string, goal: string, input: string, opts?: { onModelEvent?: (e: ModelEvent) => void }): Promise<AgentResult> {
     const config = this.agents.get(agentId)
     if (!config) {
       throw new Error(`Agent not found: "${agentId}". Call registerAgent() or loadAgentFile() first.`)
@@ -387,6 +387,7 @@ export class Milkie {
       childRecorderFactory,
       makeChildPort,
       causalCursor,
+      ...(opts?.onModelEvent ? { onModelEvent: opts.onModelEvent } : {}),
     })
 
     await runtime.loadCheckpoint(checkpoint)
