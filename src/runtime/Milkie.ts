@@ -24,8 +24,13 @@ import { ReplayingIOPort } from '../trace/ReplayingIOPort.js'
 import { ReplayError } from '../trace/ReplayError.js'
 import { ReplayDivergenceError } from '../trace/ReplayDivergenceError.js'
 import { extractRunSnapshot } from '../trace/RunSnapshot.js'
-import type { ToolEmittedPayload } from '../trace/types.js'
+import type { ToolEmittedPayload, AgentRunStartedPayload } from '../trace/types.js'
 import { makeTraceTools } from '../tools/trace.js'
+import {
+  type PortableSession,
+  PORTABLE_SESSION_SCHEMA_VERSION,
+  collectRunTree,
+} from './PortableSession.js'
 
 export interface MilkieOptions {
   /**
@@ -539,6 +544,80 @@ export class Milkie {
       }
     }
     return result
+  }
+
+  // ---- #84: portable session export/import ----
+  // The event log is the source of truth (#73): export bundles the run-tree's
+  // events (latest checkpointed run + sub-agent descendants) plus the context's
+  // persistent vars (#83) under a versioned manifest. Import re-injects them into
+  // this instance so `invoke({ contextId })` continues with prior history.
+
+  /**
+   * Export a context's session as a portable, serialisable snapshot.
+   * Requires an eventStore (events are the payload). Throws when the context has
+   * no checkpointed run to export.
+   */
+  async exportSession(contextId: string): Promise<PortableSession> {
+    if (!this.eventStore) {
+      throw new Error('Milkie has no eventStore; cannot export a portable session')
+    }
+    const latestRunId = await this.stateStore.get(`context:${contextId}:checkpoint-run:latest`) as string | undefined
+    if (!latestRunId) {
+      throw new Error(`No session to export for contextId "${contextId}"`)
+    }
+
+    const events = await collectRunTree(this.eventStore, latestRunId)
+
+    // agentId: prefer the latest run's checkpoint meta, fall back to its
+    // agent.run.started event (a run-tree always has at least the root's lifecycle).
+    const latestRunEvents = events.filter(e => e.runId === latestRunId)
+    const cp = checkpointFromEvents(latestRunEvents)
+    const started = latestRunEvents.find(e => e.type === 'agent.run.started')
+    const agentId = cp?.meta.agentId
+      ?? (started?.payload as AgentRunStartedPayload | undefined)?.agentId
+      ?? ''
+
+    return {
+      manifest: {
+        schemaVersion: PORTABLE_SESSION_SCHEMA_VERSION,
+        contextId,
+        agentId,
+        latestRunId,
+        exportedAt: Date.now(),
+      },
+      events,
+      variables: await this.listContextVars(contextId),
+    }
+  }
+
+  /**
+   * Import a portable session into this instance: append its run-tree events
+   * into the eventStore, install the context→run routing pointer, and restore
+   * its persistent vars. Afterwards `invoke({ contextId })` continues the
+   * conversation with the prior history. Returns the contextId now installed.
+   */
+  async importSession(session: PortableSession): Promise<{ contextId: string }> {
+    if (!this.eventStore) {
+      throw new Error('Milkie has no eventStore; cannot import a portable session')
+    }
+    if (session.manifest.schemaVersion !== PORTABLE_SESSION_SCHEMA_VERSION) {
+      throw new Error(
+        `Unsupported portable session schemaVersion ${session.manifest.schemaVersion}; ` +
+        `this build imports v${PORTABLE_SESSION_SCHEMA_VERSION}`)
+    }
+    const { contextId, latestRunId } = session.manifest
+
+    for (const event of session.events) {
+      await this.eventStore.append(event)
+    }
+    // Routing pointer: invoke() reads this to project the resume checkpoint from
+    // the event log (#73).
+    await this.stateStore.set(`context:${contextId}:checkpoint-run:latest`, latestRunId)
+
+    for (const [name, value] of Object.entries(session.variables)) {
+      await this.setContextVar(contextId, name, value)
+    }
+    return { contextId }
   }
 
   async interrupt(contextId: string): Promise<void> {

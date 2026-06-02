@@ -26,6 +26,10 @@ export { AnthropicAdapter }         from './gateway/AnthropicAdapter.js'
 export { OpenAICompatibleAdapter }  from './gateway/OpenAICompatibleAdapter.js'
 export { createGateway }            from './gateway/GatewayFactory.js'
 
+// #84: portable session export/import
+export { PORTABLE_SESSION_SCHEMA_VERSION } from './runtime/PortableSession.js'
+export type { PortableSession } from './runtime/PortableSession.js'
+
 // Trace stores / views
 export { MemoryEventStore } from './trace/MemoryEventStore.js'
 export { JsonlEventStore } from './trace/JsonlEventStore.js'
