@@ -30,6 +30,13 @@ function passageId(file: string, lineStart: number, lineEnd: number): string {
   return 'obj:' + contentAddressForCanonicalBytes(canonicalize({ type: 'passage', meta: { file, lineStart, lineEnd }, hash: null }))
 }
 
+// 1-based line of the first line in `file` containing `substr` (matches grep's view).
+function findLine(file: string, substr: string): number {
+  const content = fs.readFileSync(path.join(__dirname, '..', 'corpus', file), 'utf-8')
+  const lines = content.replace(/\n$/, '').split('\n')
+  return lines.findIndex(l => l.includes(substr)) + 1
+}
+
 describe('lineage emit end-to-end (#37/#38/新) — real runtime path', () => {
   let server: Server
   let baseUrl: string
@@ -155,6 +162,86 @@ describe('lineage emit end-to-end (#37/#38/新) — real runtime path', () => {
     // Replay re-runs from cache (zero live calls); handlers don't run, so the
     // mintedObjects registry stays empty on replay — yet the cached cite outputs
     // (ok:true / ok:false) are served verbatim, so the run reproduces identically.
+    const replay = await postJson(`${baseUrl}/run/${runId}/replay`, {})
+    expect(replay.status).toBe(200)
+    const body = JSON.parse(replay.body)
+    expect(body.status).toBe('deterministic')
+    expect(body.matchesOriginal).toBe(true)
+  })
+
+  it('P2 lazy: grep registers passages but emits ZERO object.created until cited', async () => {
+    await start([
+      toolCall('grep', { pattern: '阿瞞' }, 'tc-1'),
+      text('done'),  // nothing cited
+    ])
+    const chat = await postJson(`${baseUrl}/chat`, { input: 'x' })
+    const runId = JSON.parse(chat.body).runId as string
+    const events = await new JsonlEventStore(runsDir).readByRunId(runId)
+
+    // grep matched, but nothing cited → no candidate object events at all.
+    expect(events.some(e => e.type === 'object.created')).toBe(false)
+    // grep emitted no object events → no artifactRefs on its tool.responded.
+    const grepResp = events.find(e => e.type === 'tool.responded' && (e.payload as ToolRespondedPayload).toolName === 'grep')!
+    expect((grepResp.payload as ToolRespondedPayload).artifactRefs).toBeUndefined()
+  })
+
+  it('P2 promote: citing a grep-registered id promotes exactly that ONE passage', async () => {
+    const file = 'chapter-01-桃园三结义.txt'
+    const line = findLine(file, '阿瞞')           // 曹操小字阿瞞 — one specific grep hit
+    expect(line).toBeGreaterThan(0)
+    const objId = passageId(file, line, line)
+    await start([
+      toolCall('grep', { pattern: '阿瞞' }, 'tc-1'),                       // registers (lazy)
+      toolCall('cite', { claim: '曹操小字阿瞞', objectId: objId }, 'tc-2'), // promotes just this one
+      text('done'),
+    ])
+    const chat = await postJson(`${baseUrl}/chat`, { input: 'x' })
+    const runId = JSON.parse(chat.body).runId as string
+    const events = await new JsonlEventStore(runsDir).readByRunId(runId)
+
+    // Exactly one passage object.created — the cited one, not every grep match.
+    const passages = events.filter(e => e.type === 'object.created' && (e.payload as ObjectCreatedPayload).type === 'passage')
+    expect(passages.length).toBe(1)
+    expect((passages[0]!.payload as ObjectCreatedPayload).objectId).toBe(objId)
+    expect((passages[0]!.payload as ObjectCreatedPayload).meta).toMatchObject({ file, lineStart: line, lineEnd: line })
+    // and the cites edge points at it.
+    const rel = events.find(e => e.type === 'relation.created')!
+    expect((rel.payload as RelationCreatedPayload).toObjectId).toBe(objId)
+  })
+
+  it('P2: promote is idempotent — citing the same grep passage twice emits ONE passage', async () => {
+    const file = 'chapter-01-桃园三结义.txt'
+    const line = findLine(file, '阿瞞')
+    const objId = passageId(file, line, line)
+    await start([
+      toolCall('grep', { pattern: '阿瞞' }, 'tc-1'),
+      toolCall('cite', { claim: '陈述一', objectId: objId }, 'tc-2'),
+      toolCall('cite', { claim: '陈述二', objectId: objId }, 'tc-3'),  // same passage again
+      text('done'),
+    ])
+    const chat = await postJson(`${baseUrl}/chat`, { input: 'x' })
+    const runId = JSON.parse(chat.body).runId as string
+    const events = await new JsonlEventStore(runsDir).readByRunId(runId)
+
+    const passages = events.filter(e => e.type === 'object.created' && (e.payload as ObjectCreatedPayload).type === 'passage')
+    const claims   = events.filter(e => e.type === 'object.created' && (e.payload as ObjectCreatedPayload).type === 'claim')
+    const rels     = events.filter(e => e.type === 'relation.created')
+    expect(passages.length).toBe(1)  // promoted once (idempotent)
+    expect(claims.length).toBe(2)    // two distinct claims
+    expect(rels.length).toBe(2)      // two cites edges → same passage
+  })
+
+  it('P2: a grep→cite lazy-promote run replays deterministically', async () => {
+    const file = 'chapter-01-桃园三结义.txt'
+    const line = findLine(file, '阿瞞')
+    const objId = passageId(file, line, line)
+    await start([
+      toolCall('grep', { pattern: '阿瞞' }, 'tc-1'),
+      toolCall('cite', { claim: '曹操小字阿瞞', objectId: objId }, 'tc-2'),
+      text('done'),
+    ])
+    const chat = await postJson(`${baseUrl}/chat`, { input: 'x' })
+    const runId = JSON.parse(chat.body).runId as string
     const replay = await postJson(`${baseUrl}/run/${runId}/replay`, {})
     expect(replay.status).toBe(200)
     const body = JSON.parse(replay.body)

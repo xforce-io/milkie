@@ -122,10 +122,12 @@ export class AgentRuntime {
   /** #60: per-run count of successful calls per toolCallId, to disambiguate a
    *  tool_call id reused across responses when keying tool.emitted record/replay. */
   private readonly toolEmitOccurrence = new Map<string, number>()
-  /** #113 P1: per-run registry of objectIds minted via ctx.createObject (read/grep),
-   *  so a later producer (cite) can fail-fast on a fabricated/hallucinated id and
-   *  P2 lazy-promote can look up meta. Record-only: replay doesn't run handlers. */
-  private readonly mintedObjects = new Map<string, { type: ObjectType; meta?: Record<string, unknown> }>()
+  /** #113 P1/P2: per-run registry of objectIds. `promoted=true` once an
+   *  object.created event has been emitted for it (eager createObject, or a
+   *  cite that promoted a lazily-registered grep candidate). Lets cite fail-fast
+   *  on unknown ids, P2 emit candidates only when cited, and promote idempotently.
+   *  Record-only: replay doesn't run handlers. */
+  private readonly mintedObjects = new Map<string, { type: ObjectType; meta?: Record<string, unknown>; promoted: boolean }>()
   private readonly subAgentConfigs?: Map<string, AgentConfig>
   private readonly childRecorderFactory?: (config: AgentConfig, contextId: string, traceId: string) => ITrajectoryRecorder
   private readonly makeChildPort?: MakeChildPort
@@ -374,16 +376,39 @@ export class AgentRuntime {
     // through ioPort.invokeTool, which drains the buffer). objectId/relationId are
     // content-addressed so they are identical in record and replay.
     if (lineage) {
+      const objectIdFor = (spec: { type: ObjectType; meta?: Record<string, unknown>; hash?: string }) =>
+        'obj:' + contentAddressForCanonicalBytes(canonicalize({ type: spec.type, meta: spec.meta ?? null, hash: spec.hash ?? null }))
+
+      // Eager: register + emit object.created now. Used for deliberate artifacts
+      // (read_file passage, cite's claim) where the producer event is the anchor.
       ctx.createObject = (spec) => {
-        const objectId = 'obj:' + contentAddressForCanonicalBytes(
-          canonicalize({ type: spec.type, meta: spec.meta ?? null, hash: spec.hash ?? null }),
-        )
+        const objectId = objectIdFor(spec)
         lineage.objects.push({ objectId, type: spec.type, ...(spec.hash ? { hash: spec.hash } : {}), ...(spec.meta ? { meta: spec.meta } : {}) })
-        // #113 P1: register in the per-run table so later producers can resolve it.
-        this.mintedObjects.set(objectId, { type: spec.type, ...(spec.meta ? { meta: spec.meta } : {}) })
+        this.mintedObjects.set(objectId, { type: spec.type, ...(spec.meta ? { meta: spec.meta } : {}), promoted: true })
         return { objectId }
       }
-      ctx.resolveObject = (objectId) => this.mintedObjects.get(objectId)
+      // #113 P2 lazy: register a candidate (grep hit) WITHOUT emitting an event.
+      // It only becomes an object.created if later promoted by a cite.
+      ctx.registerObject = (spec) => {
+        const objectId = objectIdFor(spec)
+        if (!this.mintedObjects.has(objectId)) {
+          this.mintedObjects.set(objectId, { type: spec.type, ...(spec.meta ? { meta: spec.meta } : {}), promoted: false })
+        }
+        return { objectId }
+      }
+      // #113 P2: emit object.created for a registered-but-not-yet-emitted object,
+      // on first cite. Idempotent — a second cite of the same passage is a no-op.
+      ctx.promoteObject = (objectId) => {
+        const o = this.mintedObjects.get(objectId)
+        if (o && !o.promoted) {
+          lineage.objects.push({ objectId, type: o.type, ...(o.meta ? { meta: o.meta } : {}) })
+          o.promoted = true
+        }
+      }
+      ctx.resolveObject = (objectId) => {
+        const o = this.mintedObjects.get(objectId)
+        return o ? { type: o.type, ...(o.meta ? { meta: o.meta } : {}) } : undefined
+      }
       ctx.createRelation = (spec) => {
         const relationId = 'rel:' + contentAddressForCanonicalBytes(
           canonicalize({ type: spec.type, from: spec.fromObjectId, to: spec.toObjectId }),

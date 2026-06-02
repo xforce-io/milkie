@@ -71,8 +71,10 @@ export function makeCorpusTools(corpusRoot: string) {
           for (let i = 0; i < lines.length; i++) {
             if (re.test(lines[i]!)) {
               const file = path.relative(root, abs)
-              // #37: each hit is a citable single-line passage object.
-              const obj = ctx?.createObject?.({ type: 'passage', meta: { file, lineStart: i + 1, lineEnd: i + 1 } })
+              // #113 P2: grep is wide recall — register each hit lazily (no event)
+              // so dozens of never-cited candidates don't flood the log; cite promotes
+              // only the one the agent actually uses.
+              const obj = ctx?.registerObject?.({ type: 'passage', meta: { file, lineStart: i + 1, lineEnd: i + 1 } })
               matches.push({
                 file,
                 line: i + 1,
@@ -105,6 +107,9 @@ export function makeCorpusTools(corpusRoot: string) {
     if (ctx?.resolveObject && !ctx.resolveObject(objectId)) {
       return { ok: false, error: `objectId '${objectId}' 不存在；请使用 read_file/grep 返回的真实 objectId` }
     }
+    // #113 P2: emit the cited passage's object.created now (a no-op if it was an
+    // eager read_file passage already emitted; emits it if it was a lazy grep hit).
+    ctx?.promoteObject?.(objectId)
     const claimObj = ctx?.createObject?.({ type: 'claim', meta: { text: claim } })
     if (claimObj && ctx?.createRelation) {
       ctx.createRelation({ type: 'cites', fromObjectId: claimObj.objectId, toObjectId: objectId })
