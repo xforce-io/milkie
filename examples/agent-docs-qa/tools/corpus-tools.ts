@@ -1,5 +1,6 @@
 import { promises as fs } from 'fs'
 import path from 'path'
+import type { ToolContext } from '../../../src/types/tool.js'
 
 /**
  * Build a sandboxed set of corpus tools rooted at `corpusRoot`.
@@ -30,20 +31,31 @@ export function makeCorpusTools(corpusRoot: string) {
     }
   }
 
-  async function read_file(input: unknown): Promise<unknown> {
-    const { relPath } = input as { relPath: string }
+  // #37: read a file (optionally a line range) and mint a `passage` object for
+  // exactly what was returned. The objectId is the citable handle — the agent
+  // cites it later via cite(objectId), so provenance no longer parses prose.
+  async function read_file(input: unknown, ctx?: ToolContext): Promise<unknown> {
+    const { relPath, lineStart, lineEnd } = input as { relPath: string; lineStart?: number; lineEnd?: number }
     const abs = resolveInsideRoot(relPath)
-    const content = await fs.readFile(abs, 'utf-8')
-    const lines = content.trimEnd().split('\n').length
-    return { content, lines }
+    const full = await fs.readFile(abs, 'utf-8')
+    // Strip a single trailing newline so a file ending in "\n" doesn't report a
+    // phantom extra line; 1-based line numbers then match grep's view.
+    const allLines = full.replace(/\n$/, '').split('\n')
+    const start = typeof lineStart === 'number' && lineStart >= 1 ? lineStart : 1
+    const end   = typeof lineEnd === 'number' && lineEnd >= start ? Math.min(lineEnd, allLines.length) : allLines.length
+    const content = allLines.slice(start - 1, end).join('\n')
+    const obj = ctx?.createObject?.({ type: 'passage', meta: { file: relPath, lineStart: start, lineEnd: end } })
+    // objectId + locator FIRST so they survive the truncate(2000) result strategy
+    // even when `content` is a long whole-file read — the agent must see objectId to cite.
+    return { ...(obj ? { objectId: obj.objectId } : {}), lineStart: start, lineEnd: end, lines: allLines.length, content }
   }
 
-  async function grep(input: unknown): Promise<unknown> {
+  async function grep(input: unknown, ctx?: ToolContext): Promise<unknown> {
     const { pattern, caseInsensitive = false } = input as { pattern: string; caseInsensitive?: boolean }
     const maxMatches = 50
     const flags = caseInsensitive ? 'gi' : 'g'
     const re = new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), flags)
-    const matches: Array<{ file: string; line: number; text: string }> = []
+    const matches: Array<{ file: string; line: number; text: string; objectId?: string }> = []
 
     async function walk(dir: string): Promise<void> {
       if (matches.length >= maxMatches) return
@@ -58,10 +70,14 @@ export function makeCorpusTools(corpusRoot: string) {
           const lines = content.split('\n')
           for (let i = 0; i < lines.length; i++) {
             if (re.test(lines[i]!)) {
+              const file = path.relative(root, abs)
+              // #37: each hit is a citable single-line passage object.
+              const obj = ctx?.createObject?.({ type: 'passage', meta: { file, lineStart: i + 1, lineEnd: i + 1 } })
               matches.push({
-                file: path.relative(root, abs),
+                file,
                 line: i + 1,
                 text: lines[i]!.slice(0, 200),
+                ...(obj ? { objectId: obj.objectId } : {}),
               })
               if (matches.length >= maxMatches) break
             }
@@ -76,7 +92,21 @@ export function makeCorpusTools(corpusRoot: string) {
     }
   }
 
-  return { list_dir, read_file, grep }
+  // 【新 issue】#38 producer: the agent declares "this claim is sourced from that
+  // passage". Mints a `claim` object and a `cites` relation claim → passage. The
+  // objectId must be one the agent received from read_file/grep — a fabricated id
+  // produces a dangling edge the UI renders as ungrounded (content-addressed ids
+  // can't be guessed). Replaces the old "(chapter:line)" prose convention.
+  async function cite(input: unknown, ctx?: ToolContext): Promise<unknown> {
+    const { claim, objectId } = input as { claim: string; objectId: string }
+    const claimObj = ctx?.createObject?.({ type: 'claim', meta: { text: claim } })
+    if (claimObj && ctx?.createRelation) {
+      ctx.createRelation({ type: 'cites', fromObjectId: claimObj.objectId, toObjectId: objectId })
+    }
+    return { ok: true, claimId: claimObj?.objectId, cites: objectId }
+  }
+
+  return { list_dir, read_file, grep, cite }
 }
 
 /**
@@ -99,10 +129,14 @@ export function makeCorpusToolDefinitions(corpusRoot: string) {
     },
     {
       name:        'read_file',
-      description: 'Read full content of a file within the corpus.',
+      description: 'Read a file within the corpus, optionally a line range. Returns { objectId, lineStart, lineEnd, lines, content }. Read a tight line range, then pass the returned objectId to the cite tool to source a claim — never write "(chapter:line)" in prose.',
       inputSchema: {
         type: 'object',
-        properties: { relPath: { type: 'string', description: 'Path relative to corpus root.' } },
+        properties: {
+          relPath:   { type: 'string', description: 'Path relative to corpus root.' },
+          lineStart: { type: 'number', description: 'Optional 1-based first line (inclusive). Omit to read the whole file.' },
+          lineEnd:   { type: 'number', description: 'Optional 1-based last line (inclusive).' },
+        },
         required: ['relPath'],
       },
       handler: t.read_file,
@@ -114,7 +148,7 @@ export function makeCorpusToolDefinitions(corpusRoot: string) {
     },
     {
       name:        'grep',
-      description: 'Search for a pattern across all files in the corpus. Returns up to 50 matches.',
+      description: 'Search for a pattern across all files in the corpus. Returns up to 50 matches, each { file, line, text, objectId }. Pass a match objectId to the cite tool to source a claim from that line.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -124,6 +158,19 @@ export function makeCorpusToolDefinitions(corpusRoot: string) {
         required: ['pattern'],
       },
       handler: t.grep,
+    },
+    {
+      name:        'cite',
+      description: 'Record that a specific claim in your answer is sourced from a passage. Pass the exact claim text and the objectId returned by read_file or grep. Call once per cited claim. Do NOT write "(chapter:line)" in prose — cite via this tool instead.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          claim:    { type: 'string', description: 'The exact statement in your answer this source supports.' },
+          objectId: { type: 'string', description: 'objectId of the passage (from read_file/grep) that supports the claim.' },
+        },
+        required: ['claim', 'objectId'],
+      },
+      handler: t.cite,
     },
   ]
 }
