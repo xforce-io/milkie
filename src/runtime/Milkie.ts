@@ -85,13 +85,17 @@ export class Milkie {
     this.traceObjectStore = opts.traceObjectStore ?? null
   }
 
-  private resolveModel(config: AgentConfig): ModelConfig | undefined {
+  private resolveModel(config: AgentConfig, tier?: string): ModelConfig | undefined {
+    // #126: a given+matched tier wins; otherwise fall back to the default model
+    // (no throw — serve configured with only a default stays usable for any tier).
+    if (tier && config.models?.[tier]) return config.models[tier]
+    if (tier) console.debug(`[milkie] tier "${tier}" not found for agent "${config.agentId}"; falling back to default model`)
     return config.model ?? this.defaultModel ?? undefined
   }
 
-  private resolveGateway(config: AgentConfig): IModelGateway {
+  private resolveGateway(config: AgentConfig, tier?: string): IModelGateway {
     if (this.gatewayOverride) return this.gatewayOverride
-    const model = this.resolveModel(config)
+    const model = this.resolveModel(config, tier)
     if (!model) {
       throw new Error(
         `Agent "${config.agentId}" has no model and Milkie has no gateway or defaultModel; ` +
@@ -173,18 +177,19 @@ export class Milkie {
    */
   async complete(
     agentId: string,
-    request: { system?: string; messages: Message[] },
+    request: { system?: string; messages: Message[]; tier?: string; temperature?: number },
     onEvent?: (e: ModelEvent) => void,
   ): Promise<ModelResponse> {
     const config = this.agents.get(agentId)
     if (!config) {
       throw new Error(`Agent not found: "${agentId}". Call registerAgent() or loadAgentFile() first.`)
     }
-    const gateway = this.resolveGateway(config)
+    const gateway = this.resolveGateway(config, request.tier)
     const req: ModelRequest = {
-      model:    this.resolveModel(config)?.model ?? '',
-      system:   request.system,
-      messages: request.messages,
+      model:       this.resolveModel(config, request.tier)?.model ?? '',
+      system:      request.system,
+      messages:    request.messages,
+      temperature: request.temperature,
     }
     return onEvent
       ? aggregateStream(gateway.stream(req), onEvent)
@@ -732,6 +737,22 @@ export class Milkie {
       throw new Error('Agent config model must have provider, model, adapter')
     }
 
+    // #126: open named model tiers. Each tier is validated like the default model.
+    const rawModels = data['models'] as Record<string, Record<string, string>> | undefined
+    const models = rawModels
+      ? Object.fromEntries(Object.entries(rawModels).map(([tier, m]) => {
+          if (!m || !m.provider || !m.model || !m.adapter) {
+            throw new Error(`Agent config models.${tier} must have provider, model, adapter`)
+          }
+          return [tier, {
+            provider: m['provider']!,
+            model:    m['model']!,
+            adapter:  m['adapter']!,
+            baseUrl:  m['baseUrl'] as string | undefined,
+          }]
+        }))
+      : undefined
+
     const agentId =
       (data['agentId'] as string | undefined) ??
       (data['id']      as string | undefined)
@@ -748,6 +769,7 @@ export class Milkie {
         adapter:  model['adapter']!,
         baseUrl:  model['baseUrl'] as string | undefined,
       } : undefined,
+      models,
       toolboxes:  data['toolboxes']  as Record<string, string> | undefined,
       skills:     data['skills']     as Record<string, string> | undefined,
       skillInstructions: data['skillInstructions'] as Record<string, string> | undefined,

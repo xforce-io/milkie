@@ -48,6 +48,25 @@ describe('AnthropicAdapter — cacheBreakpoint translation', () => {
     expect(params['system']).toBeUndefined()
   })
 
+  // #126: temperature passthrough — alfred's compressor calls with fast=True at a
+  // fixed temperature; the adapter must forward it to Anthropic's messages.create.
+  test('temperature is forwarded into params when set', () => {
+    const params = buildParamsOf(adapter, {
+      model:       'claude-sonnet-4-6',
+      messages:    [],
+      temperature: 0.2,
+    })
+    expect(params['temperature']).toBe(0.2)
+  })
+
+  test('temperature absent → no temperature field emitted (provider default)', () => {
+    const params = buildParamsOf(adapter, {
+      model:    'claude-sonnet-4-6',
+      messages: [],
+    })
+    expect(params['temperature']).toBeUndefined()
+  })
+
   test('cacheBreakpoint plays nicely with tools (both fields emitted)', () => {
     const params = buildParamsOf(adapter, {
       model:           'claude-sonnet-4-6',

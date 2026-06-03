@@ -77,6 +77,11 @@ export class AnthropicAdapter implements IModelGateway {
       params['tool_choice'] = request.toolChoice
     }
 
+    // #126: forward sampling temperature when set; omit otherwise (provider default).
+    if (request.temperature !== undefined) {
+      params['temperature'] = request.temperature
+    }
+
     return params
   }
 

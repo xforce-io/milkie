@@ -31,6 +31,7 @@ export class OpenAICompatibleAdapter implements IModelGateway {
         },
       })),
       tool_choice: request.tools?.length ? 'auto' : undefined,
+      temperature: request.temperature,
     })
 
     return this.parseResponse(raw)
@@ -49,6 +50,7 @@ export class OpenAICompatibleAdapter implements IModelGateway {
         },
       })),
       tool_choice:    request.tools?.length ? 'auto' : undefined,
+      temperature:    request.temperature,
       stream:         true,
       stream_options: { include_usage: true },
     })
