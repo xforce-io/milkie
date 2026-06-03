@@ -3,7 +3,7 @@ import { Milkie } from '../runtime/Milkie.js'
 import { BroadcastingEventStore } from '../trace/BroadcastingEventStore.js'
 import { MemoryStore } from '../store/MemoryStore.js'
 import { MemoryEventStore } from '../trace/MemoryEventStore.js'
-import type { AgentResult } from '../types/common.js'
+import type { AgentResult, JSONValue } from '../types/common.js'
 import type { ModelEvent } from '../types/model.js'
 
 /**
@@ -123,6 +123,29 @@ export function createServeServer(opts: ServeOptions): Server {
     )
   }
 
+  // #83: expose session context variables over HTTP so an external (Python)
+  // provider can set/get/list them across the process boundary.
+  async function handleContextSet(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const { contextId, name, value } = JSON.parse(await readBody(req)) as { contextId?: string; name?: string; value?: JSONValue }
+    if (!contextId || !name) return sendJson(res, 400, { error: 'contextId and name are required' })
+    await milkie.setContextVar(contextId, name, value as JSONValue)
+    sendJson(res, 200, { ok: true })
+  }
+
+  async function handleContextGet(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const { contextId, name } = JSON.parse(await readBody(req)) as { contextId?: string; name?: string }
+    if (!contextId || !name) return sendJson(res, 400, { error: 'contextId and name are required' })
+    const value = await milkie.getContextVar(contextId, name)
+    sendJson(res, 200, { value: value ?? null })
+  }
+
+  async function handleContextList(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const { contextId } = JSON.parse(await readBody(req)) as { contextId?: string }
+    if (!contextId) return sendJson(res, 400, { error: 'contextId is required' })
+    const vars = await milkie.listContextVars(contextId)
+    sendJson(res, 200, { vars })
+  }
+
   return http.createServer((req, res) => {
     void (async () => {
       try {
@@ -132,6 +155,9 @@ export function createServeServer(opts: ServeOptions): Server {
         if (req.method === 'POST' && route === '/chat')      return await handleChat(req, res)
         if (req.method === 'POST' && route === '/interrupt') return await handleInterrupt(req, res)
         if (req.method === 'POST' && route === '/resume')    return await handleResume(req, res)
+        if (req.method === 'POST' && route === '/context/set')  return await handleContextSet(req, res)
+        if (req.method === 'POST' && route === '/context/get')  return await handleContextGet(req, res)
+        if (req.method === 'POST' && route === '/context/list') return await handleContextList(req, res)
         sendJson(res, 404, { error: `no route ${req.method} ${route}` })
       } catch (err) {
         sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) })

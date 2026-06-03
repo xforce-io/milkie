@@ -258,4 +258,38 @@ describe('createServeServer', () => {
     expect(res.status).toBe(200)
     expect(res.json).toEqual({ ok: true })
   })
+
+  it('POST /context/set then /context/get round-trips a variable', async () => {
+    const { milkie, agentId, broadcaster } = buildTextMilkie(['x'])
+    const port = await listen(createServeServer({ milkie, agentId, broadcaster }))
+    const setRes = await request(port, 'POST', '/context/set', { contextId: 'cv', name: 'model_name', value: 'claude' })
+    expect(setRes.status).toBe(200)
+    expect(setRes.json).toMatchObject({ ok: true })
+    const getRes = await request(port, 'POST', '/context/get', { contextId: 'cv', name: 'model_name' })
+    expect(getRes.json).toMatchObject({ value: 'claude' })
+  })
+
+  it('POST /context/get returns null for a missing variable', async () => {
+    const { milkie, agentId, broadcaster } = buildTextMilkie(['x'])
+    const port = await listen(createServeServer({ milkie, agentId, broadcaster }))
+    const res = await request(port, 'POST', '/context/get', { contextId: 'cv', name: 'nope' })
+    expect(res.status).toBe(200)
+    expect(res.json).toMatchObject({ value: null })
+  })
+
+  it('POST /context/list returns all variables for a context', async () => {
+    const { milkie, agentId, broadcaster } = buildTextMilkie(['x'])
+    const port = await listen(createServeServer({ milkie, agentId, broadcaster }))
+    await request(port, 'POST', '/context/set', { contextId: 'cv', name: 'a', value: '1' })
+    await request(port, 'POST', '/context/set', { contextId: 'cv', name: 'b', value: '2' })
+    const res = await request(port, 'POST', '/context/list', { contextId: 'cv' })
+    expect(res.json).toMatchObject({ vars: { a: '1', b: '2' } })
+  })
+
+  it('POST /context/set without contextId returns 400', async () => {
+    const { milkie, agentId, broadcaster } = buildTextMilkie(['x'])
+    const port = await listen(createServeServer({ milkie, agentId, broadcaster }))
+    const res = await request(port, 'POST', '/context/set', { name: 'k', value: 'v' })
+    expect(res.status).toBe(400)
+  })
 })
