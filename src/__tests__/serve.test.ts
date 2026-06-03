@@ -397,6 +397,33 @@ describe('createServeServer', () => {
     expect(Array.isArray((res.json as { events: unknown[] }).events)).toBe(true)
   })
 
+  // ──────────────────────── #128 /session/history ────────────────────────
+
+  it('POST /session/history returns the full per-message transcript after a chat', async () => {
+    const { milkie, agentId, broadcaster } = buildTextMilkie(['ok'])
+    const port = await listen(createServeServer({ milkie, agentId, broadcaster }))
+    await (await sse(port, 'POST', '/chat', { contextId: 'sh', input: 'hi' }).done)
+    const res = await request(port, 'POST', '/session/history', { contextId: 'sh' })
+    expect(res.status).toBe(200)
+    const messages = (res.json as { messages: Array<{ role: string; content: Array<{ type: string; text?: string }> }> }).messages
+    expect(messages[0]).toEqual({ role: 'user', content: [{ type: 'text', text: 'hi' }] })
+    expect(messages.some(m => m.role === 'assistant' && m.content.some(c => c.text === 'ok'))).toBe(true)
+  })
+
+  it('POST /session/history without contextId returns 400', async () => {
+    const { milkie, agentId, broadcaster } = buildTextMilkie(['x'])
+    const port = await listen(createServeServer({ milkie, agentId, broadcaster }))
+    const res = await request(port, 'POST', '/session/history', {})
+    expect(res.status).toBe(400)
+  })
+
+  it('POST /session/history for an unknown context returns 404', async () => {
+    const { milkie, agentId, broadcaster } = buildTextMilkie(['x'])
+    const port = await listen(createServeServer({ milkie, agentId, broadcaster }))
+    const res = await request(port, 'POST', '/session/history', { contextId: 'never' })
+    expect(res.status).toBe(404)
+  })
+
   it('POST /session/export without contextId returns 400', async () => {
     const { milkie, agentId, broadcaster } = buildTextMilkie(['x'])
     const port = await listen(createServeServer({ milkie, agentId, broadcaster }))

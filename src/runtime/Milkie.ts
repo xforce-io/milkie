@@ -1,5 +1,6 @@
 import { v4 as uuid } from 'uuid'
 import { checkpointFromEvents } from '../trace/diagnostics/checkpointFromEvents.js'
+import { runEventsToMessages } from '../trace/diagnostics/sessionHistory.js'
 import matter from 'gray-matter'
 import fs from 'fs'
 import path from 'path'
@@ -25,7 +26,7 @@ import { ReplayingIOPort } from '../trace/ReplayingIOPort.js'
 import { ReplayError } from '../trace/ReplayError.js'
 import { ReplayDivergenceError } from '../trace/ReplayDivergenceError.js'
 import { extractRunSnapshot } from '../trace/RunSnapshot.js'
-import type { ToolEmittedPayload, AgentRunStartedPayload } from '../trace/types.js'
+import type { Event, ToolEmittedPayload, AgentRunStartedPayload } from '../trace/types.js'
 import { makeTraceTools } from '../tools/trace.js'
 import {
   type PortableSession,
@@ -276,11 +277,14 @@ export class Milkie {
     // #73: the event log is the source of truth for resume state — read the
     // context's latest checkpointed run via the routing pointer and project the
     // checkpoint from its events; fall back to the legacy stateStore blob.
+    // #128: the run this turn continues from (= the session's previous run). Used
+    // both to restore the checkpoint and to chain runs for getSessionHistory.
     let restoredCheckpoint: AgentCheckpoint | null = null
+    let previousRunId: string | undefined
     if (request.contextId) {
-      const runPtr = await this.stateStore.get(`context:${request.contextId}:checkpoint-run:latest`) as string | undefined
-      if (runPtr && this.eventStore) {
-        restoredCheckpoint = checkpointFromEvents(await this.eventStore.readByRunId(runPtr))
+      previousRunId = await this.stateStore.get(`context:${request.contextId}:checkpoint-run:latest`) as string | undefined
+      if (previousRunId && this.eventStore) {
+        restoredCheckpoint = checkpointFromEvents(await this.eventStore.readByRunId(previousRunId))
       }
       if (!restoredCheckpoint) {
         restoredCheckpoint = (await this.stateStore.get(`context:${request.contextId}:checkpoint:latest`) as AgentCheckpoint | null) ?? null
@@ -346,6 +350,7 @@ export class Milkie {
       goal:      request.goal,
       input:     request.input,
       contextId,
+      ...(previousRunId ? { previousRunId } : {}),
     })
 
     try {
@@ -652,6 +657,51 @@ export class Milkie {
       await this.setContextVar(contextId, name, value)
     }
     return { contextId }
+  }
+
+  /**
+   * #128: the full per-message transcript of a whole session — every run/turn
+   * under `contextId`, tool chains intact, in turn order. Unlike exportSession's
+   * forward state snapshot, this walks each run's event log (the only place the
+   * inter-turn-dropped tool chain survives) and concatenates the per-run
+   * projections. Throws when the context has no runs.
+   *
+   * The session's runs are enumerated from the event log itself: start at the
+   * latest run (`checkpoint-run:latest`) and walk backwards via each run's
+   * `agent.run.started.previousRunId`. This needs no separate, non-atomic
+   * by-context index, so it survives export/import (the latest pointer is the only
+   * thing import must set, which it already does) and has no concurrent-append
+   * lost-update. The walk stops where events are absent (e.g. an imported session
+   * carries only the latest run-tree), degrading gracefully rather than failing.
+   */
+  async getSessionHistory(contextId: string): Promise<Message[]> {
+    if (!this.eventStore) {
+      throw new Error('Milkie has no eventStore; cannot read session history')
+    }
+    const latest = await this.stateStore.get(`context:${contextId}:checkpoint-run:latest`) as string | undefined
+    if (!latest) {
+      throw new Error(`No session for contextId "${contextId}"`)
+    }
+
+    // Walk the run chain newest→oldest, collecting each run's events, then reverse
+    // to chronological order. Guard against cycles and missing runs.
+    const chain: Event[][] = []
+    const seen = new Set<string>()
+    let runId: string | undefined = latest
+    while (runId && !seen.has(runId)) {
+      seen.add(runId)
+      const events = await this.eventStore.readByRunId(runId)
+      if (events.length === 0) break
+      chain.push(events)
+      const started = events.find(e => e.type === 'agent.run.started')
+      runId = (started?.payload as AgentRunStartedPayload | undefined)?.previousRunId
+    }
+
+    const messages: Message[] = []
+    for (const events of chain.reverse()) {
+      messages.push(...runEventsToMessages(events))
+    }
+    return messages
   }
 
   async interrupt(contextId: string): Promise<void> {

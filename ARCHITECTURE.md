@@ -131,6 +131,49 @@ written.
 *Not:* a span. Spans are intervals with start/end and parent/child; Events
 are points.
 
+### Run, Turn, Session
+
+Three nested units of execution, easy to conflate because in the common chat
+flow they line up one-to-one.
+
+A **run** is one `invoke()` — the agent executes from a starting input until it
+either reaches a terminal FSM state or pauses to wait for more user input. A run
+owns one `runId` and one Trace; `agent.run.started` / `agent.run.completed`
+bracket it. A run is *not* a single LLM call — one run contains many
+`llm.requested/responded` and `tool.requested/responded` effects across its FSM
+loop.
+
+A **turn** is one user-input → agent-response exchange. In the serve chat flow
+each turn is a fresh `invoke`, so **one turn = one run** (`/resume` is the
+exception: it continues an existing run under the same `runId`).
+
+A **session** is one continuous conversation, identified by a `contextId`. A
+session **spans many runs** — one per turn — chained by checkpoint restoration:
+each new run restores the previous run's checkpoint (regions / working memory)
+before continuing. The `contextId` is the only thread tying the runs together;
+each run still has its own independent `runId` and Trace.
+
+Carry-forward across runs is a **lossy projection**, by design. At turn end the
+lifecycle engine crystallizes the turn into a single `(user, final-answer)`
+history pair and drops the turn-local scratchpad — so the forward state a later
+run restores holds only those text pairs, **not** the turn's tool chain. The
+full per-turn transcript (assistant `tool_use` + `tool_result`, paired) survives
+**only** in each run's append-only event log. Reconstructing a session's
+complete history therefore means walking every run's events — an instance of
+"the event log is canonical, snapshots are derived" (see Event-sourced runtime
+state). The session's runs are enumerated from the log itself: each
+`agent.run.started` records the `previousRunId` it continued from, so a reader
+starts at `context:<id>:checkpoint-run:latest` and follows the chain backwards.
+That keeps enumeration event-derived — no separate by-context index to keep in
+sync — so it survives export/import and has no concurrent-append race.
+
+*Example:* a `contextId` chatted three times is one session = runs A→B→C; B
+restored A's checkpoint, C restored B's. A's tool chain lives in A's event log
+alone; the context C restores only carries A's and B's crystallized text pairs.
+*Not:* a run is not a session, and a session is not a single Trace. Reading the
+latest run alone yields the current turn's tool chain plus prior turns as
+text-only — not the full transcript.
+
 ### Trace
 
 The ordered set of all Events belonging to one run, stored in an
@@ -344,6 +387,8 @@ subsystems (Agent Runtime, Agent Trace, Evolution) sit below them.
 | Pair | Key distinction |
 |---|---|
 | **Event** vs **Trace** | Event is one record. Trace is the ordered set of all Events in a run. |
+| **Run** vs **Session** | A run is one `invoke` — one `runId`, one Trace. A session is a conversation — one `contextId` spanning many runs, chained by checkpoint restore. |
+| **Session history** vs **forward state** | The full per-turn transcript (incl. tool chain) lives only in each run's event log; forward state (checkpoint / regions) carries only crystallized `(user, final-answer)` pairs across turns. |
 | **Trace** vs **Trajectory** | Trace is flat, append-only, replay-canonical. Trajectory is a hierarchical span tree, derivable, currently a peer view (will be unified). |
 | **IOPort** vs **Event** | IOPort is the nondet boundary. Events are its recorded outputs. |
 | **Region** vs **`region.added` Event** | The Region is context state. The Event is the record that the state changed. |
