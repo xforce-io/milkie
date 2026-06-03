@@ -4,10 +4,11 @@ import matter from 'gray-matter'
 import fs from 'fs'
 import path from 'path'
 import type { AgentConfig, FSMDefinition, ModelConfig } from '../types/agent.js'
-import type { AgentInvokeRequest, AgentResult, JSONValue } from '../types/common.js'
+import type { AgentInvokeRequest, AgentResult, JSONValue, Message } from '../types/common.js'
 import type { ChildAgentRecord, IStateStore, AgentCheckpoint } from '../types/store.js'
 import type { ToolDefinition } from '../types/tool.js'
-import type { IModelGateway, ModelEvent } from '../types/model.js'
+import type { IModelGateway, ModelEvent, ModelRequest, ModelResponse } from '../types/model.js'
+import { aggregateStream } from '../gateway/StreamAggregator.js'
 import type { ResolvedManifest } from '../types/trajectory.js'
 import { MemoryStore } from '../store/MemoryStore.js'
 import { InMemoryRecorder } from '../trajectory/InMemoryRecorder.js'
@@ -161,6 +162,33 @@ export class Milkie {
 
   listAgents(): string[] {
     return Array.from(this.agents.keys())
+  }
+
+  /**
+   * #124: one-shot LLM completion that bypasses the FSM — no agent run, no event
+   * log. Resolves the agent's own gateway/model (the only place model config
+   * lives) and calls it directly, mirroring DefaultIOPort.invokeLLM: streaming +
+   * aggregation when `onEvent` is provided, a single non-streaming call when not.
+   * Exposed over HTTP as serve's `POST /llm` (alfred's `call_llm` equivalent).
+   */
+  async complete(
+    agentId: string,
+    request: { system?: string; messages: Message[] },
+    onEvent?: (e: ModelEvent) => void,
+  ): Promise<ModelResponse> {
+    const config = this.agents.get(agentId)
+    if (!config) {
+      throw new Error(`Agent not found: "${agentId}". Call registerAgent() or loadAgentFile() first.`)
+    }
+    const gateway = this.resolveGateway(config)
+    const req: ModelRequest = {
+      model:    this.resolveModel(config)?.model ?? '',
+      system:   request.system,
+      messages: request.messages,
+    }
+    return onEvent
+      ? aggregateStream(gateway.stream(req), onEvent)
+      : gateway.complete(req)
   }
 
   /**
