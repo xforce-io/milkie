@@ -3,6 +3,11 @@ import { Milkie } from '../runtime/Milkie.js'
 import { BroadcastingEventStore } from '../trace/BroadcastingEventStore.js'
 import { MemoryStore } from '../store/MemoryStore.js'
 import { MemoryEventStore } from '../trace/MemoryEventStore.js'
+import { SQLiteStore } from '../store/SQLiteStore.js'
+import { JsonlEventStore } from '../trace/JsonlEventStore.js'
+import path from 'path'
+import type { IStateStore } from '../types/store.js'
+import type { IEventStore } from '../trace/EventStore.js'
 import type { AgentResult, JSONValue, Message } from '../types/common.js'
 import type { ModelEvent, ModelResponse } from '../types/model.js'
 import type { PortableSession } from '../runtime/PortableSession.js'
@@ -288,14 +293,34 @@ export function runServeServer(server: Server, opts: { port: number; host?: stri
 }
 
 /**
- * CLI entry for `milkie serve`: load the agent file, build a process-local
- * Milkie (MemoryStore + broadcasting MemoryEventStore — interrupt/resume live
- * in this process, D5), and serve until shut down. The gateway is resolved from
- * the agent's own model config.
+ * #130: pick serve's persistence backend. Default is in-memory (sessions live in
+ * this process only — the #86 behavior). `state-store=sqlite` uses a persistent
+ * SQLite stateStore + Jsonl eventStore under `data-dir`, so a restarted sidecar
+ * recovers a context from its event-sourced checkpoint (#73). The two stores are
+ * coupled on purpose: recovery needs both the checkpoint events (eventStore) and
+ * the `checkpoint-run:latest` pointer (stateStore), so they persist together.
  */
-export async function serveMain(opts: { agent: string; port: number; host?: string }): Promise<void> {
-  const broadcaster = new BroadcastingEventStore(new MemoryEventStore())
-  const milkie = new Milkie({ stateStore: new MemoryStore(), eventStore: broadcaster })
+export async function buildServeStores(opts: { stateStore?: 'memory' | 'sqlite'; dataDir?: string }): Promise<{ stateStore: IStateStore; eventStore: IEventStore }> {
+  if (opts.stateStore === 'sqlite') {
+    if (!opts.dataDir) throw new Error('--data-dir is required when --state-store=sqlite')
+    const stateStore = new SQLiteStore({ path: path.join(opts.dataDir, 'state.sqlite') })
+    await stateStore.init()
+    const eventStore = new JsonlEventStore(path.join(opts.dataDir, 'runs'))
+    return { stateStore, eventStore }
+  }
+  return { stateStore: new MemoryStore(), eventStore: new MemoryEventStore() }
+}
+
+/**
+ * CLI entry for `milkie serve`: load the agent file, build a process-local
+ * Milkie (in-memory by default, or persistent SQLite+Jsonl under `--data-dir` so
+ * the same contextId recovers from checkpoint after a restart — D5/#130), and
+ * serve until shut down. The gateway is resolved from the agent's own model config.
+ */
+export async function serveMain(opts: { agent: string; port: number; host?: string; stateStore?: 'memory' | 'sqlite'; dataDir?: string }): Promise<void> {
+  const { stateStore, eventStore } = await buildServeStores(opts)
+  const broadcaster = new BroadcastingEventStore(eventStore)
+  const milkie = new Milkie({ stateStore, eventStore: broadcaster })
   const config = milkie.loadAgentFile(opts.agent)
   const server = createServeServer({ milkie, agentId: config.agentId, broadcaster })
   await runServeServer(server, { port: opts.port, host: opts.host })

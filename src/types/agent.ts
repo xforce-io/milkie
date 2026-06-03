@@ -38,6 +38,5 @@ export interface AgentConfig {
   skills?:      Record<string, string>
   skillInstructions?: Record<string, string>
   subAgents?:   Record<string, string>
-  stateStore?:  'memory' | 'sqlite' | 'redis'
   dispatch?:    'local' | 'queue'
 }
