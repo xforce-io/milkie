@@ -74,6 +74,17 @@ describe('server — REST endpoints', () => {
     expect(r.body).toContain('agent playground')
   })
 
+  it('GET /public/citations.js serves the citation module', async () => {
+    const r = await get(`${baseUrl}/public/citations.js`)
+    expect(r.status).toBe(200)
+    expect(r.body).toContain('function linkifyCitations')
+  })
+
+  it('GET /public/:file rejects path traversal (encoded ../)', async () => {
+    const r = await get(`${baseUrl}/public/%2e%2e%2fserver.ts`)
+    expect(r.status).toBe(400)
+  })
+
   it('POST /chat with no contextId mints a new one and returns runId + contextId', async () => {
     const r = await postJson(`${baseUrl}/chat`, { input: 'hi' })
     expect(r.status).toBe(200)

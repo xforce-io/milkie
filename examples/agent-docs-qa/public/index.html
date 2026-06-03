@@ -406,6 +406,18 @@
     .ap-seg.s-unsupported .ap-seg-label { color: #c02020 }
     .ap-seg.s-unverified  { border-color: #b0b0b5; background: var(--bg) }
     .ap-seg.s-unverified  .ap-seg-label { color: var(--muted) }
+    /* #132: 正文内联引用角标 + 点击后溯源条目高亮 */
+    .cite-ref {
+      cursor: pointer; color: var(--cite-fg); font-weight: 600;
+      font-size: 0.72em; vertical-align: super; line-height: 0;
+      padding: 0 1px; text-decoration: none;
+    }
+    .cite-ref:hover { text-decoration: underline }
+    @keyframes citeFlash {
+      from { background: var(--cite-bg); box-shadow: 0 0 0 3px var(--cite-bg) }
+      to   { background: transparent;   box-shadow: none }
+    }
+    .ap-seg.cite-flash { animation: citeFlash 1.4s ease-out }
     .ap-seg .ap-seg-quote {
       display: block; margin-top: 6px; padding: 6px 10px; border-radius: 3px;
       background: rgba(0,0,0,0.04); font-family: ui-monospace, SFMono-Regular, monospace;
@@ -497,6 +509,8 @@
     <div class="ap-body"></div>
   </aside>
 
+  <!-- #132: 引用角标纯函数(与 jest 单测共用,UMD 挂 window.linkifyCitations) -->
+  <script src="/public/citations.js"></script>
   <script>
   (function () {
     // ─── State ─────────────────────────────────────────────────────────
@@ -617,10 +631,12 @@
     // derived from the run's lineage events (object.created/relation.created),
     // not parsed from text. See buildLineage() in the Provenance section.
     function renderAssistantHtml(text, runId) {
-      const html = renderMinimalMarkdown(esc(text))
+      let html = renderMinimalMarkdown(esc(text))
       let footer = ''
       if (runId) {
-        const { files } = buildLineage(runId)
+        const { files, citations } = buildLineage(runId)
+        // #132: 把正文里的序号 [n] 转成可点击角标(序号对齐 lineage 第 n 个 cite,零匹配)。
+        html = linkifyCitations(html, citations.length)
         if (files.length > 0) {
           const srcChips = files.map(f => `<span class="src">${esc(f)}</span>`).join(' ')
           footer = `<div class="sources-footer">Sourced from ${files.length} file${files.length > 1 ? 's' : ''} · ${srcChips}</div>`
@@ -977,7 +993,7 @@
           <span class="lg-dot s-supported"></span>有来源（grounded）
           <span class="lg-dot s-unsupported"></span>来源失效（dangling）
         </div>`
-      const rows = citations.map(c => {
+      const rows = citations.map((c, i) => {
         const meta = c.passage && c.passage.meta
         const grounded = !!meta
         const slice = grounded ? sourceCache.get(`${meta.file}:${meta.lineStart}-${meta.lineEnd}`) : null
@@ -986,7 +1002,7 @@
           : c.toObjectId
         const label = grounded ? '有来源直接支撑' : '来源失效——objectId 未对应任何已读段落'
         return `
-          <div class="ap-seg s-${grounded ? 'supported' : 'unsupported'}">
+          <div class="ap-seg s-${grounded ? 'supported' : 'unsupported'}" data-cite-index="${i + 1}">
             <span class="ap-seg-text">${esc(c.claimText || '(未记录陈述)')}</span>
             <span class="ap-seg-label">${esc(label)}</span>
             <span class="ap-seg-meta">${esc(cite)}</span>
@@ -1055,6 +1071,12 @@
         renderProvenanceTab(auditAnchorRunId).then(html => {
           if (auditAnchorRunId === pendingRunId && auditActiveTab === pendingTab) {
             $auditBody.innerHTML = html
+            // #132: 由正文角标点击跳转而来 — 滚动并高亮第 n 条来源。
+            if (pendingCiteFlash != null) {
+              const el = $auditBody.querySelector(`.ap-seg[data-cite-index="${pendingCiteFlash}"]`)
+              if (el) { el.scrollIntoView({ block: 'center' }); el.classList.add('cite-flash') }
+              pendingCiteFlash = null
+            }
           }
         })
       }
@@ -1167,6 +1189,7 @@
     // projection) is a chip that jumps to & flashes that row in the Execution tab.
     const diagnosisByRun = new Map()   // runId → diagnose response (or {error})
     let pendingStepFlash = null        // step idx to highlight after Execution paints
+    let pendingCiteFlash = null        // #132: 来源序号,溯源 tab 渲染后高亮(由正文角标点击触发)
 
     function renderVerdict() {
       if (!auditAnchorRunId) { $auditVerdict.className = 'ap-verdict'; $auditVerdict.innerHTML = ''; return }
@@ -1269,6 +1292,7 @@
       // Any tab switch that isn't the firstBreak jump cancels a pending flash,
       // so a stale highlight can never surface on a later visit to Execution.
       if (name !== 'steps') pendingStepFlash = null
+      if (name !== 'provenance') pendingCiteFlash = null
       auditActiveTab = name
       $auditTabs.forEach(t => {
         if (t.classList.contains('disabled')) return
@@ -1310,7 +1334,28 @@
     // Click on "View audit ▾" trigger inside any assistant message.
     $log.addEventListener('click', (ev) => {
       const target = ev.target
-      if (target instanceof HTMLElement && target.classList.contains('audit-trigger')) {
+      if (!(target instanceof HTMLElement)) return
+      // #132: 点正文引用角标 → 打开溯源面板并高亮第 n 条来源。
+      const citeRef = target.closest('.cite-ref')
+      if (citeRef) {
+        ev.stopPropagation()
+        const msg = citeRef.closest('.msg.assistant[data-run-id]')
+        const runId = msg && msg.dataset.runId
+        const n = Number(citeRef.dataset.citeIndex)
+        if (runId && n) {
+          // openAudit 对已打开的同一 run 再点会 toggle 关闭;只在需要打开/切换时调它,
+          // 否则直接切到溯源 tab(setAuditTab 会重渲染并消费 pendingCiteFlash)。
+          if (auditAnchorRunId !== runId || !$audit.classList.contains('open')) {
+            openAudit(runId)
+          }
+          // 必须在 openAudit 之后设 —— openAudit 内部的 setAuditTab('sources')
+          // 会按"非 provenance 即清"的规则把 pendingCiteFlash 清掉。
+          pendingCiteFlash = n
+          setAuditTab('provenance')
+        }
+        return
+      }
+      if (target.classList.contains('audit-trigger')) {
         ev.stopPropagation()
         const runId = target.dataset.runId
         if (runId) openAudit(runId)

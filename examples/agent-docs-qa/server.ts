@@ -298,12 +298,29 @@ async function serveStatic(res: ServerResponse, filePath: string): Promise<void>
   try {
     const content = await fs.readFile(filePath, 'utf-8')
     const ext = path.extname(filePath)
-    const ctype = ext === '.html' ? 'text/html; charset=utf-8' : 'text/plain'
+    const ctype = ext === '.html' ? 'text/html; charset=utf-8'
+      : ext === '.js' ? 'application/javascript; charset=utf-8'
+      : 'text/plain'
     res.writeHead(200, { 'content-type': ctype })
     res.end(content)
   } catch {
     res.writeHead(404).end()
   }
+}
+
+// Serve static assets under public/ (e.g. citations.js, imported by index.html).
+// Resolves within publicDir and refuses anything that escapes it — same guard
+// as handleSourceFetch.
+async function handlePublicAsset(
+  res: ServerResponse, s: ServerState, relPath: string,
+): Promise<void> {
+  const baseAbs  = path.resolve(s.publicDir)
+  const resolved = path.resolve(baseAbs, relPath)
+  if (resolved !== baseAbs && !resolved.startsWith(baseAbs + path.sep)) {
+    sendJson(res, 400, { error: 'path escapes public root' })
+    return
+  }
+  return serveStatic(res, resolved)
 }
 
 export async function startServer(config: ServerConfig): Promise<Server> {
@@ -385,6 +402,11 @@ export async function startServer(config: ServerConfig): Promise<Server> {
           decodeURIComponent(sourceMatch[1]!),
           url.searchParams.get('lines'),
         )
+      }
+
+      const publicMatch = route.match(/^\/public\/(.+)$/)
+      if (req.method === 'GET' && publicMatch) {
+        return handlePublicAsset(res, state, decodeURIComponent(publicMatch[1]!))
       }
 
       if (req.method === 'GET' && (route === '/' || route === '/index.html')) {
