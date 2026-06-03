@@ -90,6 +90,18 @@ describe('#130 buildServeStores — backend selection', () => {
   it('state-store=sqlite without data-dir is rejected', async () => {
     await expect(buildServeStores({ stateStore: 'sqlite' })).rejects.toThrow(/data-dir/)
   })
+
+  it('an unknown backend fails fast instead of silently falling back to memory', async () => {
+    // A typo (or an unsupported backend like redis) must NOT silently run in-memory:
+    // the user would think persistence is on and lose sessions on restart.
+    await expect(buildServeStores({ stateStore: 'sqltie' as 'sqlite', dataDir: tmpDir })).rejects.toThrow(/sqltie|state-store|backend/)
+    await expect(buildServeStores({ stateStore: 'redis' as 'sqlite', dataDir: tmpDir })).rejects.toThrow(/redis|state-store|backend/)
+  })
+
+  it('explicit memory and omitted both resolve to in-memory (the only non-throwing non-sqlite values)', async () => {
+    expect((await buildServeStores({ stateStore: 'memory' })).stateStore).toBeInstanceOf(MemoryStore)
+    expect((await buildServeStores({})).stateStore).toBeInstanceOf(MemoryStore)
+  })
 })
 
 describe('#130 restart recovery — same contextId continues from checkpoint after a fresh instance', () => {

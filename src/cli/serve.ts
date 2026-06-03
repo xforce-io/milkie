@@ -301,14 +301,21 @@ export function runServeServer(server: Server, opts: { port: number; host?: stri
  * the `checkpoint-run:latest` pointer (stateStore), so they persist together.
  */
 export async function buildServeStores(opts: { stateStore?: 'memory' | 'sqlite'; dataDir?: string }): Promise<{ stateStore: IStateStore; eventStore: IEventStore }> {
-  if (opts.stateStore === 'sqlite') {
+  const kind = opts.stateStore ?? 'memory'
+  if (kind === 'memory') {
+    return { stateStore: new MemoryStore(), eventStore: new MemoryEventStore() }
+  }
+  if (kind === 'sqlite') {
     if (!opts.dataDir) throw new Error('--data-dir is required when --state-store=sqlite')
     const stateStore = new SQLiteStore({ path: path.join(opts.dataDir, 'state.sqlite') })
     await stateStore.init()
     const eventStore = new JsonlEventStore(path.join(opts.dataDir, 'runs'))
     return { stateStore, eventStore }
   }
-  return { stateStore: new MemoryStore(), eventStore: new MemoryEventStore() }
+  // Fail fast: an unknown backend (typo, or unsupported like redis) must NOT
+  // silently fall back to memory — the caller would think persistence is on and
+  // lose sessions on restart.
+  throw new Error(`unknown --state-store "${String(kind)}"; expected "memory" or "sqlite"`)
 }
 
 /**
