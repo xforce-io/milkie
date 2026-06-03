@@ -21,6 +21,7 @@ import type { PortableSession } from '../runtime/PortableSession.js'
  *   POST /llm { system?, messages, stream? }  → JSON (or SSE when stream) (#124)
  *   POST /session/export { contextId }        → PortableSession JSON (#124)
  *   POST /session/import { session }          → { contextId } (#124)
+ *   POST /session/history { contextId }       → { messages: Message[] } full transcript (#128)
  */
 export interface ServeOptions {
   milkie:      Milkie
@@ -195,6 +196,20 @@ export function createServeServer(opts: ServeOptions): Server {
     }
   }
 
+  // #128: project Milkie.getSessionHistory onto HTTP — the full per-message
+  // transcript (every run/turn under the context, tool chains intact). No session
+  // → 404, else 500.
+  async function handleSessionHistory(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const { contextId } = JSON.parse(await readBody(req)) as { contextId?: string }
+    if (!contextId) return sendJson(res, 400, { error: 'contextId is required' })
+    try {
+      sendJson(res, 200, { messages: await milkie.getSessionHistory(contextId) })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      sendJson(res, /No session/.test(message) ? 404 : 500, { error: message })
+    }
+  }
+
   async function handleSessionImport(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const { session } = JSON.parse(await readBody(req)) as { session?: PortableSession }
     if (!session) return sendJson(res, 400, { error: 'session is required' })
@@ -219,6 +234,7 @@ export function createServeServer(opts: ServeOptions): Server {
         if (req.method === 'POST' && route === '/context/get')  return await handleContextGet(req, res)
         if (req.method === 'POST' && route === '/context/list') return await handleContextList(req, res)
         if (req.method === 'POST' && route === '/llm')            return await handleLlm(req, res)
+        if (req.method === 'POST' && route === '/session/history') return await handleSessionHistory(req, res)
         if (req.method === 'POST' && route === '/session/export') return await handleSessionExport(req, res)
         if (req.method === 'POST' && route === '/session/import') return await handleSessionImport(req, res)
         sendJson(res, 404, { error: `no route ${req.method} ${route}` })

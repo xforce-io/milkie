@@ -1,5 +1,6 @@
 import { v4 as uuid } from 'uuid'
 import { checkpointFromEvents } from '../trace/diagnostics/checkpointFromEvents.js'
+import { runEventsToMessages } from '../trace/diagnostics/sessionHistory.js'
 import matter from 'gray-matter'
 import fs from 'fs'
 import path from 'path'
@@ -288,6 +289,17 @@ export class Milkie {
     }
 
     const agentRunId = uuid()
+
+    // #128: by-context run index. The checkpoint pointer only retains the latest
+    // run; append every turn's runId so getSessionHistory can enumerate the whole
+    // session. Only top-level invokes pass through here (spawned children go via
+    // makeChildPort, resume reuses the runId), so the list is exactly the turns.
+    if (request.contextId) {
+      const runs = (await this.stateStore.get(`context:${request.contextId}:runs`) as string[] | undefined) ?? []
+      runs.push(agentRunId)
+      await this.stateStore.set(`context:${request.contextId}:runs`, runs)
+    }
+
     const runtimeConfig = { ...config, model: this.resolveModel(config) }
     const childRecorderFactory = this.trajectoryStore
       ? (childConfig: AgentConfig, childContextId: string, childTraceId: string) =>
@@ -652,6 +664,28 @@ export class Milkie {
       await this.setContextVar(contextId, name, value)
     }
     return { contextId }
+  }
+
+  /**
+   * #128: the full per-message transcript of a whole session — every run/turn
+   * under `contextId`, tool chains intact, in turn order. Unlike exportSession's
+   * forward state snapshot, this walks each run's event log (the only place the
+   * inter-turn-dropped tool chain survives) and concatenates the per-run
+   * projections. Throws when the context has no runs.
+   */
+  async getSessionHistory(contextId: string): Promise<Message[]> {
+    if (!this.eventStore) {
+      throw new Error('Milkie has no eventStore; cannot read session history')
+    }
+    const runIds = (await this.stateStore.get(`context:${contextId}:runs`) as string[] | undefined) ?? []
+    if (runIds.length === 0) {
+      throw new Error(`No session for contextId "${contextId}"`)
+    }
+    const messages: Message[] = []
+    for (const runId of runIds) {
+      messages.push(...runEventsToMessages(await this.eventStore.readByRunId(runId)))
+    }
+    return messages
   }
 
   async interrupt(contextId: string): Promise<void> {
