@@ -75,6 +75,24 @@ describe('BroadcastingEventStore', () => {
     expect(b).toHaveLength(1)
   })
 
+  // #130: serve restart + /resume. resume() reuses a runId but does NOT emit a
+  // fresh agent.run.started, so a broadcaster created after restart never learns
+  // the mapping live. It must recover it from the persisted log, or the resumed
+  // run's trace/progress events silently never reach the contextId subscriber.
+  it('back-fills runId→contextId from the persisted log when the started event predates this instance', async () => {
+    const inner = new MemoryEventStore()
+    await inner.append(startedEvent('r1', 'ctx1'))   // persisted by a "previous process", not via this broadcaster
+
+    const store = new BroadcastingEventStore(inner)  // fresh instance: empty in-memory map (a restart)
+    const received: Event[] = []
+    store.subscribe('ctx1', e => { received.push(e) })
+
+    // A resumed run reuses r1 and appends trace events through the new broadcaster.
+    await store.append(llmEvent('r1', 'resumed-evt'))
+
+    expect(received.map(e => e.id)).toEqual(['resumed-evt'])
+  })
+
   it('forwards readByRunId / readRange to inner', async () => {
     const inner = new MemoryEventStore()
     const store = new BroadcastingEventStore(inner)

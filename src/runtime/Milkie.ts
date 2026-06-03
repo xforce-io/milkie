@@ -824,7 +824,6 @@ export class Milkie {
       skills:     data['skills']     as Record<string, string> | undefined,
       skillInstructions: data['skillInstructions'] as Record<string, string> | undefined,
       subAgents:  (data['sub_agents'] ?? data['subAgents']) as Record<string, string> | undefined,
-      stateStore: data['state_store'] as 'memory' | 'sqlite' | 'redis' | undefined,
       dispatch:   data['dispatch']   as 'local' | 'queue' | undefined,
     }
   }

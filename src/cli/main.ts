@@ -1,4 +1,4 @@
-import { Command } from 'commander'
+import { Command, Option } from 'commander'
 import fs from 'fs'
 import path from 'path'
 import { Milkie } from '../runtime/Milkie.js'
@@ -257,8 +257,10 @@ export async function main(argv: string[]): Promise<MainResult> {
     .requiredOption('--agent <file>', 'agent definition file (.md with frontmatter)')
     .requiredOption('--port <port>', 'port to listen on (0 = OS-assigned)', v => parseInt(v, 10))
     .option('--host <host>', 'host/interface to bind', '127.0.0.1')
-    .action(async (opts: { agent: string; port: number; host: string }) => {
-      await serveMain({ agent: opts.agent, port: opts.port, host: opts.host })
+    .addOption(new Option('--state-store <kind>', 'persistence backend (#130: sqlite is restart-recoverable)').choices(['memory', 'sqlite']).default('memory'))
+    .option('--data-dir <path>', 'stable directory for sqlite state + jsonl events (required with --state-store sqlite)')
+    .action(async (opts: { agent: string; port: number; host: string; stateStore: 'memory' | 'sqlite'; dataDir?: string }) => {
+      await serveMain({ agent: opts.agent, port: opts.port, host: opts.host, stateStore: opts.stateStore, dataDir: opts.dataDir })
     })
 
   try {
