@@ -112,6 +112,13 @@ export interface AgentRunStartedPayload {
   input:      string
   contextId:  string
   parentId?:  string
+  /**
+   * #128: the run this turn continued from (the checkpoint it restored), i.e. the
+   * previous run of the same session. Unset on a session's first turn. This links
+   * a session's runs into a chain so getSessionHistory can enumerate every turn
+   * from the event log alone — no separate, non-atomic by-context index.
+   */
+  previousRunId?: string
 }
 
 export interface AgentRunCompletedPayload {

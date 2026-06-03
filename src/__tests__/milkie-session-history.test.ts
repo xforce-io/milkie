@@ -27,6 +27,16 @@ function factWriter(): ToolDefinition {
   }
 }
 
+/** Answers immediately (end_turn) with the given text. */
+function endTurnGateway(text: string): IModelGateway {
+  return {
+    async complete(_req: ModelRequest): Promise<ModelResponse> {
+      return { content: [{ type: 'text', text }], toolCalls: [], finishReason: 'end_turn' }
+    },
+    async *stream(_r: ModelRequest): AsyncIterable<never> { yield* [] },
+  }
+}
+
 /** Each turn: first call records fact{n} (tool_use), second call completes. */
 function multiTurnRecorder(): IModelGateway {
   let calls = 0, facts = 0
@@ -81,5 +91,25 @@ describe('#128 Milkie.getSessionHistory', () => {
     const milkie = new Milkie({ stateStore: new MemoryStore(), eventStore: new MemoryEventStore(), gateway: multiTurnRecorder(), tools: [factWriter()] })
     milkie.registerAgent(recorderAgent)
     await expect(milkie.getSessionHistory('never')).rejects.toThrow(/never/)
+  })
+
+  // P1 regression: getSessionHistory is derived from the event log (the run chain
+  // via agent.run.started.previousRunId), not a separate index importSession would
+  // have to remember to restore. So an exported→imported session's transcript is
+  // reconstructable in a fresh instance — no 404, no lost history.
+  it('reconstructs an imported session\'s transcript (no separate index to restore)', async () => {
+    const src = new Milkie({ stateStore: new MemoryStore(), eventStore: new MemoryEventStore(), gateway: endTurnGateway('answer'), tools: [factWriter()] })
+    src.registerAgent(recorderAgent)
+    const contextId = 'ctx-imp'
+    await src.invoke({ agentId: 'recorder', goal: 'g', input: 'only turn', contextId })
+    const session = await src.exportSession(contextId)
+
+    const dst = new Milkie({ stateStore: new MemoryStore(), eventStore: new MemoryEventStore(), gateway: endTurnGateway('x'), tools: [factWriter()] })
+    dst.registerAgent(recorderAgent)
+    await dst.importSession(session)
+
+    const messages = await dst.getSessionHistory(contextId)
+    expect(userTexts(messages)).toEqual(['only turn'])
+    expect(messages.some(m => m.role === 'assistant' && m.content.some(c => (c as { text?: string }).text === 'answer'))).toBe(true)
   })
 })

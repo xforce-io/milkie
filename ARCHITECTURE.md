@@ -161,9 +161,11 @@ full per-turn transcript (assistant `tool_use` + `tool_result`, paired) survives
 **only** in each run's append-only event log. Reconstructing a session's
 complete history therefore means walking every run's events — an instance of
 "the event log is canonical, snapshots are derived" (see Event-sourced runtime
-state). Today only `context:<id>:checkpoint-run:latest` is persisted (the most
-recent run); enumerating *all* of a session's runs needs a by-context run index,
-which does not yet exist.
+state). The session's runs are enumerated from the log itself: each
+`agent.run.started` records the `previousRunId` it continued from, so a reader
+starts at `context:<id>:checkpoint-run:latest` and follows the chain backwards.
+That keeps enumeration event-derived — no separate by-context index to keep in
+sync — so it survives export/import and has no concurrent-append race.
 
 *Example:* a `contextId` chatted three times is one session = runs A→B→C; B
 restored A's checkpoint, C restored B's. A's tool chain lives in A's event log

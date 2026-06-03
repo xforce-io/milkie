@@ -26,7 +26,7 @@ import { ReplayingIOPort } from '../trace/ReplayingIOPort.js'
 import { ReplayError } from '../trace/ReplayError.js'
 import { ReplayDivergenceError } from '../trace/ReplayDivergenceError.js'
 import { extractRunSnapshot } from '../trace/RunSnapshot.js'
-import type { ToolEmittedPayload, AgentRunStartedPayload } from '../trace/types.js'
+import type { Event, ToolEmittedPayload, AgentRunStartedPayload } from '../trace/types.js'
 import { makeTraceTools } from '../tools/trace.js'
 import {
   type PortableSession,
@@ -277,11 +277,14 @@ export class Milkie {
     // #73: the event log is the source of truth for resume state — read the
     // context's latest checkpointed run via the routing pointer and project the
     // checkpoint from its events; fall back to the legacy stateStore blob.
+    // #128: the run this turn continues from (= the session's previous run). Used
+    // both to restore the checkpoint and to chain runs for getSessionHistory.
     let restoredCheckpoint: AgentCheckpoint | null = null
+    let previousRunId: string | undefined
     if (request.contextId) {
-      const runPtr = await this.stateStore.get(`context:${request.contextId}:checkpoint-run:latest`) as string | undefined
-      if (runPtr && this.eventStore) {
-        restoredCheckpoint = checkpointFromEvents(await this.eventStore.readByRunId(runPtr))
+      previousRunId = await this.stateStore.get(`context:${request.contextId}:checkpoint-run:latest`) as string | undefined
+      if (previousRunId && this.eventStore) {
+        restoredCheckpoint = checkpointFromEvents(await this.eventStore.readByRunId(previousRunId))
       }
       if (!restoredCheckpoint) {
         restoredCheckpoint = (await this.stateStore.get(`context:${request.contextId}:checkpoint:latest`) as AgentCheckpoint | null) ?? null
@@ -289,17 +292,6 @@ export class Milkie {
     }
 
     const agentRunId = uuid()
-
-    // #128: by-context run index. The checkpoint pointer only retains the latest
-    // run; append every turn's runId so getSessionHistory can enumerate the whole
-    // session. Only top-level invokes pass through here (spawned children go via
-    // makeChildPort, resume reuses the runId), so the list is exactly the turns.
-    if (request.contextId) {
-      const runs = (await this.stateStore.get(`context:${request.contextId}:runs`) as string[] | undefined) ?? []
-      runs.push(agentRunId)
-      await this.stateStore.set(`context:${request.contextId}:runs`, runs)
-    }
-
     const runtimeConfig = { ...config, model: this.resolveModel(config) }
     const childRecorderFactory = this.trajectoryStore
       ? (childConfig: AgentConfig, childContextId: string, childTraceId: string) =>
@@ -358,6 +350,7 @@ export class Milkie {
       goal:      request.goal,
       input:     request.input,
       contextId,
+      ...(previousRunId ? { previousRunId } : {}),
     })
 
     try {
@@ -672,18 +665,41 @@ export class Milkie {
    * forward state snapshot, this walks each run's event log (the only place the
    * inter-turn-dropped tool chain survives) and concatenates the per-run
    * projections. Throws when the context has no runs.
+   *
+   * The session's runs are enumerated from the event log itself: start at the
+   * latest run (`checkpoint-run:latest`) and walk backwards via each run's
+   * `agent.run.started.previousRunId`. This needs no separate, non-atomic
+   * by-context index, so it survives export/import (the latest pointer is the only
+   * thing import must set, which it already does) and has no concurrent-append
+   * lost-update. The walk stops where events are absent (e.g. an imported session
+   * carries only the latest run-tree), degrading gracefully rather than failing.
    */
   async getSessionHistory(contextId: string): Promise<Message[]> {
     if (!this.eventStore) {
       throw new Error('Milkie has no eventStore; cannot read session history')
     }
-    const runIds = (await this.stateStore.get(`context:${contextId}:runs`) as string[] | undefined) ?? []
-    if (runIds.length === 0) {
+    const latest = await this.stateStore.get(`context:${contextId}:checkpoint-run:latest`) as string | undefined
+    if (!latest) {
       throw new Error(`No session for contextId "${contextId}"`)
     }
+
+    // Walk the run chain newest→oldest, collecting each run's events, then reverse
+    // to chronological order. Guard against cycles and missing runs.
+    const chain: Event[][] = []
+    const seen = new Set<string>()
+    let runId: string | undefined = latest
+    while (runId && !seen.has(runId)) {
+      seen.add(runId)
+      const events = await this.eventStore.readByRunId(runId)
+      if (events.length === 0) break
+      chain.push(events)
+      const started = events.find(e => e.type === 'agent.run.started')
+      runId = (started?.payload as AgentRunStartedPayload | undefined)?.previousRunId
+    }
+
     const messages: Message[] = []
-    for (const runId of runIds) {
-      messages.push(...runEventsToMessages(await this.eventStore.readByRunId(runId)))
+    for (const events of chain.reverse()) {
+      messages.push(...runEventsToMessages(events))
     }
     return messages
   }
