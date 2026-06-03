@@ -87,6 +87,35 @@ function buildSteppingMilkie(opts: { totalSteps?: number; stepMs?: number } = {}
   return { milkie, agentId: 'stepper', broadcaster }
 }
 
+/**
+ * #126: a Milkie whose agent has a default model + a named `fast` tier, behind a
+ * gateway that records every ModelRequest. Lets /llm tests assert which tier's
+ * model was resolved and whether temperature was forwarded across the wire.
+ */
+function buildTieredMilkie(): { milkie: Milkie; agentId: string; broadcaster: BroadcastingEventStore; reqs: ModelRequest[] } {
+  const broadcaster = new BroadcastingEventStore(new MemoryEventStore())
+  const reqs: ModelRequest[] = []
+  const gateway: IModelGateway = {
+    async complete(req: ModelRequest): Promise<ModelResponse> {
+      reqs.push(req)
+      return { content: [{ type: 'text', text: 'ok' }], toolCalls: [], finishReason: 'end_turn' }
+    },
+    async *stream(req: ModelRequest): AsyncIterable<ModelEvent> {
+      reqs.push(req)
+      yield { type: 'message_delta', data: { text: 'ok' } }
+    },
+  }
+  const agent: AgentConfig = {
+    agentId: 'tiered', version: '1.0.0', systemPrompt: 'sys',
+    fsm: { states: [{ name: 'react', type: 'llm' }] },
+    model:  { provider: 'stub', model: 'default-model', adapter: 'stub' },
+    models: { fast: { provider: 'stub', model: 'fast-model', adapter: 'stub' } },
+  }
+  const milkie = new Milkie({ stateStore: new MemoryStore(), eventStore: broadcaster, gateway })
+  milkie.registerAgent(agent)
+  return { milkie, agentId: 'tiered', broadcaster, reqs }
+}
+
 /** A Milkie whose gateway throws, to exercise the error path (invoke rejects). */
 function buildErrorMilkie(): { milkie: Milkie; agentId: string; broadcaster: BroadcastingEventStore } {
   const broadcaster = new BroadcastingEventStore(new MemoryEventStore())
@@ -330,6 +359,30 @@ describe('createServeServer', () => {
     const events = await done
     expect(events.find(e => e.event === 'error')).toBeDefined()
     expect(events.find(e => e.event === 'done')).toBeDefined()
+  })
+
+  // ─────────────────────── #126 /llm tier + temperature ───────────────────────
+
+  it('POST /llm with tier="fast" resolves the fast tier model', async () => {
+    const { milkie, agentId, broadcaster, reqs } = buildTieredMilkie()
+    const port = await listen(createServeServer({ milkie, agentId, broadcaster }))
+    const res = await request(port, 'POST', '/llm', { messages: userMsg, tier: 'fast' })
+    expect(res.status).toBe(200)
+    expect(reqs[0]!.model).toBe('fast-model')
+  })
+
+  it('POST /llm without tier resolves the default model (regression)', async () => {
+    const { milkie, agentId, broadcaster, reqs } = buildTieredMilkie()
+    const port = await listen(createServeServer({ milkie, agentId, broadcaster }))
+    await request(port, 'POST', '/llm', { messages: userMsg })
+    expect(reqs[0]!.model).toBe('default-model')
+  })
+
+  it('POST /llm forwards temperature into the ModelRequest', async () => {
+    const { milkie, agentId, broadcaster, reqs } = buildTieredMilkie()
+    const port = await listen(createServeServer({ milkie, agentId, broadcaster }))
+    await request(port, 'POST', '/llm', { messages: userMsg, temperature: 0.2 })
+    expect(reqs[0]!.temperature).toBe(0.2)
   })
 
   // ──────────────────────── #124 /session ────────────────────────

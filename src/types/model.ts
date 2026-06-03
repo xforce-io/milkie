@@ -17,6 +17,8 @@ export interface ModelRequest {
   responseFormat?: unknown
   reasoning?:      ReasoningOptions
   metadata?:       Record<string, unknown>
+  /** #126: sampling temperature. When set, adapters forward it to the provider; when omitted, the param is not sent (provider default). */
+  temperature?:    number
   /** PR-D Phase 1: when 'system-end', adapter wraps system block with cache_control. */
   cacheBreakpoint?: 'system-end'
 }

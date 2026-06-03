@@ -27,6 +27,13 @@ export interface AgentConfig {
   systemPrompt: string
   fsm:          FSMDefinition
   model?:       ModelConfig
+  /**
+   * #126: open named model tiers. `model` stays the default tier; `models[tier]`
+   * lets a one-shot `complete({ tier })` pick a named model/gateway. Keys are
+   * arbitrary (milkie does not hardcode `default`/`fast`); an unknown or omitted
+   * tier falls back to `model`.
+   */
+  models?:      Record<string, ModelConfig>
   toolboxes?:   Record<string, string>
   skills?:      Record<string, string>
   skillInstructions?: Record<string, string>

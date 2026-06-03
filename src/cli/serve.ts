@@ -160,16 +160,16 @@ export function createServeServer(opts: ServeOptions): Server {
   // a `done` terminal (errors as an `error` frame + `done`, never a bare
   // disconnect); otherwise a single JSON { output, usage }.
   async function handleLlm(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    const { system, messages, stream } = JSON.parse(await readBody(req)) as { system?: string; messages?: Message[]; stream?: boolean }
+    const { system, messages, stream, tier, temperature } = JSON.parse(await readBody(req)) as { system?: string; messages?: Message[]; stream?: boolean; tier?: string; temperature?: number }
     if (!Array.isArray(messages) || messages.length === 0) return sendJson(res, 400, { error: 'messages is required' })
     if (!stream) {
-      const result = await milkie.complete(agentId, { system, messages })
+      const result = await milkie.complete(agentId, { system, messages, tier, temperature })
       return sendJson(res, 200, { output: outputText(result), usage: result.usage })
     }
     res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', 'connection': 'keep-alive' })
     res.on('error', () => { /* client disconnect; writes are guarded by writeSSE */ })
     try {
-      const result = await milkie.complete(agentId, { system, messages }, e => {
+      const result = await milkie.complete(agentId, { system, messages, tier, temperature }, e => {
         if (e.type === 'message_delta') writeSSE(res, 'message_delta', e.data)
       })
       writeSSE(res, 'done', { usage: result.usage })
