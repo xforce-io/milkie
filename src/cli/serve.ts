@@ -3,8 +3,9 @@ import { Milkie } from '../runtime/Milkie.js'
 import { BroadcastingEventStore } from '../trace/BroadcastingEventStore.js'
 import { MemoryStore } from '../store/MemoryStore.js'
 import { MemoryEventStore } from '../trace/MemoryEventStore.js'
-import type { AgentResult } from '../types/common.js'
-import type { ModelEvent } from '../types/model.js'
+import type { AgentResult, JSONValue, Message } from '../types/common.js'
+import type { ModelEvent, ModelResponse } from '../types/model.js'
+import type { PortableSession } from '../runtime/PortableSession.js'
 
 /**
  * #86: `milkie serve` HTTP + SSE sidecar. Built (not started) by this factory so
@@ -17,6 +18,9 @@ import type { ModelEvent } from '../types/model.js'
  *   POST /chat   { contextId, goal?, input }  → text/event-stream (D2)
  *   POST /interrupt { contextId }             → { signaled: true }
  *   POST /resume { contextId, input? }        → text/event-stream
+ *   POST /llm { system?, messages, stream? }  → JSON (or SSE when stream) (#124)
+ *   POST /session/export { contextId }        → PortableSession JSON (#124)
+ *   POST /session/import { session }          → { contextId } (#124)
  */
 export interface ServeOptions {
   milkie:      Milkie
@@ -56,6 +60,11 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
 function writeSSE(res: ServerResponse, event: string, data: unknown): void {
   if (res.writableEnded || res.destroyed) return
   res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
+}
+
+/** Concatenate the text content of a model response (#124 /llm output). */
+function outputText(result: ModelResponse): string {
+  return result.content.filter((c): c is { type: 'text'; text: string } => c.type === 'text').map(c => c.text).join('')
 }
 
 export function createServeServer(opts: ServeOptions): Server {
@@ -123,6 +132,80 @@ export function createServeServer(opts: ServeOptions): Server {
     )
   }
 
+  // #83: expose session context variables over HTTP so an external (Python)
+  // provider can set/get/list them across the process boundary.
+  async function handleContextSet(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const { contextId, name, value } = JSON.parse(await readBody(req)) as { contextId?: string; name?: string; value?: JSONValue }
+    if (!contextId || !name) return sendJson(res, 400, { error: 'contextId and name are required' })
+    await milkie.setContextVar(contextId, name, value as JSONValue)
+    sendJson(res, 200, { ok: true })
+  }
+
+  async function handleContextGet(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const { contextId, name } = JSON.parse(await readBody(req)) as { contextId?: string; name?: string }
+    if (!contextId || !name) return sendJson(res, 400, { error: 'contextId and name are required' })
+    const value = await milkie.getContextVar(contextId, name)
+    sendJson(res, 200, { value: value ?? null })
+  }
+
+  async function handleContextList(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const { contextId } = JSON.parse(await readBody(req)) as { contextId?: string }
+    if (!contextId) return sendJson(res, 400, { error: 'contextId is required' })
+    const vars = await milkie.listContextVars(contextId)
+    sendJson(res, 200, { vars })
+  }
+
+  // #124: one-shot LLM completion (alfred's call_llm). Borrows the single loaded
+  // agent's model config; bypasses the FSM. stream=true → SSE message_delta… +
+  // a `done` terminal (errors as an `error` frame + `done`, never a bare
+  // disconnect); otherwise a single JSON { output, usage }.
+  async function handleLlm(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const { system, messages, stream } = JSON.parse(await readBody(req)) as { system?: string; messages?: Message[]; stream?: boolean }
+    if (!Array.isArray(messages) || messages.length === 0) return sendJson(res, 400, { error: 'messages is required' })
+    if (!stream) {
+      const result = await milkie.complete(agentId, { system, messages })
+      return sendJson(res, 200, { output: outputText(result), usage: result.usage })
+    }
+    res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', 'connection': 'keep-alive' })
+    res.on('error', () => { /* client disconnect; writes are guarded by writeSSE */ })
+    try {
+      const result = await milkie.complete(agentId, { system, messages }, e => {
+        if (e.type === 'message_delta') writeSSE(res, 'message_delta', e.data)
+      })
+      writeSSE(res, 'done', { usage: result.usage })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      writeSSE(res, 'error', { message })
+      writeSSE(res, 'done', { error: message })
+    } finally {
+      if (!res.writableEnded && !res.destroyed) res.end()
+    }
+  }
+
+  // #124: project the #84 portable-session library API onto HTTP. Library errors
+  // map to 4xx (no session → 404; unsupported schemaVersion → 400), else 500.
+  async function handleSessionExport(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const { contextId } = JSON.parse(await readBody(req)) as { contextId?: string }
+    if (!contextId) return sendJson(res, 400, { error: 'contextId is required' })
+    try {
+      sendJson(res, 200, await milkie.exportSession(contextId))
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      sendJson(res, /No session to export/.test(message) ? 404 : 500, { error: message })
+    }
+  }
+
+  async function handleSessionImport(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const { session } = JSON.parse(await readBody(req)) as { session?: PortableSession }
+    if (!session) return sendJson(res, 400, { error: 'session is required' })
+    try {
+      sendJson(res, 200, await milkie.importSession(session))
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      sendJson(res, /schemaVersion/.test(message) ? 400 : 500, { error: message })
+    }
+  }
+
   return http.createServer((req, res) => {
     void (async () => {
       try {
@@ -132,6 +215,12 @@ export function createServeServer(opts: ServeOptions): Server {
         if (req.method === 'POST' && route === '/chat')      return await handleChat(req, res)
         if (req.method === 'POST' && route === '/interrupt') return await handleInterrupt(req, res)
         if (req.method === 'POST' && route === '/resume')    return await handleResume(req, res)
+        if (req.method === 'POST' && route === '/context/set')  return await handleContextSet(req, res)
+        if (req.method === 'POST' && route === '/context/get')  return await handleContextGet(req, res)
+        if (req.method === 'POST' && route === '/context/list') return await handleContextList(req, res)
+        if (req.method === 'POST' && route === '/llm')            return await handleLlm(req, res)
+        if (req.method === 'POST' && route === '/session/export') return await handleSessionExport(req, res)
+        if (req.method === 'POST' && route === '/session/import') return await handleSessionImport(req, res)
         sendJson(res, 404, { error: `no route ${req.method} ${route}` })
       } catch (err) {
         sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) })

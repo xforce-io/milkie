@@ -258,4 +258,124 @@ describe('createServeServer', () => {
     expect(res.status).toBe(200)
     expect(res.json).toEqual({ ok: true })
   })
+
+  it('POST /context/set then /context/get round-trips a variable', async () => {
+    const { milkie, agentId, broadcaster } = buildTextMilkie(['x'])
+    const port = await listen(createServeServer({ milkie, agentId, broadcaster }))
+    const setRes = await request(port, 'POST', '/context/set', { contextId: 'cv', name: 'model_name', value: 'claude' })
+    expect(setRes.status).toBe(200)
+    expect(setRes.json).toMatchObject({ ok: true })
+    const getRes = await request(port, 'POST', '/context/get', { contextId: 'cv', name: 'model_name' })
+    expect(getRes.json).toMatchObject({ value: 'claude' })
+  })
+
+  it('POST /context/get returns null for a missing variable', async () => {
+    const { milkie, agentId, broadcaster } = buildTextMilkie(['x'])
+    const port = await listen(createServeServer({ milkie, agentId, broadcaster }))
+    const res = await request(port, 'POST', '/context/get', { contextId: 'cv', name: 'nope' })
+    expect(res.status).toBe(200)
+    expect(res.json).toMatchObject({ value: null })
+  })
+
+  it('POST /context/list returns all variables for a context', async () => {
+    const { milkie, agentId, broadcaster } = buildTextMilkie(['x'])
+    const port = await listen(createServeServer({ milkie, agentId, broadcaster }))
+    await request(port, 'POST', '/context/set', { contextId: 'cv', name: 'a', value: '1' })
+    await request(port, 'POST', '/context/set', { contextId: 'cv', name: 'b', value: '2' })
+    const res = await request(port, 'POST', '/context/list', { contextId: 'cv' })
+    expect(res.json).toMatchObject({ vars: { a: '1', b: '2' } })
+  })
+
+  it('POST /context/set without contextId returns 400', async () => {
+    const { milkie, agentId, broadcaster } = buildTextMilkie(['x'])
+    const port = await listen(createServeServer({ milkie, agentId, broadcaster }))
+    const res = await request(port, 'POST', '/context/set', { name: 'k', value: 'v' })
+    expect(res.status).toBe(400)
+  })
+
+  // ─────────────────────────── #124 /llm ───────────────────────────
+
+  const userMsg = [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }]
+
+  it('POST /llm (non-streaming) returns the aggregated output as JSON', async () => {
+    const { milkie, agentId, broadcaster } = buildTextMilkie(['Sum', 'mary'])
+    const port = await listen(createServeServer({ milkie, agentId, broadcaster }))
+    const res = await request(port, 'POST', '/llm', { messages: userMsg })
+    expect(res.status).toBe(200)
+    expect(res.json).toMatchObject({ output: 'Summary' })
+  })
+
+  it('POST /llm with stream=true streams token-level message_delta then a done terminal', async () => {
+    const { milkie, agentId, broadcaster } = buildTextMilkie(['a', 'b', 'c'])
+    const port = await listen(createServeServer({ milkie, agentId, broadcaster }))
+    const { done } = sse(port, 'POST', '/llm', { messages: userMsg, stream: true })
+    const events = await done
+    const deltas = events.filter(e => e.event === 'message_delta')
+    expect(deltas.map(e => (e.data as { text: string }).text)).toEqual(['a', 'b', 'c'])
+    expect(events.find(e => e.event === 'done')).toBeDefined()
+  })
+
+  it('POST /llm without messages returns 400', async () => {
+    const { milkie, agentId, broadcaster } = buildTextMilkie(['x'])
+    const port = await listen(createServeServer({ milkie, agentId, broadcaster }))
+    const res = await request(port, 'POST', '/llm', { system: 'only' })
+    expect(res.status).toBe(400)
+    expect(res.json).toMatchObject({ error: expect.stringContaining('messages') })
+  })
+
+  it('POST /llm with stream=true surfaces a failing gateway as an error frame + done', async () => {
+    const { milkie, agentId, broadcaster } = buildErrorMilkie()
+    const port = await listen(createServeServer({ milkie, agentId, broadcaster }))
+    const { done } = sse(port, 'POST', '/llm', { messages: userMsg, stream: true })
+    const events = await done
+    expect(events.find(e => e.event === 'error')).toBeDefined()
+    expect(events.find(e => e.event === 'done')).toBeDefined()
+  })
+
+  // ──────────────────────── #124 /session ────────────────────────
+
+  it('POST /session/export returns a portable session after a chat', async () => {
+    const { milkie, agentId, broadcaster } = buildTextMilkie(['ok'])
+    const port = await listen(createServeServer({ milkie, agentId, broadcaster }))
+    await (await sse(port, 'POST', '/chat', { contextId: 'se', input: 'hi' }).done)
+    const res = await request(port, 'POST', '/session/export', { contextId: 'se' })
+    expect(res.status).toBe(200)
+    expect(res.json).toMatchObject({ manifest: { schemaVersion: 1, contextId: 'se', agentId } })
+    expect(Array.isArray((res.json as { events: unknown[] }).events)).toBe(true)
+  })
+
+  it('POST /session/export without contextId returns 400', async () => {
+    const { milkie, agentId, broadcaster } = buildTextMilkie(['x'])
+    const port = await listen(createServeServer({ milkie, agentId, broadcaster }))
+    const res = await request(port, 'POST', '/session/export', {})
+    expect(res.status).toBe(400)
+  })
+
+  it('POST /session/export for an unknown context returns 404', async () => {
+    const { milkie, agentId, broadcaster } = buildTextMilkie(['x'])
+    const port = await listen(createServeServer({ milkie, agentId, broadcaster }))
+    const res = await request(port, 'POST', '/session/export', { contextId: 'never' })
+    expect(res.status).toBe(404)
+  })
+
+  it('POST /session/import round-trips an exported session into a fresh server', async () => {
+    const a = buildTextMilkie(['ok'])
+    const portA = await listen(createServeServer(a))
+    await (await sse(portA, 'POST', '/chat', { contextId: 'rt', input: 'hi' }).done)
+    const exported = (await request(portA, 'POST', '/session/export', { contextId: 'rt' })).json
+
+    const b = buildTextMilkie(['ok'])
+    const portB = await listen(createServeServer(b))
+    const res = await request(portB, 'POST', '/session/import', { session: exported })
+    expect(res.status).toBe(200)
+    expect(res.json).toMatchObject({ contextId: 'rt' })
+  })
+
+  it('POST /session/import with an unsupported schemaVersion returns 400', async () => {
+    const { milkie, agentId, broadcaster } = buildTextMilkie(['x'])
+    const port = await listen(createServeServer({ milkie, agentId, broadcaster }))
+    const bogus = { manifest: { schemaVersion: 999, contextId: 'x', agentId: 'echo', latestRunId: 'r', exportedAt: 0 }, events: [], variables: {} }
+    const res = await request(port, 'POST', '/session/import', { session: bogus })
+    expect(res.status).toBe(400)
+  })
 })
