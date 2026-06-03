@@ -34,11 +34,31 @@ export class BroadcastingEventStore implements IEventStore {
       this.contextIdByRunId.set(event.runId, payload.contextId)
     }
 
-    const contextId = this.contextIdByRunId.get(event.runId)
+    const contextId = await this.contextIdFor(event.runId)
     if (contextId) {
       const subs = this.subscribers.get(contextId)
       if (subs) for (const cb of subs) cb(event)
     }
+  }
+
+  /**
+   * The contextId owning a run. Normally learned live from the run's
+   * `agent.run.started` (cached). But `resume()` reuses a runId without emitting
+   * a fresh started event, so a broadcaster created after a serve restart never
+   * sees it live — recover the mapping from the persisted log (the started event
+   * is durable, e.g. in the JsonlEventStore) so the resumed run's trace/progress
+   * events still reach contextId subscribers. Cached so the lookup runs at most
+   * once per unknown run.
+   */
+  private async contextIdFor(runId: string): Promise<string | undefined> {
+    const cached = this.contextIdByRunId.get(runId)
+    if (cached !== undefined) return cached
+    const prior = await this.inner.readByRunId(runId)
+    const started = prior.find(e => e.type === 'agent.run.started')
+    if (!started) return undefined
+    const contextId = (started.payload as { contextId: string }).contextId
+    this.contextIdByRunId.set(runId, contextId)
+    return contextId
   }
 
   async readByRunId(runId: string): Promise<Event[]> {

@@ -4,7 +4,9 @@
 // in-memory (backward compatible with #86/#124/#126/#128).
 import { buildServeStores } from '../cli/serve'
 import { Milkie } from '../runtime/Milkie'
+import { BroadcastingEventStore } from '../trace/BroadcastingEventStore'
 import { MemoryStore } from '../store/MemoryStore'
+import type { Event } from '../trace/types'
 import type { IModelGateway, ModelRequest, ModelResponse } from '../types/model'
 import type { AgentConfig } from '../types/agent'
 import type { ToolDefinition } from '../types/tool'
@@ -137,6 +139,38 @@ describe('#130 restart recovery — same contextId continues from checkpoint aft
     const prompt = JSON.stringify(captured)
     expect(prompt).toContain('fact1')
     expect(prompt).toContain('fact2')
+  })
+
+  // The serve scenario: after a restart, /resume reuses the runId but emits no
+  // fresh agent.run.started, so a new BroadcastingEventStore must still fan the
+  // resumed run's trace/progress events out to the contextId SSE subscriber.
+  it('a fresh BroadcastingEventStore still delivers the resumed run\'s tool/trace events after restart', async () => {
+    const contextId = 'C'
+
+    // Instance 1 (persistent): one turn to completion → checkpoint + persisted started.
+    const s1 = await buildServeStores({ stateStore: 'sqlite', dataDir: tmpDir })
+    const b1 = new BroadcastingEventStore(s1.eventStore)
+    const m1 = new Milkie({ stateStore: s1.stateStore, eventStore: b1, gateway: multiTurnRecorder(), tools: [factWriter()] })
+    m1.registerAgent(recorderAgent)
+    await m1.invoke({ agentId: 'recorder', goal: 'g', input: 'turn1', contextId })
+    closeIfPossible(s1.stateStore)
+
+    // Instance 2 (restart): brand-new stores AND a brand-new broadcaster (empty map).
+    const s2 = await buildServeStores({ stateStore: 'sqlite', dataDir: tmpDir })
+    const b2 = new BroadcastingEventStore(s2.eventStore)
+    const m2 = new Milkie({ stateStore: s2.stateStore, eventStore: b2, gateway: multiTurnRecorder(), tools: [factWriter()] })
+    m2.registerAgent(recorderAgent)
+
+    const seen: Event[] = []
+    const unsub = b2.subscribe(contextId, e => { seen.push(e) })
+    await m2.resume(`context:${contextId}:checkpoint:latest`, 'recorder', 'continue', 'continue')
+    unsub()
+    closeIfPossible(s2.stateStore)
+
+    // The resumed run's tool chain reached the subscriber (would be empty before the
+    // back-fill fix — the new broadcaster never saw this runId's started event live).
+    expect(seen.some(e => e.type === 'tool.responded')).toBe(true)
+    expect(seen.length).toBeGreaterThan(0)
   })
 
   it('default (memory) does NOT recover across instances — confirms persistence is what enables recovery', async () => {
