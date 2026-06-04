@@ -34,6 +34,22 @@ import {
   collectRunTree,
 } from './PortableSession.js'
 
+/**
+ * #137: read-only run-state of a context, projected from its latest checkpoint.
+ * `paused` ⇔ the FSM stopped in the reserved `paused` state (entered only via
+ * interrupt); `resumable` ⇔ a paused checkpoint exists to /resume from.
+ * `interruptSignaled` is the transient `context:{id}:interrupt` flag — set the
+ * moment interrupt is requested, before the turn has yielded to `paused`.
+ */
+export interface ContextRunState {
+  contextId:         string
+  exists:            boolean
+  paused:            boolean
+  resumable:         boolean
+  currentState:      string | null
+  interruptSignaled: boolean
+}
+
 export interface MilkieOptions {
   /**
    * #99: required — no silent in-memory fallback. Choose the backend explicitly:
@@ -712,6 +728,24 @@ export class Milkie {
         await this.stateStore.set(`context:${child.contextId}:interrupt`, true)
       }
     }
+  }
+
+  /**
+   * #137: read-only run-state query for a context. Projects the latest
+   * checkpoint (event-sourced, via resolveCheckpoint) and reports whether the
+   * context is interrupt-paused and resumable — letting an external provider
+   * decide resume-vs-stop without driving a turn. A completed or never-run
+   * context is not paused (`paused` ⇔ FSM stopped in the reserved `paused` state).
+   */
+  async getContextState(contextId: string): Promise<ContextRunState> {
+    const interruptSignaled = (await this.stateStore.get(`context:${contextId}:interrupt`)) === true
+    const checkpoint = await this.resolveCheckpoint(`context:${contextId}:checkpoint:latest`)
+    if (!checkpoint) {
+      return { contextId, exists: false, paused: false, resumable: false, currentState: null, interruptSignaled }
+    }
+    const currentState = checkpoint.fsm.currentState
+    const paused = currentState === 'paused'
+    return { contextId, exists: true, paused, resumable: paused, currentState, interruptSignaled }
   }
 
   // ---- #83: session context variables (key contract: context:{id}:var:{name}) ----

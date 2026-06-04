@@ -161,6 +161,15 @@ export function createServeServer(opts: ServeOptions): Server {
     sendJson(res, 200, { vars })
   }
 
+  // #137: read-only run-state of a context (is it interrupt-paused / resumable),
+  // projected from the latest checkpoint. Lets an external provider gate
+  // resume-vs-stop without driving a turn.
+  async function handleContextState(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const { contextId } = JSON.parse(await readBody(req)) as { contextId?: string }
+    if (!contextId) return sendJson(res, 400, { error: 'contextId is required' })
+    sendJson(res, 200, await milkie.getContextState(contextId))
+  }
+
   // #124: one-shot LLM completion (alfred's call_llm). Borrows the single loaded
   // agent's model config; bypasses the FSM. stream=true → SSE message_delta… +
   // a `done` terminal (errors as an `error` frame + `done`, never a bare
@@ -238,6 +247,7 @@ export function createServeServer(opts: ServeOptions): Server {
         if (req.method === 'POST' && route === '/context/set')  return await handleContextSet(req, res)
         if (req.method === 'POST' && route === '/context/get')  return await handleContextGet(req, res)
         if (req.method === 'POST' && route === '/context/list') return await handleContextList(req, res)
+        if (req.method === 'POST' && route === '/context/state') return await handleContextState(req, res)
         if (req.method === 'POST' && route === '/llm')            return await handleLlm(req, res)
         if (req.method === 'POST' && route === '/session/history') return await handleSessionHistory(req, res)
         if (req.method === 'POST' && route === '/session/export') return await handleSessionExport(req, res)
