@@ -322,6 +322,44 @@ describe('createServeServer', () => {
     expect(res.status).toBe(400)
   })
 
+  // ─────────────────────── #137 /context/state ───────────────────────
+
+  it('POST /context/state for a never-run context reports not paused / not resumable', async () => {
+    const { milkie, agentId, broadcaster } = buildTextMilkie(['x'])
+    const port = await listen(createServeServer({ milkie, agentId, broadcaster }))
+    const res = await request(port, 'POST', '/context/state', { contextId: 'never' })
+    expect(res.status).toBe(200)
+    expect(res.json).toMatchObject({ contextId: 'never', exists: false, paused: false, resumable: false })
+  })
+
+  it('POST /context/state after a completed chat reports exists but not paused', async () => {
+    const { milkie, agentId, broadcaster } = buildTextMilkie(['ok'])
+    const port = await listen(createServeServer({ milkie, agentId, broadcaster }))
+    await (await sse(port, 'POST', '/chat', { contextId: 'cs', input: 'hi' }).done)
+    const res = await request(port, 'POST', '/context/state', { contextId: 'cs' })
+    expect(res.status).toBe(200)
+    expect(res.json).toMatchObject({ contextId: 'cs', exists: true, paused: false, resumable: false })
+  })
+
+  it('POST /context/state after an interrupt reports paused + resumable', async () => {
+    const { milkie, agentId, broadcaster } = buildSteppingMilkie({ totalSteps: 30, stepMs: 40 })
+    const port = await listen(createServeServer({ milkie, agentId, broadcaster }))
+    const { done } = sse(port, 'POST', '/chat', { contextId: 'ps', input: 'go' })
+    await new Promise(r => setTimeout(r, 120))   // let a few steps run
+    await request(port, 'POST', '/interrupt', { contextId: 'ps' })
+    await done                                    // interrupted terminal ⇒ checkpoint persisted
+    const res = await request(port, 'POST', '/context/state', { contextId: 'ps' })
+    expect(res.status).toBe(200)
+    expect(res.json).toMatchObject({ contextId: 'ps', exists: true, paused: true, resumable: true, currentState: 'paused' })
+  })
+
+  it('POST /context/state without contextId returns 400', async () => {
+    const { milkie, agentId, broadcaster } = buildTextMilkie(['x'])
+    const port = await listen(createServeServer({ milkie, agentId, broadcaster }))
+    const res = await request(port, 'POST', '/context/state', {})
+    expect(res.status).toBe(400)
+  })
+
   // ─────────────────────────── #124 /llm ───────────────────────────
 
   const userMsg = [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }]
