@@ -1,15 +1,57 @@
+import fs from 'fs'
 import type { ToolDefinition } from '../types/tool.js'
 
 // skill_list and skill_request are system-injected tools.
-// In v1 they are stubs; the Skill Registry (Section 6) is wired in v2.
+//
+// #139 提议1 — skill_list 默认 handler 读宿主经 MILKIE_SKILL_MANIFEST 注入的本地
+// manifest，返回真实完整技能列表。这是个 thin v1 bridge（非 §6 / s-010 完整 Skill
+// Registry）：只读「宿主配置好的 manifest 文件路径」，不碰发现规则。设计取舍是
+// 「最小契约（name+description）+ 开放透传」——milkie 只消费 name/description，宿主
+// 附加字段（dir/version/…）原样透传给 LLM，不投影、不解释。
+//
+// 错误策略「行为软、日志硬」：未配置 / 读失败 / 单条目 malformed 一律 degrade 成安全
+// 结果（绝不抛给 turn loop 里的 LLM），但已配置却读失败 / 跳过坏条目时 log WARNING，
+// 避免 degrade 掩盖 misconfig。
+const SKILL_MANIFEST_ENV = 'MILKIE_SKILL_MANIFEST'
+
+interface SkillEntry { name: string; description: string; [k: string]: unknown }
+
+function isValidSkill(s: unknown): s is SkillEntry {
+  return !!s && typeof s === 'object'
+    && typeof (s as Record<string, unknown>).name === 'string'
+    && typeof (s as Record<string, unknown>).description === 'string'
+}
+
+function loadSkillManifest(): { skills: SkillEntry[]; registryConfigured: boolean } {
+  const manifestPath = process.env[SKILL_MANIFEST_ENV]
+  if (!manifestPath) return { skills: [], registryConfigured: false }
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'))
+  } catch (e) {
+    // env 已设却读不到/解析失败 — 大概率 misconfig：行为 degrade，日志响亮。
+    console.warn(`[milkie] skill_list: failed to read ${SKILL_MANIFEST_ENV}=${manifestPath}: ${(e as Error).message}`)
+    return { skills: [], registryConfigured: false }
+  }
+
+  const raw = (parsed as { skills?: unknown }).skills
+  const entries = Array.isArray(raw) ? raw : []
+  const skills: SkillEntry[] = []
+  for (const s of entries) {
+    if (isValidSkill(s)) skills.push(s)               // 原样透传，含 dir/version 等附加字段
+    else console.warn(`[milkie] skill_list: skipping malformed skill entry (missing name/description): ${JSON.stringify(s)}`)
+  }
+  return { skills, registryConfigured: true }
+}
+
 export const systemTools: ToolDefinition[] = [
   {
     name:        'skill_list',
     description: 'List all available skills with their names and brief descriptions.',
     inputSchema: { type: 'object', properties: {}, required: [] },
     handler: async (_input, _ctx) => {
-      // v1 stub — no remote registry
-      return { skills: [] }
+      return loadSkillManifest()
     },
   },
 
