@@ -22,6 +22,21 @@ function findMilkieDir(startDir: string): string | undefined {
 }
 
 /**
+ * #144: resolve the trace root holding `runs/` (and `objects/`). An explicit
+ * `--data-dir` — the same directory passed to `serve --data-dir`, where the
+ * sidecar persisted `<dir>/runs/<runId>.jsonl` — takes precedence and bypasses
+ * findMilkieDir (alfred's data-dir is not named `.milkie/`). Otherwise discover
+ * the nearest `.milkie/` upward from cwd, preserving the original CLI behavior.
+ */
+function resolveTraceDir(dataDir: string | undefined): string {
+  const dir = dataDir ? path.resolve(dataDir) : findMilkieDir(process.cwd())
+  if (!dir) {
+    throw new Error('no .milkie/ directory found upward from cwd (or pass --data-dir)')
+  }
+  return dir
+}
+
+/**
  * Build a Milkie instance with CLI defaults: persistent SQLite stateStore
  * (interrupt / resume survive across CLI processes), JsonlEventStore on
  * `.milkie/runs/`, and manifest auto-loaded.
@@ -146,11 +161,9 @@ export async function main(argv: string[]): Promise<MainResult> {
     .command('inspect <runId>')
     .description('Print every event in a recorded run as JSONL')
     .option('--include-children', 'also emit events from descendant sub-agent runs')
-    .action(async (runId: string, opts: { includeChildren?: boolean }) => {
-      const milkieDir = findMilkieDir(process.cwd())
-      if (!milkieDir) {
-        throw new Error('no .milkie/ directory found upward from cwd')
-      }
+    .option('--data-dir <path>', 'read trace from <path>/runs (e.g. a serve --data-dir); else find .milkie/ upward from cwd')
+    .action(async (runId: string, opts: { includeChildren?: boolean; dataDir?: string }) => {
+      const milkieDir = resolveTraceDir(opts.dataDir)
       const runsDir = path.join(milkieDir, 'runs')
       const eventStore = new JsonlEventStore(runsDir)
 
@@ -182,11 +195,9 @@ export async function main(argv: string[]): Promise<MainResult> {
   trace
     .command('report <runId>')
     .description('Render <runId> (and any descendant sub-agent runs) as a self-contained HTML report to stdout')
-    .action(async (runId: string) => {
-      const milkieDir = findMilkieDir(process.cwd())
-      if (!milkieDir) {
-        throw new Error('no .milkie/ directory found upward from cwd')
-      }
+    .option('--data-dir <path>', 'read trace from <path>/runs (e.g. a serve --data-dir); else find .milkie/ upward from cwd')
+    .action(async (runId: string, opts: { dataDir?: string }) => {
+      const milkieDir = resolveTraceDir(opts.dataDir)
       const runsDir = path.join(milkieDir, 'runs')
       const eventStore = new JsonlEventStore(runsDir)
       const { findDescendantRuns } = await import('../trace/render/children.js')
@@ -209,11 +220,9 @@ export async function main(argv: string[]): Promise<MainResult> {
   trace
     .command('execution <runId>')
     .description('Project <runId> into execution-timeline JSON (steps with cache health + region composition) to stdout')
-    .action(async (runId: string) => {
-      const milkieDir = findMilkieDir(process.cwd())
-      if (!milkieDir) {
-        throw new Error('no .milkie/ directory found upward from cwd')
-      }
+    .option('--data-dir <path>', 'read trace from <path>/runs (e.g. a serve --data-dir); else find .milkie/ upward from cwd')
+    .action(async (runId: string, opts: { dataDir?: string }) => {
+      const milkieDir = resolveTraceDir(opts.dataDir)
       const runsDir = path.join(milkieDir, 'runs')
       const eventStore = new JsonlEventStore(runsDir)
       const { buildExecutionProjection } = await import('../trace/diagnostics/buildExecutionProjection.js')
@@ -232,12 +241,10 @@ export async function main(argv: string[]): Promise<MainResult> {
 
   trace
     .command('replay <runId>')
-    .description('Replay a recorded run from .milkie/runs/<runId>.jsonl')
-    .action(async (runId: string) => {
-      const milkieDir = findMilkieDir(process.cwd())
-      if (!milkieDir) {
-        throw new Error('no .milkie/ directory found upward from cwd')
-      }
+    .description('Replay a recorded run from <data-dir or .milkie>/runs/<runId>.jsonl')
+    .option('--data-dir <path>', 'read trace from <path>/runs (e.g. a serve --data-dir); else find .milkie/ upward from cwd')
+    .action(async (runId: string, opts: { dataDir?: string }) => {
+      const milkieDir = resolveTraceDir(opts.dataDir)
       const eventStore = new JsonlEventStore(path.join(milkieDir, 'runs'))
       const traceObjectStore = new FileTraceObjectStore(path.join(milkieDir, 'objects'))
       // ephemeral: replay is deterministic from the event log, no persistent state needed.
