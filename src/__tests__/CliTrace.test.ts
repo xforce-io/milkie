@@ -93,6 +93,34 @@ sys`
     }
   })
 
+  it('trace replay --data-dir <dir> replays from <dir>/runs/ (alfred sidecar layout, no .milkie)', async () => {
+    // alfred sidecar layout: runs + agents.json sit directly under the data-dir,
+    // not under a .milkie/. --data-dir points replay at that root.
+    writeAgentMd('router.md', 'router')
+    fs.writeFileSync(
+      path.join(tmpDir, 'agents.json'),
+      JSON.stringify({ agents: [{ id: 'router', file: 'agents/router.md' }] }),
+    )
+
+    const gateway = new SequentialGateway([text('hello')])
+    const eventStore = new JsonlEventStore(path.join(tmpDir, 'runs'))
+    const recordMilkie = new Milkie({ stateStore: new MemoryStore(), gateway, eventStore })
+    recordMilkie.loadAgentFile(path.join(tmpDir, 'agents', 'router.md'))
+    const original = await recordMilkie.invoke({ agentId: 'router', goal: 'g', input: 'i' })
+    expect(original.status).toBe('completed')
+
+    const cwdSpy = jest.spyOn(process, 'cwd').mockReturnValue(os.tmpdir())
+    try {
+      const result = await main(['trace', 'replay', '--data-dir', tmpDir, original.agentRunId])
+      expect(result.exitCode).toBe(0)
+      const out = JSON.parse(result.stdout.trim()) as { status: string; newRunId: string }
+      expect(out.status).toBe('completed')
+      expect(out.newRunId).toBe(original.agentRunId)
+    } finally {
+      cwdSpy.mockRestore()
+    }
+  })
+
   it('inspect outputs JSONL of every event in the run', async () => {
     const runId = 'demo-run-1'
     const events = [

@@ -46,4 +46,32 @@ describe('CLI: trace execution', () => {
       cwdSpy.mockRestore()
     }
   })
+
+  it('trace execution --data-dir <dir> projects from <dir>/runs/ (alfred sidecar layout)', async () => {
+    fs.mkdirSync(path.join(tmpDir, 'runs'), { recursive: true })
+    const runId = 'exec-dd-run'
+    const events = [
+      { id: 's', runId, type: 'agent.run.started', actor: 'runtime', timestamp: 1,
+        payload: { agentId: 'echo', goal: 'g', input: 'i', contextId: runId } },
+      { id: 'q', runId, type: 'llm.requested', actor: 'echo', timestamp: 3,
+        payload: { request: { model: 'm', messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }] }, requestHash: 'h1' } },
+      { id: 'a', runId, type: 'llm.responded', actor: 'echo', timestamp: 4, causedBy: 'q',
+        payload: { response: { content: [{ type: 'text', text: 'hi' }], toolCalls: [], finishReason: 'end_turn' }, requestHash: 'h1' } },
+      { id: 'c', runId, type: 'agent.run.completed', actor: 'runtime', timestamp: 9,
+        payload: { status: 'completed', lastTextOutput: 'hi' } },
+    ]
+    fs.writeFileSync(
+      path.join(tmpDir, 'runs', `${runId}.jsonl`),
+      events.map(e => JSON.stringify(e)).join('\n') + '\n',
+    )
+    const cwdSpy = jest.spyOn(process, 'cwd').mockReturnValue(os.tmpdir())
+    try {
+      const result = await main(['trace', 'execution', '--data-dir', tmpDir, runId])
+      expect(result.exitCode).toBe(0)
+      const proj = JSON.parse(result.stdout) as { steps: Array<{ kind: string }> }
+      expect(proj.steps.some(s => s.kind === 'llm')).toBe(true)
+    } finally {
+      cwdSpy.mockRestore()
+    }
+  })
 })

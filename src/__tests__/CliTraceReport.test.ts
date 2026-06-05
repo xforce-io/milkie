@@ -67,6 +67,54 @@ describe('CLI: trace render-html', () => {
     }
   })
 
+  it('trace report --data-dir <dir> reads <dir>/runs/ directly (alfred sidecar layout, no .milkie, cwd-independent)', async () => {
+    // alfred's sidecar persists to `<data-dir>/runs/` (serve --data-dir), NOT under
+    // a `.milkie/`. --data-dir lets trace read that layout without findMilkieDir.
+    fs.mkdirSync(path.join(tmpDir, 'runs'), { recursive: true })
+    const runId = 'sidecar-run'
+    const events = [
+      { id: 's', runId, type: 'agent.run.started', actor: 'runtime', timestamp: 1,
+        payload: { agentId: 'echo', goal: 'g', input: 'i', contextId: runId } },
+      { id: 'c', runId, type: 'agent.run.completed', actor: 'runtime', timestamp: 9,
+        payload: { status: 'completed', lastTextOutput: 'hi' } },
+    ]
+    fs.writeFileSync(
+      path.join(tmpDir, 'runs', `${runId}.jsonl`),
+      events.map(e => JSON.stringify(e)).join('\n') + '\n',
+    )
+
+    // No .milkie/ anywhere; cwd points somewhere irrelevant (os.tmpdir, not tmpDir).
+    const cwdSpy = jest.spyOn(process, 'cwd').mockReturnValue(os.tmpdir())
+    try {
+      const result = await main(['trace', 'report', '--data-dir', tmpDir, runId])
+      expect(result.exitCode).toBe(0)
+      expect(result.stdout.startsWith('<!doctype html>')).toBe(true)
+      expect(result.stdout).toContain(runId)
+      expect(result.stdout).toContain('echo')
+    } finally {
+      cwdSpy.mockRestore()
+    }
+  })
+
+  it('trace inspect --data-dir <dir> emits the run events from <dir>/runs/', async () => {
+    fs.mkdirSync(path.join(tmpDir, 'runs'), { recursive: true })
+    const runId = 'insp-run'
+    fs.writeFileSync(
+      path.join(tmpDir, 'runs', `${runId}.jsonl`),
+      JSON.stringify({ id: 's', runId, type: 'agent.run.started', actor: 'runtime', timestamp: 1,
+        payload: { agentId: 'echo', goal: 'g', input: 'i', contextId: runId } }) + '\n',
+    )
+    const cwdSpy = jest.spyOn(process, 'cwd').mockReturnValue(os.tmpdir())
+    try {
+      const result = await main(['trace', 'inspect', '--data-dir', tmpDir, runId])
+      expect(result.exitCode).toBe(0)
+      expect(result.stdout).toContain('agent.run.started')
+      expect(result.stdout).toContain(runId)
+    } finally {
+      cwdSpy.mockRestore()
+    }
+  })
+
   it('trace report includes descendant sub-agent runs in one HTML', async () => {
     fs.mkdirSync(path.join(tmpDir, '.milkie', 'runs'), { recursive: true })
     const parent = 'parent-run'
