@@ -92,7 +92,13 @@ export function createServeServer(opts: ServeOptions): Server {
       'cache-control': 'no-cache',
       'connection':    'keep-alive',
     })
+    // #140: the run's id, so alfred can locate the recorded trace
+    // (`<dataDir>/runs/<runId>.jsonl`). Success reads it from the AgentResult;
+    // a failed run has no result, so capture it from the first broadcast event
+    // (the top-level run's `agent.run.started` fires before any sub-agent).
+    let capturedRunId: string | undefined
     const unsub = broadcaster.subscribe(contextId, ev => {
+      capturedRunId ??= ev.runId
       if (STREAM_EVENT_WHITELIST.has(ev.type)) writeSSE(res, ev.type, ev.payload)
     })
     // If the client disconnects mid-run, release the subscription immediately
@@ -104,11 +110,11 @@ export function createServeServer(opts: ServeOptions): Server {
       const result = await run(e => {
         if (e.type === 'message_delta') writeSSE(res, 'message_delta', e.data)
       })
-      writeSSE(res, 'agent.run.completed', { status: result.status, output: result.output })
+      writeSSE(res, 'agent.run.completed', { status: result.status, output: result.output, runId: result.agentRunId })
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       writeSSE(res, 'error', { message })
-      writeSSE(res, 'agent.run.completed', { status: 'error', output: '', error: message })
+      writeSSE(res, 'agent.run.completed', { status: 'error', output: '', error: message, runId: capturedRunId })
     } finally {
       unsub()
       if (!res.writableEnded && !res.destroyed) res.end()
