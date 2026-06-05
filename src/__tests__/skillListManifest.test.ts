@@ -78,6 +78,43 @@ describe('skill_list 默认 handler 读 manifest (#139)', () => {
     expect(warnSpy).toHaveBeenCalled()
   })
 
+  it('合法 JSON 但顶层为 null → 不抛、degrade false + WARNING（契约点2：绝不抛给 LLM）', async () => {
+    const p = writeManifest('null.json', 'null')
+    process.env[ENV_KEY] = p
+    // 关键：handler 必须 resolve（不能 reject/throw），否则会成为 tool-call error 丢给 turn loop
+    const out = await skillList.handler({}, ctx) as { skills: unknown[]; registryConfigured: boolean }
+    expect(out.skills).toEqual([])
+    expect(out.registryConfigured).toBe(false)
+    expect(warnSpy).toHaveBeenCalled()
+  })
+
+  it('合法 JSON 但缺 skills 键（{}）→ degrade false + WARNING（不静默 true 空表，避免重新引入误导性空）', async () => {
+    const p = writeManifest('noskills.json', JSON.stringify({}))
+    process.env[ENV_KEY] = p
+    const out = await skillList.handler({}, ctx) as { skills: unknown[]; registryConfigured: boolean }
+    expect(out.skills).toEqual([])
+    expect(out.registryConfigured).toBe(false)
+    expect(warnSpy).toHaveBeenCalled()
+  })
+
+  it('skills 非数组（{"skills":"x"}）→ degrade false + WARNING', async () => {
+    const p = writeManifest('nonarray.json', JSON.stringify({ skills: 'x' }))
+    process.env[ENV_KEY] = p
+    const out = await skillList.handler({}, ctx) as { skills: unknown[]; registryConfigured: boolean }
+    expect(out.skills).toEqual([])
+    expect(out.registryConfigured).toBe(false)
+    expect(warnSpy).toHaveBeenCalled()
+  })
+
+  it('合法空数组（{"skills":[]}）→ registryConfigured:true，宿主显式声明零技能，不 WARNING', async () => {
+    const p = writeManifest('empty.json', JSON.stringify({ skills: [] }))
+    process.env[ENV_KEY] = p
+    const out = await skillList.handler({}, ctx) as { skills: unknown[]; registryConfigured: boolean }
+    expect(out.skills).toEqual([])
+    expect(out.registryConfigured).toBe(true)
+    expect(warnSpy).not.toHaveBeenCalled()
+  })
+
   it('单条目 malformed（缺 name/description）→ 跳过该条 + WARNING，其余正常返回', async () => {
     const p = writeManifest('partial.json', JSON.stringify({
       skills: [
