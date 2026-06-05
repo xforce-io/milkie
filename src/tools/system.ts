@@ -35,10 +35,19 @@ function loadSkillManifest(): { skills: SkillEntry[]; registryConfigured: boolea
     return { skills: [], registryConfigured: false }
   }
 
-  const raw = (parsed as { skills?: unknown }).skills
-  const entries = Array.isArray(raw) ? raw : []
+  // 顶层结构访问必须容错：JSON.parse('null') 返回 null、文件可能是数组/标量。
+  // 任何取不出合法 skills 数组的情况都 degrade 成 registryConfigured:false（而非
+  // true+空表）—— 后者会让 LLM 读成「registry 说我零技能」，正是 #139 要消灭的误导性空。
+  const skillsRaw = (parsed && typeof parsed === 'object' && !Array.isArray(parsed))
+    ? (parsed as { skills?: unknown }).skills
+    : undefined
+  if (!Array.isArray(skillsRaw)) {
+    console.warn(`[milkie] skill_list: ${SKILL_MANIFEST_ENV}=${manifestPath} parsed but has no valid 'skills' array; treating as unconfigured`)
+    return { skills: [], registryConfigured: false }
+  }
+
   const skills: SkillEntry[] = []
-  for (const s of entries) {
+  for (const s of skillsRaw) {
     if (isValidSkill(s)) skills.push(s)               // 原样透传，含 dir/version 等附加字段
     else console.warn(`[milkie] skill_list: skipping malformed skill entry (missing name/description): ${JSON.stringify(s)}`)
   }
