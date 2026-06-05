@@ -1,5 +1,8 @@
 import http from 'http'
-import { createServeServer } from '../cli/serve'
+import fs from 'fs'
+import path from 'path'
+import os from 'os'
+import { createServeServer, buildServeStores } from '../cli/serve'
 import { Milkie } from '../runtime/Milkie'
 import { MemoryStore } from '../store/MemoryStore'
 import { MemoryEventStore } from '../trace/MemoryEventStore'
@@ -270,6 +273,96 @@ describe('createServeServer', () => {
     const terminal = events.find(e => e.event === 'agent.run.completed')
     expect(terminal).toBeDefined()
     expect((terminal!.data as { status: string }).status).toBe('error')
+  })
+
+  // ─────────────────────── #140 terminal frame carries runId ───────────────────────
+  // The completed terminal frame must expose the run's runId so an external
+  // (alfred) provider can locate the recorded trace (`<dataDir>/runs/<runId>.jsonl`,
+  // read by `milkie trace <runId>`). Assertion strength: the emitted runId, fed
+  // back into readByRunId (what `trace` does), resolves to this run's events.
+
+  it('POST /chat completed terminal frame carries a runId that resolves to the recorded run', async () => {
+    const { milkie, agentId, broadcaster } = buildTextMilkie(['Hello, ', 'world!'])
+    const port = await listen(createServeServer({ milkie, agentId, broadcaster }))
+    const events = await sse(port, 'POST', '/chat', { contextId: 'rid-chat', input: 'hi' }).done
+
+    const terminal = events.find(e => e.event === 'agent.run.completed')!
+    const runId = (terminal.data as { runId?: string }).runId
+    expect(typeof runId).toBe('string')
+    expect(runId!.length).toBeGreaterThan(0)
+
+    const recorded = await broadcaster.readByRunId(runId!)
+    expect(recorded.length).toBeGreaterThan(0)
+    expect(recorded.some(ev => ev.type === 'agent.run.started')).toBe(true)
+  })
+
+  it('POST /chat error terminal frame still carries a runId (failed runs stay traceable)', async () => {
+    const { milkie, agentId, broadcaster } = buildErrorMilkie()
+    const port = await listen(createServeServer({ milkie, agentId, broadcaster }))
+    const events = await sse(port, 'POST', '/chat', { contextId: 'rid-err', input: 'go' }).done
+
+    const terminal = events.find(e => e.event === 'agent.run.completed')!
+    expect((terminal.data as { status: string }).status).toBe('error')
+    const runId = (terminal.data as { runId?: string }).runId
+    expect(typeof runId).toBe('string')
+    expect(runId!.length).toBeGreaterThan(0)
+
+    const recorded = await broadcaster.readByRunId(runId!)
+    expect(recorded.length).toBeGreaterThan(0)
+  })
+
+  it('POST /resume completed terminal frame carries a runId that resolves to the run', async () => {
+    const { milkie, agentId, broadcaster } = buildSteppingMilkie({ totalSteps: 4, stepMs: 40 })
+    const port = await listen(createServeServer({ milkie, agentId, broadcaster }))
+
+    const { done: chatDone } = sse(port, 'POST', '/chat', { contextId: 'rid-res', input: 'go' })
+    await new Promise(r => setTimeout(r, 70))
+    await request(port, 'POST', '/interrupt', { contextId: 'rid-res' })
+    await chatDone
+
+    const resumeEvents = await sse(port, 'POST', '/resume', { contextId: 'rid-res' }).done
+    const terminal = resumeEvents.find(e => e.event === 'agent.run.completed')!
+    expect((terminal.data as { status: string }).status).toBe('completed')
+    const runId = (terminal.data as { runId?: string }).runId
+    expect(typeof runId).toBe('string')
+    expect(runId!.length).toBeGreaterThan(0)
+
+    const recorded = await broadcaster.readByRunId(runId!)
+    expect(recorded.length).toBeGreaterThan(0)
+  })
+
+  it('POST /chat terminal frame runId names the on-disk trace file (end-to-end: what `milkie trace <runId>` reads)', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'milkie-runid-'))
+    try {
+      const { stateStore, eventStore } = await buildServeStores({ stateStore: 'sqlite', dataDir: tmpDir })
+      const broadcaster = new BroadcastingEventStore(eventStore)
+      const gateway: IModelGateway = {
+        async complete(_req: ModelRequest): Promise<ModelResponse> {
+          return { content: [{ type: 'text', text: 'hi' }], toolCalls: [], finishReason: 'end_turn' }
+        },
+        async *stream(_req: ModelRequest): AsyncIterable<ModelEvent> { yield { type: 'message_delta', data: { text: 'hi' } } },
+      }
+      const agent: AgentConfig = {
+        agentId: 'echo', version: '1.0.0', systemPrompt: 'echo',
+        fsm: { states: [{ name: 'react', type: 'llm' }] },
+        model: { provider: 'stub', model: 'stub', adapter: 'stub' },
+      }
+      const milkie = new Milkie({ stateStore, eventStore: broadcaster, gateway })
+      milkie.registerAgent(agent)
+      const port = await listen(createServeServer({ milkie, agentId: 'echo', broadcaster }))
+
+      const events = await sse(port, 'POST', '/chat', { contextId: 'disk', input: 'hi' }).done
+      const terminal = events.find(e => e.event === 'agent.run.completed')!
+      const runId = (terminal.data as { runId?: string }).runId
+      expect(typeof runId).toBe('string')
+
+      // The exact file `milkie trace report <runId>` opens — proves the cross-process contract.
+      expect(fs.existsSync(path.join(tmpDir, 'runs', `${runId}.jsonl`))).toBe(true)
+      const maybeClose = (stateStore as unknown as { close?: () => void }).close
+      if (typeof maybeClose === 'function') maybeClose.call(stateStore)
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true })
+    }
   })
 
   it('a client disconnecting mid-stream does not crash the server', async () => {
