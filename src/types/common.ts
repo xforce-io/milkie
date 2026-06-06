@@ -31,6 +31,31 @@ export interface AgentInvokeRequest {
   onModelEvent?: (e: ModelEvent) => void
 }
 
+export interface ProjectionBound {
+  /** Keep the newest N projections for the target context. Defaults to 5. */
+  maxCount?: number
+  /** Optional per-projection expiration, in seconds. */
+  ttl?:      number
+}
+
+export interface ContextProjection {
+  sourceRunId:     string
+  sourceContextId?: string
+  displayText:     string
+  summary?:        string
+  deliveredAt:     number
+  attachedAt:      number
+}
+
+export interface AttachProjectionRequest {
+  sourceRunId:      string
+  sourceContextId?: string
+  displayText:      string
+  summary?:         string
+  deliveredAt?:     number
+  bound?:           ProjectionBound
+}
+
 export interface AgentResult {
   agentRunId:  string
   contextId:   string

@@ -53,6 +53,9 @@ export type {
 export type {
   AgentInvokeRequest,
   AgentResult,
+  AttachProjectionRequest,
+  ContextProjection,
+  ProjectionBound,
   TaskResult,
   Message,
   MessageContent,

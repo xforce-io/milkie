@@ -15,6 +15,7 @@ export type SystemSection =
 
 export type MessageSection =
   | 'history'
+  | 'external-context'  // #146: delivered external run projections (read-side, not history)
   | 'session-context'   // #83: persistent session vars (session-stable, between history and turn-context)
   | 'turn-context'   // #82: per-turn injected variables (volatile, between history and current-turn)
   | 'current-turn'
