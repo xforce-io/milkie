@@ -71,6 +71,33 @@ describe('built-in run_command tool (#134)', () => {
     expect(out.stdout).toContain('chars dropped')
   })
 
+  // #148: lazy-register stdout as a citable object so any shell-fetched evidence
+  // (file/network/db) can be cited via the framework `cite` tool.
+  it('lazy-registers a shell:stdout object for non-empty stdout and surfaces objectId first', async () => {
+    const registered: Array<{ type: string; meta?: Record<string, unknown> }> = []
+    const created: unknown[] = []
+    const ctx = {
+      registerObject: (spec: { type: string; meta?: Record<string, unknown> }) => { registered.push(spec); return { objectId: `obj:reg:${registered.length}` } },
+      createObject:   (spec: unknown) => { created.push(spec); return { objectId: 'obj:eager' } },
+    } as unknown as ToolContext
+    const out = (await runCmd.handler({ command: 'echo evidence-xyz' }, ctx)) as RunCommandOutput & { objectId?: string }
+    expect(out.objectId).toBe('obj:reg:1')
+    expect(registered).toHaveLength(1)
+    expect(registered[0]!.type).toBe('shell:stdout')
+    expect(created).toHaveLength(0) // lazy: registerObject, not eager createObject
+    expect(out.stdout).toContain('evidence-xyz')
+  })
+
+  it('does not register an object when stdout is empty (e.g. stderr-only)', async () => {
+    const registered: unknown[] = []
+    const ctx = {
+      registerObject: (spec: unknown) => { registered.push(spec); return { objectId: 'obj:x' } },
+    } as unknown as ToolContext
+    const out = (await runCmd.handler({ command: 'echo oops 1>&2' }, ctx)) as RunCommandOutput & { objectId?: string }
+    expect(registered).toHaveLength(0)
+    expect(out.objectId).toBeUndefined()
+  })
+
   it('handler is invokable as a ToolDefinition (ctx not required)', async () => {
     const out = (await runCmd.handler({ command: 'echo viahandler' }, {} as ToolContext)) as RunCommandOutput
     expect(out.stdout).toContain('viahandler')

@@ -81,9 +81,12 @@ export const execTools: ToolDefinition[] = [
   {
     name:        'run_command',
     description:
-      'Execute a shell command in a subprocess and return { stdout, stderr, exitCode, timedOut, truncated }. ' +
+      'Execute a shell command in a subprocess and return { objectId?, stdout, stderr, exitCode, timedOut, truncated }. ' +
       'Use this to run skill scripts (e.g. `python skills/<name>/scripts/x.py`), CLIs (`inv`, `codex-cli`), ' +
-      'and other tools. Output over 30000 chars per stream is truncated (head+tail kept).',
+      'and other tools. Output over 30000 chars per stream is truncated (head+tail kept). ' +
+      'When stdout is non-empty the result carries an `objectId` for that output — to source a claim from this ' +
+      'fetched data (a file you cat-ed, an API/DB you queried, a page you scraped), pass that objectId to the ' +
+      'cite tool. Never write provenance like "(source:...)" in prose; cite the objectId instead.',
     inputSchema: {
       type:       'object',
       properties: {
@@ -93,6 +96,23 @@ export const execTools: ToolDefinition[] = [
       },
       required:   ['command'],
     },
-    handler: async (input) => runCommand(input as RunCommandInput),
+    handler: async (input, ctx) => {
+      const out = await runCommand(input as RunCommandInput)
+      // #148: lazy-register non-empty stdout as a citable object (like grep) so any
+      // shell-fetched evidence (file / network / db) can be sourced via the `cite`
+      // tool — no per-skill refactoring. registerObject is lazy (no event); the
+      // object is promoted only when the agent actually cites it, so routine
+      // commands (ls/mkdir) never flood the lineage graph. objectId is placed
+      // FIRST so it survives the result-truncation strategy — the agent must see
+      // it to cite. Stdout is a genuine tool-call record (origin invariant holds).
+      if (ctx?.registerObject && out.stdout) {
+        const { objectId } = ctx.registerObject({
+          type: 'shell:stdout',
+          meta: { command: (input as RunCommandInput).command, exitCode: out.exitCode },
+        })
+        return { objectId, ...out }
+      }
+      return out
+    },
   },
 ]
