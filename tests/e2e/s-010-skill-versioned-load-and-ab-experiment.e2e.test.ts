@@ -191,7 +191,7 @@ describe('Case 5: Skill A/B 版本对比', () => {
     expect(t2.resolvedManifest?.agentVersion).toBe('1.2.0')
     expect(t1.resolvedManifest?.skills['research']?.version).toBe('1.0.0')
     expect(t2.resolvedManifest?.skills['research']?.version).toBe('1.1.0')
-    expect(t1.resolvedManifest?.model.model).toBe(t2.resolvedManifest?.model.model)
+    expect(t1.resolvedManifest?.model?.model).toBe(t2.resolvedManifest?.model?.model)
   })
 
   live('可构造 Experiment 对象用于后续分析', () => {

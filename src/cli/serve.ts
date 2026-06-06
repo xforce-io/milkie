@@ -8,7 +8,7 @@ import { JsonlEventStore } from '../trace/JsonlEventStore.js'
 import path from 'path'
 import type { IStateStore } from '../types/store.js'
 import type { IEventStore } from '../trace/EventStore.js'
-import type { AgentResult, JSONValue, Message } from '../types/common.js'
+import type { AgentResult, AttachProjectionRequest, JSONValue, Message } from '../types/common.js'
 import type { ModelEvent, ModelResponse } from '../types/model.js'
 import type { PortableSession } from '../runtime/PortableSession.js'
 
@@ -27,6 +27,8 @@ import type { PortableSession } from '../runtime/PortableSession.js'
  *   POST /session/export { contextId }        → PortableSession JSON (#124)
  *   POST /session/import { session }          → { contextId } (#124)
  *   POST /session/history { contextId }       → { messages: Message[] } full transcript (#128)
+ *   POST /projection/attach { contextId, sourceRunId, displayText, ... } → { projection } (#146)
+ *   POST /projection/list { contextId }       → { projections } (#146)
  */
 export interface ServeOptions {
   milkie:      Milkie
@@ -167,6 +169,28 @@ export function createServeServer(opts: ServeOptions): Server {
     sendJson(res, 200, { vars })
   }
 
+  // #146: attach/list delivered external context projections. This is the HTTP
+  // sidecar surface alfred can call when it delivers a background run output to
+  // a channel; the next /chat for that context sees a bounded read-side region.
+  async function handleProjectionAttach(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const body = JSON.parse(await readBody(req)) as AttachProjectionRequest & { contextId?: string }
+    const { contextId, ...projectionRequest } = body
+    if (!contextId || !projectionRequest.sourceRunId || !projectionRequest.displayText) {
+      return sendJson(res, 400, { error: 'contextId, sourceRunId and displayText are required' })
+    }
+    if (projectionRequest.bound?.maxCount !== undefined && projectionRequest.bound.maxCount < 1) {
+      return sendJson(res, 400, { error: 'bound.maxCount must be at least 1' })
+    }
+    const projection = await milkie.attachProjection(contextId, projectionRequest)
+    sendJson(res, 200, { projection })
+  }
+
+  async function handleProjectionList(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const { contextId } = JSON.parse(await readBody(req)) as { contextId?: string }
+    if (!contextId) return sendJson(res, 400, { error: 'contextId is required' })
+    sendJson(res, 200, { projections: await milkie.listContextProjections(contextId) })
+  }
+
   // #137: read-only run-state of a context (is it interrupt-paused / resumable),
   // projected from the latest checkpoint. Lets an external provider gate
   // resume-vs-stop without driving a turn.
@@ -254,6 +278,8 @@ export function createServeServer(opts: ServeOptions): Server {
         if (req.method === 'POST' && route === '/context/get')  return await handleContextGet(req, res)
         if (req.method === 'POST' && route === '/context/list') return await handleContextList(req, res)
         if (req.method === 'POST' && route === '/context/state') return await handleContextState(req, res)
+        if (req.method === 'POST' && route === '/projection/attach') return await handleProjectionAttach(req, res)
+        if (req.method === 'POST' && route === '/projection/list') return await handleProjectionList(req, res)
         if (req.method === 'POST' && route === '/llm')            return await handleLlm(req, res)
         if (req.method === 'POST' && route === '/session/history') return await handleSessionHistory(req, res)
         if (req.method === 'POST' && route === '/session/export') return await handleSessionExport(req, res)

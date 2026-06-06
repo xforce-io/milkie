@@ -415,6 +415,61 @@ describe('createServeServer', () => {
     expect(res.status).toBe(400)
   })
 
+  it('POST /projection/attach then /projection/list exposes delivered context projections', async () => {
+    const { milkie, agentId, broadcaster } = buildTextMilkie(['x'])
+    const port = await listen(createServeServer({ milkie, agentId, broadcaster }))
+
+    const attach = await request(port, 'POST', '/projection/attach', {
+      contextId:       'channel-c1',
+      sourceRunId:     'job-run-1',
+      sourceContextId: 'job-context',
+      displayText:     'Nightly report delivered to the channel.',
+      summary:         'nightly report',
+      deliveredAt:     12345,
+      bound:           { maxCount: 5 },
+    })
+    expect(attach.status).toBe(200)
+    expect(attach.json).toMatchObject({
+      projection: {
+        sourceRunId:     'job-run-1',
+        sourceContextId: 'job-context',
+        displayText:     'Nightly report delivered to the channel.',
+        summary:         'nightly report',
+        deliveredAt:     12345,
+      },
+    })
+
+    const list = await request(port, 'POST', '/projection/list', { contextId: 'channel-c1' })
+    expect(list.status).toBe(200)
+    expect(list.json).toMatchObject({
+      projections: [
+        {
+          sourceRunId: 'job-run-1',
+          displayText: 'Nightly report delivered to the channel.',
+        },
+      ],
+    })
+  })
+
+  it('POST /projection/attach without contextId returns 400', async () => {
+    const { milkie, agentId, broadcaster } = buildTextMilkie(['x'])
+    const port = await listen(createServeServer({ milkie, agentId, broadcaster }))
+    const res = await request(port, 'POST', '/projection/attach', { sourceRunId: 'r1', displayText: 'x' })
+    expect(res.status).toBe(400)
+  })
+
+  it('POST /projection/attach with maxCount < 1 returns 400', async () => {
+    const { milkie, agentId, broadcaster } = buildTextMilkie(['x'])
+    const port = await listen(createServeServer({ milkie, agentId, broadcaster }))
+    const res = await request(port, 'POST', '/projection/attach', {
+      contextId:   'c1',
+      sourceRunId: 'r1',
+      displayText: 'x',
+      bound:       { maxCount: 0 },
+    })
+    expect(res.status).toBe(400)
+  })
+
   // ─────────────────────── #137 /context/state ───────────────────────
 
   it('POST /context/state for a never-run context reports not paused / not resumable', async () => {

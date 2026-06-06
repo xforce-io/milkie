@@ -5,7 +5,14 @@ import matter from 'gray-matter'
 import fs from 'fs'
 import path from 'path'
 import type { AgentConfig, FSMDefinition, ModelConfig } from '../types/agent.js'
-import type { AgentInvokeRequest, AgentResult, JSONValue, Message } from '../types/common.js'
+import type {
+  AgentInvokeRequest,
+  AgentResult,
+  AttachProjectionRequest,
+  ContextProjection,
+  JSONValue,
+  Message,
+} from '../types/common.js'
 import type { ChildAgentRecord, IStateStore, AgentCheckpoint } from '../types/store.js'
 import type { ToolDefinition } from '../types/tool.js'
 import type { IModelGateway, ModelEvent, ModelRequest, ModelResponse } from '../types/model.js'
@@ -334,6 +341,9 @@ export class Milkie {
 
     // #83: snapshot this context's persistent vars at invoke entry (next-invoke visibility).
     const sessionVariables = await this.listContextVars(contextId)
+    // #146: snapshot delivered projections at invoke entry; later attaches are
+    // visible on the next invoke, matching #83's isolation semantics.
+    const externalProjections = await this.listContextProjections(contextId)
 
     const runtime = new AgentRuntime({
       config: runtimeConfig,
@@ -341,6 +351,7 @@ export class Milkie {
       input:           request.input,
       variables:       request.variables,  // #82: per-turn variables → turn-context region
       sessionVariables,                    // #83: persistent session vars → session-context region
+      externalProjections,                 // #146: external delivered reports → external-context region
       contextId,
       agentRunId,
       stateStore:      this.stateStore,
@@ -778,6 +789,62 @@ export class Milkie {
     return out
   }
 
+  // ---- #146: delivered external context projections ----
+
+  private projectionPrefix(contextId: string): string {
+    return `context:${contextId}:projection:`
+  }
+
+  private projectionKey(contextId: string, sourceRunId: string): string {
+    return `${this.projectionPrefix(contextId)}${sourceRunId}`
+  }
+
+  async attachProjection(contextId: string, request: AttachProjectionRequest): Promise<ContextProjection> {
+    if (!request.sourceRunId) throw new Error('sourceRunId is required')
+    if (!request.displayText) throw new Error('displayText is required')
+    if (request.bound?.maxCount !== undefined && request.bound.maxCount < 1) {
+      throw new Error('bound.maxCount must be at least 1')
+    }
+
+    const projection: ContextProjection = {
+      sourceRunId: request.sourceRunId,
+      ...(request.sourceContextId ? { sourceContextId: request.sourceContextId } : {}),
+      displayText: request.displayText,
+      ...(request.summary ? { summary: request.summary } : {}),
+      deliveredAt: request.deliveredAt ?? Date.now(),
+      attachedAt:  Date.now(),
+    }
+
+    await this.stateStore.set(
+      this.projectionKey(contextId, request.sourceRunId),
+      projection,
+      request.bound?.ttl,
+    )
+
+    await this.trimContextProjections(contextId, request.bound?.maxCount ?? 5)
+    return projection
+  }
+
+  async listContextProjections(contextId: string): Promise<ContextProjection[]> {
+    const entries = await this.stateStore.list(this.projectionPrefix(contextId))
+    return entries
+      .map(e => e.value as ContextProjection)
+      .sort(byProjectionTime)
+  }
+
+  private async trimContextProjections(contextId: string, maxCount: number): Promise<void> {
+    if (maxCount < 1) return
+    const entries = await this.stateStore.list(this.projectionPrefix(contextId))
+    const sorted = entries
+      .map(e => ({ key: e.key, value: e.value as ContextProjection }))
+      .sort((a, b) => byProjectionTime(a.value, b.value))
+    const excess = sorted.length - maxCount
+    if (excess <= 0) return
+    for (const item of sorted.slice(0, excess)) {
+      await this.stateStore.delete(item.key)
+    }
+  }
+
   private buildResolvedManifest(config: AgentConfig): ResolvedManifest {
     const tools: Record<string, { version: string }> = {}
     for (const tool of this.extraTools) {
@@ -861,4 +928,10 @@ export class Milkie {
       dispatch:   data['dispatch']   as 'local' | 'queue' | undefined,
     }
   }
+}
+
+function byProjectionTime(a: ContextProjection, b: ContextProjection): number {
+  if (a.deliveredAt !== b.deliveredAt) return a.deliveredAt - b.deliveredAt
+  if (a.attachedAt !== b.attachedAt) return a.attachedAt - b.attachedAt
+  return a.sourceRunId.localeCompare(b.sourceRunId)
 }

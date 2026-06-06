@@ -1,7 +1,7 @@
 import { v4 as uuidv4 } from 'uuid'
 import { createHash } from 'crypto'
 import type { AgentConfig, FSMState } from '../types/agent.js'
-import type { AgentResult } from '../types/common.js'
+import type { AgentResult, ContextProjection } from '../types/common.js'
 import { MaxIterationsError } from '../types/common.js'
 import type { IStateStore, AgentCheckpoint, ChildAgentRecord } from '../types/store.js'
 import type { ITrajectoryRecorder, Span } from '../types/trajectory.js'
@@ -17,6 +17,7 @@ import {
   makeCurrentTurnRegion,
   makeTurnContextRegion,
   makeSessionContextRegion,
+  makeExternalContextRegion,
   makeScratchpadAssistantRegion,
   makeScratchpadToolResultRegion,
   makeStateInstructionsRegion,
@@ -61,6 +62,8 @@ export interface AgentRuntimeOptions {
   /** #83: persistent session variables (read from store by Milkie.invoke), rendered
    *  into the session-stable session-context region. turn `variables` override same keys. */
   sessionVariables?: Record<string, JSONValue>
+  /** #146: delivered external run projections, rendered read-only for this turn. */
+  externalProjections?: ContextProjection[]
   stateStore:        IStateStore
   recorder:          ITrajectoryRecorder
   ioPort:            IIOPort
@@ -110,6 +113,7 @@ export class AgentRuntime {
   private readonly goal:             string
   private readonly variables?:       Record<string, JSONValue>  // #82: per-turn injected vars
   private readonly sessionVariables?: Record<string, JSONValue>  // #83: persistent session vars
+  private readonly externalProjections?: ContextProjection[]  // #146: read-side delivered projections
   readonly contextId:        string
   private readonly agentRunId:       string
   private readonly parentId?:        string
@@ -166,6 +170,7 @@ export class AgentRuntime {
     this.goal            = opts.goal
     this.variables       = opts.variables
     this.sessionVariables = opts.sessionVariables
+    this.externalProjections = opts.externalProjections
     this.contextId       = opts.contextId ?? this.ioPort.uuid()
     this.agentRunId      = opts.agentRunId ?? this.ioPort.uuid()
     this.parentId        = opts.parentId
@@ -502,6 +507,13 @@ export class AgentRuntime {
     if (Object.keys(effective).length > 0) {
       this.regions.set('session-context', makeSessionContextRegion(effective))
     }
+  }
+
+  // #146: inject delivered external run outputs as read-only context for this
+  // turn. The region is turn-local, so it never crystallizes into history.
+  private setExternalContext(): void {
+    if (!this.externalProjections || this.externalProjections.length === 0) return
+    this.regions.set('external-context', makeExternalContextRegion(this.externalProjections))
   }
 
   private getCurrentTurn(): string | null {
@@ -945,6 +957,7 @@ export class AgentRuntime {
 
     const turnInput = `Goal: ${this.goal}\n\n${input}`
     this.setCurrentTurn(turnInput)
+    this.setExternalContext()
     this.setSessionContext()
     this.setTurnContext()
     this.turnNumber++
