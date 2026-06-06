@@ -854,3 +854,46 @@ describe('#83 session-context variables', () => {
     expect(req.system ?? '').not.toContain('workspace_instructions')
   })
 })
+
+// #148 e2e:agent 经 run_command 取证 → 该 stdout 铸的 shell:stdout 对象可被 cite
+// resolve(端到端:run_command 铸对象 → resolveObject → cite 记 cites 关系)。
+describe('#148 run_command output is citable end-to-end', () => {
+  class CiteRunCommandGateway implements IModelGateway {
+    private cited = false
+    async complete(req: ModelRequest): Promise<ModelResponse> {
+      const blob = JSON.stringify(req)
+      const m = blob.match(/(obj:sha256:[0-9a-f]+)/)  // run_command 铸的 objectId(tool_result 内被转义,直接配值)
+      if (!m) return toolCallResponse('tc-run', 'run_command', { command: 'echo EVIDENCE-148' })
+      if (!this.cited) {
+        this.cited = true
+        return toolCallResponse('tc-cite', 'cite', { claim: 'evidence is 148', objectId: m[1] })
+      }
+      return textResponse('done')
+    }
+    async *stream(_req: ModelRequest): AsyncIterable<never> { yield* [] }
+  }
+
+  it('run_command stdout objectId resolves through cite → records a cites relation', async () => {
+    const stateStore = new MemoryStore()
+    const eventStore = new MemoryEventStore()
+    const milkie = new Milkie({
+      stateStore,
+      eventStore,
+      traceObjectStore: new MemoryTraceObjectStore(),
+      gateway: new CiteRunCommandGateway(),
+    })
+    milkie.registerAgent(makeConfig({ fsm: { states: [{ name: 'react', type: 'llm', max_iterations: 5 }] } }))
+
+    const result = await milkie.invoke({
+      agentId: 'test-agent', goal: 'verify', input: 'cite the fetched evidence', contextId: 'ctx-cite-148',
+    })
+    const events = await eventStore.readByRunId(result.agentRunId)
+
+    // cite 成功 = 记录了一条 cites 关系(说明 run_command 铸的 objectId 被 resolve)
+    const rels = events.filter(e => e.type === 'relation.created').map(e => e.payload as { type?: string })
+    expect(rels.some(p => p.type === 'cites')).toBe(true)
+    // 且确有 shell:stdout 对象被 promote(object.created)
+    const objs = events.filter(e => e.type === 'object.created').map(e => e.payload as { type?: string })
+    expect(objs.some(p => p.type === 'shell:stdout')).toBe(true)
+  })
+})
