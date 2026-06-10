@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process'
+import { sha256Hex } from '../trace/hash.js'
 import type { ToolDefinition } from '../types/tool.js'
 
 // Built-in shell/exec tool (#134). Lets an agent run subprocess commands —
@@ -106,8 +107,12 @@ export const execTools: ToolDefinition[] = [
       // FIRST so it survives the result-truncation strategy — the agent must see
       // it to cite. Stdout is a genuine tool-call record (origin invariant holds).
       if (ctx?.registerObject && out.stdout) {
+        // #150: hash the capped stdout (what the trace's tool.responded record holds)
+        // so the objectId is content-bound — same command re-run with different
+        // output mints a different object instead of colliding.
         const { objectId } = ctx.registerObject({
           type: 'shell:stdout',
+          hash: sha256Hex(out.stdout),
           meta: { command: (input as RunCommandInput).command, exitCode: out.exitCode },
         })
         return { objectId, ...out }
