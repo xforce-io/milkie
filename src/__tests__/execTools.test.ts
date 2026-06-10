@@ -2,6 +2,7 @@ import { mkdtemp, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execTools, runCommand, type RunCommandOutput } from '../tools/exec'
+import { sha256Hex } from '../trace/hash'
 import type { ToolContext } from '../types/tool'
 
 const runCmd = execTools.find(t => t.name === 'run_command')!
@@ -86,6 +87,50 @@ describe('built-in run_command tool (#134)', () => {
     expect(registered[0]!.type).toBe('shell:stdout')
     expect(created).toHaveLength(0) // lazy: registerObject, not eager createObject
     expect(out.stdout).toContain('evidence-xyz')
+  })
+
+  // #150: the registered spec must carry a content hash of the (capped) stdout so the
+  // objectId is content-bound — same command re-run with different output must not
+  // collide on the same objectId, and the object is byte-bound to the trace record.
+  it('registers shell:stdout with a content hash of the capped stdout', async () => {
+    const registered: Array<{ type: string; hash?: string; meta?: Record<string, unknown> }> = []
+    const ctx = {
+      registerObject: (spec: { type: string; hash?: string; meta?: Record<string, unknown> }) => { registered.push(spec); return { objectId: 'obj:x' } },
+    } as unknown as ToolContext
+    const out = (await runCmd.handler({ command: 'echo hash-me' }, ctx)) as RunCommandOutput
+    expect(registered).toHaveLength(1)
+    expect(registered[0]!.hash).toBe(sha256Hex(out.stdout))
+  })
+
+  it('same command, different stdout → different content hash (no objectId collision)', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'milkie-exec-'))
+    try {
+      const registered: Array<{ hash?: string }> = []
+      const ctx = {
+        registerObject: (spec: { hash?: string }) => { registered.push(spec); return { objectId: 'obj:x' } },
+      } as unknown as ToolContext
+      await writeFile(join(dir, 'data.txt'), 'first fetch')
+      await runCmd.handler({ command: 'cat data.txt', cwd: dir }, ctx)
+      await writeFile(join(dir, 'data.txt'), 'second fetch — content changed')
+      await runCmd.handler({ command: 'cat data.txt', cwd: dir }, ctx)
+      expect(registered).toHaveLength(2)
+      expect(registered[0]!.hash).toBeTruthy()
+      expect(registered[0]!.hash).not.toBe(registered[1]!.hash)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('hashes the capped stdout (matches the trace record bytes, not the raw stream)', async () => {
+    const registered: Array<{ hash?: string }> = []
+    const ctx = {
+      registerObject: (spec: { hash?: string }) => { registered.push(spec); return { objectId: 'obj:x' } },
+    } as unknown as ToolContext
+    const out = (await runCmd.handler({
+      command: `${NODE} -e "process.stdout.write('A'.repeat(50)+'B'.repeat(100000)+'Z'.repeat(50))"`,
+    }, ctx)) as RunCommandOutput
+    expect(out.truncated).toBe(true)
+    expect(registered[0]!.hash).toBe(sha256Hex(out.stdout)) // out.stdout is the capped text
   })
 
   it('does not register an object when stdout is empty (e.g. stderr-only)', async () => {
