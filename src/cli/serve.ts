@@ -11,6 +11,7 @@ import type { IEventStore } from '../trace/EventStore.js'
 import type { AgentResult, AttachProjectionRequest, JSONValue, Message } from '../types/common.js'
 import type { ModelEvent, ModelResponse } from '../types/model.js'
 import type { PortableSession } from '../runtime/PortableSession.js'
+import { getLogger, type ServiceLogger } from '../logging/logger.js'
 
 /**
  * #86: `milkie serve` HTTP + SSE sidecar. Built (not started) by this factory so
@@ -35,6 +36,8 @@ export interface ServeOptions {
   agentId:     string
   /** The Milkie's eventStore, wrapped so persistent events fan out by contextId. */
   broadcaster: BroadcastingEventStore
+  /** #79：服务日志 logger；缺省用进程级 getLogger()。测试注入内存 sink。 */
+  logger?:     ServiceLogger
 }
 
 /**
@@ -77,6 +80,7 @@ function outputText(result: ModelResponse): string {
 
 export function createServeServer(opts: ServeOptions): Server {
   const { milkie, agentId, broadcaster } = opts
+  const log = (opts.logger ?? getLogger()).child({ mod: 'server' })
 
   /**
    * Drive one turn (invoke or resume) and stream it as SSE. The stream forwards
@@ -266,6 +270,16 @@ export function createServeServer(opts: ServeOptions): Server {
   }
 
   return http.createServer((req, res) => {
+    // #79：每请求一条 wide event。挂在 res 'finish' 上，SSE 长连接记录的是完整流时长。
+    const startedAt = Date.now()
+    res.on('finish', () => {
+      log.info({
+        method: req.method,
+        path:   new URL(req.url ?? '/', 'http://localhost').pathname,
+        status: res.statusCode,
+        ms:     Date.now() - startedAt,
+      }, 'http request')
+    })
     void (async () => {
       try {
         const url = new URL(req.url ?? '/', 'http://localhost')
@@ -300,18 +314,21 @@ export function createServeServer(opts: ServeOptions): Server {
  * discover the port immediately even though this command never "returns" until
  * shutdown.
  */
-export function runServeServer(server: Server, opts: { port: number; host?: string }): Promise<void> {
+export function runServeServer(server: Server, opts: { port: number; host?: string; logger?: ServiceLogger }): Promise<void> {
+  const log = (opts.logger ?? getLogger()).child({ mod: 'server' })
   return new Promise<void>((resolve, reject) => {
     const onError = (err: Error): void => reject(err)
     server.on('error', onError)
     server.listen(opts.port, opts.host ?? '127.0.0.1', () => {
       const addr = server.address() as { port: number }
       process.stdout.write(`MILKIE_SERVE_READY ${addr.port}\n`)
+      log.info({ port: addr.port, host: opts.host ?? '127.0.0.1' }, 'serve listening')
     })
     let closing = false
     const shutdown = (): void => {
       if (closing) return
       closing = true
+      log.info('serve shutting down')
       // Detach every listener we registered so repeated serve sessions in one
       // process don't accumulate handlers, and release the event loop —
       // stdin.resume() (below) keeps the process alive to watch for stdin close,
@@ -367,10 +384,12 @@ export async function buildServeStores(opts: { stateStore?: 'memory' | 'sqlite';
  * serve until shut down. The gateway is resolved from the agent's own model config.
  */
 export async function serveMain(opts: { agent: string; port: number; host?: string; stateStore?: 'memory' | 'sqlite'; dataDir?: string }): Promise<void> {
+  const log = getLogger().child({ mod: 'server' })
   const { stateStore, eventStore } = await buildServeStores(opts)
   const broadcaster = new BroadcastingEventStore(eventStore)
   const milkie = new Milkie({ stateStore, eventStore: broadcaster })
   const config = milkie.loadAgentFile(opts.agent)
+  log.info({ agentId: config.agentId, stateStore: opts.stateStore ?? 'memory', dataDir: opts.dataDir }, 'serve starting')
   const server = createServeServer({ milkie, agentId: config.agentId, broadcaster })
   await runServeServer(server, { port: opts.port, host: opts.host })
 }

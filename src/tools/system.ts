@@ -1,5 +1,6 @@
 import fs from 'fs'
 import type { ToolDefinition } from '../types/tool.js'
+import { getLogger } from '../logging/logger.js'
 
 // skill_list and skill_request are system-injected tools.
 //
@@ -23,6 +24,7 @@ function isValidSkill(s: unknown): s is SkillEntry {
 }
 
 function loadSkillManifest(): { skills: SkillEntry[]; registryConfigured: boolean } {
+  const log = getLogger().child({ mod: 'tools' })
   const manifestPath = process.env[SKILL_MANIFEST_ENV]
   if (!manifestPath) return { skills: [], registryConfigured: false }
 
@@ -31,7 +33,7 @@ function loadSkillManifest(): { skills: SkillEntry[]; registryConfigured: boolea
     parsed = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'))
   } catch (e) {
     // env 已设却读不到/解析失败 — 大概率 misconfig：行为 degrade，日志响亮。
-    console.warn(`[milkie] skill_list: failed to read ${SKILL_MANIFEST_ENV}=${manifestPath}: ${(e as Error).message}`)
+    log.warn({ manifestPath, err: e as Error }, `skill_list: failed to read ${SKILL_MANIFEST_ENV}`)
     return { skills: [], registryConfigured: false }
   }
 
@@ -42,14 +44,14 @@ function loadSkillManifest(): { skills: SkillEntry[]; registryConfigured: boolea
     ? (parsed as { skills?: unknown }).skills
     : undefined
   if (!Array.isArray(skillsRaw)) {
-    console.warn(`[milkie] skill_list: ${SKILL_MANIFEST_ENV}=${manifestPath} parsed but has no valid 'skills' array; treating as unconfigured`)
+    log.warn({ manifestPath }, `skill_list: ${SKILL_MANIFEST_ENV} parsed but has no valid 'skills' array; treating as unconfigured`)
     return { skills: [], registryConfigured: false }
   }
 
   const skills: SkillEntry[] = []
   for (const s of skillsRaw) {
     if (isValidSkill(s)) skills.push(s)               // 原样透传，含 dir/version 等附加字段
-    else console.warn(`[milkie] skill_list: skipping malformed skill entry (missing name/description): ${JSON.stringify(s)}`)
+    else log.warn({ entry: JSON.stringify(s) }, 'skill_list: skipping malformed skill entry (missing name/description)')
   }
   return { skills, registryConfigured: true }
 }
