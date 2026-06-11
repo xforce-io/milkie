@@ -40,6 +40,7 @@ import {
   PORTABLE_SESSION_SCHEMA_VERSION,
   collectRunTree,
 } from './PortableSession.js'
+import { getLogger, type ServiceLogger } from '../logging/logger.js'
 
 /**
  * #137: read-only run-state of a context, projected from its latest checkpoint.
@@ -80,6 +81,8 @@ export interface MilkieOptions {
    */
   eventStore?:      IEventStore
   traceObjectStore?: ITraceObjectStore
+  /** #79：服务日志 logger；缺省用进程级 getLogger()。测试注入内存 sink。 */
+  logger?:          ServiceLogger
 }
 
 export class Milkie {
@@ -90,6 +93,7 @@ export class Milkie {
   private readonly trajectoryStore: TrajectoryStore | null
   private readonly eventStore:      IEventStore | null
   private readonly traceObjectStore: ITraceObjectStore | null
+  private readonly log:             ServiceLogger
 
   private readonly agents:   Map<string, AgentConfig> = new Map()
 
@@ -107,13 +111,14 @@ export class Milkie {
     this.trajectoryStore = opts.trajectoryStore  ?? null
     this.eventStore      = opts.eventStore       ?? null
     this.traceObjectStore = opts.traceObjectStore ?? null
+    this.log             = opts.logger           ?? getLogger()
   }
 
   private resolveModel(config: AgentConfig, tier?: string): ModelConfig | undefined {
     // #126: a given+matched tier wins; otherwise fall back to the default model
     // (no throw — serve configured with only a default stays usable for any tier).
     if (tier && config.models?.[tier]) return config.models[tier]
-    if (tier) console.debug(`[milkie] tier "${tier}" not found for agent "${config.agentId}"; falling back to default model`)
+    if (tier) this.log.warn({ mod: 'runtime', agentId: config.agentId, tier }, 'tier not found; falling back to default model')
     return config.model ?? this.defaultModel ?? undefined
   }
 
@@ -125,7 +130,7 @@ export class Milkie {
         `Agent "${config.agentId}" has no model and Milkie has no gateway or defaultModel; ` +
         `built-in agents need a gateway or defaultModel at construction.`)
     }
-    return createGateway(model)
+    return createGateway(model, this.log.child({ mod: 'gateway' }))
   }
 
   private wrapIOPort(gateway: IModelGateway, runId: string, cursor?: CausalCursor): IIOPort {
@@ -380,12 +385,18 @@ export class Milkie {
       ...(previousRunId ? { previousRunId } : {}),
     })
 
+    // #79：每 invoke 一条服务日志 wide event（边界汇总，设计 §5）。
+    // turns/token 不在 AgentResult 上，token 已由 LoggingGateway 按调用记录。
+    const invokeLog = this.log.child({ mod: 'runtime', runId: agentRunId, contextId })
+    const invokeStartedAt = Date.now()
     try {
       const result = await runtime.run(request.input)
       await rec?.detach({ status: result.status, lastTextOutput: result.output })
+      invokeLog.info({ agentId: config.agentId, durationMs: Date.now() - invokeStartedAt, status: result.status }, 'invoke completed')
       return result
     } catch (err) {
       await rec?.detach({ status: 'error', error: err instanceof Error ? err.message : String(err) })
+      invokeLog.error({ agentId: config.agentId, durationMs: Date.now() - invokeStartedAt, err }, 'invoke failed')
       throw err
     }
   }
