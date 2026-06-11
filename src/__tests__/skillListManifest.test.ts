@@ -9,6 +9,7 @@ import { createServiceLogger, setLogger } from '../logging/logger'
 // → 返回真实完整技能列表；未配置 / 读失败 → degrade（行为软）+ WARNING（日志硬）。
 
 const skillList = systemTools.find(t => t.name === 'skill_list')!
+const skillRequest = systemTools.find(t => t.name === 'skill_request')!
 const ctx = {} as unknown as ToolContext
 
 let tmpDir: string
@@ -141,5 +142,56 @@ describe('skill_list 默认 handler 读 manifest (#139)', () => {
     expect(out.registryConfigured).toBe(true)
     expect(out.skills.map(s => s.name)).toEqual(['good', 'also-good'])
     expect(warnLines().length).toBeGreaterThan(0)
+  })
+})
+
+describe('skill_request manifest-backed fallback (#153)', () => {
+  it('原生 AgentConfig 未声明但 manifest 有该 skill 时，不返回误导性的 unavailable', async () => {
+    const p = writeManifest('request-fallback.json', JSON.stringify({
+      skills: [
+        { name: 'twitter-watch', description: '盯推', dir: '/abs/twitter-watch', version: '1.2.0' },
+      ],
+    }))
+    process.env[ENV_KEY] = p
+    const unavailableCtx = {
+      requestSkill: (name: string) => ({ requested: name, status: 'unavailable' }),
+    } as unknown as ToolContext
+
+    const out = await skillRequest.handler({ name: 'twitter-watch' }, unavailableCtx) as Record<string, unknown>
+
+    expect(out).toMatchObject({
+      requested: 'twitter-watch',
+      status:    'manifest_backed',
+      skill:     { name: 'twitter-watch', description: '盯推', dir: '/abs/twitter-watch', version: '1.2.0' },
+    })
+    expect(out.status).not.toBe('unavailable')
+    expect(out).toHaveProperty('instructionPath', '/abs/twitter-watch/SKILL.md')
+    expect(String(out.message)).toContain('SKILL.md')
+  })
+
+  it('原生 skill_request 成功时保持原生返回，不走 manifest fallback', async () => {
+    const p = writeManifest('native-wins.json', JSON.stringify({
+      skills: [
+        { name: 'twitter-watch', description: '盯推', dir: '/abs/twitter-watch', version: '1.2.0' },
+      ],
+    }))
+    process.env[ENV_KEY] = p
+    const nativeCtx = {
+      requestSkill: (_name: string) => ({
+        requested: 'twitter-watch',
+        status:    'pending_next_epoch',
+        version:   '9.9.9',
+        scope:     'turn',
+      }),
+    } as unknown as ToolContext
+
+    const out = await skillRequest.handler({ name: 'twitter-watch' }, nativeCtx)
+
+    expect(out).toEqual({
+      requested: 'twitter-watch',
+      status:    'pending_next_epoch',
+      version:   '9.9.9',
+      scope:     'turn',
+    })
   })
 })

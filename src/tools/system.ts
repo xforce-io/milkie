@@ -1,4 +1,5 @@
 import fs from 'fs'
+import path from 'path'
 import type { ToolDefinition } from '../types/tool.js'
 import { getLogger } from '../logging/logger.js'
 
@@ -56,6 +57,31 @@ function loadSkillManifest(): { skills: SkillEntry[]; registryConfigured: boolea
   return { skills, registryConfigured: true }
 }
 
+function normalizeSkillName(name: string): string {
+  return name.trim().replace(/\s+skill$/i, '')
+}
+
+function manifestBackedSkillRequest(name: string): Record<string, unknown> | undefined {
+  const manifest = loadSkillManifest()
+  if (!manifest.registryConfigured) return undefined
+
+  const normalized = normalizeSkillName(name)
+  const skill = manifest.skills.find(s => normalizeSkillName(s.name) === normalized)
+  if (!skill) return undefined
+
+  const dir = typeof skill.dir === 'string' ? skill.dir : undefined
+  const instructionPath = dir ? path.join(dir, 'SKILL.md') : undefined
+  return {
+    requested: normalized,
+    status:    'manifest_backed',
+    skill,
+    ...(instructionPath ? { instructionPath } : {}),
+    message: instructionPath
+      ? `Skill "${normalized}" is available via the manifest, but this agent was not configured with inline skillInstructions. Read ${instructionPath} with run_command/cat, then follow that SKILL.md.`
+      : `Skill "${normalized}" is available via the manifest, but this agent was not configured with inline skillInstructions and the manifest entry has no dir. Use skill_list details or host instructions to locate its SKILL.md.`,
+  }
+}
+
 export const systemTools: ToolDefinition[] = [
   {
     name:        'skill_list',
@@ -83,7 +109,9 @@ export const systemTools: ToolDefinition[] = [
     },
     handler: async (input: unknown, ctx) => {
       const { name, scope } = input as { name: string; scope?: 'turn' | 'session' }
-      return ctx.requestSkill?.(name, scope) ?? { requested: name, status: 'unavailable' }
+      const result = ctx.requestSkill?.(name, scope) ?? { requested: name, status: 'unavailable' }
+      if ((result as { status?: unknown }).status !== 'unavailable') return result
+      return manifestBackedSkillRequest(name) ?? result
     },
   },
 ]
