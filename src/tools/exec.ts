@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
-import { sha256Hex } from '../trace/hash.js'
 import type { ToolDefinition } from '../types/tool.js'
+import { citeable } from './lineage.js'
 
 // Built-in shell/exec tool (#134). Lets an agent run subprocess commands —
 // skill scripts (`python skills/.../scripts/x.py`), CLIs (`inv`, `codex-cli`), etc.
@@ -98,26 +98,16 @@ export const execTools: ToolDefinition[] = [
       required:   ['command'],
     },
     handler: async (input, ctx) => {
-      const out = await runCommand(input as RunCommandInput)
-      // #148: lazy-register non-empty stdout as a citable object (like grep) so any
-      // shell-fetched evidence (file / network / db) can be sourced via the `cite`
-      // tool — no per-skill refactoring. registerObject is lazy (no event); the
-      // object is promoted only when the agent actually cites it, so routine
-      // commands (ls/mkdir) never flood the lineage graph. objectId is placed
-      // FIRST so it survives the result-truncation strategy — the agent must see
-      // it to cite. Stdout is a genuine tool-call record (origin invariant holds).
-      if (ctx?.registerObject && out.stdout) {
-        // #150: hash the capped stdout (what the trace's tool.responded record holds)
-        // so the objectId is content-bound — same command re-run with different
-        // output mints a different object instead of colliding.
-        const { objectId } = ctx.registerObject({
-          type: 'shell:stdout',
-          hash: sha256Hex(out.stdout),
-          meta: { command: (input as RunCommandInput).command, exitCode: out.exitCode },
-        })
-        return { objectId, ...out }
-      }
-      return out
+      const cmd = input as RunCommandInput
+      const out = await runCommand(cmd)
+      // #148/#155: lazily register non-empty stdout as a citable object via the shared
+      // `citeable` helper, so any shell-fetched evidence (file / network / db) can be
+      // sourced via the `cite` tool with no per-skill refactoring. The helper is lazy
+      // (no event until the agent cites it, so ls/mkdir never flood the lineage graph),
+      // hashes the capped stdout (#150: content-bound objectId — different output mints
+      // a different object), and spreads objectId FIRST so it survives result-truncation.
+      if (!out.stdout) return out
+      return citeable(ctx, out.stdout, out, { type: 'shell:stdout', meta: { command: cmd.command, exitCode: out.exitCode } })
     },
   },
 ]

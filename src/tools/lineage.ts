@@ -1,5 +1,6 @@
 import type { ToolDefinition, ToolContext } from '../types/tool.js'
-import type { RelationType } from '../trace/types.js'
+import type { ObjectType, RelationType } from '../trace/types.js'
+import { sha256Hex } from '../trace/hash.js'
 
 /**
  * #113 P3: framework built-in lineage-declaration tools.
@@ -14,6 +15,33 @@ import type { RelationType } from '../trace/types.js'
  *   - promoteObject  → emit a lazily-registered object on first citation
  *   - createObject / createRelation → record claim + typed edge
  */
+
+/**
+ * #155: the one-liner for a *data tool* (recall / read / fetch) to make a piece of
+ * fetched content citable. Wraps the lazy-lineage boilerplate every such tool would
+ * otherwise hand-write, closing its three foot-guns at once:
+ *   - lazy `registerObject` (no event until a cite promotes it → wide recall never
+ *     floods the event log);
+ *   - the resulting `objectId` is spread to the FRONT of the result, so it survives
+ *     result-truncation and the agent can actually see+cite it;
+ *   - no-op when no lineage sink is wired (`registerObject` absent) — returns the
+ *     result untouched, never injecting a stray `objectId` key.
+ * `content` is what gets hashed (content-addressed id → cross-run dedupe); `type`
+ * defaults to 'passage' (override with a `namespace:kind`, e.g. 'shell:stdout').
+ */
+export function citeable<T extends object>(
+  ctx: ToolContext,
+  content: string,
+  result: T,
+  opts?: { type?: ObjectType; meta?: Record<string, unknown> },
+): T | ({ objectId: string } & T) {
+  const objectId = ctx?.registerObject?.({
+    type: opts?.type ?? 'passage',
+    hash: sha256Hex(content),
+    meta: opts?.meta,
+  })?.objectId
+  return objectId ? { objectId, ...result } : result
+}
 
 function unresolved(ctx: ToolContext, objectId: string): boolean {
   return !!ctx.resolveObject && !ctx.resolveObject(objectId)
