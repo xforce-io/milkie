@@ -95,6 +95,7 @@ the framework's built-in `cite` / `declare_relation` cover the core vocabulary.
 ## See also
 
 - ARCHITECTURE.md §Concept Model → `Object`, `Relation` (one-line canonical defs).
+- `docs/lineage-lifecycle.md` (取证→cite→落账→消费的完整时序图与 lazy-promote 状态机).
 - `docs/design/40-lineage-citation-goal.md` (why this exists; the burn-down target).
 - Issues: #39 (this doc), #37 (`object.created`), #38 (`relation.created`), #40
   (front-end consumes these events).

@@ -2,7 +2,7 @@
 
 面向**工具作者**:你写了一个会从外部召回/读取资料的工具(检索、读文件、查库、抓网页……),如何让它召回的资料能被 agent 用 `cite` 溯源。
 
-配套阅读:[`lineage-taxonomy.md`](./lineage-taxonomy.md)(object/relation 的受控词汇表)。
+配套阅读:[`lineage-taxonomy.md`](./lineage-taxonomy.md)(object/relation 的受控词汇表)、[`lineage-lifecycle.md`](./lineage-lifecycle.md)(从取证到落账的完整时序与 lazy-promote)。
 
 ## 何时该接
 
