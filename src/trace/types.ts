@@ -318,6 +318,8 @@ export interface PendingObject {
   type:     ObjectType
   hash?:    string
   meta?:    Record<string, unknown>
+  /** #160: carry the retrieval turn's respEventId so flushLineage anchors correctly. */
+  producerEventId?: string
 }
 
 /** A createRelation declaration, buffered during a tool call (#38). */
@@ -338,6 +340,10 @@ export interface PendingRelation {
 export interface LineageBuffer {
   objects:   PendingObject[]
   relations: PendingRelation[]
+  /** #160: objectIds registered lazily in this call (populated by registerObject). */
+  registeredObjectIds?: string[]
+  /** #160: called by RecordingIOPort after generating respEventId to backfill retrieval anchors. */
+  backfillProducerEventId?: (respEventId: string) => void
 }
 
 // ---- Typed event aliases ----

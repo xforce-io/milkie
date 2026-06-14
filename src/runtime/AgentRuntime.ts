@@ -133,7 +133,7 @@ export class AgentRuntime {
    *  cite that promoted a lazily-registered grep candidate). Lets cite fail-fast
    *  on unknown ids, P2 emit candidates only when cited, and promote idempotently.
    *  Record-only: replay doesn't run handlers. */
-  private readonly mintedObjects = new Map<string, { type: ObjectType; meta?: Record<string, unknown>; promoted: boolean }>()
+  private readonly mintedObjects = new Map<string, { type: ObjectType; meta?: Record<string, unknown>; promoted: boolean; producerEventId?: string }>()
   private readonly subAgentConfigs?: Map<string, AgentConfig>
   private readonly childRecorderFactory?: (config: AgentConfig, contextId: string, traceId: string) => ITrajectoryRecorder
   private readonly makeChildPort?: MakeChildPort
@@ -403,6 +403,9 @@ export class AgentRuntime {
         if (!this.mintedObjects.has(objectId)) {
           this.mintedObjects.set(objectId, { type: spec.type, ...(spec.meta ? { meta: spec.meta } : {}), promoted: false })
         }
+        // #160: track ids registered in this call so backfillProducerEventId can anchor them.
+        lineage.registeredObjectIds ??= []
+        if (!lineage.registeredObjectIds.includes(objectId)) lineage.registeredObjectIds.push(objectId)
         return { objectId }
       }
       // #113 P2: emit object.created for a registered-but-not-yet-emitted object,
@@ -410,7 +413,12 @@ export class AgentRuntime {
       ctx.promoteObject = (objectId) => {
         const o = this.mintedObjects.get(objectId)
         if (o && !o.promoted) {
-          lineage.objects.push({ objectId, type: o.type, ...(o.meta ? { meta: o.meta } : {}) })
+          lineage.objects.push({
+            objectId, type: o.type,
+            // #160: carry the retrieval turn's respEventId so flushLineage anchors correctly.
+            ...(o.producerEventId ? { producerEventId: o.producerEventId } : {}),
+            ...(o.meta ? { meta: o.meta } : {}),
+          })
           o.promoted = true
         }
       }
@@ -1246,6 +1254,14 @@ export class AgentRuntime {
     // #37/#38: handler declares objects/relations into this buffer; RecordingIOPort
     // drains it into object.created/relation.created right after tool.responded.
     const lineage: LineageBuffer = { objects: [], relations: [] }
+    // #160: backfill producerEventId on lazily-registered objects once RecordingIOPort
+    // generates the respEventId for this call (the actual retrieval anchor).
+    lineage.backfillProducerEventId = (respEventId) => {
+      for (const id of lineage.registeredObjectIds ?? []) {
+        const o = this.mintedObjects.get(id)
+        if (o && !o.producerEventId) o.producerEventId = respEventId
+      }
+    }
     const ctx = this.buildToolContext((event, payload, guard) => {
       const hadPending = this.fsm.hasPendingEvent()
       this.fsm.emitEvent(event, payload, guard)
