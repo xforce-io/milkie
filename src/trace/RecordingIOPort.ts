@@ -199,14 +199,16 @@ export class RecordingIOPort implements IIOPort {
   private async flushLineage(lineage: LineageBuffer | undefined, producerEventId: string): Promise<void> {
     if (!lineage) return
     for (const o of lineage.objects) {
+      // #160: prefer the object's own producerEventId (backfilled from the retrieval turn).
+      const effectiveProducerEventId = o.producerEventId ?? producerEventId
       await this.store.append({
         id:        this.inner.uuid(),
         runId:     this.runId,
         type:      'object.created',
         actor:     this.actor,
-        causedBy:  producerEventId,
+        causedBy:  effectiveProducerEventId,
         timestamp: this.inner.now(),
-        payload:   { objectId: o.objectId, type: o.type, producerEventId, ...(o.hash ? { hash: o.hash } : {}), ...(o.meta ? { meta: o.meta } : {}) } satisfies ObjectCreatedPayload,
+        payload:   { objectId: o.objectId, type: o.type, producerEventId: effectiveProducerEventId, ...(o.hash ? { hash: o.hash } : {}), ...(o.meta ? { meta: o.meta } : {}) } satisfies ObjectCreatedPayload,
       })
     }
     for (const r of lineage.relations) {
@@ -253,6 +255,8 @@ export class RecordingIOPort implements IIOPort {
       // on tool.responded (artifactRefs) and emit object.created/relation.created.
       const artifactRefs = opts?.lineage?.objects.map(o => o.objectId)
       const respEventId = this.inner.uuid()
+      // #160: backfill producerEventId on lazily-registered objects before flushing.
+      opts?.lineage?.backfillProducerEventId?.(respEventId)
       await this.store.append({
         id:        respEventId,
         runId:     this.runId,

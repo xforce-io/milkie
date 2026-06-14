@@ -2,7 +2,7 @@ import { RecordingIOPort } from '../trace/RecordingIOPort'
 import { MemoryEventStore } from '../trace/MemoryEventStore'
 import type { IIOPort } from '../runtime/IOPort'
 import type { ModelRequest, ModelResponse } from '../types/model'
-import type { LineageBuffer, ObjectCreatedPayload, RelationCreatedPayload, ToolRespondedPayload } from '../trace/types'
+import type { LineageBuffer, ObjectCreatedPayload, ObjectType, PendingObject, RelationCreatedPayload, ToolRespondedPayload } from '../trace/types'
 
 class ExecInnerPort implements IIOPort {
   private nextClock = 1000
@@ -84,5 +84,63 @@ describe('RecordingIOPort — lineage flush (#37/#38)', () => {
     ).rejects.toThrow('boom')
     const events = await store.readByRunId('r1')
     expect(events.some(e => e.type === 'object.created')).toBe(false)
+  })
+
+  it('lazy-promote: producerEventId anchors to the retrieval turn (turn A), not the cite turn (turn B)', async () => {
+    // Simulates AgentRuntime's mintedObjects map and the backfillProducerEventId callback.
+    type MintedEntry = { type: ObjectType; meta?: Record<string, unknown>; producerEventId?: string; promoted: boolean }
+    const mintedObjects = new Map<string, MintedEntry>()
+
+    const store = new MemoryEventStore()
+    const port  = new RecordingIOPort(new ExecInnerPort(), store, 'r1')
+
+    // Turn A: tool that calls registerObject (lazy, no push to lineage.objects yet).
+    const lineageA: LineageBuffer = {
+      objects: [],
+      relations: [],
+      registeredObjectIds: [],
+      backfillProducerEventId: (respEventId) => {
+        for (const id of lineageA.registeredObjectIds ?? []) {
+          const o = mintedObjects.get(id)
+          if (o && !o.producerEventId) o.producerEventId = respEventId
+        }
+      },
+    }
+    await port.invokeTool('run_command', { cmd: 'echo hi' }, async () => {
+      // Simulate ctx.registerObject
+      mintedObjects.set('obj:stdout', { type: 'passage', promoted: false })
+      lineageA.registeredObjectIds!.push('obj:stdout')
+      return { output: 'hi' }
+    }, { lineage: lineageA })
+
+    // Turn B: tool that calls promoteObject (cite).
+    const lineageB: LineageBuffer = { objects: [], relations: [] }
+    await port.invokeTool('cite', { objectId: 'obj:stdout' }, async () => {
+      // Simulate ctx.promoteObject
+      const o = mintedObjects.get('obj:stdout')
+      if (o && !o.promoted) {
+        const pending: PendingObject = { objectId: 'obj:stdout', type: o.type }
+        if (o.producerEventId) pending.producerEventId = o.producerEventId
+        lineageB.objects.push(pending)
+        o.promoted = true
+      }
+      return { ok: true }
+    }, { lineage: lineageB })
+
+    const events = await store.readByRunId('r1')
+    const turnAResp = events.find(
+      e => e.type === 'tool.responded' && (e.payload as ToolRespondedPayload).toolName === 'run_command',
+    )!
+    const turnBResp = events.find(
+      e => e.type === 'tool.responded' && (e.payload as ToolRespondedPayload).toolName === 'cite',
+    )!
+    const objCreated = events.find(e => e.type === 'object.created')!
+
+    expect(turnAResp).toBeDefined()
+    expect(turnBResp).toBeDefined()
+    expect(objCreated).toBeDefined()
+    // object.created must use turn A's tool.responded id, not turn B's.
+    expect((objCreated.payload as ObjectCreatedPayload).producerEventId).toBe(turnAResp.id)
+    expect((objCreated.payload as ObjectCreatedPayload).producerEventId).not.toBe(turnBResp.id)
   })
 })
