@@ -13,7 +13,22 @@ export class SQLiteStore implements IStateStore {
   }
 
   async init(): Promise<void> {
-    const Database = (await import('better-sqlite3')).default
+    let Database: typeof import('better-sqlite3')
+    try {
+      Database = (await import('better-sqlite3')).default
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      if (msg.includes('NODE_MODULE_VERSION')) {
+        const built   = msg.match(/NODE_MODULE_VERSION (\d+)\./)?.[1] ?? '?'
+        const runtime = msg.match(/requires NODE_MODULE_VERSION (\d+)/)?.[1] ?? process.versions.modules
+        throw new Error(
+          `better-sqlite3 ABI mismatch: native module was built for NODE_MODULE_VERSION ${built}, ` +
+          `but this Node.js requires NODE_MODULE_VERSION ${runtime} (Node ${process.version}). ` +
+          `Run \`npm rebuild better-sqlite3\` in the milkie project directory on Node ${process.version}.`
+        )
+      }
+      throw err
+    }
     this.db = new Database(this.path)
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS kv (

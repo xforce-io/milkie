@@ -15,7 +15,7 @@
     "build": "tsc",
     "dev": "tsc --watch",
     "test": "npm run test:unit && npm run test:e2e:deterministic",
-    "test:unit": "jest src/__tests__/AgentRuntime.test.ts src/__tests__/FSMEngine.test.ts src/__tests__/MemoryStore.test.ts src/__tests__/WorkingMemory.test.ts --runInBand",
+    "test:unit": "jest src/__tests__/AgentRuntime.test.ts src/__tests__/FSMEngine.test.ts src/__tests__/MemoryStore.test.ts src/__tests__/WorkingMemory.test.ts src/__tests__/SQLiteStore.abiMismatch.test.ts --runInBand",
     "test:all": "jest",
     "test:smoke": "jest src/__tests__/volcengine.smoke.test.ts --runInBand",
     "test:watch": "jest --watch",
