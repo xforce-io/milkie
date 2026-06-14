@@ -13,7 +13,7 @@ export class SQLiteStore implements IStateStore {
   }
 
   async init(): Promise<void> {
-    let Database: typeof import('better-sqlite3').default
+    let Database: typeof import('better-sqlite3')
     try {
       Database = (await import('better-sqlite3')).default
     } catch (err) {
