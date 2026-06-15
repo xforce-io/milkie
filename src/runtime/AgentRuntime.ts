@@ -162,6 +162,8 @@ export class AgentRuntime {
    *  crystallization reads it for causedBy. Unset outside the crystallization window so
    *  agent-set region deltas (e.g. header) get no causedBy. */
   private pendingBoundaryId?: string
+  /** #164: bare user input for the current turn — no "Goal:" prefix, stable across tool-loop iterations. */
+  private currentTurnRaw?: string
 
   constructor(opts: AgentRuntimeOptions) {
     this.ioPort          = opts.ioPort
@@ -380,6 +382,7 @@ export class AgentRuntime {
       stateStore:    this.stateStore,
       emit:          emitFn,
       requestSkill:  (name: string, scope?: 'turn' | 'session') => this.requestSkill(name, scope),
+      currentTurn:   this.currentTurnRaw,
     }
     // #37/#38: only wire lineage when a sink is present (LLM-state tool calls go
     // through ioPort.invokeTool, which drains the buffer). objectId/relationId are
@@ -963,6 +966,7 @@ export class AgentRuntime {
       this.needsResumeCrystallization = false
     }
 
+    this.currentTurnRaw = input
     const turnInput = `Goal: ${this.goal}\n\n${input}`
     this.setCurrentTurn(turnInput)
     this.setExternalContext()
