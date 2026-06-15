@@ -10,6 +10,8 @@ export interface ToolContext {
   stateStore:    IStateStore
   emit:          (event: string, payload?: unknown, guard?: GuardEvaluation | GuardEvaluation[]) => void
   requestSkill?: (name: string, scope?: 'turn' | 'session') => { requested: string; status: string; version?: string; scope?: 'turn' | 'session' }
+  /** #164: raw user input for the current turn, stable across all tool-loop iterations. */
+  currentTurn?:  string
   /**
    * #37: declare a content-addressable object (a passage read, a claim produced).
    * Returns a stable `objectId` handle (content-addressed → identical across

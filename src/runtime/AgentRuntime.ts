@@ -380,6 +380,7 @@ export class AgentRuntime {
       stateStore:    this.stateStore,
       emit:          emitFn,
       requestSkill:  (name: string, scope?: 'turn' | 'session') => this.requestSkill(name, scope),
+      currentTurn:   this.getCurrentTurn() ?? undefined,
     }
     // #37/#38: only wire lineage when a sink is present (LLM-state tool calls go
     // through ioPort.invokeTool, which drains the buffer). objectId/relationId are
