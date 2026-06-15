@@ -1,0 +1,52 @@
+#!/usr/bin/env tsx
+import { Command } from 'commander'
+import { EntityResolver } from '../resolver/EntityResolver'
+
+function die(msg: string): never {
+  process.stderr.write(JSON.stringify({ error: msg }) + '\n')
+  process.exit(1)
+}
+
+const program = new Command()
+  .name('entity-resolver')
+  .description('Hierarchical entity resolver')
+
+program
+  .command('lookup')
+  .description('Find candidate entities matching an utterance')
+  .requiredOption('--schema <path>', 'Path to schema JSON')
+  .requiredOption('--data <path>', 'Path to data CSV')
+  .requiredOption('--level <name>', 'Entity level to search')
+  .requiredOption('--utterance <query>', 'Natural-language search query')
+  .option('--pinned <json>', 'Pinned ancestor map as JSON object', '{}')
+  .action((opts: { schema: string; data: string; level: string; utterance: string; pinned: string }) => {
+    let resolver: EntityResolver
+    try { resolver = new EntityResolver({ schemaPath: opts.schema, dataPath: opts.data }) }
+    catch (err) { die(`Failed to load resolver: ${String(err)}`) }
+    let pinned: Record<string, string>
+    try { pinned = JSON.parse(opts.pinned) as Record<string, string> }
+    catch { die('--pinned must be valid JSON') }
+    const result = resolver!.lookup({ op: 'lookup', query: opts.utterance, context: { level: opts.level, pinned } })
+    process.stdout.write(JSON.stringify(result) + '\n')
+  })
+
+program
+  .command('commit')
+  .description('Commit a selected entity id and resolve its full record')
+  .requiredOption('--schema <path>', 'Path to schema JSON')
+  .requiredOption('--data <path>', 'Path to data CSV')
+  .requiredOption('--level <name>', 'Entity level to commit at')
+  .requiredOption('--selected <id>', 'Selected entity id')
+  .option('--pinned <json>', 'Pinned ancestor map as JSON object', '{}')
+  .action((opts: { schema: string; data: string; level: string; selected: string; pinned: string }) => {
+    let resolver: EntityResolver
+    try { resolver = new EntityResolver({ schemaPath: opts.schema, dataPath: opts.data }) }
+    catch (err) { die(`Failed to load resolver: ${String(err)}`) }
+    let pinned: Record<string, string>
+    try { pinned = JSON.parse(opts.pinned) as Record<string, string> }
+    catch { die('--pinned must be valid JSON') }
+    const result = resolver!.commit({ op: 'commit', selected: opts.selected, context: { level: opts.level, pinned } })
+    process.stdout.write(JSON.stringify(result) + '\n')
+  })
+
+program.parse()
