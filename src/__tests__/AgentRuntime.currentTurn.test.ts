@@ -92,10 +92,7 @@ describe('#164 ToolContext.currentTurn', () => {
 
     await runtime.run('hello world')
 
-    // currentTurn is built from: `Goal: ${goal}\n\n${input}`
-    expect(capturedCurrentTurn).toBeDefined()
-    expect(capturedCurrentTurn).toContain('hello world')
-    expect(capturedCurrentTurn).toContain('test goal')
+    expect(capturedCurrentTurn).toBe('hello world')
   })
 
   it('action-state handler receives ctx.currentTurn matching the turn input', async () => {
@@ -157,9 +154,7 @@ describe('#164 ToolContext.currentTurn', () => {
 
     await runtime.run('trigger the action')
 
-    expect(capturedCurrentTurn).toBeDefined()
-    expect(capturedCurrentTurn).toContain('trigger the action')
-    expect(capturedCurrentTurn).toContain('action goal')
+    expect(capturedCurrentTurn).toBe('trigger the action')
   })
 
   it('ctx.currentTurn is identical across multiple tool-loop iterations in the same turn', async () => {
@@ -195,10 +190,9 @@ describe('#164 ToolContext.currentTurn', () => {
     await runtime.run('run three times')
 
     expect(capturedTurns).toHaveLength(3)
-    expect(capturedTurns[0]).toBeDefined()
-    // All three calls should receive the identical currentTurn value
-    expect(capturedTurns[1]).toBe(capturedTurns[0])
-    expect(capturedTurns[2]).toBe(capturedTurns[0])
-    expect(capturedTurns[0]).toContain('run three times')
+    // All three calls must receive the identical bare input string
+    expect(capturedTurns[0]).toBe('run three times')
+    expect(capturedTurns[1]).toBe('run three times')
+    expect(capturedTurns[2]).toBe('run three times')
   })
 })
