@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "levels": [
+    { "name": "site",       "label": "站点",   "idColumn": "site_id",  "labelColumn": "site_name",  "searchColumns": ["site_name"] },
+    { "name": "building",   "label": "楼宇",   "idColumn": "bldg_id",  "labelColumn": "bldg_name",  "parentLevel": "site",       "searchColumns": ["bldg_name"] },
+    { "name": "department", "label": "部门",   "idColumn": "dept_id",  "labelColumn": "dept_name",  "parentLevel": "building",   "searchColumns": ["dept_name", "dept_alias"] },
+    { "name": "assignee",   "label": "负责人", "idColumn": "emp_id",   "labelColumn": "emp_name",   "parentLevel": "department", "searchColumns": ["emp_name", "emp_alias"] }
+  ],
+  "metaColumns": ["emp_email", "emp_phone", "dept_head"]
+}

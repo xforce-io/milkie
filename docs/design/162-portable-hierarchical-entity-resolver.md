@@ -299,12 +299,11 @@ interface CommitOutput {
 {
   "version": 1,
   "levels": [
-    { "name": "site",       "label": "站点",   "idColumn": "site_id",  "labelColumn": "site_name" },
-    { "name": "building",   "label": "楼宇",   "idColumn": "bldg_id",  "labelColumn": "bldg_name",  "parentLevel": "site" },
-    { "name": "department", "label": "部门",   "idColumn": "dept_id",  "labelColumn": "dept_name",  "parentLevel": "building" },
-    { "name": "assignee",   "label": "负责人", "idColumn": "emp_id",   "labelColumn": "emp_name",   "parentLevel": "department" }
+    { "name": "site",       "label": "站点",   "idColumn": "site_id",  "labelColumn": "site_name",  "searchColumns": ["site_name"] },
+    { "name": "building",   "label": "楼宇",   "idColumn": "bldg_id",  "labelColumn": "bldg_name",  "parentLevel": "site",       "searchColumns": ["bldg_name"] },
+    { "name": "department", "label": "部门",   "idColumn": "dept_id",  "labelColumn": "dept_name",  "parentLevel": "building",   "searchColumns": ["dept_name", "dept_alias"] },
+    { "name": "assignee",   "label": "负责人", "idColumn": "emp_id",   "labelColumn": "emp_name",   "parentLevel": "department", "searchColumns": ["emp_name", "emp_alias"] }
   ],
-  "searchColumns": ["site_name", "bldg_name", "dept_name", "dept_alias", "emp_name", "emp_alias"],
   "metaColumns": ["emp_email", "emp_phone", "dept_head"]
 }
 ```
@@ -317,8 +316,10 @@ interface CommitOutput {
 | `levels[].idColumn` | data.csv 中作为 id 的列名 |
 | `levels[].labelColumn` | data.csv 中作为显示名称的列名 |
 | `levels[].parentLevel` | 父层级名（用于过滤：指定 department 后只展示该 department 下的 assignee） |
-| `searchColumns` | 参与模糊匹配的列名列表 |
+| `levels[].searchColumns` | **该层**参与模糊匹配的列名列表（#167：按层显式声明,不靠 CSV 表头顺序推断——否则父层会吸收子层的 name/alias、且行为依赖列序） |
 | `metaColumns` | 原样透传进 `resolved.meta` 的列名列表 |
+
+> **#167 设计变更**：`searchColumns` 从顶层扁平列表改为**每层 `levels[].searchColumns`**。原扁平列表无法表达"哪个列属于哪一层",实现里只能靠 CSV 表头位置推断列归属——脆弱(列重排即出错)且会让父层实体被子层的 name/alias 召回。按层声明后,列归属确定、与物理列序无关。
 
 ### 8.2 `data.csv`
 

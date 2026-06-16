@@ -1,0 +1,8 @@
+site_id,site_name,bldg_id,bldg_name,dept_id,dept_name,dept_alias,emp_id,emp_name,emp_alias,emp_email,emp_phone,dept_head
+S01,总部,B01,主楼,D02,IT硬件组,硬件部,E005,刘洋,小刘,liuyang@corp.com,13800138005,陈强
+S01,总部,B01,主楼,D02,IT硬件组,硬件部,E006,陈静,小陈,chenjing@corp.com,13800138006,陈强
+S01,总部,B01,主楼,D03,IT网络部,网络组,E007,张伟,小张,zhangwei@corp.com,13800138007,李明
+S01,总部,B01,主楼,D03,IT网络部,网络组,E008,王芳,小王,wangfang@corp.com,13800138008,李明
+S01,总部,B01,主楼,D03,IT网络部,网络组,E009,张亮,小亮,zhangliang@corp.com,13800138009,李明
+S01,总部,B02,东楼,D07,安全部,安保组,E012,张伟,小张,zhangwei2@corp.com,13800138012,王磊
+S02,分部,B03,分楼,D10,研发部,研发组,E020,赵明,小赵,zhaoming@corp.com,13800138020,钱进
