@@ -9,8 +9,7 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
-    "milkie": "dist/cli/index.js",
-    "entity-resolver": "examples/repair-ticketing/bin/entity-resolver"
+    "milkie": "dist/cli/index.js"
   },
   "scripts": {
     "build": "tsc",

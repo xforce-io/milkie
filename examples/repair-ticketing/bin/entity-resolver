@@ -1,10 +1,59 @@
 #!/usr/bin/env tsx
+//
+// Stable JSON CLI wrapper for the portable entity resolver (#167).
+//
+// This wrapper is the only filesystem-touching layer: it reads --schema / --data
+// from disk, builds the dictionary via the fs-free core, and exposes the same
+// JSON-oriented contract as the core functions. The target level is NOT passed
+// by the caller — it is derived from how many ancestors are pinned (next unfilled
+// level), so a non-TS subprocess only supplies --utterance, --pinned and (for
+// commit) a JSON --selected.
+//
+//   lookup: --schema <p> --data <p> --utterance <q> [--pinned <json>]
+//   commit: --schema <p> --data <p> --selected <json> [--utterance <q>] [--pinned <json>]
+//
+import fs from 'fs'
 import { Command } from 'commander'
-import { EntityResolver } from '../resolver/EntityResolver'
+import {
+  loadHierarchicalDict,
+  lookupEntities,
+  commitEntities,
+  type Schema,
+  type HierarchicalDict,
+} from '../resolver/EntityResolver'
 
 function die(msg: string): never {
   process.stderr.write(JSON.stringify({ error: msg }) + '\n')
   process.exit(1)
+}
+
+function loadDict(schemaPath: string, dataPath: string): HierarchicalDict {
+  let schema: Schema
+  try { schema = JSON.parse(fs.readFileSync(schemaPath, 'utf-8')) as Schema }
+  catch (err) { die(`Failed to read schema: ${String(err)}`) }
+  let csv: string
+  try { csv = fs.readFileSync(dataPath, 'utf-8') }
+  catch (err) { die(`Failed to read data: ${String(err)}`) }
+  try { return loadHierarchicalDict(schema!, csv!) }
+  catch (err) { die(`Failed to load resolver: ${String(err)}`) }
+}
+
+function parsePinned(raw: string): Record<string, string> {
+  try { return JSON.parse(raw) as Record<string, string> }
+  catch { die('--pinned must be valid JSON') }
+}
+
+// --selected is JSON: either an id string ("E007") or an object with a string
+// "id" field ({ "id": "E007" }) — e.g. a candidate echoed back from lookup.
+function parseSelected(raw: string): string {
+  let value: unknown
+  try { value = JSON.parse(raw) }
+  catch { die('--selected must be valid JSON (an id string or an object with an "id" field)') }
+  if (typeof value === 'string') return value
+  if (value && typeof value === 'object' && typeof (value as { id?: unknown }).id === 'string') {
+    return (value as { id: string }).id
+  }
+  die('--selected JSON must be an id string or an object with a string "id" field')
 }
 
 const program = new Command()
@@ -16,36 +65,30 @@ program
   .description('Find candidate entities matching an utterance')
   .requiredOption('--schema <path>', 'Path to schema JSON')
   .requiredOption('--data <path>', 'Path to data CSV')
-  .requiredOption('--level <name>', 'Entity level to search')
   .requiredOption('--utterance <query>', 'Natural-language search query')
   .option('--pinned <json>', 'Pinned ancestor map as JSON object', '{}')
-  .action((opts: { schema: string; data: string; level: string; utterance: string; pinned: string }) => {
-    let resolver: EntityResolver
-    try { resolver = new EntityResolver({ schemaPath: opts.schema, dataPath: opts.data }) }
-    catch (err) { die(`Failed to load resolver: ${String(err)}`) }
-    let pinned: Record<string, string>
-    try { pinned = JSON.parse(opts.pinned) as Record<string, string> }
-    catch { die('--pinned must be valid JSON') }
-    const result = resolver!.lookup({ op: 'lookup', query: opts.utterance, context: { level: opts.level, pinned } })
+  .action((opts: { schema: string; data: string; utterance: string; pinned: string }) => {
+    const dict = loadDict(opts.schema, opts.data)
+    const pinned = parsePinned(opts.pinned)
+    // No explicit level: the core derives the target level from `pinned`.
+    const result = lookupEntities({ utterance: opts.utterance, pinned, dict })
     process.stdout.write(JSON.stringify(result) + '\n')
   })
 
 program
   .command('commit')
-  .description('Commit a selected entity id and resolve its full record')
+  .description('Commit a selected entity and resolve its full record')
   .requiredOption('--schema <path>', 'Path to schema JSON')
   .requiredOption('--data <path>', 'Path to data CSV')
-  .requiredOption('--level <name>', 'Entity level to commit at')
-  .requiredOption('--selected <id>', 'Selected entity id')
+  .requiredOption('--selected <json>', 'Selected entity as JSON: an id string ("E007") or { "id": "E007" }')
+  .option('--utterance <query>', 'Natural-language utterance the selection came from (optional context)')
   .option('--pinned <json>', 'Pinned ancestor map as JSON object', '{}')
-  .action((opts: { schema: string; data: string; level: string; selected: string; pinned: string }) => {
-    let resolver: EntityResolver
-    try { resolver = new EntityResolver({ schemaPath: opts.schema, dataPath: opts.data }) }
-    catch (err) { die(`Failed to load resolver: ${String(err)}`) }
-    let pinned: Record<string, string>
-    try { pinned = JSON.parse(opts.pinned) as Record<string, string> }
-    catch { die('--pinned must be valid JSON') }
-    const result = resolver!.commit({ op: 'commit', selected: opts.selected, context: { level: opts.level, pinned } })
+  .action((opts: { schema: string; data: string; utterance?: string; selected: string; pinned: string }) => {
+    const dict = loadDict(opts.schema, opts.data)
+    const pinned = parsePinned(opts.pinned)
+    const selected = parseSelected(opts.selected)
+    // No explicit level: the core derives the target level from `pinned`.
+    const result = commitEntities({ utterance: opts.utterance, selected, pinned, dict })
     process.stdout.write(JSON.stringify(result) + '\n')
   })
 
