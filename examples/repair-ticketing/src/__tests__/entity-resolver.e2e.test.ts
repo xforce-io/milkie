@@ -284,9 +284,13 @@ const repairAgentConfig: AgentConfig = {
         on:    { SLOTS_COMPLETE: 'confirming' },
       },
       {
+        // Path D ends collecting_slots → confirming, where the agent waits for the
+        // user to confirm before executing (… → executing → completed). It is a
+        // wait-for-user state, NOT terminal: a terminal turn does not persist a
+        // checkpoint, which would drop the final slot write (assignee) made on the
+        // turn that fired SLOTS_COMPLETE.
         name:         'confirming',
         type:         'llm',
-        terminal:     true,
         tools:        [],
         instructions: '向用户确认已登记的报修负责人。',
       },
