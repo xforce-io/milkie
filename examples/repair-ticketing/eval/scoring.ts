@@ -103,7 +103,13 @@ export function scoreCase(c: EvalCase, obs: Observed, ids: IdsByLevel): CaseResu
 
   // ── Clarify / reject cases ──────────────────────────────────────────────────
   if (c.expect.outcome) {
-    const emittedTicket = obs.ticket != null || obs.status === 'completed'
+    // "Emitted a ticket" === a ticket object actually exists. NOT `status ===
+    // 'completed'`: under #175's single autonomous llm state EVERY normal turn
+    // completes (the run finishes each turn), so a correct clarify/reject turn is
+    // also 'completed' — using status here false-flagged every clarify/reject case
+    // as premature_emit. The ticket is read authoritatively from WM (run-eval), so
+    // its presence is the right signal.
+    const emittedTicket = obs.ticket != null
     if (emittedTicket) failures.add('premature_emit')
 
     const knownPrefix = c.expect.slots ?? {}
