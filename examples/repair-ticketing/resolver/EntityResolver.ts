@@ -17,6 +17,8 @@
 //   lookupEntities({ utterance, pinned, dict })            -> LookupOutput
 //   commitEntities({ utterance, selected, pinned, dict })  -> CommitOutput
 
+import { recall as runRecall, type RecallConfig, type RecallResult } from './recall.js'
+
 // ─── schema types ─────────────────────────────────────────────────────────────
 
 export interface LevelSchema {
@@ -251,6 +253,23 @@ export class EntityResolver {
 
   commit(input: CommitRequest): CommitOutput {
     return commitEntities({ ...input, dict: this.dict })
+  }
+
+  // #180: deterministic multi-algorithm fusion recall (step 1). Delegates to
+  // resolver/recall.ts over this dict — LLM-free, returns neutral RecallResult.
+  recall(
+    utterance: string,
+    pinned: Record<string, string> = {},
+    config?: RecallConfig,
+    level?: string,
+  ): RecallResult {
+    return runRecall(this.dict, utterance, pinned, config, level)
+  }
+
+  /** Human-readable label for a level name (e.g. 'site' → '站点'); name itself if
+   *  unknown. Lets the scenario layer render话术 without reaching into the dict. */
+  levelLabel(name: string): string {
+    return this.dict.schema.levels.find(l => l.name === name)?.label ?? name
   }
 }
 
