@@ -23,7 +23,7 @@
 import type { AgentConfig } from '../../../src/types/agent.js'
 import type { ToolContext, ToolDefinition } from '../../../src/types/tool.js'
 import type { EntityResolver } from '../resolver/EntityResolver.js'
-import { makeEntityResolverTools } from './tools/entity-resolver.js'
+import { makeEntityResolverTools, makeResolveEntitiesTool } from './tools/entity-resolver.js'
 
 /** Ordered hierarchy levels that must all be confirmed before a ticket can open. */
 export const REQUIRED_SLOTS = ['site', 'building', 'department', 'assignee'] as const
@@ -179,6 +179,11 @@ export function makeAssembleTicketTool(): ToolDefinition {
  */
 export function buildRepairTicketingTools(resolver: EntityResolver): ToolDefinition[] {
   return [
+    // #180: resolve_entities (recall + fast-path) is the primary entity tool; the
+    // lower-level lookup_entity/commit_entity pair stays registered — commit_entity
+    // is the model's step-2 "pick from candidates", and both remain the resolver
+    // adapter's tested contract (#166).
+    makeResolveEntitiesTool(resolver, [...REQUIRED_SLOTS]),
     ...makeEntityResolverTools(resolver, [...REQUIRED_SLOTS]),
     makeCommitDescriptionTool(),
     makeAssembleTicketTool(),
@@ -190,19 +195,24 @@ export const repairTicketingAgentConfig: AgentConfig = {
   version:      '2.0.0',
   systemPrompt:
     `你是报修工单助手，在一个自主对话中按以下顺序协助用户（软引导，非强制状态机）：
-1. 逐级定位报修对象（站点 → 楼宇 → 部门 → 负责人）。对每一级：先调用 lookup_entity 检索候选，再调用 commit_entity 确认其中一个候选。系统会自动以用户本轮原话作为查询，你只需指定 level。
+1. 逐级定位报修对象（站点 → 楼宇 → 部门 → 负责人）。每轮先调用 resolve_entities——系统会用用户本轮原话自动检索，并把能【唯一确定】的层级直接确认（无需你指定 level，也无需传参）。然后按其返回处理：
+   - committed：已自动确认的层级，无需再操作。
+   - needsSelection：某一级有多个候选。若能从上下文或对话历史判断是哪一个，就用 commit_entity 选定那个候选的 id（id 必须来自候选，不得臆造）；若无法判断，就把 message 转述给用户，请其在候选中选择。
+   - notFound：该层级本轮还无法确定。请按 message 请用户补充这一层级。
 2. 四级全部确认后，请用户用一句话描述故障现象（位置 + 问题）。用户描述后调用 commit_description（描述内容由系统自动采集，无需传参）。
 3. 四级实体与描述都确认后，调用 assemble_ticket 生成结构化工单，并把工单原样回复用户。
 注意：assemble_ticket 有前置条件——必须先集齐四级实体与描述；若它返回 preconditionFailed，请先补齐 missing 列出的字段，不要重复空调用。`,
   // #175: a single autonomous llm state. No `on:` edges, no business events.
-  // The four tools drive lookup → commit → describe → assemble within one
-  // tool-loop; assemble_ticket's precondition is the only hard gate.
+  // #180: resolve_entities does deterministic recall + fast-path commit; commit_entity
+  // is the model's step-2 pick from candidates; commit_description + assemble_ticket
+  // close the journey. lookup_entity is intentionally NOT exposed here (resolve_entities
+  // supersedes it) though it stays registered for the adapter contract/tests.
   fsm: {
     states: [
       {
         name:  'repair',
         type:  'llm',
-        tools: ['lookup_entity', 'commit_entity', 'commit_description', 'assemble_ticket'],
+        tools: ['resolve_entities', 'commit_entity', 'commit_description', 'assemble_ticket'],
       },
     ],
   },

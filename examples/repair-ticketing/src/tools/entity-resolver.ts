@@ -20,6 +20,8 @@
 
 import type { ToolContext, ToolDefinition } from '../../../../src/types/tool.js'
 import type { EntityResolver, ResolvedEntity } from '../../resolver/EntityResolver.js'
+import type { RecallConfig } from '../../resolver/recall.js'
+import { repairMessages } from '../messages.js'
 
 interface LookupInput {
   context?: { level?: string; sessionHint?: string }
@@ -178,4 +180,100 @@ export function makeEntityResolverTools(
   }
 
   return [lookupEntity, commitEntity]
+}
+
+/**
+ * `resolve_entities` — the #180 "step 1 + fast-path" orchestration tool. One call
+ * per user turn does the deterministic work the model used to fumble:
+ *
+ *   for each still-unfilled level, in order (站点→楼宇→部门→负责人):
+ *     • run the fusion recall (resolver.recall) over this turn's utterance, branch-
+ *       filtered by the already-committed ancestors;
+ *     • if it has a DECISIVE unique winner → commit it straight to WM (no LLM) and
+ *       move to the next level;
+ *     • else stop: report the level as `needsSelection` (multiple candidates — the
+ *       model may pick with commit_entity if context disambiguates, else clarify)
+ *       or `notFound` (none — prompt the user for this level).
+ *
+ * The LLM never picks a level and never invents an id: decisive levels are
+ * committed deterministically; ambiguous ones hand the model REAL candidates to
+ * choose from. No business event (#175) — completeness is read back from WM by the
+ * assemble_ticket precondition. User-facing wording comes from messages.ts.
+ */
+export function makeResolveEntitiesTool(
+  resolver: EntityResolver,
+  requiredSlots: string[],
+  recallConfig?: RecallConfig,
+): ToolDefinition {
+  const pinnedFromWM = (ctx: ToolContext): Record<string, string> => {
+    const pinned: Record<string, string> = {}
+    for (const level of requiredSlots) {
+      const value = ctx.workingMemory.get(level)
+      if (value != null && value !== '') pinned[level] = String(value)
+    }
+    return pinned
+  }
+  const firstUnfilled = (ctx: ToolContext): string | undefined =>
+    requiredSlots.find(l => {
+      const v = ctx.workingMemory.get(l)
+      return v == null || v === ''
+    })
+
+  return {
+    name: 'resolve_entities',
+    description:
+      '用用户本轮原话自动逐级检索并提交能【唯一确定】的层级（站点→楼宇→部门→负责人，系统自动取原话为查询，你无需传参）。' +
+      '返回 committed（已自动确认）、needsSelection（同级多个候选，需判断）、notFound（该层级尚未给出）、message（可向用户转述的提示）。' +
+      '处理建议：needsSelection 时若能从上下文/历史判断是哪一个，用 commit_entity 选定；否则把 message 转述给用户澄清。notFound 时请用户补充该层级。每轮先调用本工具。',
+    inputSchema: { type: 'object', properties: {} },
+    handler: async (_input: unknown, ctx: ToolContext): Promise<unknown> => {
+      const utterance = (ctx.currentTurn ?? '').trim()
+      const committed: Array<{ level: string; id: string; label: string }> = []
+      const corrected: Array<{ level: string; toId: string }> = []
+      const needsSelection: Array<{ level: string; candidates: Array<{ id: string; label: string; path: string[] }> }> = []
+      const notFound: string[] = []
+      const messages: string[] = []
+
+      // Process the next-unfilled level repeatedly; each decisive commit re-pins and
+      // unlocks the following level within the SAME turn (handles "总部主楼网络部的王芳").
+      for (;;) {
+        const level = firstUnfilled(ctx)
+        if (!level) break
+        const pinned = pinnedFromWM(ctx)
+        const lr = resolver.recall(utterance, pinned, recallConfig, level).byLevel[0]
+
+        if (lr?.decisive) {
+          const out = resolver.commit({ selected: lr.decisive, level, pinned })
+          if (out.status === 'complete' || out.status === 'corrected') {
+            ctx.workingMemory.set(level, out.resolved.id)
+            committed.push({ level, id: out.resolved.id, label: out.resolved.label })
+            if (out.status === 'corrected') {
+              corrected.push({ level, toId: out.resolved.id })
+              messages.push(repairMessages.noticeCorrected(resolver.levelLabel(level), out.resolved.label))
+            }
+            continue   // re-pinned → try the next level this same turn
+          }
+          // Decisive recall but commit rejected (conflicts with pinned branch) → stop.
+          notFound.push(level)
+          messages.push(repairMessages.promptForLevel(resolver.levelLabel(level)))
+          break
+        }
+
+        if (lr && lr.candidates.length > 0) {
+          needsSelection.push({
+            level,
+            candidates: lr.candidates.map(c => ({ id: c.id, label: c.label, path: c.path })),
+          })
+          messages.push(repairMessages.clarifyAmbiguous(resolver.levelLabel(level), lr.candidates))
+          break   // first ambiguous level halts the deterministic run
+        }
+
+        notFound.push(level)
+        messages.push(repairMessages.promptForLevel(resolver.levelLabel(level)))
+        break
+      }
+
+      return { committed, corrected, needsSelection, notFound, message: messages.join(' ') || null }
+    },
+  }
 }

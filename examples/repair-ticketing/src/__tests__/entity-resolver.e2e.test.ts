@@ -32,7 +32,7 @@ import { MemoryEventStore } from '../../../../src/trace/MemoryEventStore.js'
 import { TrajectoryStore } from '../../../../src/trajectory/TrajectoryStore.js'
 
 import { EntityResolver, type Schema } from '../../resolver/EntityResolver.js'
-import { makeEntityResolverTools } from '../tools/entity-resolver.js'
+import { makeEntityResolverTools, makeResolveEntitiesTool } from '../tools/entity-resolver.js'
 
 // ─────────────────────────────── Fixtures ────────────────────────────────────
 
@@ -407,5 +407,60 @@ describe('Path D: hierarchical slot filling inside a single autonomous state (e2
     expect(lastResult.status).toBe('completed')
     const transitionSpans = trajectory.spans.filter(s => s.name === 'fsm.transition')
     expect(transitionSpans).toEqual([])  // no business transitions remain
+  })
+})
+
+// ─── resolve_entities (#180: recall + fast-path orchestration, deterministic) ───
+
+const resolveTool = makeResolveEntitiesTool(resolver, REQUIRED)
+interface ResolveOut {
+  committed: Array<{ level: string; id: string }>
+  needsSelection: Array<{ level: string; candidates: Array<{ id: string }> }>
+  notFound: string[]
+  message: string | null
+}
+const resolve = (ctx: ToolContext) => resolveTool.handler({}, ctx) as Promise<ResolveOut>
+
+describe('resolve_entities — deterministic recall + fast-path (#180)', () => {
+  it('one-shot multi-level utterance auto-commits every decisive level', async () => {
+    const { ctx, wm } = makeCtx('总部主楼IT网络部的王芳')
+    const out = await resolve(ctx)
+    expect(out.committed.map(c => c.level)).toEqual(['site', 'building', 'department', 'assignee'])
+    expect(wm.get('site')).toBe('S01')
+    expect(wm.get('building')).toBe('B01')
+    expect(wm.get('department')).toBe('D03')
+    expect(wm.get('assignee')).toBe('E008')
+    expect(out.needsSelection).toEqual([])
+  })
+
+  it('drip-feed: commits the current level, then asks for the next', async () => {
+    const { ctx, wm } = makeCtx('主楼', { site: 'S01' })
+    const out = await resolve(ctx)
+    expect(wm.get('building')).toBe('B01')                 // committed this turn
+    expect(out.committed.map(c => c.level)).toContain('building')
+    expect(out.notFound).toContain('department')           // next level prompted
+    expect(out.message).toMatch(/部门/)
+  })
+
+  it('typo auto-commits via fuzzy recall (总布 → 总部)', async () => {
+    const { ctx, wm } = makeCtx('总布')
+    await resolve(ctx)
+    expect(wm.get('site')).toBe('S01')
+  })
+
+  it('ambiguous level → needsSelection with real candidates, no commit', async () => {
+    const { ctx, wm } = makeCtx('张', { site: 'S01', building: 'B01', department: 'D03' })
+    const out = await resolve(ctx)
+    expect(wm.get('assignee')).toBeUndefined()             // never hard-commits an ambiguous slot
+    const sel = out.needsSelection.find(s => s.level === 'assignee')!
+    expect(sel.candidates.map(c => c.id)).toEqual(expect.arrayContaining(['E007', 'E009']))
+    expect(out.message).toMatch(/确认|哪一个/)
+  })
+
+  it('unknown → notFound, never invents a slot', async () => {
+    const { ctx, wm } = makeCtx('火星基地', { site: 'S01', building: 'B01', department: 'D03' })
+    const out = await resolve(ctx)
+    expect(wm.get('assignee')).toBeUndefined()
+    expect(out.notFound).toContain('assignee')
   })
 })

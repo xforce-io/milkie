@@ -17,6 +17,8 @@
 //   lookupEntities({ utterance, pinned, dict })            -> LookupOutput
 //   commitEntities({ utterance, selected, pinned, dict })  -> CommitOutput
 
+import { recall as runRecall, type RecallConfig, type RecallResult } from './recall.js'
+
 // ─── schema types ─────────────────────────────────────────────────────────────
 
 export interface LevelSchema {
@@ -92,7 +94,9 @@ export type CommitOutput =
 
 // ─── internal ────────────────────────────────────────────────────────────────
 
-interface EntityRecord {
+// Exported for the in-package fusion-recall module (#180, resolver/recall.ts).
+// Still an internal core type — not part of the public lookup/commit contract.
+export interface EntityRecord {
   id: string
   label: string
   path: string[]
@@ -250,6 +254,23 @@ export class EntityResolver {
   commit(input: CommitRequest): CommitOutput {
     return commitEntities({ ...input, dict: this.dict })
   }
+
+  // #180: deterministic multi-algorithm fusion recall (step 1). Delegates to
+  // resolver/recall.ts over this dict — LLM-free, returns neutral RecallResult.
+  recall(
+    utterance: string,
+    pinned: Record<string, string> = {},
+    config?: RecallConfig,
+    level?: string,
+  ): RecallResult {
+    return runRecall(this.dict, utterance, pinned, config, level)
+  }
+
+  /** Human-readable label for a level name (e.g. 'site' → '站点'); name itself if
+   *  unknown. Lets the scenario layer render话术 without reaching into the dict. */
+  levelLabel(name: string): string {
+    return this.dict.schema.levels.find(l => l.name === name)?.label ?? name
+  }
 }
 
 // ─── level derivation (shared by CLI wrappers) ─────────────────────────────────
@@ -273,7 +294,7 @@ export function nextLevel(dict: HierarchicalDict, pinned: Record<string, string>
 // recalled or suggested from the CLI (#167 item 1). With a longer `pinned` prefix
 // this naturally narrows to the remaining levels, collapsing to the single leaf
 // once every ancestor is pinned.
-function targetLevels(
+export function targetLevels(
   dict: HierarchicalDict,
   pinned: Record<string, string>,
   level?: string,
@@ -542,7 +563,7 @@ function parseCSVLine(line: string): string[] {
 // Strip the target level's own pin, leaving only strictly-higher (ancestor)
 // constraints. An entity's own level is never present in `ancestors`, so a pin
 // at the target level must not be used for topological filtering (#167).
-function ancestorOnly(pinned: Record<string, string>, level: string): Record<string, string> {
+export function ancestorOnly(pinned: Record<string, string>, level: string): Record<string, string> {
   const ancestors: Record<string, string> = {}
   for (const [k, v] of Object.entries(pinned)) {
     if (k !== level) ancestors[k] = v
@@ -550,7 +571,7 @@ function ancestorOnly(pinned: Record<string, string>, level: string): Record<str
   return ancestors
 }
 
-function matchesPinned(entity: EntityRecord, pinned: Record<string, string>): boolean {
+export function matchesPinned(entity: EntityRecord, pinned: Record<string, string>): boolean {
   for (const [k, v] of Object.entries(pinned)) {
     if (entity.ancestors[k] !== v) return false
   }
