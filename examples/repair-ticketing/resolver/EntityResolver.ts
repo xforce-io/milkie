@@ -92,7 +92,9 @@ export type CommitOutput =
 
 // ─── internal ────────────────────────────────────────────────────────────────
 
-interface EntityRecord {
+// Exported for the in-package fusion-recall module (#180, resolver/recall.ts).
+// Still an internal core type — not part of the public lookup/commit contract.
+export interface EntityRecord {
   id: string
   label: string
   path: string[]
@@ -273,7 +275,7 @@ export function nextLevel(dict: HierarchicalDict, pinned: Record<string, string>
 // recalled or suggested from the CLI (#167 item 1). With a longer `pinned` prefix
 // this naturally narrows to the remaining levels, collapsing to the single leaf
 // once every ancestor is pinned.
-function targetLevels(
+export function targetLevels(
   dict: HierarchicalDict,
   pinned: Record<string, string>,
   level?: string,
@@ -542,7 +544,7 @@ function parseCSVLine(line: string): string[] {
 // Strip the target level's own pin, leaving only strictly-higher (ancestor)
 // constraints. An entity's own level is never present in `ancestors`, so a pin
 // at the target level must not be used for topological filtering (#167).
-function ancestorOnly(pinned: Record<string, string>, level: string): Record<string, string> {
+export function ancestorOnly(pinned: Record<string, string>, level: string): Record<string, string> {
   const ancestors: Record<string, string> = {}
   for (const [k, v] of Object.entries(pinned)) {
     if (k !== level) ancestors[k] = v
@@ -550,7 +552,7 @@ function ancestorOnly(pinned: Record<string, string>, level: string): Record<str
   return ancestors
 }
 
-function matchesPinned(entity: EntityRecord, pinned: Record<string, string>): boolean {
+export function matchesPinned(entity: EntityRecord, pinned: Record<string, string>): boolean {
   for (const [k, v] of Object.entries(pinned)) {
     if (entity.ancestors[k] !== v) return false
   }
