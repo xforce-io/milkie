@@ -58,6 +58,21 @@ interface CommitToolOutput {
  *                      `pinned` ancestor branch for the next lookup/commit
  *                      (e.g. ['site','building','department','assignee']).
  */
+/**
+ * Coerce a tool's `context` argument into an object. Some models (e.g. DeepSeek)
+ * serialize nested-object parameters as a JSON *string* instead of a JSON object;
+ * left unparsed, `context.level` would read `undefined` and the slot would be
+ * written under the wrong key. Parse a string form defensively; pass an object
+ * through; anything else → undefined.
+ */
+function coerceContext<T extends object>(raw: unknown): T | undefined {
+  if (raw == null) return undefined
+  if (typeof raw === 'string') {
+    try { return JSON.parse(raw) as T } catch { return undefined }
+  }
+  return typeof raw === 'object' ? raw as T : undefined
+}
+
 export function makeEntityResolverTools(
   resolver: EntityResolver,
   requiredSlots: string[],
@@ -93,7 +108,7 @@ export function makeEntityResolverTools(
       required: ['context'],
     },
     handler: async (input: unknown, ctx: ToolContext): Promise<unknown> => {
-      const { context } = (input ?? {}) as LookupInput
+      const context = coerceContext<NonNullable<LookupInput['context']>>((input as LookupInput)?.context)
       // Utterance comes from the runtime turn, NOT from the LLM tool params.
       const utterance = ctx.currentTurn ?? ''
       return resolver.lookup({
@@ -123,8 +138,16 @@ export function makeEntityResolverTools(
       required: ['selected', 'context'],
     },
     handler: async (input: unknown, ctx: ToolContext): Promise<unknown> => {
-      const { selected, context } = (input ?? {}) as CommitInput
+      const { selected } = (input ?? {}) as CommitInput
+      const context = coerceContext<NonNullable<CommitInput['context']>>((input as CommitInput)?.context)
       const level = context?.level
+      // The WM slot key IS the level name. Without a level we cannot key the slot
+      // correctly — fail loudly rather than silently writing under a numeric
+      // fallback key (which leaves requiredSlots permanently incomplete).
+      if (!level) {
+        const errorOutput: CommitToolOutput = { validationError: 'commit_entity: missing level in context' }
+        return errorOutput
+      }
       const result = resolver.commit({
         selected: selected ?? '',
         level,
@@ -132,11 +155,12 @@ export function makeEntityResolverTools(
       })
 
       if (result.status === 'complete' || result.status === 'corrected') {
-        // WM key = level name; value = the resolved entity id. No business event:
-        // slot completeness is read back from WM by the assemble_ticket
-        // precondition, not pushed via a (now-removed) ctx.emit (#175).
-        const key = level ?? result.resolved.path.length.toString()
-        ctx.workingMemory.set(key, result.resolved.id)
+        // WM key = level name; value = the resolved entity id. `level` is
+        // guaranteed present (early-returned above, #178 — no numeric fallback).
+        // No business event: slot completeness is read back from WM by the
+        // assemble_ticket precondition, not pushed via a (now-removed)
+        // ctx.emit (#175).
+        ctx.workingMemory.set(level, result.resolved.id)
 
         // `corrected` is a Record<string,string> (level → corrected id), per
         // CommitToolOutput — see the type doc for why it is not a plain string.

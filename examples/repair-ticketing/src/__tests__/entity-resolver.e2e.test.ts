@@ -139,9 +139,37 @@ describe('commit_entity handler', () => {
     expect(wm.get('site')).toBe('S01')
   })
 
+  it('tolerates a stringified `context` and keys WM by the level name, not a numeric fallback', async () => {
+    // Regression (#178): some models (e.g. DeepSeek) serialize the nested `context`
+    // object as a JSON *string*. Unparsed, `context.level` reads undefined and the
+    // slot lands under a numeric path-length key (e.g. "1"), so requiredSlots stay
+    // permanently incomplete. The handler must parse the string form.
+    const { ctx, wm } = makeCtx('总部')
+    const out = (await commitTool.handler(
+      { selected: 'S01', context: '{"level":"site"}' },   // context as a JSON string
+      ctx,
+    )) as { resolved?: { id: string }; validationError?: string }
+    expect(out.validationError).toBeUndefined()
+    expect(out.resolved?.id).toBe('S01')
+    expect(wm.get('site')).toBe('S01')      // keyed by level name…
+    expect(wm.get('1')).toBeUndefined()     // …NOT the numeric path-length fallback
+  })
+
+  it('rejects a commit with no resolvable level instead of writing a numeric key', async () => {
+    const { ctx, wm } = makeCtx('总部')
+    const out = (await commitTool.handler(
+      { selected: 'S01' },                  // no context at all → no level
+      ctx,
+    )) as { validationError?: string }
+    expect(out.validationError).toBeDefined()
+    expect(wm.get('site')).toBeUndefined()
+    expect(wm.get('1')).toBeUndefined()
+  })
+
   it('writes the last required level into WM, completing the slot set (AC8)', async () => {
     // #175: with three levels pinned, committing the fourth simply lands the id in
-    // WM — there is no business event. "All slots filled" becomes readable from WM.
+    // WM — there is no business event (ctx.emit removed). "All slots filled" is
+    // read back from WM by the assemble_ticket precondition.
     const { ctx, wm } = makeCtx('王芳', { site: 'S01', building: 'B01', department: 'D03' })
     const out = (await commitTool.handler(
       { selected: 'E008', context: { level: 'assignee' } },
