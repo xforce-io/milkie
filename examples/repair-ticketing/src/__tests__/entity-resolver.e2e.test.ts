@@ -138,6 +138,33 @@ describe('commit_entity handler', () => {
     expect(emitted).toEqual([])              // not all slots yet
   })
 
+  it('tolerates a stringified `context` and keys WM by the level name, not a numeric fallback', async () => {
+    // Regression: some models (e.g. DeepSeek) serialize the nested `context`
+    // object as a JSON *string*. Unparsed, `context.level` reads undefined and the
+    // slot lands under a numeric path-length key (e.g. "1"), so requiredSlots stay
+    // permanently incomplete. The handler must parse the string form.
+    const { ctx, wm } = makeCtx('总部')
+    const out = (await commitTool.handler(
+      { selected: 'S01', context: '{"level":"site"}' },   // context as a JSON string
+      ctx,
+    )) as { resolved?: { id: string }; validationError?: string }
+    expect(out.validationError).toBeUndefined()
+    expect(out.resolved?.id).toBe('S01')
+    expect(wm.get('site')).toBe('S01')      // keyed by level name…
+    expect(wm.get('1')).toBeUndefined()     // …NOT the numeric path-length fallback
+  })
+
+  it('rejects a commit with no resolvable level instead of writing a numeric key', async () => {
+    const { ctx, wm } = makeCtx('总部')
+    const out = (await commitTool.handler(
+      { selected: 'S01' },                  // no context at all → no level
+      ctx,
+    )) as { validationError?: string }
+    expect(out.validationError).toBeDefined()
+    expect(wm.get('site')).toBeUndefined()
+    expect(wm.get('1')).toBeUndefined()
+  })
+
   it('emits SLOTS_COMPLETE once every required level is in WM (AC8)', async () => {
     const { ctx, emitted, wm } = makeCtx('王芳', { site: 'S01', building: 'B01', department: 'D03' })
     const out = (await commitTool.handler(
