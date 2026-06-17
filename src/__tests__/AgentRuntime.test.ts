@@ -236,6 +236,8 @@ describe('AgentRuntime', () => {
       expect(checkpoint.lifecycle?.status).toBe('interrupted')
       expect(checkpoint.lifecycle?.resumeKind).toBe('loop')
       expect(checkpoint.fsm).toBeUndefined()
+      // #181: the #60 pendingEvents residue is gone — never written to checkpoints.
+      expect(checkpoint.pendingEvents).toBeUndefined()
       expect(checkpoint.meta.contextId).toBe('ctx-interrupt')
       expect(checkpoint.meta.agentRunId).toBe(result.agentRunId)
     })

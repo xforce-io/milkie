@@ -43,7 +43,9 @@ export interface AgentCheckpoint {
     instructions?:        Record<string, string>
     contextEpoch?:        number
   }
-  pendingEvents: AgentEvent[]
+  // #181: de-core removed the #60 pendingEvents queue; the runtime no longer
+  // writes this. Optional so historical (v1) checkpoints that carry it still parse.
+  pendingEvents?: AgentEvent[]
   children: ChildAgentRecord[]
   meta: {
     agentId:        string
