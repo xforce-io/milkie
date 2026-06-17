@@ -23,10 +23,38 @@ import { Milkie } from '../../../src/runtime/Milkie.js'
 import { MemoryStore } from '../../../src/store/MemoryStore.js'
 import { MemoryEventStore } from '../../../src/trace/MemoryEventStore.js'
 import { createGateway } from '../../../src/gateway/GatewayFactory.js'
+import { OpenAICompatibleAdapter } from '../../../src/gateway/OpenAICompatibleAdapter.js'
+import type { IModelGateway } from '../../../src/types/model.js'
 import type { Event } from '../../../src/trace/types.js'
 
 import { EntityResolver, type Schema } from '../resolver/EntityResolver.js'
 import { buildRepairTicketingTools, repairTicketingAgentConfig } from '../src/agent.js'
+
+// Eval model override (#174/#180): the example ships with doubao-seed-2.0-lite,
+// too weak to exercise the flow. When DEEPSEEK_API_KEY is set, run the SAME
+// agent/flow against DeepSeek; the committed example config is untouched.
+const useDeepseek = !!process.env['DEEPSEEK_API_KEY']
+const evalAgentConfig = useDeepseek
+  ? {
+      ...repairTicketingAgentConfig,
+      model: {
+        provider: 'deepseek',
+        model:    process.env['EVAL_MODEL'] ?? 'deepseek-chat',
+        adapter:  'openai-compatible' as const,
+        baseUrl:  process.env['DEEPSEEK_API_BASE'] ?? 'https://api.deepseek.com',
+      },
+    }
+  : repairTicketingAgentConfig
+
+function buildEvalGateway(): IModelGateway {
+  if (useDeepseek) {
+    return new OpenAICompatibleAdapter({
+      baseUrl: process.env['DEEPSEEK_API_BASE'] ?? 'https://api.deepseek.com',
+      apiKey:  process.env['DEEPSEEK_API_KEY'],
+    })
+  }
+  return createGateway(repairTicketingAgentConfig.model)
+}
 
 import {
   scoreCase, aggregate, LEVELS,
@@ -87,10 +115,22 @@ function latestWorkingMemory(events: Event[], prev: Record<string, unknown>): Re
   return data
 }
 
-function parseTicket(output: string): Record<string, unknown> | null {
+function isTicket(v: unknown): v is Record<string, unknown> {
+  return !!v && typeof v === 'object' && typeof (v as Record<string, unknown>)['ticketId'] === 'string'
+}
+
+/**
+ * Read the assembled ticket. #175 made assemble_ticket a TOOL whose result the
+ * model RELAYS as formatted prose (a markdown table), so the run's text output is
+ * no longer raw ticket JSON — but assemble_ticket also stores the ticket object in
+ * WM (`ctx.workingMemory.set('ticket', …)`). Read it from WM first (authoritative,
+ * model-paraphrase-proof); fall back to JSON in the text output for older shapes.
+ */
+function readTicket(workingMemory: Record<string, unknown>, output: string): Record<string, unknown> | null {
+  if (isTicket(workingMemory['ticket'])) return workingMemory['ticket'] as Record<string, unknown>
   try {
     const parsed = JSON.parse(output) as Record<string, unknown>
-    return parsed && typeof parsed === 'object' && typeof parsed['ticketId'] === 'string' ? parsed : null
+    return isTicket(parsed) ? parsed : null
   } catch {
     return null
   }
@@ -98,11 +138,11 @@ function parseTicket(output: string): Record<string, unknown> | null {
 
 /** Feed every turn of one case through a fresh Milkie and capture the observed end
  *  state (final WM, terminal-turn ticket, turn count). */
-async function runCase(c: EvalCase, gateway: ReturnType<typeof createGateway>): Promise<Observed> {
+async function runCase(c: EvalCase, gateway: IModelGateway): Promise<Observed> {
   const eventStore = new MemoryEventStore()
   const milkie = new Milkie({ stateStore: new MemoryStore(), eventStore, gateway })
   for (const tool of buildRepairTicketingTools(resolver)) milkie.registerTool(tool)
-  milkie.registerAgent(repairTicketingAgentConfig)
+  milkie.registerAgent(evalAgentConfig)
 
   const contextId = `eval-${c.id}`
   let workingMemory: Record<string, unknown> = {}
@@ -123,13 +163,13 @@ async function runCase(c: EvalCase, gateway: ReturnType<typeof createGateway>): 
     }
   } catch (err) {
     return {
-      status: 'error', workingMemory, ticket: parseTicket(lastOutput),
+      status: 'error', workingMemory, ticket: readTicket(workingMemory, lastOutput),
       turnCount: c.turns.length, error: (err as Error).message,
     }
   }
 
   return {
-    status, workingMemory, ticket: parseTicket(lastOutput),
+    status, workingMemory, ticket: readTicket(workingMemory, lastOutput),
     turnCount: c.turns.length,
   }
 }
@@ -195,18 +235,19 @@ function renderReport(m: Metrics, results: CaseResult[], model: string, startedA
 // ─────────────────────────────────── Main ────────────────────────────────────
 
 async function main(): Promise<void> {
-  if (!process.env['VOLCENGINE_TOKEN'] || !process.env['VOLCENGINE_API_BASE']) {
+  const hasVolc = process.env['VOLCENGINE_TOKEN'] && process.env['VOLCENGINE_API_BASE']
+  if (!useDeepseek && !hasVolc) {
     console.log(
       'SKIPPED: live model credentials not set. ' +
-      'Set VOLCENGINE_TOKEN and VOLCENGINE_API_BASE to run the repair-ticketing eval.',
+      'Set VOLCENGINE_TOKEN + VOLCENGINE_API_BASE (or DEEPSEEK_API_KEY) to run the repair-ticketing eval.',
     )
     return
   }
 
   const cases = loadCases()
   const ids   = buildIdsByLevel()
-  const gateway = createGateway(repairTicketingAgentConfig.model)
-  const model = repairTicketingAgentConfig.model.model
+  const gateway = buildEvalGateway()
+  const model = evalAgentConfig.model.model
   const startedAt = new Date().toISOString()
 
   console.log(`Running ${cases.length} cases against ${model} …`)
