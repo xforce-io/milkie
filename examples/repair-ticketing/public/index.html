@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>报修工单 · Repair Ticketing</title>
+<style>
+  :root { --bg:#0f1115; --panel:#181b22; --line:#2a2f3a; --fg:#e6e9ef; --muted:#8b93a3; --accent:#4f9dff; --ok:#3fd07f; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;
+         background:var(--bg); color:var(--fg); }
+  header { padding:18px 24px; border-bottom:1px solid var(--line); }
+  header h1 { margin:0; font-size:18px; }
+  header p { margin:4px 0 0; color:var(--muted); font-size:13px; }
+  main { display:grid; grid-template-columns: 1fr 360px; gap:20px; padding:20px 24px; max-width:1100px; margin:0 auto; align-items:start; }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px; }
+  .chips { display:flex; gap:8px; margin-bottom:14px; flex-wrap:wrap; }
+  .chip { flex:1 1 0; min-width:72px; text-align:center; padding:8px 6px; border-radius:9px; border:1px solid var(--line);
+          background:#12151c; color:var(--muted); font-size:13px; transition:all .25s; }
+  .chip .lbl { display:block; font-size:11px; opacity:.7; }
+  .chip .val { display:block; margin-top:3px; font-weight:600; min-height:18px; }
+  .chip.filled { border-color:var(--ok); color:var(--fg); background:rgba(63,208,127,.08); }
+  #log { height:340px; overflow-y:auto; display:flex; flex-direction:column; gap:10px; padding-right:4px; }
+  .msg { padding:9px 12px; border-radius:10px; max-width:86%; white-space:pre-wrap; word-break:break-word; }
+  .msg.user { align-self:flex-end; background:var(--accent); color:#fff; }
+  .msg.bot  { align-self:flex-start; background:#22273180; border:1px solid var(--line); }
+  .msg.sys  { align-self:center; color:var(--muted); font-size:12px; background:none; }
+  form { display:flex; gap:8px; margin-top:14px; }
+  textarea { flex:1; resize:none; height:46px; padding:10px 12px; border-radius:10px; border:1px solid var(--line);
+             background:#12151c; color:var(--fg); font:inherit; }
+  button { padding:0 18px; border:none; border-radius:10px; background:var(--accent); color:#fff; font-weight:600; cursor:pointer; }
+  button:disabled { opacity:.5; cursor:default; }
+  h2 { font-size:13px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); margin:0 0 12px; }
+  .ticket .row { display:flex; justify-content:space-between; gap:10px; padding:7px 0; border-bottom:1px dashed var(--line); font-size:14px; }
+  .ticket .row:last-child { border-bottom:none; }
+  .ticket .k { color:var(--muted); }
+  .ticket .v { font-weight:600; text-align:right; word-break:break-word; }
+  .empty { color:var(--muted); font-size:13px; }
+  .pill { display:inline-block; font-size:11px; padding:2px 8px; border-radius:99px; background:rgba(63,208,127,.15); color:var(--ok); }
+</style>
+</head>
+<body>
+<header>
+  <h1>报修工单助手 <span class="pill">S-011 Path D</span></h1>
+  <p>逐级定位报修对象（站点 → 楼宇 → 部门 → 负责人），描述故障，系统确定性生成工单。</p>
+</header>
+<main>
+  <section class="panel">
+    <div class="chips" id="chips"></div>
+    <div id="log"></div>
+    <form id="form">
+      <textarea id="input" placeholder="例如：总部 / 主楼 / IT网络部 / 王芳 / 投影仪无法开机" autocomplete="off"></textarea>
+      <button id="send" type="submit">发送</button>
+    </form>
+  </section>
+  <aside class="panel">
+    <h2>工单预览</h2>
+    <div id="ticket"><div class="empty">完成全部步骤后，工单将在此生成。</div></div>
+  </aside>
+</main>
+
+<script>
+const SLOTS = [
+  { key: 'site',       label: '站点' },
+  { key: 'building',   label: '楼宇' },
+  { key: 'department', label: '部门' },
+  { key: 'assignee',   label: '负责人' },
+];
+const TICKET_FIELDS = [
+  ['ticketId', '工单号'], ['site', '站点'], ['building', '楼宇'],
+  ['department', '部门'], ['assignee', '负责人'], ['description', '故障描述'], ['createdAt', '创建时间'],
+];
+
+const $ = (id) => document.getElementById(id);
+let contextId = null;
+let evtSource = null;
+
+function renderChips(wm = {}) {
+  $('chips').innerHTML = SLOTS.map(s => {
+    const val = wm[s.key];
+    return `<div class="chip ${val ? 'filled' : ''}">
+      <span class="lbl">${s.label}</span><span class="val">${val ?? '—'}</span></div>`;
+  }).join('');
+}
+
+function addMsg(text, cls) {
+  const el = document.createElement('div');
+  el.className = `msg ${cls}`;
+  el.textContent = text;
+  $('log').appendChild(el);
+  $('log').scrollTop = $('log').scrollHeight;
+}
+
+function renderTicket(ticket) {
+  if (!ticket) return;
+  $('ticket').innerHTML = `<div class="ticket">` + TICKET_FIELDS.map(
+    ([k, label]) => `<div class="row"><span class="k">${label}</span><span class="v">${ticket[k] ?? '—'}</span></div>`
+  ).join('') + `</div>`;
+}
+
+// SSE: live WM-change events fill the slot chips as each commit succeeds.
+function connectStream(id) {
+  if (evtSource) evtSource.close();
+  evtSource = new EventSource(`/events/${encodeURIComponent(id)}`);
+  evtSource.onmessage = (e) => {
+    try {
+      const data = JSON.parse(e.data);
+      if (data.type === 'wm') renderChips(data.snapshot);
+    } catch { /* ignore keep-alives */ }
+  };
+}
+
+async function send(text) {
+  addMsg(text, 'user');
+  $('send').disabled = true;
+  try {
+    const res = await fetch('/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ input: text, contextId }),
+    });
+    const data = await res.json();
+    if (data.error) { addMsg('错误：' + data.error, 'sys'); return; }
+
+    if (!contextId) { contextId = data.contextId; connectStream(contextId); }
+    renderChips(data.workingMemory);
+
+    if (data.ticket) {
+      renderTicket(data.ticket);
+      addMsg('✅ 工单已生成：' + data.ticket.ticketId, 'bot');
+    } else {
+      addMsg(data.output || '（已处理）', 'bot');
+    }
+  } catch (err) {
+    addMsg('请求失败：' + err.message, 'sys');
+  } finally {
+    $('send').disabled = false;
+    $('input').focus();
+  }
+}
+
+$('form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const text = $('input').value.trim();
+  if (!text) return;
+  $('input').value = '';
+  send(text);
+});
+$('input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('form').requestSubmit(); }
+});
+
+renderChips();
+addMsg('请逐条输入：站点、楼宇、部门、负责人，最后描述故障现象。', 'sys');
+</script>
+</body>
+</html>
