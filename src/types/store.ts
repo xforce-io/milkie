@@ -17,11 +17,22 @@ export interface AgentCheckpoint {
   sequence:     number
   goal:         string
   currentTurn?: string
-  fsm: {
+  // #175 §8: schemaVersion >= 2 ⇒ v2 (lifecycle/userland, no fsm). Absent ⇒ v1 legacy.
+  schemaVersion?: number
+  // v1 legacy ONLY — the de-cored runtime no longer writes this; reads go through
+  // readCheckpointLifecycle (runtime/checkpointSchema). Kept readable per D7.
+  fsm?: {
     currentState: string
     resumeState?:  string
     stateData:    unknown
   }
+  // #175 §8: v2 run-lifecycle. inline shape avoids a runtime→types cycle.
+  lifecycle?: {
+    status:       string
+    resumeKind?:  'loop' | 'legacy-state'
+  }
+  // #175 §8: opaque, checkpointable userland blob (absent for the default loop).
+  userland?: unknown
   context: {
     workingMemory:        unknown
     regions:              import('../context/Region.js').RegionSnapshot

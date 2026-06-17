@@ -77,7 +77,7 @@ function latestWorkingMemory(events: Event[]): Record<string, unknown> {
 }
 
 /** Parse the live invoke output as a ticket, or null when this turn produced
- *  plain text (every turn before emit_ticket). */
+ *  plain text (i.e. assemble_ticket did not run / its precondition was unmet). */
 function parseTicket(output: string): Ticket | null {
   try {
     const parsed = JSON.parse(output) as Partial<Ticket>
@@ -112,8 +112,8 @@ async function handleChat(req: IncomingMessage, res: ServerResponse, s: ServerSt
     status:        result.status,
     output:        result.output,
     workingMemory: latestWorkingMemory(events),
-    // Read from the live invoke output, NOT a checkpoint: emit_ticket → completed
-    // is a terminal turn and #172 does not persist a checkpoint for it.
+    // Read from the live invoke output, NOT a checkpoint: assemble_ticket returns
+    // the ticket JSON which the model relays as the final turn text (#175).
     ticket:        parseTicket(result.output),
   })
 }

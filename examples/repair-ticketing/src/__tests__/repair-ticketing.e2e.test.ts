@@ -1,19 +1,21 @@
 /**
- * Issue #162 — repair-ticketing example: the full three-state flow as an e2e.
+ * Issue #162 / #175 — repair-ticketing example: the full journey as an e2e,
+ * migrated to the #175 lightweight tier (single autonomous state).
  *
- * This is the coverage the #166 adapter test does NOT provide: the end-to-end
- * journey through all three FSM states —
- *   collecting_entities → collecting_description → emit_ticket (action) → completed
- * — driven by a deterministic stub gateway, asserting the ticket assembled by the
- * pure-function action handler.
+ * The end-to-end journey is no longer a three-state business FSM. It is one
+ * autonomous `llm` state whose tool-loop runs lookup → commit (×4 levels) →
+ * commit_description → assemble_ticket, driven by a deterministic stub gateway,
+ * asserting the ticket assembled by the pure-function tool.
  *
- * Two #162 acceptance points are pinned here:
- *   1. emit_ticket is an `action` state whose handler assembles the ticket
- *      deterministically from confirmed WM — never LLM-authored.
- *   2. The ticket is read from the LIVE `milkie.invoke` return value (result.output),
- *      NOT from a checkpoint: emit_ticket → completed is a terminal turn, and #172
- *      does not persist a checkpoint for terminal turns, so a checkpoint read would
- *      drop the final state.
+ * Three acceptance points are pinned here:
+ *   1. assemble_ticket assembles the ticket deterministically from confirmed WM —
+ *      never LLM-authored (#162).
+ *   2. assemble_ticket carries an ACTION PRECONDITION (#175 §6): it refuses to
+ *      open a ticket until the four levels AND the description are confirmed,
+ *      returning a structured `preconditionFailed` block instead of a ticket.
+ *   3. The ticket is read from the LIVE `milkie.invoke` return value
+ *      (result.output): assemble_ticket returns the ticket JSON, the model relays
+ *      it as the final turn text, so the live output is the ticket.
  *
  * The error-path block at the bottom exercises every CommitOutput status the
  * resolver can return (alias / missing / ambiguous / unknown / invalid_selection /
@@ -34,7 +36,14 @@ import { MemoryEventStore } from '../../../../src/trace/MemoryEventStore.js'
 import { WorkingMemory } from '../../../../src/store/WorkingMemory.js'
 
 import { EntityResolver, type Schema } from '../../resolver/EntityResolver.js'
-import { assembleTicket, buildRepairTicketingTools, repairTicketingAgentConfig } from '../agent.js'
+import {
+  assembleTicket,
+  buildRepairTicketingTools,
+  makeAssembleTicketTool,
+  makeCommitDescriptionTool,
+  repairTicketingAgentConfig,
+  type AssembleTicketBlocked,
+} from '../agent.js'
 
 // ─────────────────────────────── Fixtures ────────────────────────────────────
 
@@ -71,12 +80,19 @@ describe('assembleTicket (pure, LLM-free)', () => {
 // ─────────────────────────── Deterministic gateway ───────────────────────────
 
 /**
- * Drives the whole flow with no live model. Per the active FSM state (tracked by
- * counting committed entity levels) it issues `lookup_entity` then `commit_entity`
- * for each of the four levels, then `commit_description` once entities are done.
+ * Drives the whole flow with no live model, all inside ONE autonomous `llm` state
+ * and ONE `invoke` turn (#175). The de-cored runtime no longer persists
+ * working-memory across completed turns (cross-turn slot-filling via
+ * need_input→paused is a later slice), so the entire journey runs in a single
+ * tool-loop: lookup_entity → commit_entity for each of the four levels (the
+ * `pinned`-filtered resolver disambiguates each level out of the one full
+ * utterance), then commit_description, then assemble_ticket, then it relays the
+ * assembled ticket JSON as the final turn text.
+ *
  * Selections come from the resolver's own suggestion — the model never invents an
- * id, and never supplies the utterance/description (the tools read those from the
- * runtime turn).
+ * id, never supplies the utterance/description (the tools read those from the
+ * runtime turn), and never invents the ticket (it relays assemble_ticket's
+ * verbatim output). The model only sequences tool calls and chooses the `level`.
  */
 class RepairTicketGateway implements IModelGateway {
   private readonly levelOrder = ['site', 'building', 'department', 'assignee']
@@ -87,6 +103,7 @@ class RepairTicketGateway implements IModelGateway {
     const last = messages[messages.length - 1]
     const producedBy = last && last.role === 'tool' ? this.precedingToolUse(messages) : undefined
     const result = last && last.role === 'tool' ? this.parseToolResult(last) : null
+    const rawResult = last && last.role === 'tool' ? this.rawToolResult(last) : null
 
     if (producedBy === 'lookup_entity') {
       const level = this.levelOrder[this.committed]!
@@ -96,23 +113,27 @@ class RepairTicketGateway implements IModelGateway {
     }
     if (producedBy === 'commit_entity') {
       this.committed++
-      return this.text(
-        this.committed >= this.levelOrder.length
-          ? '已登记到负责人，请用一句话描述故障现象。'
-          : '已记录，请继续。',
-      )
+      // Stay in the same turn: drive the next level's lookup, or move on to the
+      // description once all four levels are committed.
+      if (this.committed < this.levelOrder.length) {
+        const level = this.levelOrder[this.committed]!
+        return this.tool(`lookup-${level}`, 'lookup_entity', { context: { level } })
+      }
+      return this.tool('commit-desc', 'commit_description', {})
     }
     if (producedBy === 'commit_description') {
-      return this.text('已记录故障描述。')
+      // Description recorded → all fields are now in WM, so open the ticket.
+      // assemble_ticket's precondition is satisfied.
+      return this.tool('assemble', 'assemble_ticket', {})
+    }
+    if (producedBy === 'assemble_ticket') {
+      // Relay the ticket verbatim as the final turn text (the model never invents
+      // it). On the off chance the precondition blocked, surface that instead.
+      return this.text(rawResult ?? '')
     }
 
-    // Fresh user turn (no preceding tool result).
-    if (this.committed < this.levelOrder.length) {
-      const level = this.levelOrder[this.committed]!
-      return this.tool(`lookup-${level}`, 'lookup_entity', { context: { level } })
-    }
-    // All four levels confirmed → this turn carries the free-text description.
-    return this.tool('commit-desc', 'commit_description', {})
+    // Fresh user turn (no preceding tool result) → start with the first level.
+    return this.tool('lookup-site', 'lookup_entity', { context: { level: 'site' } })
   }
 
   async *stream(_request: ModelRequest): AsyncIterable<never> {
@@ -140,6 +161,23 @@ class RepairTicketGateway implements IModelGateway {
     }
   }
 
+  /** Raw tool_result string (assemble_ticket returns a JSON STRING, which the
+   *  runtime wraps again — the model relays this verbatim). */
+  private rawToolResult(m: Message): string | null {
+    const part = m.content.find(c => c.type === 'tool_result')
+    if (!part || part.type !== 'tool_result') return null
+    // The runtime serializes the tool's return value into `content`. assemble_ticket
+    // returns a JSON string, which arrives here either as that string or wrapped;
+    // unwrap one layer of JSON-string quoting if present.
+    const content = part.content
+    try {
+      const parsed = JSON.parse(content)
+      return typeof parsed === 'string' ? parsed : content
+    } catch {
+      return content
+    }
+  }
+
   private text(text: string): ModelResponse {
     return { content: [{ type: 'text', text }], toolCalls: [], finishReason: 'end_turn' }
   }
@@ -153,10 +191,15 @@ class RepairTicketGateway implements IModelGateway {
   }
 }
 
-// ─────────────────────────── Happy path (full FSM) ───────────────────────────
+// ─────────────────────── Happy path (single autonomous state) ────────────────
 
-describe('repair-ticketing — happy path through emit_ticket (FSM e2e)', () => {
-  const DESCRIPTION = '三楼会议室的投影仪无法开机'
+describe('repair-ticketing — happy path through assemble_ticket (single-state e2e)', () => {
+  // One turn carries the whole request: the four entity keywords (resolved
+  // level-by-level by the `pinned`-filtered resolver) plus the fault. The HER
+  // tools and commit_description all read this same verbatim utterance from the
+  // runtime turn — never from a model-supplied parameter — so the stored
+  // description is the user's exact words.
+  const INPUT = '总部 主楼 IT网络部 王芳 三楼会议室的投影仪无法开机'
   const contextId = `ctx-repair-ticket-${Date.now()}`
   let milkie: Milkie
   let lastResult: AgentResult
@@ -174,20 +217,18 @@ describe('repair-ticketing — happy path through emit_ticket (FSM e2e)', () => 
     for (const tool of tools) milkie.registerTool(tool)
     milkie.registerAgent(repairTicketingAgentConfig)
 
-    await sendTurn('总部')          // → site S01
-    await sendTurn('主楼')          // → building B01
-    await sendTurn('IT网络部')      // → department D03
-    await sendTurn('王芳')          // → assignee E008 → SLOTS_COMPLETE → collecting_description
-    lastResult = await sendTurn(DESCRIPTION)  // → commit_description → emit_ticket → completed
+    // Single autonomous turn: lookup→commit ×4 → commit_description →
+    // assemble_ticket → final text, all in one tool-loop (no cross-turn WM).
+    lastResult = await sendTurn(INPUT)
   }, 60_000)
 
-  it('reaches a completed terminal turn', () => {
+  it('reaches a completed turn', () => {
     expect(lastResult.status).toBe('completed')
   })
 
   it('emits the ticket on the live invoke output, deterministically assembled from WM (#162)', () => {
-    // Read the ticket from the LIVE return value — not a checkpoint (#172: the
-    // terminal turn persists none).
+    // Read the ticket from the LIVE return value: assemble_ticket returns the
+    // ticket JSON and the model relays it as the final turn text.
     const ticket = JSON.parse(lastResult.output)
     expect(ticket).toMatchObject({
       ticketId:    'TKT-S01-B01-D03-E008',
@@ -195,27 +236,82 @@ describe('repair-ticketing — happy path through emit_ticket (FSM e2e)', () => 
       building:    'B01',
       department:  'D03',
       assignee:    'E008',
-      description: DESCRIPTION,
+      description: INPUT,   // verbatim user turn — not a model paraphrase
     })
     // createdAt is a system timestamp — assert its shape, not an exact value.
     expect(ticket.createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/)
   })
 })
 
+// ─────────────────── Action precondition: 未集齐不得开单 (#175 §6) ────────────────
+
+describe('assemble_ticket — action precondition (#175 lightweight tier)', () => {
+  const FULL = { site: 'S01', building: 'B01', department: 'D03', assignee: 'E008', description: '投影仪无法开机' }
+  const assemble = makeAssembleTicketTool()
+  const commitDescription = makeCommitDescriptionTool()
+
+  it('refuses to open a ticket when required fields are missing (returns a block, not a ticket)', async () => {
+    // Only entities pinned, description absent — the hard gate ("未报价不得维修"
+    // analog: 未集齐不得开单) must block.
+    const { ctx, wm } = makeCtx('', { site: 'S01', building: 'B01', department: 'D03', assignee: 'E008' })
+    const out = (await assemble.handler({}, ctx)) as AssembleTicketBlocked
+    expect(out.preconditionFailed).toBe('incomplete_fields')
+    expect(out.missing).toEqual(['description'])
+    expect(wm.get('ticket')).toBeUndefined()   // nothing opened
+  })
+
+  it('lists every missing field when nothing is collected yet', async () => {
+    const { ctx } = makeCtx('')
+    const out = (await assemble.handler({}, ctx)) as AssembleTicketBlocked
+    expect(out.preconditionFailed).toBe('incomplete_fields')
+    expect(out.missing).toEqual(['site', 'building', 'department', 'assignee', 'description'])
+  })
+
+  it('does NOT throw on an unmet precondition (a miss is recoverable, not a run error)', async () => {
+    const { ctx } = makeCtx('')
+    await expect(assemble.handler({}, ctx)).resolves.toBeDefined()
+  })
+
+  it('assembles deterministically once every field is confirmed (#162)', async () => {
+    const { ctx, wm } = makeCtx('', FULL)
+    const out = (await assemble.handler({}, ctx)) as string
+    const ticket = JSON.parse(out)
+    expect(ticket).toMatchObject({ ticketId: 'TKT-S01-B01-D03-E008', ...FULL })
+    expect(wm.get('ticket')).toMatchObject({ ticketId: 'TKT-S01-B01-D03-E008' })
+  })
+
+  it('commit_description records the verbatim current turn into WM (no ctx.emit needed)', async () => {
+    const { ctx, wm } = makeCtx('三楼会议室的投影仪无法开机')
+    const out = (await commitDescription.handler({}, ctx)) as { description: string }
+    expect(out.description).toBe('三楼会议室的投影仪无法开机')
+    expect(wm.get('description')).toBe('三楼会议室的投影仪无法开机')
+  })
+
+  it('description lets a previously-blocked assemble succeed (precondition becomes satisfiable)', async () => {
+    const { ctx, wm } = makeCtx('投影仪无法开机', { site: 'S01', building: 'B01', department: 'D03', assignee: 'E008' })
+    // Blocked before the description is recorded …
+    const blocked = (await assemble.handler({}, ctx)) as AssembleTicketBlocked
+    expect(blocked.missing).toEqual(['description'])
+    // … record it, then assemble succeeds.
+    await commitDescription.handler({}, ctx)
+    const out = (await assemble.handler({}, ctx)) as string
+    expect(JSON.parse(out)).toMatchObject({ description: '投影仪无法开机' })
+    expect(wm.get('ticket')).toBeDefined()
+  })
+})
+
 // ─────────────────────────── Error paths (resolver statuses) ──────────────────
 
 function makeCtx(currentTurn: string, preset: Record<string, string> = {}): {
-  ctx: ToolContext; emitted: string[]; wm: WorkingMemory
+  ctx: ToolContext; wm: WorkingMemory
 } {
-  const emitted: string[] = []
   const wm = new WorkingMemory()
   for (const [k, v] of Object.entries(preset)) wm.set(k, v)
   const ctx = {
     workingMemory: wm,
-    emit: (event: string) => { emitted.push(event) },
     currentTurn,
   } as unknown as ToolContext
-  return { ctx, emitted, wm }
+  return { ctx, wm }
 }
 
 const lookup = (tool: ToolDefinition, level: string, ctx: ToolContext) =>

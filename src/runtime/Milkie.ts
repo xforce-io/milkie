@@ -23,6 +23,7 @@ import { InMemoryRecorder } from '../trajectory/InMemoryRecorder.js'
 import { TrajectoryStore } from '../trajectory/TrajectoryStore.js'
 import { createGateway } from '../gateway/GatewayFactory.js'
 import { AgentRuntime } from './AgentRuntime.js'
+import { readCheckpointLifecycle } from './checkpointSchema.js'
 import { DefaultIOPort, type IIOPort } from './IOPort.js'
 import type { IEventStore } from '../trace/EventStore.js'
 import { RecordingIOPort } from '../trace/RecordingIOPort.js'
@@ -33,7 +34,7 @@ import { ReplayingIOPort } from '../trace/ReplayingIOPort.js'
 import { ReplayError } from '../trace/ReplayError.js'
 import { ReplayDivergenceError } from '../trace/ReplayDivergenceError.js'
 import { extractRunSnapshot } from '../trace/RunSnapshot.js'
-import type { Event, ToolEmittedPayload, AgentRunStartedPayload } from '../trace/types.js'
+import type { Event, AgentRunStartedPayload } from '../trace/types.js'
 import { makeTraceTools } from '../tools/trace.js'
 import {
   type PortableSession,
@@ -590,16 +591,6 @@ export class Milkie {
       replayWmSnapshots: events
         .filter(e => e.type === 'wm.mutated')
         .map(e => (e.payload as { snapshot: unknown }).snapshot),
-      // #60: recorded emit-driven FSM events keyed by (toolCallId, occurrence) →
-      // replay re-emits them so emit-driven transitions reproduce without re-running
-      // tool handlers. The occurrence suffix keeps a tool_call id reused across
-      // responses from collapsing in the map (provider ids are only unique per response).
-      replayEmits: new Map(events
-        .filter(e => e.type === 'tool.emitted')
-        .map(e => {
-          const p = e.payload as ToolEmittedPayload
-          return [`${p.toolCallId}#${p.occurrence ?? 0}`, p.event] as const
-        })),
     })
 
     const result = await runtime.run(snapshot.input)
@@ -765,9 +756,12 @@ export class Milkie {
     if (!checkpoint) {
       return { contextId, exists: false, paused: false, resumable: false, currentState: null, interruptSignaled }
     }
-    const currentState = checkpoint.fsm.currentState
-    const paused = currentState === 'paused'
-    return { contextId, exists: true, paused, resumable: paused, currentState, interruptSignaled }
+    // #175 §8/D7: read lifecycle via the v1/v2 seam, not checkpoint.fsm. Keep the
+    // external `currentState: 'paused'` string for a suspended context (the
+    // documented resumable signal) so this surface is stable across v1/v2.
+    const lc = readCheckpointLifecycle(checkpoint)
+    const currentState = lc.suspended ? 'paused' : lc.status
+    return { contextId, exists: true, paused: lc.suspended, resumable: lc.suspended, currentState, interruptSignaled }
   }
 
   // ---- #83: session context variables (key contract: context:{id}:var:{name}) ----

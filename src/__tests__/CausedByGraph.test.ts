@@ -5,7 +5,7 @@ import { Milkie } from '../runtime/Milkie'
 import { MemoryStore } from '../store/MemoryStore'
 import type { IIOPort } from '../runtime/IOPort'
 import type { IModelGateway, ModelRequest, ModelResponse } from '../types/model'
-import type { Event, FsmTransitionPayload, RegionAddedPayload } from '../trace/types'
+import type { Event, RegionAddedPayload } from '../trace/types'
 import type { AgentRunStartedPayload } from '../trace/types'
 import type { AgentConfig } from '../types/agent'
 
@@ -160,7 +160,13 @@ const twoStateConfig = (): AgentConfig => ({
 })
 
 describe('causedBy densify — AgentRuntime edges (#30)', () => {
-  it('edge 3 + edge 4: fsm.transition <- llm.responded; crystallized region.added <- boundary', async () => {
+  // #175 de-core: the old "edge 3" (fsm.transition <- llm.responded) asserted a
+  // business-topology transition node that no longer exists — the runtime stopped
+  // writing `fsm.transition` (the decision anchor is the llm.responded effect
+  // itself; agent.run.completed <- final llm.responded covers the outcome edge).
+  // Edge 4 (crystallized history region <- turn-end boundary) and the header
+  // agent-set exception are live causedBy coverage and are retained.
+  it('edge 4: crystallized region.added <- turn-end boundary; header has no upstream', async () => {
     const eventStore = new MemoryEventStore()
     const milkie = new Milkie({
       stateStore: new MemoryStore(),
@@ -172,11 +178,6 @@ describe('causedBy densify — AgentRuntime edges (#30)', () => {
     expect(result.status).toBe('completed')
 
     const evs = await eventStore.readByRunId(result.agentRunId)
-
-    // edge 3: the react->wrap DONE transition was triggered by the text llm.responded
-    const transition = evs.find(e => e.type === 'fsm.transition') as Event<FsmTransitionPayload>
-    const llmResponded = firstOf(evs, 'llm.responded')
-    expect(transition.causedBy).toBe(llmResponded.id)
 
     // edge 4: the crystallized history-pair region was caused by the turn-end boundary
     const boundary = firstOf(evs, 'context.boundary.applied')

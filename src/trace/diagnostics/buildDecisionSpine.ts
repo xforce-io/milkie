@@ -1,7 +1,13 @@
 import type { Event } from '../types.js'
 import { walkCausedBy } from './walkCausedBy.js'
 
-export type DecisionKind = 'llm' | 'tool' | 'transition' | 'output'
+/**
+ * #175 de-core: the decision spine no longer carries `fsm.transition` business
+ * nodes. A decision is an I/O EFFECT — `llm.responded` (the model chose tools /
+ * text) and `tool.responded` (a tool produced a result) — plus the final
+ * output. This is the same anchor `explainDecision` reads.
+ */
+export type DecisionKind = 'llm' | 'tool' | 'output'
 
 export interface DecisionNode {
   eventId:          string
@@ -16,27 +22,29 @@ export interface DecisionSpine {
   nodes: DecisionNode[]
 }
 
-const SPINE_TYPES = new Set(['llm.requested', 'tool.requested', 'fsm.transition', 'agent.run.completed'])
+const SPINE_TYPES = new Set(['llm.responded', 'tool.responded', 'agent.run.completed'])
 
 function kindOf(type: string): DecisionKind {
-  if (type === 'llm.requested')  return 'llm'
-  if (type === 'tool.requested') return 'tool'
-  if (type === 'fsm.transition') return 'transition'
+  if (type === 'llm.responded')  return 'llm'
+  if (type === 'tool.responded') return 'tool'
   return 'output'
 }
 
 function labelOf(e: Event): string {
-  if (e.type === 'llm.requested')  return 'LLM call'
-  if (e.type === 'tool.requested') return `tool: ${String((e.payload as { toolName?: unknown }).toolName ?? '?')}`
-  if (e.type === 'fsm.transition') { const p = e.payload as { from: string; to: string }; return `${p.from} → ${p.to}` }
+  if (e.type === 'llm.responded') {
+    const resp = (e.payload as { response?: { toolCalls?: Array<{ name: string }> } }).response
+    const tools = resp?.toolCalls ?? []
+    return tools.length ? `LLM → ${tools.map(t => t.name).join(', ')}` : 'LLM → 文本'
+  }
+  if (e.type === 'tool.responded') return `tool: ${String((e.payload as { toolName?: unknown }).toolName ?? '?')}`
   return '输出'
 }
 
 /**
- * Project the event log down to the decision spine: only LLM calls, tool
- * calls, transitions, and the final output, in timestamp order. For each node,
+ * Project the event log down to the decision spine: only llm decisions, tool
+ * results, and the final output, in timestamp order. For each node,
  * causeDecisionId is the nearest decision ancestor reached by walking causedBy
- * (skipping non-decision causes like tool.responded / run.started). Pure.
+ * (skipping non-decision causes). Pure.
  */
 export function buildDecisionSpine(events: Event[]): DecisionSpine {
   const spineIds = new Set(events.filter(e => SPINE_TYPES.has(e.type)).map(e => e.id))

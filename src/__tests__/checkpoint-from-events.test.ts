@@ -55,7 +55,9 @@ describe('#73 Stage 6: checkpoint projected from the event log == stateStore che
     const events = await eventStore.readByRunId(run.agentRunId)
     const fromEvents = checkpointFromEvents(events)
     expect(fromEvents).not.toBeNull()
-    expect(fromEvents!.fsm.currentState).toBe('paused')
+    // #175 §8: v2 checkpoint — lifecycle (interrupted), no fsm.
+    expect(fromEvents!.schemaVersion).toBe(2)
+    expect(fromEvents!.lifecycle?.status).toBe('interrupted')
     expect(Object.keys((fromEvents!.context.workingMemory as { data: Record<string, unknown> }).data).length).toBeGreaterThan(0)
     // The context→runId routing pointer is in place (an index, not state).
     expect(await stateStore.get(`context:${contextId}:checkpoint-run:latest`)).toBe(run.agentRunId)

@@ -91,50 +91,13 @@ describe('renderHtml', () => {
     expect(html).not.toContain('class="badge ' + malicious)
   })
 
-  it('renders fsm.transition with guard summary in html', () => {
-    const events: Event[] = [
-      e({ id: 's', runId: 'r1', type: 'agent.run.started', timestamp: 1,
-          payload: { agentId: 'x', goal: 'g', input: 'i', contextId: 'c' } }),
-      e({ id: 't', runId: 'r1', type: 'fsm.transition', timestamp: 2,
-          payload: { from: 'classify', to: 'handle_b', trigger: { domain: 'business', name: 'INTENT_B' },
-            guardEvaluations: [{ guardId: 'intent-threshold', result: 'INTENT_B', contextSlice: {} }] } }),
-    ]
-    const html = renderHtml(events)
-    expect(html).toContain('intent-threshold')
-    expect(html).toContain('data-kind="fsm"')
-  })
-
-  it('renders a Why? block on fsm.transition with anchor links to upstream events', () => {
-    const events: Event[] = [
-      e({ id: 'start', runId: 'r1', type: 'agent.run.started', timestamp: 1,
-          payload: { agentId: 'x', goal: 'g', input: 'i', contextId: 'c' } }),
-      e({ id: 'treq', runId: 'r1', type: 'tool.requested', timestamp: 2, causedBy: 'start',
-          payload: { toolName: 'classify_intent', input: {}, requestHash: 'h' } }),
-      e({ id: 'tres', runId: 'r1', type: 'tool.responded', timestamp: 3, causedBy: 'treq',
-          payload: { toolName: 'classify_intent', output: {}, requestHash: 'h' } }),
-      e({ id: 'fsm', runId: 'r1', type: 'fsm.transition', timestamp: 4, causedBy: 'tres',
-          payload: { from: 'classify', to: 'handle_b', trigger: { domain: 'business', name: 'INTENT_B' },
-            guardEvaluations: [{ guardId: 'intent-threshold', result: 'INTENT_B', contextSlice: { confidence: 0.9 } }] } }),
-    ]
-    const html = renderHtml(events)
-    expect(html).toContain('class="why"')
-    expect(html).toContain('classify → handle_b')
-    expect(html).toContain('intent-threshold')
-    expect(html).toContain('href="#ev-tres"')
-    expect(html).toContain('id="ev-tres"')
-  })
-
-  it('renders a Why? block for an fsm.transition without guards', () => {
-    const events: Event[] = [
-      e({ id: 'start', runId: 'r1', type: 'agent.run.started', timestamp: 1,
-          payload: { agentId: 'x', goal: 'g', input: 'i', contextId: 'c' } }),
-      e({ id: 'fsm', runId: 'r1', type: 'fsm.transition', timestamp: 2, causedBy: 'start',
-          payload: { from: 's0', to: 'end', trigger: { domain: 'lifecycle', name: 'DONE' } } }),
-    ]
-    const html = renderHtml(events)
-    expect(html).toContain('class="why"')
-    expect(html).toContain('s0 → end')
-  })
+  // #175 de-core: `fsm.transition` rendering (data-kind="fsm"), its guard
+  // summary (#31 guard / guardEvaluations), and the `from → to` Why? block on
+  // transitions are deleted — there is no authored business FSM to render. The
+  // three prior cases asserting fsm-transition guard-summary html, the fsm Why?
+  // anchor block, and the guard-less fsm Why? block are removed (feature gone by
+  // design — see docs/design/175-decore-multistate-fsm.md §7, D2). The Why?
+  // block now lives on llm.requested, anchored on causedBy effects (#34 below).
 
   it('includes Why-block styling', () => {
     const html = renderHtml([
@@ -146,7 +109,10 @@ describe('renderHtml', () => {
 })
 
 describe('#34 llm Why?', () => {
-  it('renders a Why? block on llm.requested with trigger link, state and causal chain', () => {
+  it('renders a Why? block on llm.requested with trigger link and causal chain', () => {
+    // #175 de-core: the Why? block no longer reports an authored fsm state name
+    // (the `reflect`/`plan` business states are gone). It now explains the call
+    // purely from the causedBy effect chain — here the upstream tool.responded.
     const events: Event[] = [
       e({ id: 'start', runId: 'r1', type: 'agent.run.started', timestamp: 1,
           payload: { agentId: 'x', goal: 'g', input: 'i', contextId: 'c' } }),
@@ -154,26 +120,12 @@ describe('#34 llm Why?', () => {
           payload: { toolName: 'search', input: {}, requestHash: 'h' } }),
       e({ id: 'tres', runId: 'r1', type: 'tool.responded', timestamp: 3, causedBy: 'treq',
           payload: { toolName: 'search', output: {}, requestHash: 'h' } }),
-      e({ id: 'fsm', runId: 'r1', type: 'fsm.transition', timestamp: 4, causedBy: 'tres',
-          payload: { from: 'plan', to: 'reflect', trigger: { domain: 'business', name: 'NEXT' } } }),
-      e({ id: 'llm', runId: 'r1', type: 'llm.requested', timestamp: 5, causedBy: 'tres', payload: { model: 'm' } }),
+      e({ id: 'llm', runId: 'r1', type: 'llm.requested', timestamp: 4, causedBy: 'tres', payload: { model: 'm' } }),
     ]
     const html = renderHtml(events)
     expect(html).toContain('class="why"')
-    expect(html).toContain('reflect')
     expect(html).toContain('tool.responded(search)')
     expect(html).toContain('href="#ev-tres"')
-  })
-
-  it('shows (未知) state when the run has no transitions', () => {
-    const events: Event[] = [
-      e({ id: 'start', runId: 'r1', type: 'agent.run.started', timestamp: 1,
-          payload: { agentId: 'x', goal: 'g', input: 'i', contextId: 'c' } }),
-      e({ id: 'llm', runId: 'r1', type: 'llm.requested', timestamp: 2, causedBy: 'start', payload: { model: 'm' } }),
-    ]
-    const html = renderHtml(events)
-    expect(html).toContain('class="why"')
-    expect(html).toContain('(未知)')
   })
 
   it('renders a Why? block for an llm.requested with no upstream trigger (no broken link)', () => {
@@ -184,7 +136,6 @@ describe('#34 llm Why?', () => {
     expect(html).toContain('class="why"')
     expect(html).not.toContain('href="#ev-undefined"')
     expect(html).not.toContain('触发:')              // no trigger line when no causedBy
-    expect(html).toContain('class="why-state"')      // state line present
   })
 
   it('renders both the #26 Assembled-by block and the #34 Why? block on the same llm entry', () => {

@@ -22,6 +22,16 @@ related:
   - docs/superpowers/specs/2026-05-16-agent-e2e-scenarios.md
 ---
 
+> **#175 迁移说明（de-core multi-state FSM）**：core 已删除多态业务 FSM
+> （`on:` 业务转移、`ctx.emit` 硬转移、`fsm.transition` 事件、#60/#31、
+> sub-agent action 态）。下文叙述的多态拓扑（intent routing / 路由 / 升级）
+> 不再是 core 能力，已降级为 userland 组合关注点。其 e2e
+> （`tests/e2e/s-011-...e2e.test.ts`）已迁移为「单态 `type: llm` + slot-filling」
+> 的轻量分档表达（设计 §6），并在文件头记录迁移依据。完整的
+> DialogFlow → slot-filling + action-precondition POC 见
+> `examples/repair-ticketing/`（设计 §10 切片 5）。详见
+> `docs/design/175-decore-multistate-fsm.md`。
+
 ## 场景叙事
 
 客服 Agent 用**自定义多状态 FSM**（`type: llm` 状态 + `type: action`

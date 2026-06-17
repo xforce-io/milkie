@@ -95,61 +95,35 @@ describe('#164 ToolContext.currentTurn', () => {
     expect(capturedCurrentTurn).toBe('hello world')
   })
 
-  it('action-state handler receives ctx.currentTurn matching the turn input', async () => {
+  // #175: action-states / business transitions are de-cored. Migrated to a
+  // single-state tool that the model triggers — ctx.currentTurn must still be
+  // reachable from a model-invoked tool handler within the loop.
+  it('model-triggered tool handler receives ctx.currentTurn matching the turn input', async () => {
     let capturedCurrentTurn: string | undefined
 
-    const actionTool: ToolDefinition = {
-      name:        'action_probe',
-      description: 'action handler capturing currentTurn',
+    const triggeredTool: ToolDefinition = {
+      name:        'triggered_probe',
+      description: 'handler capturing currentTurn',
       inputSchema: { type: 'object', properties: {} },
       handler:     async (_input, ctx) => {
         capturedCurrentTurn = ctx.currentTurn
-        ctx.emit('DONE')
-        return {}
-      },
-    }
-
-    const config = makeConfig({
-      fsm: {
-        states: [
-          {
-            name:  'classify',
-            type:  'llm',
-            tools: ['trigger_action'],
-            on:    { TRIGGER: 'process' },
-          },
-          {
-            name:     'process',
-            type:     'action',
-            handler:  'action_probe',
-            terminal: true,
-          },
-        ],
-      },
-    })
-
-    const triggerTool: ToolDefinition = {
-      name:        'trigger_action',
-      description: 'trigger the action state',
-      inputSchema: { type: 'object', properties: {} },
-      handler:     async (_input, ctx) => {
-        ctx.emit('TRIGGER')
         return {}
       },
     }
 
     const gateway = new SequentialGateway([
-      toolCallResponse('tc-1', 'trigger_action', {}),
+      toolCallResponse('tc-1', 'triggered_probe', {}),
+      textResponse('done'),
     ])
 
     const runtime = new AgentRuntime({
-      config,
+      config:     makeConfig(),
       goal:       'action goal',
       input:      'trigger the action',
       stateStore: new MemoryStore(),
       recorder:   new InMemoryRecorder(),
       ioPort:     new DefaultIOPort(gateway),
-      extraTools: [triggerTool, actionTool],
+      extraTools: [triggeredTool],
     })
 
     await runtime.run('trigger the action')

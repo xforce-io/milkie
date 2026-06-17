@@ -17,7 +17,6 @@ import type {
   LlmRespondedPayload,
   ToolRequestedPayload,
   ToolRespondedPayload,
-  FsmTransitionPayload,
   RegionAddedPayload,
   SkillLifecyclePayload,
   AgentSpawnedPayload,
@@ -717,9 +716,16 @@ describe('agent.spawned / agent.returned events', () => {
   })
 })
 
-// ---- fsm.transition (#21) ----
-
-describe('fsm.transition events', () => {
+// ---- decision anchor (#175 de-core) ----
+//
+// The old `fsm.transition events` describe block (#21) asserted the runtime wrote
+// one `fsm.transition` business-topology event per authored polymorphic transition.
+// #175 de-cores the multi-state FSM: the runtime no longer writes `fsm.transition`,
+// and the decision anchor moved onto the `llm.responded` / `tool.responded` effects
+// (explainDecision). Those pure transition-write assertions are deleted. The
+// surviving "this run still completes" coverage is folded into the assertion below,
+// which also confirms the decision-effect anchor is present in the log.
+describe('decision anchor lives on effects, not fsm.transition', () => {
   const twoStateConfig = (): AgentConfig => ({
     agentId:      'multi-state',
     version:      '1.0.0',
@@ -733,7 +739,7 @@ describe('fsm.transition events', () => {
     model: { provider: 'test', model: 'test', adapter: 'test' },
   })
 
-  it('records one fsm.transition event per FSM transition with from/to/trigger', async () => {
+  it('records no fsm.transition event; the llm.responded effect is the decision anchor', async () => {
     const eventStore = new MemoryEventStore()
     const milkie = new Milkie({
       stateStore: new MemoryStore(),
@@ -746,26 +752,8 @@ describe('fsm.transition events', () => {
     expect(result.status).toBe('completed')
 
     const events = await eventStore.readByRunId(result.agentRunId)
-    const transitions = events.filter(e => e.type === 'fsm.transition') as Event<FsmTransitionPayload>[]
-    expect(transitions.length).toBe(1)
-
-    const t = transitions[0]!
-    expect(t.runId).toBe(result.agentRunId)
-    expect(t.payload.from).toBe('react')
-    expect(t.payload.to).toBe('wrap')
-    expect(t.payload.trigger.name).toBe('DONE')
-    expect(t.payload.trigger.domain).toBe('lifecycle')
-  })
-
-  it('does not record fsm.transition when no eventStore configured', async () => {
-    // No assertion — just verifies the run still works without an eventStore.
-    const milkie = new Milkie({
-      stateStore: new MemoryStore(),
-      gateway:    new StubGateway([textResponse('hi')]),
-    })
-    milkie.registerAgent(twoStateConfig())
-
-    const result = await milkie.invoke({ agentId: 'multi-state', goal: 'g', input: 'i' })
-    expect(result.status).toBe('completed')
+    expect(events.filter(e => e.type === 'fsm.transition')).toHaveLength(0)
+    // the decision anchor (#175) is the llm.responded effect, present in the log
+    expect(events.some(e => e.type === 'llm.responded')).toBe(true)
   })
 })

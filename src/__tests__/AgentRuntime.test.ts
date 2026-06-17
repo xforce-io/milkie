@@ -179,57 +179,6 @@ describe('AgentRuntime', () => {
     })
   })
 
-  describe('multi-state FSM (intent routing)', () => {
-    const routingConfig = makeConfig({
-      fsm: {
-        states: [
-          {
-            name:  'classify',
-            type:  'llm',
-            tools: ['classify_intent'],
-            on:    { INTENT_DONE: 'done' },
-          },
-          { name: 'done', type: 'action', terminal: true },
-        ],
-      },
-    })
-
-    it('transitions via ctx.emit from tool handler', async () => {
-      let emitted = false
-      const classifyTool: ToolDefinition = {
-        name:        'classify_intent',
-        description: 'classify',
-        inputSchema: { type: 'object', properties: {} },
-        handler:     async (_input, ctx) => {
-          emitted = true
-          ctx.emit('INTENT_DONE')
-          return { intent: 'done' }
-        },
-      }
-
-      const gateway  = new SequentialGateway([
-        toolCallResponse('tc-1', 'classify_intent', {}),
-      ])
-      const recorder = new InMemoryRecorder()
-      const runtime  = new AgentRuntime({
-        config:     routingConfig,
-        goal:       'classify',
-        input:      'hello',
-        stateStore: new MemoryStore(),
-        recorder,
-        ioPort: new DefaultIOPort(gateway),
-        extraTools: [classifyTool],
-      })
-
-      const result = await runtime.run('hello')
-      expect(emitted).toBe(true)
-      expect(result.status).toBe('completed')
-
-      const transitions = recorder.getSpans().filter(s => s.name === 'fsm.transition')
-      expect(transitions.map(t => t.attributes['toState'])).toContain('done')
-    })
-  })
-
   describe('error handling', () => {
     it('returns error status when tool throws and no recovery', async () => {
       const failingTool: ToolDefinition = {
@@ -281,9 +230,12 @@ describe('AgentRuntime', () => {
 
       expect(result.status).toBe('interrupted')
       // #73: resume state lives in the event log (agent.checkpoint event).
+      // #175 §8: v2 checkpoint — lifecycle, no fsm.
       const checkpoint = checkpointFromEvents(await eventStore.readByRunId(result.agentRunId))!
-      expect(checkpoint.fsm.currentState).toBe('paused')
-      expect(checkpoint.fsm.resumeState).toBe('react')
+      expect(checkpoint.schemaVersion).toBe(2)
+      expect(checkpoint.lifecycle?.status).toBe('interrupted')
+      expect(checkpoint.lifecycle?.resumeKind).toBe('loop')
+      expect(checkpoint.fsm).toBeUndefined()
       expect(checkpoint.meta.contextId).toBe('ctx-interrupt')
       expect(checkpoint.meta.agentRunId).toBe(result.agentRunId)
     })
@@ -420,7 +372,7 @@ describe('AgentRuntime', () => {
 
       expect(result.status).toBe('interrupted')
       const parentCp = checkpointFromEvents(await eventStore.readByRunId(result.agentRunId))!
-      expect(parentCp.fsm.currentState).toBe('paused')
+      expect(parentCp.lifecycle?.status).toBe('interrupted')
       expect(parentCp.children).toHaveLength(2)
       expect(parentCp.children.every(c => c.status === 'interrupted')).toBe(true)
       expect(parentCp.children.every(c => c.checkpointId)).toBe(true)
@@ -522,89 +474,6 @@ describe('AgentRuntime', () => {
         .map(e => e.payload as AgentReturnedPayload)
       expect(returned.some(p => p.status === 'interrupted')).toBe(true)
     })
-  })
-})
-
-describe('#31 guard evaluation capture', () => {
-  const routingConfig = makeConfig({
-    fsm: {
-      states: [
-        {
-          name:  'classify',
-          type:  'llm',
-          tools: ['classify_intent'],
-          on:    { INTENT_DONE: 'done' },
-        },
-        { name: 'done', type: 'action', terminal: true },
-      ],
-    },
-  })
-
-  it('writes guardEvaluations onto the fsm.transition event', async () => {
-    const eventStore = new MemoryEventStore()
-    const guardTool: ToolDefinition = {
-      name:        'classify_intent',
-      description: 'classify',
-      inputSchema: { type: 'object', properties: {} },
-      handler:     async (_input, ctx) => {
-        ctx.emit('INTENT_DONE', undefined, {
-          guardId: 'intent-threshold', result: 'INTENT_DONE',
-          contextSlice: { confidence: 0.9, threshold: 0.75 },
-        })
-        return { ok: true }
-      },
-    }
-    const runtime = new AgentRuntime({
-      config:     routingConfig,
-      goal:       'classify',
-      input:      'hello',
-      stateStore: new MemoryStore(),
-      recorder:   new InMemoryRecorder(),
-      ioPort:     new DefaultIOPort(new SequentialGateway([
-        toolCallResponse('tc-1', 'classify_intent', {}),
-      ])),
-      extraTools: [guardTool],
-      eventStore,
-    })
-
-    const result = await runtime.run('hello')
-    const events = await eventStore.readByRunId(result.agentRunId)
-    const transitions = events.filter(e => e.type === 'fsm.transition')
-    const withGuard = transitions.find(
-      t => (t.payload as import('../trace/types').FsmTransitionPayload).guardEvaluations,
-    )
-    expect((withGuard!.payload as import('../trace/types').FsmTransitionPayload).guardEvaluations)
-      .toEqual([{ guardId: 'intent-threshold', result: 'INTENT_DONE', contextSlice: { confidence: 0.9, threshold: 0.75 } }])
-  })
-
-  it('omits guardEvaluations when the tool does not report one', async () => {
-    const eventStore = new MemoryEventStore()
-    const plainTool: ToolDefinition = {
-      name:        'classify_intent',
-      description: 'classify',
-      inputSchema: { type: 'object', properties: {} },
-      handler:     async (_input, ctx) => { ctx.emit('INTENT_DONE'); return {} },
-    }
-    const runtime = new AgentRuntime({
-      config:     routingConfig,
-      goal:       'classify',
-      input:      'hello',
-      stateStore: new MemoryStore(),
-      recorder:   new InMemoryRecorder(),
-      ioPort:     new DefaultIOPort(new SequentialGateway([
-        toolCallResponse('tc-1', 'classify_intent', {}),
-      ])),
-      extraTools: [plainTool],
-      eventStore,
-    })
-    const result = await runtime.run('hello')
-    const events = await eventStore.readByRunId(result.agentRunId)
-    const transition = events.find(
-      e => e.type === 'fsm.transition'
-        && (e.payload as import('../trace/types').FsmTransitionPayload).trigger.name === 'INTENT_DONE',
-    )
-    expect((transition!.payload as import('../trace/types').FsmTransitionPayload).guardEvaluations)
-      .toBeUndefined()
   })
 })
 
@@ -895,5 +764,69 @@ describe('#148 run_command output is citable end-to-end', () => {
     // 且确有 shell:stdout 对象被 promote(object.created)
     const objs = events.filter(e => e.type === 'object.created').map(e => e.payload as { type?: string })
     expect(objs.some(p => p.type === 'shell:stdout')).toBe(true)
+  })
+
+  // #175 切片 1.2a：RunLifecycle 成为 run 最终状态的权威（保行为）。
+  describe('RunLifecycle authority (#175)', () => {
+    it('exposes lifecycle "completed" after a successful run', async () => {
+      const runtime = new AgentRuntime({
+        config:     makeConfig(),
+        goal:       'test', input: 'hi',
+        stateStore: new MemoryStore(),
+        recorder:   new InMemoryRecorder(undefined, 'test-agent'),
+        ioPort:     new DefaultIOPort(new SequentialGateway([textResponse('done')])),
+      })
+      const result = await runtime.run('hi')
+      expect(result.status).toBe('completed')
+      expect(runtime.lifecycleState).toBe('completed')
+    })
+
+    it('exposes lifecycle "interrupted" when interrupted before completing', async () => {
+      const runtime = new AgentRuntime({
+        config:     makeConfig(),
+        goal:       'test', input: 'hi',
+        stateStore: new MemoryStore(),
+        recorder:   new InMemoryRecorder(undefined, 'test-agent'),
+        ioPort:     new DefaultIOPort(new SequentialGateway([textResponse('nope')])),
+      })
+      runtime.interrupt()
+      const result = await runtime.run('hi')
+      expect(result.status).toBe('interrupted')
+      expect(runtime.lifecycleState).toBe('interrupted')
+    })
+
+    it('exposes lifecycle "failed" when the run errors', async () => {
+      const runtime = new AgentRuntime({
+        config:     makeConfig(),
+        goal:       'test', input: 'hi',
+        stateStore: new MemoryStore(),
+        recorder:   new InMemoryRecorder(undefined, 'test-agent'),
+        ioPort:     new DefaultIOPort(new SequentialGateway([])),  // no responses → LLM call throws
+      })
+      const result = await runtime.run('hi')
+      expect(result.status).toBe('error')
+      expect(runtime.lifecycleState).toBe('failed')
+    })
+
+    it('persists lifecycle "interrupted" into the checkpoint for resume', async () => {
+      const eventStore = new MemoryEventStore()
+      const runtime = new AgentRuntime({
+        config:     makeConfig(),
+        goal:       'test', input: 'hi', contextId: 'ctx-lc',
+        stateStore: new MemoryStore(),
+        eventStore,
+        recorder:   new InMemoryRecorder('trace-lc', 'test-agent'),
+        ioPort:     new DefaultIOPort(new SequentialGateway([textResponse('nope')])),
+      })
+      runtime.interrupt()
+      const result = await runtime.run('hi')
+      expect(result.status).toBe('interrupted')
+
+      const checkpoint = checkpointFromEvents(await eventStore.readByRunId(result.agentRunId))!
+      // #175 §8: v2 — explicit schemaVersion + lifecycle, no fsm written.
+      expect(checkpoint.schemaVersion).toBe(2)
+      expect(checkpoint.lifecycle?.status).toBe('interrupted')
+      expect(checkpoint.fsm).toBeUndefined()
+    })
   })
 })
