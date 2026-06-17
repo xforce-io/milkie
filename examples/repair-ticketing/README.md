@@ -53,6 +53,55 @@ npx jest examples/repair-ticketing
 `repair-ticketing.e2e.test.ts` 用确定性 stub gateway 跑通三状态全流程（happy path），断言确定性
 工单，并覆盖解析器的各类返回状态（别名命中 / 缺级 / 歧义 / unknown / invalid_selection / corrected 回退）。
 
+## LLM 鲁棒性与端到端质量评测（#174）
+
+`eval/` 目录用**真实模型**（doubao-seed-2.0-lite，经 `createGateway`，无 stub gateway）度量 HER 槽填充
+与端到端工单质量。打分**零 LLM judge**：ground-truth 是离散实体 id，精确匹配即可、且完全确定可复现。
+
+```bash
+# 需要 live 模型凭证（VOLCENGINE_TOKEN + VOLCENGINE_API_BASE）；缺凭证时打印 SKIP 并退出 0
+npm run eval:repair
+```
+
+- **数据集** `eval/cases.jsonl`：覆盖 `canonical` / `colloquial` / `multi-level-in-one-turn` /
+  `alias` / `typo` / `synonym` / `ambiguous` / `unknown` / `correction` / `cross-branch` 等标签，每标签 3–5 例。
+- **harness** `eval/run-eval.ts`：复用 #162 导出的 `repairTicketingAgentConfig` + `buildRepairTicketingTools`，
+  逐轮 `milkie.invoke`（同一 `contextId`）；槽位 id 从 `wm.mutated` 事件读取、工单从 live 返回值读取，**均不读 checkpoint**
+  （#172：终态 turn 不落 checkpoint）。
+- **打分** `eval/scoring.ts`（纯函数，含单测 `eval/__tests__/scoring.test.ts`，无凭证即可在 CI 跑）：
+  4 槽全匹配率 + 单槽率、工单字段精确匹配率、澄清行为准确率（ambiguous/unknown）、纠错成功率、
+  平均轮数与失败归因分布（wrong level / hallucinated id / premature emit / missing slot / missing ticket）。
+- **报告**：写入 `eval/reports/`（已 gitignore）。
+
+`eval:repair` 挂在 `npm run test:e2e:live` 之下，默认 CI 不跑、需 live 凭证。
+
+### 基线（baseline）
+
+首次 live run 的汇总指标回填于下表，并同步到 issue #174。指标口径见 `eval/scoring.ts`，
+表格列与 `eval/run-eval.ts` 的 `renderReport` 输出一一对应；复跑只需：
+
+```bash
+VOLCENGINE_TOKEN=… VOLCENGINE_API_BASE=… npm run eval:repair
+# 报告写入 eval/reports/eval-<时间戳>.{md,json}（已 gitignore），把 md 的汇总指标回填到下表
+```
+
+| 指标 | 数值 |
+| --- | --- |
+| model | _待 live run 回填_ |
+| 用例数 | _待 live run 回填_ |
+| 整体通过率 | _待 live run 回填_ |
+| 平均轮数 | _待 live run 回填_ |
+| 4 槽全匹配率 | _待 live run 回填_ |
+| · site / building / department / assignee 单槽率 | _待 live run 回填_ |
+| 工单字段精确匹配率 | _待 live run 回填_ |
+| 澄清行为准确率（ambiguous/unknown） | _待 live run 回填_ |
+| 纠错成功率（correction） | _待 live run 回填_ |
+| 失败归因分布 | _待 live run 回填_ |
+
+> 注：本次 patch 的执行环境已配置 `VOLCENGINE_TOKEN` + `VOLCENGINE_API_BASE`，但沙箱禁用了
+> `node`/`npm`/`tsx` 进程执行，无法在此跑出 live 数字（拒绝在基线中填入伪造数据）。请在可执行 shell 中
+> 跑一次上面的命令，将 `eval/reports/` 生成的 md 汇总回填到本表与 issue #174。
+
 ## 不在范围内
 
 - 不改 `resolver/EntityResolver.ts` 与 `src/tools/entity-resolver.ts`（#167 / #166 的产物）。
