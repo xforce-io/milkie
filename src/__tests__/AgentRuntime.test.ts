@@ -938,5 +938,26 @@ describe('#148 run_command output is citable end-to-end', () => {
       expect(result.status).toBe('error')
       expect(runtime.lifecycleState).toBe('failed')
     })
+
+    it('persists lifecycle "interrupted" into the checkpoint for resume', async () => {
+      const eventStore = new MemoryEventStore()
+      const runtime = new AgentRuntime({
+        config:     makeConfig(),
+        goal:       'test', input: 'hi', contextId: 'ctx-lc',
+        stateStore: new MemoryStore(),
+        eventStore,
+        recorder:   new InMemoryRecorder('trace-lc', 'test-agent'),
+        ioPort:     new DefaultIOPort(new SequentialGateway([textResponse('nope')])),
+      })
+      runtime.interrupt()
+      const result = await runtime.run('hi')
+      expect(result.status).toBe('interrupted')
+
+      const checkpoint = checkpointFromEvents(await eventStore.readByRunId(result.agentRunId))!
+      expect(checkpoint.lifecycle?.state).toBe('interrupted')
+      // D7: old fsm field stays readable alongside.
+      expect(checkpoint.fsm.currentState).toBe('paused')
+      expect(checkpoint.fsm.resumeState).toBe('react')
+    })
   })
 })

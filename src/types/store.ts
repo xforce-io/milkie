@@ -22,6 +22,11 @@ export interface AgentCheckpoint {
     resumeState?:  string
     stateData:    unknown
   }
+  // #175: lower run-lifecycle state, persisted alongside fsm (D7 keeps fsm
+  // readable). Optional during de-core; inline shape avoids a runtime→types cycle.
+  lifecycle?: {
+    state: string
+  }
   context: {
     workingMemory:        unknown
     regions:              import('../context/Region.js').RegionSnapshot

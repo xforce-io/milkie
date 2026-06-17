@@ -877,6 +877,10 @@ export class AgentRuntime {
 
     if (event.type === 'interrupt') {
       const resumeState = this.fsm.currentState.name
+      // #175: drive lifecycle at the real interrupt point so the checkpoint
+      // captures 'interrupted' (resume restores it). run()'s catch is guarded
+      // to not double-signal.
+      this.lifecycle.signal('interrupt')
       this.fsm.emitEvent('interrupt')
       this.fsm.processPendingEvent()
       const checkpoint = this.buildCheckpoint(resumeState)
@@ -899,6 +903,7 @@ export class AgentRuntime {
       goal:        this.goal,
       currentTurn: currentTurn ?? this.getCurrentTurn() ?? undefined,
       fsm:         this.fsm.snapshot(resumeState),
+      lifecycle:   this.lifecycle.snapshot(),
       context: {
         workingMemory: this.memory.toJSON(),
         regions:       this.regions.snapshot(),
@@ -997,7 +1002,9 @@ export class AgentRuntime {
     } catch (err: unknown) {
       const isInterrupt = err instanceof Error && err.name === 'InterruptSignal'
       if (isInterrupt) {
-        this.lifecycle.signal('interrupt')
+        // checkEvents() already signaled 'interrupt' at the interrupt point;
+        // guard so we don't double-signal a non-running lifecycle.
+        if (this.lifecycle.state === 'running') this.lifecycle.signal('interrupt')
         this.recorder.endSpan(this.rootSpan, 'ok')
         return {
           agentRunId: this.agentRunId,
