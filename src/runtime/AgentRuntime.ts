@@ -11,6 +11,7 @@ import type { MessageContent, JSONValue } from '../types/common.js'
 import { FSMEngine } from '../fsm/FSMEngine.js'
 import { RunLifecycle } from './RunLifecycle.js'
 import type { RunLifecycleState } from './RunLifecycle.js'
+import { CHECKPOINT_SCHEMA_VERSION, readCheckpointLifecycle } from './checkpointSchema.js'
 import { ContextRegions } from '../context/ContextRegions.js'
 import { assemble, type AssembleScope } from '../context/assemble.js'
 import {
@@ -836,14 +837,17 @@ export class AgentRuntime {
   // #73: build the resume-state checkpoint object. checkpointId is a content-free
   // uuid (previously minted by the now-archived CheckpointManager). The object is
   // NOT persisted to the stateStore — persistCheckpoint writes it to the event log.
-  private buildCheckpoint(resumeState?: string, currentTurn?: string): AgentCheckpoint {
+  private buildCheckpoint(_resumeState?: string, currentTurn?: string): AgentCheckpoint {
+    // #175 §8/D7: write v2 (explicit schemaVersion + lifecycle). The de-cored
+    // single-state runtime resumes by re-entering states[0], so the old `fsm`
+    // {currentState,resumeState} is no longer written (`_resumeState` ignored).
     return {
       checkpointId: uuidv4(),
       sequence:    this.turnNumber,
       goal:        this.goal,
       currentTurn: currentTurn ?? this.getCurrentTurn() ?? undefined,
-      fsm:         this.fsm.snapshot(resumeState),
-      lifecycle:   this.lifecycle.snapshot(),
+      schemaVersion: CHECKPOINT_SCHEMA_VERSION,
+      lifecycle:   { status: this.lifecycle.snapshot().state, resumeKind: 'loop' },
       context: {
         workingMemory: this.memory.toJSON(),
         regions:       this.regions.snapshot(),
@@ -892,12 +896,12 @@ export class AgentRuntime {
     }
     const restoredMemory = WorkingMemory.fromJSON(checkpoint.context.workingMemory)
     Object.assign(this.memory, restoredMemory)
-    this.fsm.restore(checkpoint.fsm)
-    if (checkpoint.fsm.currentState === 'paused' && checkpoint.fsm.resumeState) {
-      // §5 kept row: `paused → X` via RESUME is a lifecycle re-entry, restoring
-      // the single user state the loop was suspended in. Not a business jump.
-      this.fsm.transitionTo(checkpoint.fsm.resumeState, { name: 'RESUME' })
-    }
+    // #175 §8/D7: the de-cored runtime resumes by re-entering the single user
+    // state (states[0]), where the freshly-constructed FSM already sits — so no
+    // fsm.restore. readCheckpointLifecycle accepts v1 ({fsm}) and v2 ({lifecycle});
+    // a suspended status just means "re-enter the loop" (resumeKind is never a
+    // business-state jump). The status is otherwise informational here.
+    void readCheckpointLifecycle(checkpoint)
     // Interrupt checkpoints did NOT crystallize (interrupt path saves mid-turn),
     // so scratchpad + current-turn survive in the snapshot. Defer
     // crystallization until run() has a rootSpan, otherwise region.added /

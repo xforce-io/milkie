@@ -230,9 +230,12 @@ describe('AgentRuntime', () => {
 
       expect(result.status).toBe('interrupted')
       // #73: resume state lives in the event log (agent.checkpoint event).
+      // #175 §8: v2 checkpoint — lifecycle, no fsm.
       const checkpoint = checkpointFromEvents(await eventStore.readByRunId(result.agentRunId))!
-      expect(checkpoint.fsm.currentState).toBe('paused')
-      expect(checkpoint.fsm.resumeState).toBe('react')
+      expect(checkpoint.schemaVersion).toBe(2)
+      expect(checkpoint.lifecycle?.status).toBe('interrupted')
+      expect(checkpoint.lifecycle?.resumeKind).toBe('loop')
+      expect(checkpoint.fsm).toBeUndefined()
       expect(checkpoint.meta.contextId).toBe('ctx-interrupt')
       expect(checkpoint.meta.agentRunId).toBe(result.agentRunId)
     })
@@ -369,7 +372,7 @@ describe('AgentRuntime', () => {
 
       expect(result.status).toBe('interrupted')
       const parentCp = checkpointFromEvents(await eventStore.readByRunId(result.agentRunId))!
-      expect(parentCp.fsm.currentState).toBe('paused')
+      expect(parentCp.lifecycle?.status).toBe('interrupted')
       expect(parentCp.children).toHaveLength(2)
       expect(parentCp.children.every(c => c.status === 'interrupted')).toBe(true)
       expect(parentCp.children.every(c => c.checkpointId)).toBe(true)
@@ -820,10 +823,10 @@ describe('#148 run_command output is citable end-to-end', () => {
       expect(result.status).toBe('interrupted')
 
       const checkpoint = checkpointFromEvents(await eventStore.readByRunId(result.agentRunId))!
-      expect(checkpoint.lifecycle?.state).toBe('interrupted')
-      // D7: old fsm field stays readable alongside.
-      expect(checkpoint.fsm.currentState).toBe('paused')
-      expect(checkpoint.fsm.resumeState).toBe('react')
+      // #175 §8: v2 — explicit schemaVersion + lifecycle, no fsm written.
+      expect(checkpoint.schemaVersion).toBe(2)
+      expect(checkpoint.lifecycle?.status).toBe('interrupted')
+      expect(checkpoint.fsm).toBeUndefined()
     })
   })
 })

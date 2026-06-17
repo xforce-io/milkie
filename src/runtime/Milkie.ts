@@ -23,6 +23,7 @@ import { InMemoryRecorder } from '../trajectory/InMemoryRecorder.js'
 import { TrajectoryStore } from '../trajectory/TrajectoryStore.js'
 import { createGateway } from '../gateway/GatewayFactory.js'
 import { AgentRuntime } from './AgentRuntime.js'
+import { readCheckpointLifecycle } from './checkpointSchema.js'
 import { DefaultIOPort, type IIOPort } from './IOPort.js'
 import type { IEventStore } from '../trace/EventStore.js'
 import { RecordingIOPort } from '../trace/RecordingIOPort.js'
@@ -755,9 +756,12 @@ export class Milkie {
     if (!checkpoint) {
       return { contextId, exists: false, paused: false, resumable: false, currentState: null, interruptSignaled }
     }
-    const currentState = checkpoint.fsm.currentState
-    const paused = currentState === 'paused'
-    return { contextId, exists: true, paused, resumable: paused, currentState, interruptSignaled }
+    // #175 §8/D7: read lifecycle via the v1/v2 seam, not checkpoint.fsm. Keep the
+    // external `currentState: 'paused'` string for a suspended context (the
+    // documented resumable signal) so this surface is stable across v1/v2.
+    const lc = readCheckpointLifecycle(checkpoint)
+    const currentState = lc.suspended ? 'paused' : lc.status
+    return { contextId, exists: true, paused: lc.suspended, resumable: lc.suspended, currentState, interruptSignaled }
   }
 
   // ---- #83: session context variables (key contract: context:{id}:var:{name}) ----
