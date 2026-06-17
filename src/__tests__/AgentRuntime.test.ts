@@ -896,4 +896,47 @@ describe('#148 run_command output is citable end-to-end', () => {
     const objs = events.filter(e => e.type === 'object.created').map(e => e.payload as { type?: string })
     expect(objs.some(p => p.type === 'shell:stdout')).toBe(true)
   })
+
+  // #175 切片 1.2a：RunLifecycle 成为 run 最终状态的权威（保行为）。
+  describe('RunLifecycle authority (#175)', () => {
+    it('exposes lifecycle "completed" after a successful run', async () => {
+      const runtime = new AgentRuntime({
+        config:     makeConfig(),
+        goal:       'test', input: 'hi',
+        stateStore: new MemoryStore(),
+        recorder:   new InMemoryRecorder(undefined, 'test-agent'),
+        ioPort:     new DefaultIOPort(new SequentialGateway([textResponse('done')])),
+      })
+      const result = await runtime.run('hi')
+      expect(result.status).toBe('completed')
+      expect(runtime.lifecycleState).toBe('completed')
+    })
+
+    it('exposes lifecycle "interrupted" when interrupted before completing', async () => {
+      const runtime = new AgentRuntime({
+        config:     makeConfig(),
+        goal:       'test', input: 'hi',
+        stateStore: new MemoryStore(),
+        recorder:   new InMemoryRecorder(undefined, 'test-agent'),
+        ioPort:     new DefaultIOPort(new SequentialGateway([textResponse('nope')])),
+      })
+      runtime.interrupt()
+      const result = await runtime.run('hi')
+      expect(result.status).toBe('interrupted')
+      expect(runtime.lifecycleState).toBe('interrupted')
+    })
+
+    it('exposes lifecycle "failed" when the run errors', async () => {
+      const runtime = new AgentRuntime({
+        config:     makeConfig(),
+        goal:       'test', input: 'hi',
+        stateStore: new MemoryStore(),
+        recorder:   new InMemoryRecorder(undefined, 'test-agent'),
+        ioPort:     new DefaultIOPort(new SequentialGateway([])),  // no responses → LLM call throws
+      })
+      const result = await runtime.run('hi')
+      expect(result.status).toBe('error')
+      expect(runtime.lifecycleState).toBe('failed')
+    })
+  })
 })

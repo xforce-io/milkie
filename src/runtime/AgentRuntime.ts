@@ -9,6 +9,8 @@ import type { ToolDefinition, ToolContext, ToolResult, ToolResultStrategy } from
 import { applyShape, serializeOutput } from './toolResultStrategy.js'
 import type { MessageContent, JSONValue } from '../types/common.js'
 import { FSMEngine } from '../fsm/FSMEngine.js'
+import { RunLifecycle } from './RunLifecycle.js'
+import type { RunLifecycleState } from './RunLifecycle.js'
 import { ContextRegions } from '../context/ContextRegions.js'
 import { assemble, type AssembleScope } from '../context/assemble.js'
 import {
@@ -141,6 +143,9 @@ export class AgentRuntime {
   private readonly causalCursor?:   CausalCursor
 
   private readonly fsm:         FSMEngine
+  // #175 切片 1.2a：下层运行生命周期状态机（per-run，run() 开头重置）。
+  // 渐进接线期：lifecycle 是 run 最终状态的权威；业务 FSM 转移暂时并存（切片 2 删）。
+  private lifecycle:            RunLifecycle = new RunLifecycle()
   private readonly regions:     ContextRegions
   private readonly registry:    ToolRegistry
   private readonly memory:      WorkingMemory
@@ -974,9 +979,13 @@ export class AgentRuntime {
     this.setTurnContext()
     this.turnNumber++
 
+    // #175 切片 1.2a：per-run 生命周期，run() 开头重置为 running。
+    this.lifecycle = new RunLifecycle()
+
     try {
       await this.executeFSM()
       // Turn completed successfully — crystallize.
+      this.lifecycle.signal('done')
       this.crystallizeTurn(turnInput)
       this.recorder.endSpan(this.rootSpan, 'ok')
       return {
@@ -988,6 +997,7 @@ export class AgentRuntime {
     } catch (err: unknown) {
       const isInterrupt = err instanceof Error && err.name === 'InterruptSignal'
       if (isInterrupt) {
+        this.lifecycle.signal('interrupt')
         this.recorder.endSpan(this.rootSpan, 'ok')
         return {
           agentRunId: this.agentRunId,
@@ -996,6 +1006,7 @@ export class AgentRuntime {
           status:     'interrupted',
         }
       }
+      this.lifecycle.signal('error')
       this.recorder.endSpan(this.rootSpan, 'error')
       return {
         agentRunId: this.agentRunId,
@@ -1007,6 +1018,11 @@ export class AgentRuntime {
       await this.tryFlushTraceWrites()
       await this.recorder.flush()
     }
+  }
+
+  /** #175: the run's lifecycle state (running/paused/interrupted/completed/failed). */
+  get lifecycleState(): RunLifecycleState {
+    return this.lifecycle.state
   }
 
   // Continue an existing session with new user input
