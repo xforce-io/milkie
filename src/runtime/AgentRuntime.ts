@@ -144,7 +144,6 @@ export class AgentRuntime {
   private readonly factory:     AgentFactory
 
   private eventQueue:    Array<{ type: string; payload: unknown }> = []
-  private pendingEvents: Array<{ type: string; payload: unknown }> = []
   private pendingSkillLoads: Array<SkillLoadRequest> = []
   private loadedSkills: Map<string, SkillLifecyclePayload> = new Map()
   private pendingTraceWrites: Promise<unknown>[] = []
@@ -831,7 +830,8 @@ export class AgentRuntime {
       err.name = 'InterruptSignal'
       throw err
     }
-    this.pendingEvents.push(event)
+    // #181: eventQueue only ever carries 'interrupt' (which threw above), so the
+    // old `pendingEvents.push(event)` was unreachable — removed with the field.
   }
 
   // #73: build the resume-state checkpoint object. checkpointId is a content-free
@@ -852,7 +852,6 @@ export class AgentRuntime {
         workingMemory: this.memory.toJSON(),
         regions:       this.regions.snapshot(),
       },
-      pendingEvents: this.pendingEvents.map(e => ({ type: e.type, payload: e.payload })),
       children:      Array.from(this.childRecords.values()),
       meta: {
         agentId:       this.config.agentId,

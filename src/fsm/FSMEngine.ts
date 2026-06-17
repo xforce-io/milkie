@@ -79,25 +79,4 @@ export class FSMEngine {
   getState(name: string): FSMState | undefined {
     return this.states.get(name)
   }
-
-  snapshot(resumeState?: string): { currentState: string; resumeState?: string; stateData: unknown } {
-    return { currentState: this.current.name, resumeState, stateData: null }
-  }
-
-  restore(snapshot: { currentState: string }): void {
-    if (RESERVED_STATES.includes(snapshot.currentState as typeof RESERVED_STATES[number])) {
-      this.current = {
-        name:     snapshot.currentState,
-        type:     'action',
-        terminal: snapshot.currentState === 'paused' || snapshot.currentState === 'failed',
-      }
-      return
-    }
-
-    const state = this.states.get(snapshot.currentState)
-    if (!state) {
-      throw new Error(`FSM restore: unknown state "${snapshot.currentState}"`)
-    }
-    this.current = state
-  }
 }

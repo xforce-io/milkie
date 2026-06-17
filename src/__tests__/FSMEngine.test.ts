@@ -107,48 +107,4 @@ describe('FSMEngine', () => {
       expect(() => fsm.transitionTo('handle_a')).toThrow(/unknown state/)
     })
   })
-
-  describe('snapshot / restore', () => {
-    it('snapshots the current user state', () => {
-      const fsm = new FSMEngine(reactFSM)
-      const snap = fsm.snapshot()
-      expect(snap.currentState).toBe('react')
-    })
-
-    it('carries the optional resumeState through the snapshot', () => {
-      const fsm = new FSMEngine(reactFSM)
-      fsm.transitionTo('paused')
-      const snap = fsm.snapshot('react')
-      expect(snap.currentState).toBe('paused')
-      expect(snap.resumeState).toBe('react')
-    })
-
-    it('restores a user state from a snapshot', () => {
-      const fsm = new FSMEngine(terminalFSM)
-      fsm.transitionTo('end')
-      const snap = fsm.snapshot()
-      expect(snap.currentState).toBe('end')
-
-      const fsm2 = new FSMEngine(terminalFSM)
-      fsm2.restore(snap)
-      expect(fsm2.currentStateName).toBe('end')
-      expect(fsm2.isTerminal()).toBe(true)
-    })
-
-    it('restores a reserved lifecycle state from a snapshot', () => {
-      const fsm = new FSMEngine(reactFSM)
-      fsm.transitionTo('paused')
-      const snap = fsm.snapshot('react')
-
-      const fsm2 = new FSMEngine(reactFSM)
-      fsm2.restore(snap)
-      expect(fsm2.currentStateName).toBe('paused')
-      expect(fsm2.isTerminal()).toBe(true)
-    })
-
-    it('throws when restoring an unknown state', () => {
-      const fsm = new FSMEngine(reactFSM)
-      expect(() => fsm.restore({ currentState: 'ghost' })).toThrow(/unknown state/)
-    })
-  })
 })
