@@ -43,7 +43,7 @@ import { canonicalize, contentAddressForCanonicalBytes } from '../trace/hash.js'
 import type { CausalCursor } from '../trace/CausalCursor.js'
 import { checkpointFromEvents } from '../trace/diagnostics/checkpointFromEvents.js'
 import type { Region } from '../context/Region.js'
-import type { SkillLifecyclePayload, AgentRunStartedPayload, AgentRunCompletedPayload, GuardEvaluation, ToolEmittedPayload, LineageBuffer, ObjectType } from '../trace/types.js'
+import type { SkillLifecyclePayload, AgentRunStartedPayload, AgentRunCompletedPayload, LineageBuffer, ObjectType } from '../trace/types.js'
 
 export type MakeChildPort = (
   childRunId:  string,
@@ -96,11 +96,6 @@ export interface AgentRuntimeOptions {
    *  Present → replay-restore mode: after each tool call, restore WM from the next
    *  snapshot instead of trusting the (non-re-run) handler. Absent → record mode. */
   replayWmSnapshots?: unknown[]
-  /** #60: recorded business FSM events keyed by toolCallId, for replay. Present →
-   *  replay mode: after each tool call, re-emit the recorded event (the handler is
-   *  not re-run, so ctx.emit never fires) so the emit-driven transition reproduces.
-   *  Absent → record mode (capture & append tool.emitted instead). */
-  replayEmits?: Map<string, { name: string; payload?: unknown; guard?: GuardEvaluation[] }>
 }
 
 type SkillLoadRequest = {
@@ -126,10 +121,6 @@ export class AgentRuntime {
   private readonly eventStore?:      import('../trace/EventStore.js').IEventStore
   private readonly traceObjectStore?: ITraceObjectStore
   private readonly replayWmSnapshots?: unknown[]  // SPIKE(#73)
-  private readonly replayEmits?: Map<string, { name: string; payload?: unknown; guard?: GuardEvaluation[] }>  // #60
-  /** #60: per-run count of successful calls per toolCallId, to disambiguate a
-   *  tool_call id reused across responses when keying tool.emitted record/replay. */
-  private readonly toolEmitOccurrence = new Map<string, number>()
   /** #113 P1/P2: per-run registry of objectIds. `promoted=true` once an
    *  object.created event has been emitted for it (eager createObject, or a
    *  cite that promoted a lazily-registered grep candidate). Lets cite fail-fast
@@ -185,7 +176,6 @@ export class AgentRuntime {
     this.recorder        = opts.recorder
     this.eventStore      = opts.eventStore
     this.replayWmSnapshots = opts.replayWmSnapshots
-    this.replayEmits     = opts.replayEmits
     this.traceObjectStore = opts.traceObjectStore
     this.subAgentConfigs = opts.subAgentConfigs
     this.childRecorderFactory = opts.childRecorderFactory
@@ -213,55 +203,7 @@ export class AgentRuntime {
       return child.run(spawnOpts.input)
     })
 
-    this.setupFSMCallbacks()
     this.registerTools(opts.extraTools ?? [])
-  }
-
-  private setupFSMCallbacks(): void {
-    this.fsm.onTransitionCallback((from, to, event) => {
-      const span = this.recorder.startSpan('fsm.transition', {
-        fromState: from,
-        toState:   to,
-        event:     event.name,
-      })
-      this.recorder.endSpan(span, 'ok')
-
-      // Also write to the event log so trace HTML / web UI / inspect can see
-      // these. Recorder-only (span events) doesn't reach the live event stream.
-      // Bypass IOPort for the same reason region.added does: these events are
-      // informational and not consumed by replay's nondet cache, so we mustn't
-      // burn an ioPort.uuid()/now() that replay's skip-write branch wouldn't
-      // match. Date.now() / uuidv4() direct keep record/replay paths symmetric.
-      if (this.eventStore) {
-        // edge 3 (#30): capture the cause synchronously here — the last llm/tool event
-        // emitted by RecordingIOPort is what provoked this transition (tool ctx.emit ->
-        // tool.responded, or DONE-after-text -> llm.responded). Must read the cursor now,
-        // NOT inside the deferred write closure, because trace appends are reordered.
-        const causedBy = this.causalCursor?.lastIoEventId
-        this.enqueueTraceWrite(async () => {
-          await this.eventStore!.append({
-            id:        uuidv4(),
-            runId:     this.agentRunId,
-            type:      'fsm.transition',
-            actor:     this.config.agentId,
-            ...(causedBy ? { causedBy } : {}),
-            timestamp: Date.now(),
-            payload: {
-              from,
-              to,
-              trigger: {
-                // emitEvent / framework emit sites stamp domain explicitly; the
-                // only path that leaves it unset is direct construction in tests.
-                domain:  event.domain ?? 'business',
-                name:    event.name,
-                ...(event.payload !== undefined ? { payload: event.payload } : {}),
-              },
-              ...(event.guard?.length ? { guardEvaluations: event.guard } : {}),
-            },
-          })
-        })
-      }
-    })
   }
 
   private registerTools(extraTools: ToolDefinition[]): void {
@@ -378,14 +320,12 @@ export class AgentRuntime {
   }
 
   private buildToolContext(
-    emitFn: (event: string, payload?: unknown, guard?: GuardEvaluation | GuardEvaluation[]) => void,
     lineage?: LineageBuffer,
   ): ToolContext {
     const ctx: ToolContext = {
       workingMemory: this.memory,
       agentFactory:  this.factory,
       stateStore:    this.stateStore,
-      emit:          emitFn,
       requestSkill:  (name: string, scope?: 'turn' | 'session') => this.requestSkill(name, scope),
       currentTurn:   this.currentTurnRaw,
     }
@@ -879,10 +819,10 @@ export class AgentRuntime {
       const resumeState = this.fsm.currentState.name
       // #175: drive lifecycle at the real interrupt point so the checkpoint
       // captures 'interrupted' (resume restores it). run()'s catch is guarded
-      // to not double-signal.
+      // to not double-signal. The reserved `paused` re-entry is a lifecycle
+      // suspend (§5 kept row), not a business transition.
       this.lifecycle.signal('interrupt')
-      this.fsm.emitEvent('interrupt')
-      this.fsm.processPendingEvent()
+      this.fsm.transitionTo('paused')
       const checkpoint = this.buildCheckpoint(resumeState)
       await this.tryFlushTraceWrites()
       await this.persistCheckpoint(checkpoint)
@@ -954,7 +894,9 @@ export class AgentRuntime {
     Object.assign(this.memory, restoredMemory)
     this.fsm.restore(checkpoint.fsm)
     if (checkpoint.fsm.currentState === 'paused' && checkpoint.fsm.resumeState) {
-      this.fsm.transitionTo(checkpoint.fsm.resumeState, { name: 'RESUME', domain: 'lifecycle' })
+      // §5 kept row: `paused → X` via RESUME is a lifecycle re-entry, restoring
+      // the single user state the loop was suspended in. Not a business jump.
+      this.fsm.transitionTo(checkpoint.fsm.resumeState, { name: 'RESUME' })
     }
     // Interrupt checkpoints did NOT crystallize (interrupt path saves mid-turn),
     // so scratchpad + current-turn survive in the snapshot. Defer
@@ -992,6 +934,16 @@ export class AgentRuntime {
       // Turn completed successfully — crystallize.
       this.lifecycle.signal('done')
       this.crystallizeTurn(turnInput)
+      // #175/D7: a non-terminal turn that finishes (pure text → waiting for the
+      // next user turn) leaves a continuation checkpoint in the event log so the
+      // next invoke / a fresh instance restores from it (portable session, serve
+      // restart recovery). Reserved terminal states (paused/failed) already
+      // persisted their own checkpoint; don't double-write.
+      if (!this.fsm.isTerminal()) {
+        const checkpoint = this.buildCheckpoint()
+        await this.tryFlushTraceWrites()
+        await this.persistCheckpoint(checkpoint)
+      }
       this.recorder.endSpan(this.rootSpan, 'ok')
       return {
         agentRunId: this.agentRunId,
@@ -1039,38 +991,30 @@ export class AgentRuntime {
     return this.run(input)
   }
 
-  // Public so Milkie can drive multi-turn execution directly
+  // Public so Milkie can drive multi-turn execution directly.
+  //
+  // #175 de-core: the multi-state state-stepping outer loop is gone. A run now
+  // executes its SINGLE authored user state (the loop body), driven to its
+  // outcome. There is no user-state→user-state business transition; what remains
+  // is the single state's own loop (LLM tool-loop or one action) plus the
+  // lifecycle re-entry handled in checkEvents (interrupt→paused) and
+  // executeSingleTool (retry via error_handling).
   async executeFSM(): Promise<void> {
-    while (true) {
-      const state = this.fsm.currentState
+    const state = this.fsm.currentState
+    // A run can be resumed straight into a reserved terminal state (paused/failed)
+    // — nothing to execute.
+    if (state.name === 'paused' || state.name === 'failed') return
 
-      if (state.name === 'paused' || state.name === 'failed') break
-      if (state.type !== 'llm' && this.fsm.isTerminal()) break
-
-      if (state.type === 'llm') {
-        const shouldContinue = await this.runLLMState(state)
-        if (!shouldContinue) {
-          if (!state.terminal) {
-            // Waiting for user — crystallize FIRST so the checkpoint includes
-            // the (user, finalAssistant) history pair (otherwise the next
-            // invoke sees an empty history).
-            this.crystallizeTurn()
-            const checkpoint = this.buildCheckpoint()
-            await this.tryFlushTraceWrites()
-            await this.persistCheckpoint(checkpoint)
-          }
-          break
-        }
-      } else if (state.type === 'action') {
-        await this.runActionState(state)
-      } else {
-        throw new Error(`Unknown state type: ${(state as FSMState).type}`)
-      }
+    if (state.type === 'llm') {
+      await this.runLLMState(state)
+    } else if (state.type === 'action') {
+      await this.runActionState(state)
+    } else {
+      throw new Error(`Unknown state type: ${(state as FSMState).type}`)
     }
   }
 
-  // Returns true if FSM should continue (transitioned to new state), false if waiting for user
-  private async runLLMState(state: FSMState): Promise<boolean> {
+  private async runLLMState(state: FSMState): Promise<void> {
     const maxIter = state.max_iterations ?? 20
     let iterations = 0
 
@@ -1158,29 +1102,13 @@ export class AgentRuntime {
         this.appendScratchpadToolResults(toolResultContent)
         this.applyPendingSkills()
 
-        // Did any tool emit a FSM event?
-        const next = this.fsm.processPendingEvent()
-        if (next) {
-          if (next.name === 'paused' || next.name === 'failed') return false
-          // For terminal LLM states, return true so outer loop runs them once
-          if (next.terminal && next.type === 'llm') return true
-          if (next.terminal) return false  // terminal action / reserved state
-          return true  // transitioned to new state, outer loop continues
-        }
-        // No event → continue LLM loop
+        // Tool calls → the autonomous loop keeps running (the `continue` signal).
         continue
       }
 
-      // Pure text output → trigger DONE
-      const next = this.fsm.processDone()
-      if (next) {
-        if (next.terminal && next.type === 'llm') return true  // run terminal LLM once
-        if (next.terminal) return false
-        return true
-      }
-
-      // No on.DONE → waiting for user
-      return false
+      // Pure text output → the run is done (the `done` signal). run() crystallizes
+      // and signals the lifecycle.
+      return
     }
   }
 
@@ -1188,8 +1116,7 @@ export class AgentRuntime {
     await this.checkEvents()
 
     if (!state.handler) {
-      // No handler, auto-DONE
-      this.fsm.processDone()
+      // No handler — nothing to do; the run is done.
       return
     }
 
@@ -1198,9 +1125,7 @@ export class AgentRuntime {
       throw new Error(`Action handler "${state.handler}" not found in tool registry`)
     }
 
-    const ctx = this.buildToolContext((event, payload, guard) => {
-      this.fsm.emitEvent(event, payload, guard)
-    })
+    const ctx = this.buildToolContext()
 
     const span = this.recorder.startSpan('tool.call', {
       toolName: state.handler,
@@ -1220,12 +1145,12 @@ export class AgentRuntime {
       if (output && typeof output === 'string') this.lastTextOutput = output
     } catch (err) {
       this.recorder.endSpan(span, 'error')
-      this.fsm.emitEvent('error', { message: err instanceof Error ? err.message : String(err) })
+      // An action handler failing surfaces as a run error (the `error` signal),
+      // not a business transition. Re-throw so run() catches it and signals failed.
+      throw err instanceof Error ? err : new Error(String(err))
     }
 
     await this.checkEvents()
-    const next = this.fsm.processPendingEvent()
-    if (!next) this.fsm.processDone()
   }
 
   private async executeTools(
@@ -1273,11 +1198,6 @@ export class AgentRuntime {
     call: { id: string; name: string; input: unknown },
     batchId: string | null,
   ): Promise<ToolResult> {
-    // #60: capture the emit that WON the FSM's single pendingEvent slot
-    // (first-emit-wins). Only the winner drives a transition, so recording just
-    // the winner makes replay reproduce one transition regardless of how a
-    // parallel batch's emits race.
-    let capturedEmit: { name: string; payload?: unknown; guard?: GuardEvaluation[] } | undefined
     // #37/#38: handler declares objects/relations into this buffer; RecordingIOPort
     // drains it into object.created/relation.created right after tool.responded.
     const lineage: LineageBuffer = { objects: [], relations: [] }
@@ -1289,17 +1209,7 @@ export class AgentRuntime {
         if (o && !o.producerEventId) o.producerEventId = respEventId
       }
     }
-    const ctx = this.buildToolContext((event, payload, guard) => {
-      const hadPending = this.fsm.hasPendingEvent()
-      this.fsm.emitEvent(event, payload, guard)
-      if (!hadPending && this.fsm.hasPendingEvent()) {
-        capturedEmit = {
-          name: event,
-          ...(payload !== undefined ? { payload } : {}),
-          ...(guard ? { guard: Array.isArray(guard) ? guard : [guard] } : {}),
-        }
-      }
-    }, lineage)
+    const ctx = this.buildToolContext(lineage)
 
     const maxRetries = 3
 
@@ -1339,32 +1249,6 @@ export class AgentRuntime {
             payload:   { snapshot: this.memory.toJSON() },  // toJSON() deep-clones (frozen)
           })
         }
-        // #60: event-source the tool's emit side-effect (FSM transition) the same
-        // way. On replay the handler didn't run, so re-emit the recorded business
-        // event before runLLMState calls processPendingEvent. In record mode,
-        // append tool.emitted iff this call won the pendingEvent slot.
-        //
-        // Key by (toolCallId, occurrence): providers only guarantee tool_call ids
-        // are unique within ONE response, not across a run — the same id can recur
-        // in a later FSM state. occurrence = how many times this id has been seen
-        // in this run (incremented per successful call, identically in record and
-        // replay), so duplicate ids never collapse or cross-inject. The counter
-        // ticks for EVERY call (even non-emitting ones) so the two sides stay aligned.
-        const occurrence = this.toolEmitOccurrence.get(call.id) ?? 0
-        this.toolEmitOccurrence.set(call.id, occurrence + 1)
-        if (this.replayEmits) {
-          const emitted = this.replayEmits.get(`${call.id}#${occurrence}`)
-          if (emitted) this.fsm.emitEvent(emitted.name, emitted.payload, emitted.guard)
-        } else if (this.eventStore && capturedEmit) {
-          await this.eventStore.append({
-            id:        uuidv4(),
-            runId:     this.agentRunId,
-            type:      'tool.emitted',
-            actor:     this.config.agentId,
-            timestamp: Date.now(),
-            payload:   { toolCallId: call.id, occurrence, event: capturedEmit } satisfies ToolEmittedPayload,
-          })
-        }
         const duration = this.ioPort.now() - start
         this.recorder.recordEvent(span, 'tool.result', { output })
         this.recorder.endSpan(span, 'ok')
@@ -1382,25 +1266,13 @@ export class AgentRuntime {
 
         this.recorder.endSpan(span, 'error')
 
+        // §5 kept rows: error escalation (`X → error_handling`) and retry-back
+        // (`error_handling → X`) are lifecycle re-entries on the single user
+        // state, not business transitions.
         const retryFromState = this.fsm.currentState.name
-        this.fsm.transitionTo('error_handling', {
-          name:   'error',
-          domain: 'runtime-control',
-          payload: {
-            attempt:  attempt + 1,
-            toolName: call.name,
-            message:  err instanceof Error ? err.message : String(err),
-          },
-        })
+        this.fsm.transitionTo('error_handling', { name: 'error' })
         await new Promise<void>(r => setTimeout(r, 500))
-        this.fsm.transitionTo(retryFromState, {
-          name:   'RETRY',
-          domain: 'runtime-control',
-          payload: {
-            attempt:  attempt + 1,
-            toolName: call.name,
-          },
-        })
+        this.fsm.transitionTo(retryFromState, { name: 'RETRY' })
       }
     }
 

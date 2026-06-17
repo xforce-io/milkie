@@ -1,7 +1,6 @@
 import type { Event } from '../types.js'
 import { buildTimelineTree, type TimelineEntry, type TimelineNode } from './tree.js'
 import { STYLES, SCRIPT } from './template.js'
-import { explainTransition, type TransitionExplanation } from '../diagnostics/explainTransition.js'
 import { explainLlmCall, type LlmCallExplanation } from '../diagnostics/explainLlmCall.js'
 import { contextRefsAt, regionReuseCounts, type RegionContentRef } from '../RegionContextView.js'
 
@@ -27,7 +26,6 @@ function summaryFor(entry: TimelineEntry): string {
   if (entry.kind === 'llm')       return 'LLM call' + (entry.respondedId ? '' : ' (no response)')
   if (entry.kind === 'tool')      return 'tool: ' + esc(entry.toolName) + (entry.respondedId ? '' : ' (no response)')
   if (entry.kind === 'region')    return esc(entry.summary)
-  if (entry.kind === 'fsm')       return esc(entry.summary)
   return entry.eventType === 'agent.run.started' ? 'run started' : 'run completed'
 }
 
@@ -37,8 +35,6 @@ function payloadFor(entry: TimelineEntry, eventById: Map<string, Event>): string
     const evt = eventById.get(entry.eventId)
     if (evt) sections.push(JSON.stringify(evt.payload, null, 2))
   } else if (entry.kind === 'region') {
-    sections.push(JSON.stringify(entry.payload, null, 2))
-  } else if (entry.kind === 'fsm') {
     sections.push(JSON.stringify(entry.payload, null, 2))
   } else {
     const req = eventById.get(entry.requestedId)
@@ -56,33 +52,16 @@ function entryEventIds(entry: TimelineEntry): string[] {
   return [entry.eventId]
 }
 
-function renderWhy(exp: TransitionExplanation): string {
-  const trigger = exp.trigger.causedByEventId
-    ? `<div class="why-trigger">触发: <a href="#ev-${esc(exp.trigger.causedByEventId)}">${esc(exp.trigger.causedBySummary ?? exp.trigger.causedByEventId)}</a></div>`
-    : ''
-  const guards = exp.guards.length
-    ? `<div class="why-guards">guard: ${esc(exp.guards.map(g => `${g.guardId}=${String(g.result)}`).join(', '))}</div>`
-    : ''
-  const chain = `<div class="why-chain">`
-    + exp.causalChain.map(c => `<a href="#ev-${esc(c.eventId)}">${esc(c.summary)}</a>`).join(' → ')
-    + `</div>`
-  return `<div class="why">`
-       + `<div class="why-summary">${esc(exp.summary)}</div>`
-       + trigger + guards + chain
-       + `</div>`
-}
-
 function renderWhyLlm(exp: LlmCallExplanation): string {
   const trigger = exp.trigger.causedByEventId
     ? `<div class="why-trigger">触发: <a href="#ev-${esc(exp.trigger.causedByEventId)}">${esc(exp.trigger.causedBySummary ?? exp.trigger.causedByEventId)}</a></div>`
     : ''
-  const state = `<div class="why-state">state: ${esc(exp.fsmState ?? '(未知)')}</div>`
   const chain = `<div class="why-chain">`
     + exp.causalChain.map(c => `<a href="#ev-${esc(c.eventId)}">${esc(c.summary)}</a>`).join(' → ')
     + `</div>`
   return `<div class="why">`
        + `<div class="why-summary">${esc(exp.summary)}</div>`
-       + trigger + state + chain
+       + trigger + chain
        + `</div>`
 }
 
@@ -106,7 +85,6 @@ function renderAssembled(requestedId: string, ctx: RegionCtx): string {
 function renderEntry(
   entry: TimelineEntry,
   eventById: Map<string, Event>,
-  explanations: Map<string, TransitionExplanation>,
   regionCtx: RegionCtx,
 ): string {
   const icon = entry.kind === 'llm' ? '◆'
@@ -114,14 +92,10 @@ function renderEntry(
              : entry.kind === 'region'
                ? (entry.eventType === 'context.boundary.applied' ? '⌖'
                  : entry.eventType === 'region.added' ? '＋' : '－')
-             : entry.kind === 'fsm' ? '⇒'
              : '●'
   const ids = entryEventIds(entry)
   const primaryId = ids[0]!
   const extraAnchors = ids.slice(1).map(id => `<span class="anchor" id="ev-${esc(id)}"></span>`).join('')
-  const why = entry.kind === 'fsm' && explanations.has(entry.eventId)
-    ? renderWhy(explanations.get(entry.eventId)!)
-    : ''
   const assembled = entry.kind === 'llm' ? renderAssembled(entry.requestedId, regionCtx) : ''
   const whyLlm = entry.kind === 'llm' ? renderWhyLlm(explainLlmCall(regionCtx.events, entry.requestedId)) : ''
   return `<div class="entry ${entry.kind}" data-kind="${entry.kind}" id="ev-${esc(primaryId)}">`
@@ -131,7 +105,6 @@ function renderEntry(
        + `<span class="summary">${summaryFor(entry)}</span>`
        + `<span class="ts">${entry.timestamp}</span>`
        + `</div>`
-       + why
        + assembled
        + whyLlm
        + `<pre class="payload">${payloadFor(entry, eventById)}</pre>`
@@ -141,7 +114,6 @@ function renderEntry(
 function renderNode(
   node: TimelineNode,
   eventById: Map<string, Event>,
-  explanations: Map<string, TransitionExplanation>,
   regionCtx: RegionCtx,
 ): string {
   const status = node.status ?? 'in-flight'
@@ -152,9 +124,9 @@ function renderNode(
        + `<span class="run-id">${esc(node.runId)}</span>`
        + `<span class="badge${badgeClass}">${esc(status)}</span>`
        + `</div>`
-       + node.entries.map(en => renderEntry(en, eventById, explanations, regionCtx)).join('')
+       + node.entries.map(en => renderEntry(en, eventById, regionCtx)).join('')
        + (node.children.length > 0
-           ? `<div class="child-run">${node.children.map(n => renderNode(n, eventById, explanations, regionCtx)).join('')}</div>`
+           ? `<div class="child-run">${node.children.map(n => renderNode(n, eventById, regionCtx)).join('')}</div>`
            : '')
        + `</section>`
 }
@@ -171,10 +143,6 @@ export function renderTimelineSections(events: Event[], opts: { regionContent?: 
   const tree = buildTimelineTree(events)
   const eventById = new Map<string, Event>()
   for (const evt of events) eventById.set(evt.id, evt)
-  const explanations = new Map<string, TransitionExplanation>()
-  for (const evt of events) {
-    if (evt.type === 'fsm.transition') explanations.set(evt.id, explainTransition(events, evt.id))
-  }
 
   const regionContent = opts.regionContent ?? new Map<string, string>()
   const regionCtx: RegionCtx = { events, reuseCounts: regionReuseCounts(events), regionContent }
@@ -189,9 +157,8 @@ export function renderTimelineSections(events: Event[], opts: { regionContent?: 
   <span class="chip" data-kind="tool">tool</span>
   <span class="chip" data-kind="lifecycle">lifecycle</span>
   <span class="chip" data-kind="region">region</span>
-  <span class="chip" data-kind="fsm">fsm</span>
 </div>
-${tree.map(n => renderNode(n, eventById, explanations, regionCtx)).join('')}
+${tree.map(n => renderNode(n, eventById, regionCtx)).join('')}
 <script type="application/json" id="region-content">${registryJson}</script>
 <script type="application/json" id="trace-data">${dataJson}</script>`
 }

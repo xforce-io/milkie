@@ -56,34 +56,10 @@ describe('buildTimelineTree', () => {
     expect(tree[0]!.children.map(n => n.runId)).toEqual(['child'])
   })
 
-  it('renders an fsm.transition entry carrying guardEvaluations', () => {
-    const events: Event[] = [
-      e({ id: 's', runId: 'r1', type: 'agent.run.started', timestamp: 1,
-          payload: { agentId: 'x', goal: 'g', input: 'i', contextId: 'c' } }),
-      e({ id: 't', runId: 'r1', type: 'fsm.transition', timestamp: 2,
-          payload: { from: 'classify', to: 'handle_b',
-            trigger: { domain: 'business', name: 'INTENT_B' },
-            guardEvaluations: [{ guardId: 'intent-threshold', result: 'INTENT_B', contextSlice: { confidence: 0.7 } }] } }),
-    ]
-    const tree = buildTimelineTree(events)
-    const entry = tree[0]!.entries.find(en => en.kind === 'fsm')
-    expect(entry).toBeDefined()
-    expect((entry as { summary: string }).summary).toContain('intent-threshold')
-  })
-
-  it('renders an fsm.transition entry without guard evaluations (no bracket segment)', () => {
-    const events: Event[] = [
-      e({ id: 's', runId: 'r1', type: 'agent.run.started', timestamp: 1,
-          payload: { agentId: 'x', goal: 'g', input: 'i', contextId: 'c' } }),
-      e({ id: 't', runId: 'r1', type: 'fsm.transition', timestamp: 2,
-          payload: { from: 'classify', to: 'handle_a',
-            trigger: { domain: 'business', name: 'INTENT_A' } } }),
-    ]
-    const tree = buildTimelineTree(events)
-    const entry = tree[0]!.entries.find(en => en.kind === 'fsm')
-    expect(entry).toBeDefined()
-    const summary = (entry as { summary: string }).summary
-    expect(summary).toContain('classify → handle_a')
-    expect(summary).not.toContain('[')
-  })
+  // #175 de-core: `fsm.transition` business-topology nodes and their
+  // `guardEvaluations` (#31 guard) are deleted. The timeline tree no longer
+  // emits an `fsm` kind, so the two prior cases asserting fsm-transition /
+  // guard-summary rendering are removed (the feature is gone by design — see
+  // docs/design/175-decore-multistate-fsm.md §7, D2). Decision rendering moved
+  // to the effect-anchored decision spine (render-viewer + explainDecision).
 })

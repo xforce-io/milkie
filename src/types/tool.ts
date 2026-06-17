@@ -2,13 +2,12 @@ import type { JSONSchema } from './common.js'
 import type { WorkingMemory } from '../store/WorkingMemory.js'
 import type { IStateStore } from './store.js'
 import type { AgentFactory } from '../runtime/AgentFactory.js'
-import type { GuardEvaluation, ObjectType, RelationType } from '../trace/types.js'
+import type { ObjectType, RelationType } from '../trace/types.js'
 
 export interface ToolContext {
   workingMemory: WorkingMemory
   agentFactory:  AgentFactory
   stateStore:    IStateStore
-  emit:          (event: string, payload?: unknown, guard?: GuardEvaluation | GuardEvaluation[]) => void
   requestSkill?: (name: string, scope?: 'turn' | 'session') => { requested: string; status: string; version?: string; scope?: 'turn' | 'session' }
   /** #164: raw user input for the current turn, stable across all tool-loop iterations. */
   currentTurn?:  string

@@ -2,8 +2,14 @@
 //
 // Wires the portable hierarchical entity resolver core (#167) into a pair of
 // milkie `ToolDefinition`s so the repair-ticketing example can resolve
-// hierarchical entities IN-PROCESS inside the `collecting_slots` FSM state — no
+// hierarchical entities IN-PROCESS inside a single autonomous loop — no
 // subprocess, no CLI spawn.
+//
+// #175 de-core: this adapter no longer fires a business event (it used to
+// `ctx.emit('SLOTS_COMPLETE')`). There is no multi-state FSM anymore — slot
+// completeness is a plain fact in working memory, read back by the downstream
+// `assemble_ticket` precondition (see src/agent.ts). The runtime offers no
+// `ctx.emit`; "all slots filled" is just `every(level → WM has it)`.
 //
 // Trust boundary: the LLM never supplies the raw utterance or the pinned ancestor
 // context through tool parameters. The adapter reads:
@@ -48,8 +54,9 @@ interface CommitToolOutput {
  *
  * @param resolver      constructed once at startup via `EntityResolver.load(...)`;
  *                      handlers reuse it and never re-parse schema/CSV.
- * @param requiredSlots ordered level names that must all be present in WM before
- *                      `SLOTS_COMPLETE` fires (e.g. ['site','building','department','assignee']).
+ * @param requiredSlots ordered level names whose already-committed members are the
+ *                      `pinned` ancestor branch for the next lookup/commit
+ *                      (e.g. ['site','building','department','assignee']).
  */
 export function makeEntityResolverTools(
   resolver: EntityResolver,
@@ -65,12 +72,6 @@ export function makeEntityResolverTools(
     }
     return pinned
   }
-
-  const slotsComplete = (ctx: ToolContext): boolean =>
-    requiredSlots.every(level => {
-      const value = ctx.workingMemory.get(level)
-      return value != null && value !== ''
-    })
 
   const lookupEntity: ToolDefinition = {
     name:        'lookup_entity',
@@ -108,7 +109,7 @@ export function makeEntityResolverTools(
     name:        'commit_entity',
     description:
       '确认在目标层级（level）选定的实体。selected 必须是上一次 lookup_entity 返回的 options 或 suggested 中的值。' +
-      '系统依据已确认的上级实体校验该选择；确认成功后写入工作记忆，全部层级齐备时进入下一阶段。',
+      '系统依据已确认的上级实体校验该选择；确认成功后写入工作记忆。四级（站点/楼宇/部门/负责人）全部确认后即可进入下一步。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -131,10 +132,11 @@ export function makeEntityResolverTools(
       })
 
       if (result.status === 'complete' || result.status === 'corrected') {
-        // WM key = level name; value = the resolved entity id.
+        // WM key = level name; value = the resolved entity id. No business event:
+        // slot completeness is read back from WM by the assemble_ticket
+        // precondition, not pushed via a (now-removed) ctx.emit (#175).
         const key = level ?? result.resolved.path.length.toString()
         ctx.workingMemory.set(key, result.resolved.id)
-        if (slotsComplete(ctx)) ctx.emit('SLOTS_COMPLETE')
 
         // `corrected` is a Record<string,string> (level → corrected id), per
         // CommitToolOutput — see the type doc for why it is not a plain string.
@@ -145,7 +147,7 @@ export function makeEntityResolverTools(
         return output
       }
 
-      // invalid_selection / missing / ambiguous / unknown → no WM write, no emit.
+      // invalid_selection / missing / ambiguous / unknown → no WM write.
       const errorOutput: CommitToolOutput = { validationError: result.message }
       return errorOutput
     },

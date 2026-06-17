@@ -1,14 +1,20 @@
 /**
- * Issue #166 — Milkie HER adapter (S-011 Path D)
+ * Issue #166 / #175 — Milkie HER adapter (S-011 Path D), single-state tier.
  *
  * Two layers of coverage:
  *   1. Handler-level behavior of `makeEntityResolverTools` against a stub
  *      `ToolContext` — precise checks for utterance/pinned isolation, WM writes,
- *      emit, and every CommitOutput status branch.
- *   2. A full FSM e2e: a deterministic stub gateway drives `lookup_entity` →
- *      `commit_entity` across all four hierarchy levels inside a `collecting_slots`
- *      state, proving the adapter runs in-process and SLOTS_COMPLETE advances the
- *      FSM to `confirming`. No subprocess, no Redis, no live model.
+ *      and every CommitOutput status branch.
+ *   2. A full e2e: a deterministic stub gateway drives `lookup_entity` →
+ *      `commit_entity` across all four hierarchy levels inside ONE autonomous
+ *      `llm` state, proving the adapter runs in-process and the four resolved ids
+ *      land in WM. No subprocess, no Redis, no live model.
+ *
+ * #175 de-core: there is no business event and no multi-state FSM anymore. The
+ * adapter no longer calls `ctx.emit('SLOTS_COMPLETE')`; "all slots filled" is a
+ * plain fact in working memory (read back by the assemble_ticket precondition in
+ * the full agent — see repair-ticketing.e2e.test.ts). So this file asserts WM
+ * state and tool-call shape, not emitted events or `fsm.transition` spans.
  */
 
 import { readFileSync } from 'node:fs'
@@ -23,7 +29,6 @@ import { Milkie } from '../../../../src/runtime/Milkie.js'
 import { MemoryStore } from '../../../../src/store/MemoryStore.js'
 import { WorkingMemory } from '../../../../src/store/WorkingMemory.js'
 import { MemoryEventStore } from '../../../../src/trace/MemoryEventStore.js'
-import { checkpointFromEvents } from '../../../../src/trace/diagnostics/checkpointFromEvents.js'
 import { TrajectoryStore } from '../../../../src/trajectory/TrajectoryStore.js'
 
 import { EntityResolver, type Schema } from '../../resolver/EntityResolver.js'
@@ -47,16 +52,14 @@ const commitTool = tools.find(t => t.name === 'commit_entity')!
 function makeCtx(
   currentTurn: string,
   preset: Record<string, string> = {},
-): { ctx: ToolContext; emitted: string[]; wm: WorkingMemory } {
-  const emitted: string[] = []
+): { ctx: ToolContext; wm: WorkingMemory } {
   const wm = new WorkingMemory()
   for (const [k, v] of Object.entries(preset)) wm.set(k, v)
   const ctx = {
     workingMemory: wm,
-    emit: (event: string) => { emitted.push(event) },
     currentTurn,
   } as unknown as ToolContext
-  return { ctx, emitted, wm }
+  return { ctx, wm }
 }
 
 // ─────────────────────────── Adapter shape (AC2, 11, 12) ──────────────────────
@@ -112,10 +115,9 @@ describe('lookup_entity handler', () => {
     expect(out.suggested).toBe('B01')
   })
 
-  it('never writes WM nor emits (AC: lookup is read-only)', async () => {
-    const { ctx, emitted, wm } = makeCtx('总部')
+  it('never writes WM (AC: lookup is read-only)', async () => {
+    const { ctx, wm } = makeCtx('总部')
     await lookupTool.handler({ context: { level: 'site' } }, ctx)
-    expect(emitted).toEqual([])
     expect(wm.get('site')).toBeUndefined()
   })
 })
@@ -124,7 +126,7 @@ describe('lookup_entity handler', () => {
 
 describe('commit_entity handler', () => {
   it('commit of a previously-suggested option writes WM = resolved.id (AC6, AC7)', async () => {
-    const { ctx, emitted, wm } = makeCtx('总部')
+    const { ctx, wm } = makeCtx('总部')
     const lookup = (await lookupTool.handler({ context: { level: 'site' } }, ctx)) as {
       suggested: string | null
     }
@@ -135,33 +137,34 @@ describe('commit_entity handler', () => {
     )) as { resolved: { id: string } }
     expect(out.resolved.id).toBe(selected)   // resolved.id came from prior lookup
     expect(wm.get('site')).toBe('S01')
-    expect(emitted).toEqual([])              // not all slots yet
   })
 
-  it('emits SLOTS_COMPLETE once every required level is in WM (AC8)', async () => {
-    const { ctx, emitted, wm } = makeCtx('王芳', { site: 'S01', building: 'B01', department: 'D03' })
+  it('writes the last required level into WM, completing the slot set (AC8)', async () => {
+    // #175: with three levels pinned, committing the fourth simply lands the id in
+    // WM — there is no business event. "All slots filled" becomes readable from WM.
+    const { ctx, wm } = makeCtx('王芳', { site: 'S01', building: 'B01', department: 'D03' })
     const out = (await commitTool.handler(
       { selected: 'E008', context: { level: 'assignee' } },
       ctx,
     )) as { resolved: { id: string } }
     expect(out.resolved.id).toBe('E008')
     expect(wm.get('assignee')).toBe('E008')
-    expect(emitted).toEqual(['SLOTS_COMPLETE'])
+    // every required level is now present in WM
+    expect(REQUIRED.every(level => wm.get(level) != null && wm.get(level) !== '')).toBe(true)
   })
 
-  it('unknown selection → validationError, no WM write, no emit (AC9)', async () => {
-    const { ctx, emitted, wm } = makeCtx('总部')
+  it('unknown selection → validationError, no WM write (AC9)', async () => {
+    const { ctx, wm } = makeCtx('总部')
     const out = (await commitTool.handler(
       { selected: 'ZZZ', context: { level: 'site' } },
       ctx,
     )) as { validationError?: string }
     expect(out.validationError).toBeDefined()
     expect(wm.get('site')).toBeUndefined()
-    expect(emitted).toEqual([])
   })
 
   it('wrong-level selection → missing → validationError, no WM write (AC9)', async () => {
-    const { ctx, emitted, wm } = makeCtx('总部')
+    const { ctx, wm } = makeCtx('总部')
     // B01 is a building id; committing it at the site level is an under-selection.
     const out = (await commitTool.handler(
       { selected: 'B01', context: { level: 'site' } },
@@ -169,13 +172,12 @@ describe('commit_entity handler', () => {
     )) as { validationError?: string }
     expect(out.validationError).toBeDefined()
     expect(wm.get('site')).toBeUndefined()
-    expect(emitted).toEqual([])
   })
 
   it('corrected path writes WM = corrected id and returns corrected levels (AC10)', async () => {
     // pinned site/building = S01/B01; selecting E012 (张伟 under B02/D07) conflicts
     // with the pinned branch → auto-corrected to the same-label sibling E007 (B01/D03).
-    const { ctx, emitted, wm } = makeCtx('张伟', { site: 'S01', building: 'B01' })
+    const { ctx, wm } = makeCtx('张伟', { site: 'S01', building: 'B01' })
     const out = (await commitTool.handler(
       { selected: 'E012', context: { level: 'assignee' } },
       ctx,
@@ -188,17 +190,20 @@ describe('commit_entity handler', () => {
     expect(typeof out.corrected).toBe('object')
     expect(typeof out.corrected.department).toBe('string')
     expect(out.corrected).toMatchObject({ department: 'D03' })
-    expect(emitted).toEqual([])                     // department slot absent → no emit
   })
 })
 
-// ─────────────────────────── FSM e2e (AC1, AC4, AC8, AC11) ────────────────────
+// ───────────────────── Single-state e2e (AC1, AC4, AC7, AC11) ─────────────────
 
 /**
- * Deterministic gateway: per turn it issues `lookup_entity` for the next unfilled
- * level (no utterance in the call — the adapter reads it from ctx.currentTurn),
- * then `commit_entity` selecting the value the lookup suggested. Level progression
- * is tracked by counting prior successful commits; the LLM never invents an id.
+ * Deterministic gateway driving the four levels inside ONE autonomous `llm` state
+ * and ONE turn (#175 — the de-cored runtime no longer steps user-state →
+ * user-state, and no longer persists WM across completed turns). It issues
+ * `lookup_entity` for the next unfilled level (no utterance in the call — the
+ * adapter reads it from ctx.currentTurn), then `commit_entity` selecting the value
+ * the lookup suggested; the `pinned`-filtered resolver disambiguates each level
+ * out of the one full utterance. After all four commit it ends the turn with
+ * text. The LLM never invents an id.
  */
 class HerSlotGateway implements IModelGateway {
   private readonly levelOrder = ['site', 'building', 'department', 'assignee']
@@ -208,29 +213,29 @@ class HerSlotGateway implements IModelGateway {
     const messages = request.messages
     const last = messages[messages.length - 1]
 
-    // All four levels resolved → confirming (terminal) state: final text.
-    if (this.committed >= this.levelOrder.length) {
-      return this.text('已为您登记报修负责人，请确认。')
-    }
-    const level = this.levelOrder[this.committed]!
-
     if (last && last.role === 'tool') {
       const producedBy = this.precedingToolUse(messages)
       const result = this.parseToolResult(last)
       if (producedBy === 'lookup_entity') {
+        const level = this.levelOrder[this.committed]!
         const opts = (result?.['options'] as string[] | undefined) ?? []
         const selected = (result?.['suggested'] as string | null) ?? opts[0]
         return this.tool(`commit-${level}`, 'commit_entity', { selected, context: { level } })
       }
       if (producedBy === 'commit_entity') {
-        // This level is committed; close the turn and wait for the next utterance.
         this.committed++
-        return this.text('已记录。')
+        // Stay in the same turn: drive the next level, or finish once all four
+        // are committed.
+        if (this.committed < this.levelOrder.length) {
+          const level = this.levelOrder[this.committed]!
+          return this.tool(`lookup-${level}`, 'lookup_entity', { context: { level } })
+        }
+        return this.text('已为您登记报修负责人，请确认。')
       }
     }
 
-    // Fresh user turn → look the next level up.
-    return this.tool(`lookup-${level}`, 'lookup_entity', { context: { level } })
+    // Fresh user turn → look the first level up.
+    return this.tool('lookup-site', 'lookup_entity', { context: { level: 'site' } })
   }
 
   async *stream(_request: ModelRequest): AsyncIterable<never> {
@@ -273,44 +278,40 @@ class HerSlotGateway implements IModelGateway {
 
 const repairAgentConfig: AgentConfig = {
   agentId:      'repair-ticketing',
-  version:      '1.0.0',
+  version:      '2.0.0',
   systemPrompt: '你负责为报修工单定位层级实体（站点 → 楼宇 → 部门 → 负责人）。',
+  // #175: a single autonomous llm state. No `on:` edges, no business event — slot
+  // completeness is just a fact in WM.
   fsm: {
     states: [
       {
         name:  'collecting_slots',
         type:  'llm',
         tools: ['lookup_entity', 'commit_entity'],
-        on:    { SLOTS_COMPLETE: 'confirming' },
-      },
-      {
-        // Path D ends collecting_slots → confirming, where the agent waits for the
-        // user to confirm before executing (… → executing → completed). It is a
-        // wait-for-user state, NOT terminal: a terminal turn does not persist a
-        // checkpoint, which would drop the final slot write (assignee) made on the
-        // turn that fired SLOTS_COMPLETE.
-        name:         'confirming',
-        type:         'llm',
-        tools:        [],
-        instructions: '向用户确认已登记的报修负责人。',
       },
     ],
   },
   model: { provider: 'volcengine', model: 'doubao-seed-2.0-lite', adapter: 'openai-compatible' },
 }
 
-async function readCheckpoint(
-  stateStore: MemoryStore,
+/** The cumulative WM field map for a run = its last `wm.mutated` snapshot (each
+ *  snapshot is the full WorkingMemory, not a delta). #175: read from the event log
+ *  directly — completed turns no longer persist a checkpoint. */
+async function latestWorkingMemory(
   eventStore: MemoryEventStore,
-  contextId: string,
-): Promise<{ context: { workingMemory: { data: Record<string, unknown> } }; fsm: { currentState: string } } | null> {
-  const runId = (await stateStore.get(`context:${contextId}:checkpoint-run:latest`)) as string | undefined
-  if (!runId) return null
-  return checkpointFromEvents(await eventStore.readByRunId(runId)) as never
+  runId: string,
+): Promise<Record<string, unknown>> {
+  let data: Record<string, unknown> = {}
+  for (const e of await eventStore.readByRunId(runId)) {
+    if (e.type === 'wm.mutated') {
+      const snap = (e.payload as { snapshot?: { data?: Record<string, unknown> } }).snapshot
+      data = snap?.data ?? {}
+    }
+  }
+  return data
 }
 
-describe('Path D: hierarchical slot filling inside collecting_slots (FSM e2e)', () => {
-  let stateStore: MemoryStore
+describe('Path D: hierarchical slot filling inside a single autonomous state (e2e)', () => {
   let eventStore: MemoryEventStore
   let trajectoryStore: TrajectoryStore
   let milkie: Milkie
@@ -319,17 +320,19 @@ describe('Path D: hierarchical slot filling inside collecting_slots (FSM e2e)', 
 
   const contextId = `ctx-repair-pathD-${Date.now()}`
   const goal = '为报修工单定位负责人'
+  // One turn carries all four entity keywords; the pinned-filtered resolver
+  // disambiguates each level out of it.
+  const INPUT = '总部 主楼 IT网络部 王芳'
 
   async function sendTurn(input: string): Promise<AgentResult> {
     return milkie.invoke({ agentId: 'repair-ticketing', goal, input, contextId })
   }
 
   beforeAll(async () => {
-    stateStore = new MemoryStore()
     eventStore = new MemoryEventStore()
     trajectoryStore = new TrajectoryStore({ jsonlDir: './test-output/trajectories' })
     milkie = new Milkie({
-      stateStore,
+      stateStore: new MemoryStore(),
       eventStore,
       trajectoryStore,
       gateway: new HerSlotGateway(),
@@ -337,10 +340,7 @@ describe('Path D: hierarchical slot filling inside collecting_slots (FSM e2e)', 
     })
     milkie.registerAgent(repairAgentConfig)
 
-    await sendTurn('总部')         // → site S01
-    await sendTurn('主楼')         // → building B01
-    await sendTurn('IT网络部')     // → department D03
-    lastResult = await sendTurn('王芳')  // → assignee E008 → SLOTS_COMPLETE
+    lastResult = await sendTurn(INPUT)  // lookup→commit ×4 in one tool-loop
 
     trajectory = await trajectoryStore.getByContextId(contextId)
   }, 60_000)
@@ -364,8 +364,7 @@ describe('Path D: hierarchical slot filling inside collecting_slots (FSM e2e)', 
   })
 
   it('every level resolves in-process and WM holds the four resolved ids (AC1, AC7)', async () => {
-    const cp = await readCheckpoint(stateStore, eventStore, contextId)
-    const wm = cp?.context.workingMemory.data ?? {}
+    const wm = await latestWorkingMemory(eventStore, lastResult.agentRunId)
     expect(wm).toMatchObject({
       site:       'S01',
       building:   'B01',
@@ -374,11 +373,11 @@ describe('Path D: hierarchical slot filling inside collecting_slots (FSM e2e)', 
     })
   })
 
-  it('SLOTS_COMPLETE advances the FSM to confirming (AC8)', () => {
-    const states = trajectory.spans
-      .filter(s => s.name === 'fsm.transition')
-      .map(s => s.attributes['toState'] as string)
-    expect(states).toContain('confirming')
+  it('the single state runs the whole slot set to a completed turn (AC8)', () => {
+    // #175: no SLOTS_COMPLETE event, no fsm.transition to a `confirming` state —
+    // all four levels resolve within one autonomous loop and the turn completes.
     expect(lastResult.status).toBe('completed')
+    const transitionSpans = trajectory.spans.filter(s => s.name === 'fsm.transition')
+    expect(transitionSpans).toEqual([])  // no business transitions remain
   })
 })
