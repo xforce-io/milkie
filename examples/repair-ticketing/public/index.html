@@ -139,6 +139,12 @@ async function send(text) {
     if (data.ticket) {
       renderTicket(data.ticket);
       addMsg('✅ 工单已生成：' + data.ticket.ticketId, 'bot');
+      // A ticket ends one transaction. Reset the session so the NEXT message starts
+      // a FRESH ticket (new contextId → empty WM in the runtime), instead of inheriting
+      // the just-filled slots and re-emitting the same ticket. Clear the chips too.
+      if (evtSource) { evtSource.close(); evtSource = null; }
+      contextId = null;
+      renderChips({});
     } else {
       addMsg(data.output || '（已处理）', 'bot');
     }

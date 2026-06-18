@@ -111,18 +111,23 @@ async function handleChat(req: IncomingMessage, res: ServerResponse, s: ServerSt
 
   const events = await s.eventStore.readByRunId(result.agentRunId)
   const wm = latestWorkingMemory(events)
-  // Prefer the ticket object assemble_ticket stored in WM (authoritative,
-  // model-paraphrase-proof — same source run-eval uses); fall back to parsing the
-  // output only for older shapes. The model often reformats the ticket JSON into
-  // markdown prose, which JSON.parse can't read — reading WM keeps the ticket CARD
-  // rendering instead of leaking a raw markdown blob into the chat.
+  // Did THIS run actually open a ticket? `wm.ticket` persists across turns (WM is
+  // per-context), so reading it unconditionally would re-report a stale ticket on
+  // every later turn. Gate on a successful assemble_ticket response in this run's
+  // events — then read the ticket from WM (authoritative, model-paraphrase-proof,
+  // same source run-eval uses), so a reformatted-as-markdown ticket still renders as
+  // the CARD. Otherwise fall back to parsing this turn's output for older shapes.
+  const emittedTicketThisRun = events.some(e =>
+    e.type === 'tool.responded' &&
+    (e.payload as { toolName?: string }).toolName === 'assemble_ticket' &&
+    (e.payload as { status?: string }).status !== 'error')
   sendJson(res, 200, {
     contextId:     ctxId,
     runId:         result.agentRunId,
     status:        result.status,
     output:        result.output,
     workingMemory: wm,
-    ticket:        isTicket(wm['ticket']) ? wm['ticket'] : parseTicket(result.output),
+    ticket:        emittedTicketThisRun && isTicket(wm['ticket']) ? wm['ticket'] : parseTicket(result.output),
   })
 }
 
