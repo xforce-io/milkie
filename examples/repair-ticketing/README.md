@@ -68,24 +68,45 @@ npx tsx examples/repair-ticketing/src/server.ts
 断言确定性工单；并单测 **action precondition**（未集齐拒绝开单、缺字段列表、不抛错可恢复），
 以及覆盖解析器的各类返回状态（别名命中 / 缺级 / 歧义 / unknown / invalid_selection / corrected 回退）。
 
+**纠错（correction）作为功能测试**：用户撤回改选（「不对，应该是网络部」）的**机制**是确定性的，
+故沉淀为功能测试而非 eval——分两层：① **同级覆盖**（`commit_entity` 重提交一个已填层级 → 覆盖旧 id 并报
+`corrected`，区别于上面那条「祖先冲突自动纠错」）；② **流程中途纠错的端到端传播**（stub gateway 先提交错的
+部门 D02、再纠正为 D03，断言最终工单带 D03 而非残留 D02）。至于「真实模型会不会主动撤回」属模型行为、
+且天然多轮，留给未来的多轮对话 eval（见下）。
+
 ## LLM 鲁棒性与端到端质量评测（#174）
 
 `eval/` 目录用**真实模型**（doubao-seed-2.0-lite，经 `createGateway`，无 stub gateway）度量 HER 槽填充
 与端到端工单质量。打分**零 LLM judge**：ground-truth 是离散实体 id，精确匹配即可、且完全确定可复现。
+
+> **聚焦单轮 HER 解析**：本 eval 只考「**一句残缺/模糊的话 → 解析出完整 HER**」——每个用例就是一轮输入，
+> 期望要么解析出完整四级（`slots`/`ticket`），要么在信息不足时**追问/拒绝**（`outcome:"clarify"/"reject"`，
+> 不许臆造）。跨轮状态承接（`need_input→paused` 挂起/恢复）、纠错撤回等**多轮对话行为**是另一条正交的功能轴，
+> 不在此 eval 内：确定性的部分已下沉为功能测试（见上文「纠错作为功能测试」），其余待后续**多轮对话 eval**。
+> 去多态后 runtime 本就不跨 turn 持久化 WM，单轮聚焦也避免了考一个尚未落地的能力。
 
 ```bash
 # 需要 live 模型凭证（VOLCENGINE_TOKEN + VOLCENGINE_API_BASE）；缺凭证时打印 SKIP 并退出 0
 npm run eval:repair
 ```
 
-- **数据集** `eval/cases.jsonl`：覆盖 `canonical` / `colloquial` / `multi-level-in-one-turn` /
-  `alias` / `typo` / `synonym` / `ambiguous` / `unknown` / `correction` / `cross-branch` 等标签，每标签 3–5 例。
+- **数据集** `eval/cases.jsonl`（**全部单轮**，每条一句话）：覆盖 `canonical`（完整路径无降级）/ `colloquial`（口语）/
+  `alias`（别名）/ `typo`（错字）/ `synonym`（同义）/ `cross-branch`（重名靠上下文消歧）/ `skip-level`（跳级）/
+  `ambiguous`（歧义→追问）/ `unknown`（不存在→拒绝）等标签；出工单的用例额外带 `oneshot`（顺带考 `descriptionCleanOk`：
+  把整句原话之外的故障子串干净存入 description，不让层级原话泄漏）。
+  - `skip-level`：用户**跳过中间层级**（如「总部网络部王芳」漏掉楼宇，甚至「研发部赵明」连站点都不给）。
+    确定性快路径会卡在第一个空档；策略是**让 LLM 从更深层级的 `path` 倒推补齐**——词典里唯一可定的（如「网络部」只在主楼）
+    期望补全四级（写 `slots`/`ticket`）；倒推后仍跨分支歧义的（如「张伟」横跨网络部/安全部）期望**追问**（`outcome:"clarify"`，下游级留空不许猜）。
 - **harness** `eval/run-eval.ts`：复用 #162 导出的 `repairTicketingAgentConfig` + `buildRepairTicketingTools`，
-  逐轮 `milkie.invoke`（同一 `contextId`）；槽位 id 从 `wm.mutated` 事件读取、工单从 live 返回值读取，**均不读 checkpoint**
+  每个用例一轮 `milkie.invoke`；槽位 id 从 `wm.mutated` 事件读取、工单从 live 返回值读取，**均不读 checkpoint**
   （#172：终态 turn 不落 checkpoint）。
 - **打分** `eval/scoring.ts`（纯函数，含单测 `eval/__tests__/scoring.test.ts`，无凭证即可在 CI 跑）：
-  4 槽全匹配率 + 单槽率、工单字段精确匹配率、澄清行为准确率（ambiguous/unknown）、纠错成功率、
-  平均轮数与失败归因分布（wrong level / hallucinated id / premature emit / missing slot / missing ticket）。
+  通过与否**只由离散 id 决定**（4 槽全匹配 +（出工单时）工单字段精确匹配）；另报 4 槽全匹配率 + 单槽率、
+  工单字段精确匹配率、澄清/拒绝行为准确率（ambiguous/unknown）、平均轮数与失败归因分布
+  （wrong level / hallucinated id / premature emit / missing slot / missing ticket）。
+  - **description clean 是独立软指标，不计入 pass**：oneshot 用例额外报「description 是否为干净故障子串（未泄漏层级原话）」，
+    但描述脏**不判 HER 解析失败**——自由文本抽取质量与层级解析是两个正交的轴，混在一起会让召回数字失真。
+  - `correction success` 指标随 correction 用例下沉为功能测试后已从 `renderReport` 移除。
 - **报告**：写入 `eval/reports/`（已 gitignore）。
 
 `eval:repair` 挂在 `npm run test:e2e:live` 之下，默认 CI 不跑、需 live 凭证。

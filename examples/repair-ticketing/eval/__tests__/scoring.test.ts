@@ -182,6 +182,64 @@ describe('scoreCase — clarify / reject', () => {
   })
 })
 
+describe('scoreCase — oneshot description SOFT metric, decoupled from pass (#185/#174)', () => {
+  // A turns=1 case packs every level AND the fault into one utterance. We track
+  // whether commit_description kept `description` to the clean fault substring
+  // (not the whole turn / level原话) — but ONLY as a reported metric: a dirty
+  // description never fails an otherwise-correct HER resolution.
+  const ONESHOT_TURN = '总部主楼IT网络部王芳，三楼会议室的投影仪无法开机'
+  const CLEAN_DESC = '三楼会议室的投影仪无法开机'
+
+  const oneshotCase = (): EvalCase => ({
+    id: 'oneshot-01', tag: ['oneshot'],
+    turns: [ONESHOT_TURN],
+    expect: {
+      slots:  { site: 'S01', building: 'B01', department: 'D03', assignee: 'E008' },
+      ticket: { site: 'S01', building: 'B01', department: 'D03', assignee: 'E008' },
+    },
+  })
+
+  const oneshotObs = (description: string, over: Partial<Observed> = {}): Observed => ({
+    status: 'completed',
+    workingMemory: { site: 'S01', building: 'B01', department: 'D03', assignee: 'E008', description },
+    ticket: {
+      ticketId: 'TKT-S01-B01-D03-E008',
+      site: 'S01', building: 'B01', department: 'D03', assignee: 'E008', description,
+    },
+    turnCount: 1,
+    ...over,
+  })
+
+  it('passes with descriptionCleanOk=true when the description is the clean fault substring', () => {
+    const r = scoreCase(oneshotCase(), oneshotObs(CLEAN_DESC), IDS)
+    expect(r.passed).toBe(true)
+    expect(r.descriptionCleanOk).toBe(true)
+  })
+
+  it('still PASSES (ids correct) but flags descriptionCleanOk=false when the whole turn leaked in', () => {
+    const r = scoreCase(oneshotCase(), oneshotObs(ONESHOT_TURN), IDS)
+    expect(r.passed).toBe(true)            // HER resolution is correct → pass
+    expect(r.descriptionCleanOk).toBe(false)
+  })
+
+  it('still PASSES but flags descriptionCleanOk=false when the description is empty', () => {
+    const r = scoreCase(oneshotCase(), oneshotObs(''), IDS)
+    expect(r.passed).toBe(true)
+    expect(r.descriptionCleanOk).toBe(false)
+  })
+
+  it('leaves descriptionCleanOk undefined for non-oneshot cases', () => {
+    const r = scoreCase(fullCase(), completedObs(), IDS)
+    expect(r.descriptionCleanOk).toBeUndefined()
+  })
+
+  it('a no-ticket one-shot fails on missing_ticket (HER gap), independent of description', () => {
+    const r = scoreCase(oneshotCase(), oneshotObs(ONESHOT_TURN, { ticket: null }), IDS)
+    expect(r.passed).toBe(false)
+    expect(r.failures).toContain('missing_ticket')
+  })
+})
+
 describe('aggregate', () => {
   it('rolls up rates, per-level slot accuracy, failure distribution, and by-tag', () => {
     const cases = [

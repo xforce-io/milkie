@@ -64,6 +64,10 @@ export interface CaseResult {
   ticketMatch?:    boolean
   clarificationOk?: boolean
   correctionOk?:   boolean
+  /** oneshot only (#185): true when the emitted ticket's description is the clean
+   *  fault substring (non-empty and not the verbatim one-shot turn). Undefined for
+   *  every non-oneshot case — the multi-turn "don't score description" rule stands. */
+  descriptionCleanOk?: boolean
   failures:      FailureKind[]
 }
 
@@ -189,12 +193,30 @@ export function scoreCase(c: EvalCase, obs: Observed, ids: IdsByLevel): CaseResu
     }
   }
 
-  const passed = slotFullMatch && (c.expect.ticket ? ticketMatch === true : true)
+  const idsPassed = slotFullMatch && (c.expect.ticket ? ticketMatch === true : true)
+
+  // oneshot description SOFT metric (#185, decoupled #174): a turns=1 case packs
+  // every level AND the fault into one utterance; with commit_description's optional
+  // param the model should keep `description` to the clean fault substring, not the
+  // whole turn (level原话). This is REPORTED (descriptionCleanOk → descriptionClean
+  // metric) but is NOT a pass-gate: a dirty free-text description must not fail an
+  // otherwise-correct HER resolution, which is the only thing this eval measures.
+  let descriptionCleanOk: boolean | undefined
+  if (c.tag.includes('oneshot')) {
+    const desc = String(obs.workingMemory['description'] ?? '').trim()
+    const turn = (c.turns[0] ?? '').trim()
+    descriptionCleanOk = desc !== '' && desc !== turn
+  }
+
+  // HER-parse pass is decided by the discrete ids ONLY — slot full-match (+ ticket
+  // fields when a ticket is expected). Description cleanliness is tracked separately.
+  const passed = idsPassed
   return {
     id: c.id, tag: c.tag, passed, turnCount: obs.turnCount,
     slotFullMatch, slotPerLevel,
     ...(ticketMatch !== undefined ? { ticketMatch } : {}),
     ...(isCorrection ? { correctionOk: slotFullMatch } : {}),
+    ...(descriptionCleanOk !== undefined ? { descriptionCleanOk } : {}),
     failures: [...failures],
   }
 }
@@ -208,6 +230,10 @@ export interface Metrics {
   ticket:       { cases: number; exactMatchRate: number }
   clarification:{ cases: number; accuracy: number }
   correction:   { cases: number; successRate: number }
+  /** oneshot-only soft metric (#185): share of oneshot cases whose stored
+   *  description was the clean fault substring (not the verbatim level原话). Reported
+   *  alongside, never folded into passRate. */
+  descriptionClean: { cases: number; cleanRate: number }
   avgTurnCount: number
   failureDistribution: Record<string, number>
   byTag:        Record<string, { cases: number; passed: number; passRate: number }>
@@ -220,6 +246,7 @@ export function aggregate(cases: EvalCase[], results: CaseResult[]): Metrics {
   const ticketCases = results.filter(r => r.ticketMatch !== undefined)
   const clarifyCases = results.filter(r => r.clarificationOk !== undefined)
   const correctionCases = results.filter(r => r.correctionOk !== undefined)
+  const descCases = results.filter(r => r.descriptionCleanOk !== undefined)
 
   const perLevelRate = {} as Record<Level, number>
   for (const level of LEVELS) {
@@ -262,6 +289,10 @@ export function aggregate(cases: EvalCase[], results: CaseResult[]): Metrics {
     correction: {
       cases:       correctionCases.length,
       successRate: rate(correctionCases.filter(r => r.correctionOk).length, correctionCases.length),
+    },
+    descriptionClean: {
+      cases:     descCases.length,
+      cleanRate: rate(descCases.filter(r => r.descriptionCleanOk).length, descCases.length),
     },
     avgTurnCount: rate(results.reduce((s, r) => s + r.turnCount, 0), results.length),
     failureDistribution,

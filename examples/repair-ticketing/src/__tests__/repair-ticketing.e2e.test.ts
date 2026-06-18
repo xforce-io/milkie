@@ -370,3 +370,105 @@ describe('repair-ticketing — every resolver status reachable through the tools
     expect(wm.get('assignee')).toBe('E007')
   })
 })
+
+// ─────────────── Correction mechanism (dialogue retract → functional test) ───────────────
+//
+// Correction ("不对，应该是网络部") used to live in the live eval as multi-turn
+// cases. It splits into a deterministic MECHANISM (locked here, no model) and a
+// model-behaviour question (does the LLM decide to retract — that parks in a future
+// multi-turn dialogue eval). The mechanism is a same-LEVEL override: re-committing a
+// level whose slot is already filled overwrites the prior id and reports `corrected`
+// — distinct from the branch auto-correction above (which fixes an ANCESTOR conflict).
+// Being deterministic with one right answer, it is a functional test, not an eval.
+
+describe('repair-ticketing — same-level correction overrides a prior commit (#162 commit override)', () => {
+  it('re-committing a filled level overwrites the prior id and reports corrected', async () => {
+    // department already confirmed as D02 (IT硬件组); the user corrects to D03 (IT网络部).
+    const { ctx, wm } = makeCtx('', { site: 'S01', building: 'B01', department: 'D02' })
+    const out = await commit(commitTool, 'D03', 'department', ctx)
+    expect(out.resolved?.id).toBe('D03')
+    expect(out.corrected).toMatchObject({ department: 'D03' })
+    expect(wm.get('department')).toBe('D03')   // D02 overwritten, not kept
+  })
+})
+
+/**
+ * Drives the WHOLE flow but commits the wrong department first (D02), then corrects
+ * to D03 mid-loop before opening the ticket — proving the override propagates all the
+ * way through assemble_ticket: the emitted ticket carries the corrected D03, never the
+ * stale D02. A fixed script (the model never invents ids; the real tool handlers run),
+ * so the assertion is deterministic. Everything runs in ONE turn — no cross-turn WM is
+ * required, which the de-cored runtime does not persist anyway (#175).
+ */
+class CorrectingTicketGateway implements IModelGateway {
+  private step = 0
+
+  async complete(request: ModelRequest): Promise<ModelResponse> {
+    const messages = request.messages
+    const last = messages[messages.length - 1]
+    switch (this.step++) {
+      case 0: return this.tool('c-site', 'commit_entity', { selected: 'S01', context: { level: 'site' } })
+      case 1: return this.tool('c-bldg', 'commit_entity', { selected: 'B01', context: { level: 'building' } })
+      case 2: return this.tool('c-dept-wrong', 'commit_entity', { selected: 'D02', context: { level: 'department' } })  // wrong
+      case 3: return this.tool('c-dept-fix', 'commit_entity', { selected: 'D03', context: { level: 'department' } })    // 不对，应该是网络部
+      case 4: return this.tool('c-asgn', 'commit_entity', { selected: 'E008', context: { level: 'assignee' } })
+      case 5: return this.tool('c-desc', 'commit_description', {})
+      case 6: return this.tool('assemble', 'assemble_ticket', {})
+      default: return this.text(this.rawToolResult(last) ?? '')
+    }
+  }
+
+  async *stream(_request: ModelRequest): AsyncIterable<never> {
+    yield* []
+  }
+
+  private rawToolResult(m: Message | undefined): string | null {
+    const part = m?.content.find(c => c.type === 'tool_result')
+    if (!part || part.type !== 'tool_result') return null
+    try {
+      const parsed = JSON.parse(part.content)
+      return typeof parsed === 'string' ? parsed : part.content
+    } catch {
+      return part.content
+    }
+  }
+
+  private text(text: string): ModelResponse {
+    return { content: [{ type: 'text', text }], toolCalls: [], finishReason: 'end_turn' }
+  }
+
+  private tool(id: string, name: string, input: unknown): ModelResponse {
+    return {
+      content:      [{ type: 'tool_use', id, name, input }],
+      toolCalls:    [{ id, name, input }],
+      finishReason: 'tool_use',
+    }
+  }
+}
+
+describe('repair-ticketing — mid-flow correction propagates to the assembled ticket (e2e, stub gateway)', () => {
+  const INPUT = '总部 主楼 IT网络部 王芳 三楼会议室的投影仪无法开机'
+  const contextId = `ctx-repair-correct-${Date.now()}`
+  let lastResult: AgentResult
+
+  beforeAll(async () => {
+    const milkie = new Milkie({
+      stateStore: new MemoryStore(),
+      eventStore: new MemoryEventStore(),
+      gateway:    new CorrectingTicketGateway(),
+    })
+    for (const tool of tools) milkie.registerTool(tool)
+    milkie.registerAgent(repairTicketingAgentConfig)
+    lastResult = await milkie.invoke({ agentId: 'repair-ticketing', goal: '登记一张报修工单', input: INPUT, contextId })
+  }, 60_000)
+
+  it('reaches a completed turn', () => {
+    expect(lastResult.status).toBe('completed')
+  })
+
+  it('emits a ticket carrying the CORRECTED department (D03), not the first wrong pick (D02)', () => {
+    const ticket = JSON.parse(lastResult.output)
+    expect(ticket.department).toBe('D03')
+    expect(ticket.ticketId).toBe('TKT-S01-B01-D03-E008')
+  })
+})

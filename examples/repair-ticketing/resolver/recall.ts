@@ -24,7 +24,10 @@ export interface RecallCandidate {
   id: string
   label: string
   level: string
-  path: string[]          // full ancestor path → tree topology for step-2 judging
+  path: string[]          // full ancestor path (labels) → tree topology for step-2 judging
+  ancestors: Record<string, string>  // ancestor ids by level (#180 back-inference): lets the
+                          // orchestrator back-fill skipped middle levels from a decisive deeper
+                          // hit, or hand a divergent choice's full id-chain to the agent.
   score: number           // fused RRF score (higher = better)
   via: MatchAlgo[]        // which matchers contributed (descending contribution)
   matchedSurface: string  // the label/alias surface form that matched best
@@ -242,6 +245,7 @@ export function recall(
         label: s.entity.label,
         level: lvl,
         path: s.entity.path,
+        ancestors: s.entity.ancestors,
         score: fused.get(s.entity.id) ?? 0,
         via,
         matchedSurface: s.bestSurface.get(via[0]!) ?? s.entity.label,
