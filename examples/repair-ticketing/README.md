@@ -23,9 +23,14 @@ npx tsx examples/repair-ticketing/src/server.ts
 `DEEPSEEK_API_KEY`，则改用 DeepSeek 运行**同一个 agent**（与 `eval/run-eval.ts` 同口径，committed
 默认不变）。运行前请配置对应 provider 凭据。端口可用 `PORT` 覆盖。
 
-**用一整句话**说全报修对象与故障即可，右侧四个槽位 chip（站点 / 楼宇 / 部门 / 负责人）逐个点亮、生成工单卡片。
-例如 `总部 主楼 IT网络部 王芳 投影仪无法开机`，甚至跳级的 `总部网络部王芳，投影仪坏了`（楼宇会被自动倒推补全）。
-注意：去多态后 runtime **不跨 turn 持久化 WM**，分多条消息「挤牙膏」不会累积槽位（见下文「HTTP/SSE」注），请单句输入。
+一句话说全可以，分多条消息**逐步补充**也可以——同一会话（`contextId`）内槽位会**跨轮累积**：
+例如先发 `东楼`、再发 `张伟`，系统会据上文把张伟唯一定到「东楼·安全部」（E012）。右侧四个槽位 chip
+（站点 / 楼宇 / 部门 / 负责人）随之逐个点亮，最后生成工单卡片。一句话直发亦可，含跳级：
+`总部网络部王芳，投影仪坏了`（楼宇自动倒推补全）。
+
+> 会话状态在进程内存（`MemoryStore`）：活跃会话内的多轮补充正常累积，但**服务器重启即丢**；
+> 且暂无 durable 的挂起/恢复（`need_input → paused` 是后续切片）。这与「终态 turn 不落 checkpoint」
+> （#172）是两回事——前者是进程内会话连续，后者是不写持久化检查点。
 
 ## 它演示了什么（#175 轻量分档）
 
@@ -62,9 +67,10 @@ npx tsx examples/repair-ticketing/src/server.ts
 工单从 `POST /chat` 的 **live 返回值**（`output` / `ticket`）读取，**不读 checkpoint**：
 `assemble_ticket` 返回工单 JSON，模型把它作为本轮最终文本原样回复，所以 live `output` 即工单。
 
-> #175 注：去多态后，**已完成的 turn 不再持久化 WM**（跨 turn 槽填充经 `need_input → paused`
-> 是后续切片）。因此整个「定位 → 描述 → 开单」在**一个 `invoke` turn** 内跑完——`pinned`
-> 上级过滤让解析器从同一句话里逐级消歧。e2e 据此用单 turn 驱动全流程。
+> #172/#175 注：终态 turn **不写 durable checkpoint**（#172），且暂无正式的挂起/恢复
+> （`need_input → paused` 是后续切片）。但同一会话（`contextId`）内 WM 仍由进程内 `MemoryStore`
+> **跨轮保留**，多轮逐级补充会正常累积（服务器重启即丢）。e2e/happy-path 选择在**一个 `invoke` turn**
+> 内跑完，是为了断言确定，而非跨 turn 不可行——`pinned` 上级过滤让解析器从同一句话里逐级消歧。
 
 ## 测试
 
@@ -91,7 +97,8 @@ npx tsx examples/repair-ticketing/src/server.ts
 > 期望要么解析出完整四级（`slots`/`ticket`），要么在信息不足时**追问/拒绝**（`outcome:"clarify"/"reject"`，
 > 不许臆造）。跨轮状态承接（`need_input→paused` 挂起/恢复）、纠错撤回等**多轮对话行为**是另一条正交的功能轴，
 > 不在此 eval 内：确定性的部分已下沉为功能测试（见上文「纠错作为功能测试」），其余待后续**多轮对话 eval**。
-> 去多态后 runtime 本就不跨 turn 持久化 WM，单轮聚焦也避免了考一个尚未落地的能力。
+> 单轮聚焦把 HER 解析质量与对话状态承接这两条正交的轴分开，避免多轮的状态管理掺进来污染归因
+> （多轮补充本身是 work 的；durable 挂起/恢复 `need_input→paused` 才是尚未落地的部分）。
 
 ```bash
 # 需要 live 模型凭证（VOLCENGINE_TOKEN + VOLCENGINE_API_BASE）；缺凭证时打印 SKIP 并退出 0
