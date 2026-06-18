@@ -22,6 +22,7 @@ import { Milkie } from '../../../src/runtime/Milkie.js'
 import { MemoryStore } from '../../../src/store/MemoryStore.js'
 import { MemoryEventStore } from '../../../src/trace/MemoryEventStore.js'
 import { BroadcastingEventStore } from '../../../src/trace/BroadcastingEventStore.js'
+import { OpenAICompatibleAdapter } from '../../../src/gateway/OpenAICompatibleAdapter.js'
 import type { IModelGateway } from '../../../src/types/model.js'
 import type { Event } from '../../../src/trace/types.js'
 
@@ -161,14 +162,39 @@ export async function startServer(config: ServerConfig): Promise<Server> {
   const csv    = readFileSync(path.join(resolverDir, 'data.csv'), 'utf-8')
   const resolver = EntityResolver.load(schema, csv)
 
+  // Eval-parity model override (mirrors eval/run-eval.ts): the committed example
+  // ships doubao-seed-2.0-lite, too weak to drive the flow well. When DEEPSEEK_API_KEY
+  // is set (and no test gateway is injected), run the SAME agent against DeepSeek so
+  // the playground matches the eval. The committed config/default is untouched.
+  const useDeepseek = !config.gateway && !!process.env['DEEPSEEK_API_KEY']
+  const agentConfig = useDeepseek
+    ? {
+        ...repairTicketingAgentConfig,
+        model: {
+          provider: 'deepseek',
+          model:    process.env['EVAL_MODEL'] ?? 'deepseek-chat',
+          adapter:  'openai-compatible' as const,
+          baseUrl:  process.env['DEEPSEEK_API_BASE'] ?? 'https://api.deepseek.com',
+        },
+      }
+    : repairTicketingAgentConfig
+
   const eventStore = new BroadcastingEventStore(new MemoryEventStore())
   const milkie = new Milkie({
     stateStore: new MemoryStore(),
     eventStore,
-    gateway:    config.gateway,   // omitted → Milkie builds the agent's own model gateway
+    // test gateway → use it; else DeepSeek override when configured; else omitted
+    // (Milkie builds the agent's own model gateway from agentConfig.model).
+    gateway:    config.gateway
+      ?? (useDeepseek
+        ? new OpenAICompatibleAdapter({
+            baseUrl: process.env['DEEPSEEK_API_BASE'] ?? 'https://api.deepseek.com',
+            apiKey:  process.env['DEEPSEEK_API_KEY'],
+          })
+        : undefined),
   })
   for (const tool of buildRepairTicketingTools(resolver)) milkie.registerTool(tool)
-  milkie.registerAgent(repairTicketingAgentConfig)
+  milkie.registerAgent(agentConfig)
 
   const state: ServerState = {
     milkie,

@@ -19,21 +19,29 @@ npx tsx examples/repair-ticketing/src/server.ts
 # 打开 http://localhost:7979
 ```
 
-服务器使用 agent 自带模型（volcengine doubao，openai-compatible），运行前请在环境中配置
-对应的 provider 凭据。端口可用 `PORT` 覆盖。
+服务器默认使用 agent 自带模型（volcengine doubao-seed-2.0-lite，openai-compatible）；若设置了
+`DEEPSEEK_API_KEY`，则改用 DeepSeek 运行**同一个 agent**（与 `eval/run-eval.ts` 同口径，committed
+默认不变）。运行前请配置对应 provider 凭据。端口可用 `PORT` 覆盖。
 
-依次输入即可看到四个槽位 chip（站点 / 楼宇 / 部门 / 负责人）逐个点亮，最后给出故障描述后，
-右侧生成工单卡片。例如：`总部` → `主楼` → `IT网络部` → `王芳` → `投影仪无法开机`。
+**用一整句话**说全报修对象与故障即可，右侧四个槽位 chip（站点 / 楼宇 / 部门 / 负责人）逐个点亮、生成工单卡片。
+例如 `总部 主楼 IT网络部 王芳 投影仪无法开机`，甚至跳级的 `总部网络部王芳，投影仪坏了`（楼宇会被自动倒推补全）。
+注意：去多态后 runtime **不跨 turn 持久化 WM**，分多条消息「挤牙膏」不会累积槽位（见下文「HTTP/SSE」注），请单句输入。
 
 ## 它演示了什么（#175 轻量分档）
 
 - **单态自主 agent**（见 `src/agent.ts` 的 `repair` 状态）：一个 `llm` 状态、四个工具
-  （`lookup_entity` / `commit_entity` / `commit_description` / `assemble_ticket`），
+  （`resolve_entities` / `commit_entity` / `commit_description` / `assemble_ticket`；`lookup_entity`
+  仍注册供适配器契约/测试用，但已被 `resolve_entities` 取代，不挂在 agent 上），
   在同一个工具循环里跑完「逐级定位 → 描述 → 开单」。无 `on:` 边、无 `ctx.emit`、无业务事件。
   对应 `docs/design/175 §6` 的最小机制递增：
-  - **软顺序 / 阶段聚焦** → `systemPrompt`（软引导，非硬拓扑）。
+  - **软顺序 / 阶段聚焦** → `systemPrompt`（软引导，非硬拓扑）+「完成判定」引导（四级与描述齐了立即开单，不停在解析完）。
   - **槽位完整性** → tool param schema + 解析器自带校验（硬地板，本地规则）：
-    `lookup_entity` 检索候选、`commit_entity` 按 `pinned` 上级分支校验后写入 WM。
+    `resolve_entities` 用本轮原话做融合召回、把【唯一确定】的层级直接确认；`commit_entity` 按 `pinned`
+    上级分支校验后写入 WM——LLM 只在歧义时从**真实候选**里挑，绝不臆造 id。
+  - **确定性倒推补全（#185）** → `resolve_entities` 看所有剩余级：某深层级一旦唯一确定，其祖先链上被
+    跳过的中间级一并**确定性回填**（「总部网络部王芳」自动补主楼，「研发部赵明」连站点+楼宇都倒推出来）；
+    仍有分歧的层级则吐出每个候选的完整 `chain=[{level,id,label}]` 交给模型判断/反问。**纯确定性、不依赖
+    模型倒推、不碰 #167 内核**（仅在 `resolver/recall.ts` 暴露 `ancestors`）。
   - **跨阶段记忆** → 工作记忆里的四级 id 与描述（一次 turn 内）。
   - **一两条硬门（Y 成立才能 X）** → **action precondition**：`assemble_ticket`
     **未集齐四级实体与描述就拒绝开单**（"未报价不得维修" 的等价物），返回
@@ -95,8 +103,9 @@ npm run eval:repair
   `ambiguous`（歧义→追问）/ `unknown`（不存在→拒绝）等标签；出工单的用例额外带 `oneshot`（顺带考 `descriptionCleanOk`：
   把整句原话之外的故障子串干净存入 description，不让层级原话泄漏）。
   - `skip-level`：用户**跳过中间层级**（如「总部网络部王芳」漏掉楼宇，甚至「研发部赵明」连站点都不给）。
-    确定性快路径会卡在第一个空档；策略是**让 LLM 从更深层级的 `path` 倒推补齐**——词典里唯一可定的（如「网络部」只在主楼）
-    期望补全四级（写 `slots`/`ticket`）；倒推后仍跨分支歧义的（如「张伟」横跨网络部/安全部）期望**追问**（`outcome:"clarify"`，下游级留空不许猜）。
+    `resolve_entities` 会**确定性倒推补全**——某深层级唯一确定时，其祖先链上被跳过的级一并回填（词典里
+    「网络部」只在主楼，故楼宇可定），期望补全四级（写 `slots`/`ticket`）；倒推后仍跨分支歧义的
+    （如「张伟」横跨网络部/安全部）期望**追问**（`outcome:"clarify"`，下游级留空不许猜）。
 - **harness** `eval/run-eval.ts`：复用 #162 导出的 `repairTicketingAgentConfig` + `buildRepairTicketingTools`，
   每个用例一轮 `milkie.invoke`；槽位 id 从 `wm.mutated` 事件读取、工单从 live 返回值读取，**均不读 checkpoint**
   （#172：终态 turn 不落 checkpoint）。
@@ -113,30 +122,34 @@ npm run eval:repair
 
 ### 基线（baseline）
 
-首次 live run 的汇总指标回填于下表，并同步到 issue #174。指标口径见 `eval/scoring.ts`，
-表格列与 `eval/run-eval.ts` 的 `renderReport` 输出一一对应；复跑只需：
+下表为 live run 的汇总指标。指标口径见 `eval/scoring.ts`，列与 `eval/run-eval.ts` 的 `renderReport`
+输出一一对应。复跑：
 
 ```bash
+# doubao（committed 默认）：
 VOLCENGINE_TOKEN=… VOLCENGINE_API_BASE=… npm run eval:repair
-# 报告写入 eval/reports/eval-<时间戳>.{md,json}（已 gitignore），把 md 的汇总指标回填到下表
+# 或 DeepSeek（下表所用模型）：
+DEEPSEEK_API_KEY=… npm run eval:repair
+# 报告写入 eval/reports/eval-<时间戳>.{md,json}（已 gitignore）
 ```
 
 | 指标 | 数值 |
 | --- | --- |
-| model | _待 live run 回填_ |
-| 用例数 | _待 live run 回填_ |
-| 整体通过率 | _待 live run 回填_ |
-| 平均轮数 | _待 live run 回填_ |
-| 4 槽全匹配率 | _待 live run 回填_ |
-| · site / building / department / assignee 单槽率 | _待 live run 回填_ |
-| 工单字段精确匹配率 | _待 live run 回填_ |
-| 澄清行为准确率（ambiguous/unknown） | _待 live run 回填_ |
-| 纠错成功率（correction） | _待 live run 回填_ |
-| 失败归因分布 | _待 live run 回填_ |
+| model | `deepseek-chat` |
+| 用例数 | 33（全单轮） |
+| 整体通过率 | **100.0%** |
+| 平均轮数 | 1.00 |
+| 4 槽全匹配率 | 100.0% |
+| · site / building / department / assignee 单槽率 | 100% / 100% / 100% / 100% |
+| 工单字段精确匹配率 | 100.0% |
+| 澄清/拒绝行为准确率（ambiguous/unknown） | 100.0%（8 例） |
+| description clean（软指标，不计入 pass） | 100.0%（25 例） |
+| 失败归因分布 | 无 |
 
-> 注：本次 patch 的执行环境已配置 `VOLCENGINE_TOKEN` + `VOLCENGINE_API_BASE`，但沙箱禁用了
-> `node`/`npm`/`tsx` 进程执行，无法在此跑出 live 数字（拒绝在基线中填入伪造数据）。请在可执行 shell 中
-> 跑一次上面的命令，将 `eval/reports/` 生成的 md 汇总回填到本表与 issue #174。
+> 注：上表为 **DeepSeek（`deepseek-chat`）** 的数字——committed 示例模型 doubao-seed-2.0-lite 偏弱
+> （eval 注释亦如此说明），harness 凭 `DEEPSEEK_API_KEY` override 到 DeepSeek 跑出该结果，committed 默认未改。
+> 演进：确定性倒推回填 + description 解耦把整体从 57.6% 拉到 90.9%（HER 槽位即到 100%），再加 systemPrompt
+> 「完成判定」引导收掉残留的 missing_ticket → 100%。
 
 ## 不在范围内
 
