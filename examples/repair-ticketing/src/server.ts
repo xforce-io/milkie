@@ -77,14 +77,17 @@ function latestWorkingMemory(events: Event[]): Record<string, unknown> {
   return data
 }
 
+/** True when a value is an assembled ticket object (has a string ticketId). */
+function isTicket(v: unknown): v is Ticket {
+  return !!v && typeof v === 'object' && typeof (v as Partial<Ticket>).ticketId === 'string'
+}
+
 /** Parse the live invoke output as a ticket, or null when this turn produced
  *  plain text (i.e. assemble_ticket did not run / its precondition was unmet). */
 function parseTicket(output: string): Ticket | null {
   try {
     const parsed = JSON.parse(output) as Partial<Ticket>
-    return parsed && typeof parsed === 'object' && typeof parsed.ticketId === 'string'
-      ? (parsed as Ticket)
-      : null
+    return isTicket(parsed) ? parsed : null
   } catch {
     return null
   }
@@ -107,15 +110,19 @@ async function handleChat(req: IncomingMessage, res: ServerResponse, s: ServerSt
   s.runsByContext.set(ctxId, runs)
 
   const events = await s.eventStore.readByRunId(result.agentRunId)
+  const wm = latestWorkingMemory(events)
+  // Prefer the ticket object assemble_ticket stored in WM (authoritative,
+  // model-paraphrase-proof — same source run-eval uses); fall back to parsing the
+  // output only for older shapes. The model often reformats the ticket JSON into
+  // markdown prose, which JSON.parse can't read — reading WM keeps the ticket CARD
+  // rendering instead of leaking a raw markdown blob into the chat.
   sendJson(res, 200, {
     contextId:     ctxId,
     runId:         result.agentRunId,
     status:        result.status,
     output:        result.output,
-    workingMemory: latestWorkingMemory(events),
-    // Read from the live invoke output, NOT a checkpoint: assemble_ticket returns
-    // the ticket JSON which the model relays as the final turn text (#175).
-    ticket:        parseTicket(result.output),
+    workingMemory: wm,
+    ticket:        isTicket(wm['ticket']) ? wm['ticket'] : parseTicket(result.output),
   })
 }
 

@@ -83,10 +83,21 @@ function renderChips(wm = {}) {
   }).join('');
 }
 
+// Minimal SAFE markdown: escape HTML first (XSS-proof against model/user text),
+// then a tiny whitelist — **bold** and newlines. The bot relays markdown-ish prose
+// (e.g. clarify lists); rendering it as plain text leaked literal `**`.
+function escapeHtml(s) {
+  return s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+function mdInline(text) {
+  return escapeHtml(text)
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/\n/g, '<br>');
+}
 function addMsg(text, cls) {
   const el = document.createElement('div');
   el.className = `msg ${cls}`;
-  el.textContent = text;
+  el.innerHTML = mdInline(text);
   $('log').appendChild(el);
   $('log').scrollTop = $('log').scrollHeight;
 }

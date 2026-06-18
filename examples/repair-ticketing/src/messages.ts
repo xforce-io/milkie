@@ -12,8 +12,14 @@ export interface ChoiceLabel {
   path: string[]
 }
 
+// Include each candidate's ancestor branch (path minus its own label), not just the
+// opaque id — so same-label candidates (两个「张伟」) are distinguishable and a model
+// that parrots this message still produces a useful clarification instead of guessing.
 const fmtChoices = (cands: ChoiceLabel[]): string =>
-  cands.map(c => `${c.id}（${c.label}）`).join('、')
+  cands.map(c => {
+    const branch = c.path.slice(0, -1).join('·')
+    return branch ? `${c.label}（${branch}，${c.id}）` : `${c.label}（${c.id}）`
+  }).join('；')
 
 export const repairMessages = {
   /** Multiple candidates at a level and context can't disambiguate → ask the user. */
