@@ -105,16 +105,37 @@ function readTicketFields(
  *
  * #175: it no longer fires a business event. Writing `description` into WM is all
  * it does; the downstream assemble_ticket precondition reads that fact back.
+ *
+ * #185: optional `description` param for the one-shot case. When the user packs
+ * levels AND the fault into a SINGLE turn, taking ctx.currentTurn verbatim would
+ * contaminate the description with the level原话. So the model may pass the clean
+ * fault substring as `description`; it must be a substring of the user's words, not
+ * a paraphrase. The param is OPT-IN — absent or blank, behavior is unchanged: the
+ * verbatim turn is used, preserving the #162/#164 "user's words, not a model
+ * paraphrase" trust boundary for the normal multi-turn flow.
  */
 export function makeCommitDescriptionTool(): ToolDefinition {
   return {
     name: 'commit_description',
     description:
-      '记录用户对故障现象的自由文本描述。系统会自动采用用户本轮的原始输入作为描述内容——' +
-      '你无需传入任何参数，只需在用户给出描述后调用本工具。记录后即可调用 assemble_ticket 生成工单。',
-    inputSchema: { type: 'object', properties: {} },
-    handler: async (_input: unknown, ctx: ToolContext): Promise<unknown> => {
-      const description = (ctx.currentTurn ?? '').trim()
+      '记录用户对故障现象的自由文本描述。多轮场景下你无需传参，系统自动采用用户本轮原话；' +
+      '仅当用户在同一轮里把「报修对象 + 故障现象」一起说了、需要把纯故障部分单独拎出来时，' +
+      '才传入 description（必须是用户原话中描述故障的子串，不要改写、不要包含站点/楼宇/部门/负责人）。' +
+      '记录后即可调用 assemble_ticket 生成工单。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        description: {
+          type: 'string',
+          description:
+            '可选，仅单轮合并场景使用：用户原话中描述故障现象的子串（不要改写，不要含层级名称）。' +
+            '缺省则自动采用用户本轮原话。',
+        },
+      },
+    },
+    handler: async (input: unknown, ctx: ToolContext): Promise<unknown> => {
+      const param = (input as { description?: string } | null | undefined)?.description?.trim()
+      const description = param && param.length > 0 ? param : (ctx.currentTurn ?? '').trim()
       ctx.workingMemory.set('description', description)
       return { description }
     },
@@ -201,6 +222,7 @@ export const repairTicketingAgentConfig: AgentConfig = {
    - notFound：该层级本轮还无法确定。请按 message 请用户补充这一层级。
 2. 四级全部确认后，请用户用一句话描述故障现象（位置 + 问题）。用户描述后调用 commit_description（描述内容由系统自动采集，无需传参）。
 3. 四级实体与描述都确认后，调用 assemble_ticket 生成结构化工单，并把工单原样回复用户。
+若用户在同一轮里就把报修对象与故障现象一起说全了，直接在本轮依次走完：resolve_entities / commit_entity 定位四级 → commit_description（此时把其中描述故障的子串作为 description 参数传入，不要把整句原话连同站点/楼宇/部门/负责人一起当描述）→ assemble_ticket，不要再停下来追问描述。
 注意：assemble_ticket 有前置条件——必须先集齐四级实体与描述；若它返回 preconditionFailed，请先补齐 missing 列出的字段，不要重复空调用。`,
   // #175: a single autonomous llm state. No `on:` edges, no business events.
   // #180: resolve_entities does deterministic recall + fast-path commit; commit_entity

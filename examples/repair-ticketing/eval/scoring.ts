@@ -53,6 +53,10 @@ export type FailureKind =
   | 'erroneous_fill'
   | 'wrong_ticket_field'
   | 'runtime_error'
+  /** oneshot only (#185): the ticket emitted, but the stored description was not
+   *  the clean fault substring — empty, or the entire one-shot turn verbatim (the
+   *  level原话 leaked in). Never raised for multi-turn cases. */
+  | 'description_contaminated'
 
 export interface CaseResult {
   id:            string
@@ -64,6 +68,10 @@ export interface CaseResult {
   ticketMatch?:    boolean
   clarificationOk?: boolean
   correctionOk?:   boolean
+  /** oneshot only (#185): true when the emitted ticket's description is the clean
+   *  fault substring (non-empty and not the verbatim one-shot turn). Undefined for
+   *  every non-oneshot case — the multi-turn "don't score description" rule stands. */
+  descriptionCleanOk?: boolean
   failures:      FailureKind[]
 }
 
@@ -189,12 +197,30 @@ export function scoreCase(c: EvalCase, obs: Observed, ids: IdsByLevel): CaseResu
     }
   }
 
-  const passed = slotFullMatch && (c.expect.ticket ? ticketMatch === true : true)
+  const idsPassed = slotFullMatch && (c.expect.ticket ? ticketMatch === true : true)
+
+  // oneshot weak assertion (#185): a turns=1 case packs every level AND the fault
+  // into one utterance. With commit_description's optional param the model should
+  // store the clean fault substring, not the whole turn (level原话). We check this
+  // only for oneshot-tagged cases — the multi-turn "don't score description" rule
+  // (above) is untouched.
+  let descriptionCleanOk: boolean | undefined
+  if (c.tag.includes('oneshot')) {
+    const desc = String(obs.workingMemory['description'] ?? '').trim()
+    const turn = (c.turns[0] ?? '').trim()
+    descriptionCleanOk = desc !== '' && desc !== turn
+    // Only attribute contamination when the run otherwise succeeded; else the
+    // primary failure already explains the row and this would just be noise.
+    if (idsPassed && !descriptionCleanOk) failures.add('description_contaminated')
+  }
+
+  const passed = idsPassed && (descriptionCleanOk === undefined || descriptionCleanOk)
   return {
     id: c.id, tag: c.tag, passed, turnCount: obs.turnCount,
     slotFullMatch, slotPerLevel,
     ...(ticketMatch !== undefined ? { ticketMatch } : {}),
     ...(isCorrection ? { correctionOk: slotFullMatch } : {}),
+    ...(descriptionCleanOk !== undefined ? { descriptionCleanOk } : {}),
     failures: [...failures],
   }
 }

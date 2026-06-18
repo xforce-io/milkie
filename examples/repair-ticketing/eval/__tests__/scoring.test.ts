@@ -182,6 +182,68 @@ describe('scoreCase — clarify / reject', () => {
   })
 })
 
+describe('scoreCase — oneshot description weak assertion (#185)', () => {
+  // A turns=1 case packs every level AND the fault into one utterance. The weak
+  // assertion verifies commit_description's optional param kept `description` to
+  // the clean fault substring instead of leaking the whole turn (level原话).
+  const ONESHOT_TURN = '总部主楼IT网络部王芳，三楼会议室的投影仪无法开机'
+  const CLEAN_DESC = '三楼会议室的投影仪无法开机'
+
+  const oneshotCase = (): EvalCase => ({
+    id: 'oneshot-01', tag: ['oneshot'],
+    turns: [ONESHOT_TURN],
+    expect: {
+      slots:  { site: 'S01', building: 'B01', department: 'D03', assignee: 'E008' },
+      ticket: { site: 'S01', building: 'B01', department: 'D03', assignee: 'E008' },
+    },
+  })
+
+  const oneshotObs = (description: string, over: Partial<Observed> = {}): Observed => ({
+    status: 'completed',
+    workingMemory: { site: 'S01', building: 'B01', department: 'D03', assignee: 'E008', description },
+    ticket: {
+      ticketId: 'TKT-S01-B01-D03-E008',
+      site: 'S01', building: 'B01', department: 'D03', assignee: 'E008', description,
+    },
+    turnCount: 1,
+    ...over,
+  })
+
+  it('passes a one-shot whose description is the clean fault substring', () => {
+    const r = scoreCase(oneshotCase(), oneshotObs(CLEAN_DESC), IDS)
+    expect(r.passed).toBe(true)
+    expect(r.descriptionCleanOk).toBe(true)
+    expect(r.failures).not.toContain('description_contaminated')
+  })
+
+  it('fails with description_contaminated when description is the whole turn verbatim', () => {
+    const r = scoreCase(oneshotCase(), oneshotObs(ONESHOT_TURN), IDS)
+    expect(r.passed).toBe(false)
+    expect(r.descriptionCleanOk).toBe(false)
+    expect(r.failures).toContain('description_contaminated')
+  })
+
+  it('fails with description_contaminated when description is empty', () => {
+    const r = scoreCase(oneshotCase(), oneshotObs(''), IDS)
+    expect(r.descriptionCleanOk).toBe(false)
+    expect(r.failures).toContain('description_contaminated')
+  })
+
+  it('leaves descriptionCleanOk undefined for non-oneshot cases (multi-turn 口径不变)', () => {
+    const r = scoreCase(fullCase(), completedObs(), IDS)
+    expect(r.descriptionCleanOk).toBeUndefined()
+  })
+
+  it('does not stack description_contaminated onto an already-failed (no ticket) one-shot', () => {
+    // Description is contaminated AND no ticket emitted: the primary attribution is
+    // missing_ticket; the weak check must not pile a second misleading failure on.
+    const r = scoreCase(oneshotCase(), oneshotObs(ONESHOT_TURN, { ticket: null }), IDS)
+    expect(r.passed).toBe(false)
+    expect(r.failures).toContain('missing_ticket')
+    expect(r.failures).not.toContain('description_contaminated')
+  })
+})
+
 describe('aggregate', () => {
   it('rolls up rates, per-level slot accuracy, failure distribution, and by-tag', () => {
     const cases = [
