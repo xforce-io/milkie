@@ -96,7 +96,14 @@ function buildIdsByLevel(): IdsByLevel {
 
 function loadCases(): EvalCase[] {
   const text = readFileSync(join(__dirname, 'cases.jsonl'), 'utf8')
-  return text.trim().split(/\r?\n/).filter(Boolean).map(l => JSON.parse(l) as EvalCase)
+  const all = text.trim().split(/\r?\n/).filter(Boolean).map(l => JSON.parse(l) as EvalCase)
+  // CASE_FILTER (optional): comma-separated keys; keep a case if any key matches its
+  // exact id, its id prefix, or one of its tags. Lets you run a subset (e.g. only
+  // `oneshot`) for a fast, low-cost, repeatable spot-check without touching the file.
+  const filter = process.env['CASE_FILTER']?.trim()
+  if (!filter) return all
+  const keys = filter.split(',').map(s => s.trim()).filter(Boolean)
+  return all.filter(c => keys.some(k => c.id === k || c.id.startsWith(k) || c.tag.includes(k)))
 }
 
 // ─────────────────────────── Live state extraction ───────────────────────────
@@ -171,6 +178,9 @@ async function runCase(c: EvalCase, gateway: IModelGateway): Promise<Observed> {
   return {
     status, workingMemory, ticket: readTicket(workingMemory, lastOutput),
     turnCount: c.turns.length,
+    // Surface the invoke's error signal (e.g. a 401 / model error returned as the
+    // run output) so the report's runtime_error rows are diagnosable, not silent.
+    ...(status === 'error' ? { error: lastOutput } : {}),
   }
 }
 
@@ -196,7 +206,7 @@ function renderReport(m: Metrics, results: CaseResult[], model: string, startedA
   for (const level of LEVELS) lines.push(`| · ${level} per-slot | ${pct(m.slotFill.perLevelRate[level])} |`)
   lines.push(`| ticket field exact-match (${m.ticket.cases} cases) | ${pct(m.ticket.exactMatchRate)} |`)
   lines.push(`| clarification accuracy (${m.clarification.cases} cases) | ${pct(m.clarification.accuracy)} |`)
-  lines.push(`| correction success (${m.correction.cases} cases) | ${pct(m.correction.successRate)} |`)
+  lines.push(`| description clean — soft, not a pass-gate (${m.descriptionClean.cases} oneshot cases) | ${pct(m.descriptionClean.cleanRate)} |`)
   lines.push('')
   lines.push(`## Pass rate by tag`)
   lines.push('')
@@ -257,6 +267,7 @@ async function main(): Promise<void> {
     const r   = scoreCase(c, obs, ids)
     results.push(r)
     console.log(`  ${r.passed ? 'PASS' : 'FAIL'}  ${c.id.padEnd(28)} ${r.failures.join(',')}`)
+    if (obs.error) console.log(`        ↳ error: ${obs.error}`)
   }
 
   const metrics = aggregate(cases, results)

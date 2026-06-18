@@ -223,6 +223,7 @@ export const repairTicketingAgentConfig: AgentConfig = {
 2. 四级全部确认后，请用户用一句话描述故障现象（位置 + 问题）。用户描述后调用 commit_description（描述内容由系统自动采集，无需传参）。
 3. 四级实体与描述都确认后，调用 assemble_ticket 生成结构化工单，并把工单原样回复用户。
 若用户在同一轮里就把报修对象与故障现象一起说全了，直接在本轮依次走完：resolve_entities / commit_entity 定位四级 → commit_description（此时把其中描述故障的子串作为 description 参数传入，不要把整句原话连同站点/楼宇/部门/负责人一起当描述）→ assemble_ticket，不要再停下来追问描述。
+【完成判定，务必遵守】resolve_entities 一次调用就可能把四级全部确认（committed 覆盖 站点/楼宇/部门/负责人，且无 needsSelection / notFound）——这不代表任务结束。只要四级齐全且本轮原话已含故障描述，必须在本轮继续 commit_description 再 assemble_ticket 收尾并回复工单，绝不能在层级解析完成后就停下、结束本轮或反过来追问已确定的层级。仅当确实缺某一层级或缺故障描述时，才向用户追问。
 注意：assemble_ticket 有前置条件——必须先集齐四级实体与描述；若它返回 preconditionFailed，请先补齐 missing 列出的字段，不要重复空调用。`,
   // #175: a single autonomous llm state. No `on:` edges, no business events.
   // #180: resolve_entities does deterministic recall + fast-path commit; commit_entity

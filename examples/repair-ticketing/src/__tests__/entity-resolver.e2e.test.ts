@@ -415,7 +415,10 @@ describe('Path D: hierarchical slot filling inside a single autonomous state (e2
 const resolveTool = makeResolveEntitiesTool(resolver, REQUIRED)
 interface ResolveOut {
   committed: Array<{ level: string; id: string }>
-  needsSelection: Array<{ level: string; candidates: Array<{ id: string }> }>
+  needsSelection: Array<{
+    level: string
+    candidates: Array<{ id: string; label: string; chain: Array<{ level: string; id: string; label: string }> }>
+  }>
   notFound: string[]
   message: string | null
 }
@@ -462,5 +465,55 @@ describe('resolve_entities — deterministic recall + fast-path (#180)', () => {
     const out = await resolve(ctx)
     expect(wm.get('assignee')).toBeUndefined()
     expect(out.notFound).toContain('assignee')
+  })
+})
+
+describe('resolve_entities — deterministic back-inference of skipped levels (#185)', () => {
+  it('skips 楼宇 → back-fills it from the decisive 部门 (总部网络部王芳)', async () => {
+    const { ctx, wm } = makeCtx('总部网络部王芳')
+    const out = await resolve(ctx)
+    expect(wm.get('site')).toBe('S01')
+    expect(wm.get('building')).toBe('B01')        // back-filled — 楼宇 never uttered
+    expect(wm.get('department')).toBe('D03')
+    expect(wm.get('assignee')).toBe('E008')
+    expect(out.committed.map(c => c.level)).toEqual(['site', 'building', 'department', 'assignee'])
+    expect(out.needsSelection).toEqual([])
+  })
+
+  it('skips 站点+楼宇 → recovers both from the decisive 部门 (研发部赵明)', async () => {
+    const { ctx, wm } = makeCtx('研发部赵明')
+    await resolve(ctx)
+    expect(wm.get('site')).toBe('S02')            // both ancestors recovered from D10's chain
+    expect(wm.get('building')).toBe('B03')
+    expect(wm.get('department')).toBe('D10')
+    expect(wm.get('assignee')).toBe('E020')
+  })
+
+  it('back-inference + cross-branch: 总部网络部张伟 → 张伟 in 网络部 (E007), not 安全部 (E012)', async () => {
+    const { ctx, wm } = makeCtx('总部网络部张伟')
+    await resolve(ctx)
+    expect(wm.get('building')).toBe('B01')        // back-filled from 网络部
+    expect(wm.get('department')).toBe('D03')
+    expect(wm.get('assignee')).toBe('E007')       // branch-filtered to 网络部, NOT 安全部's E012
+  })
+
+  it('divergence: 总部张伟 commits only 站点 and surfaces the assignee branches with full chains', async () => {
+    const { ctx, wm } = makeCtx('总部张伟')
+    const out = await resolve(ctx)
+    expect(wm.get('site')).toBe('S01')
+    expect(wm.get('building')).toBeUndefined()    // branches diverge here → never guessed
+    expect(wm.get('department')).toBeUndefined()
+    expect(wm.get('assignee')).toBeUndefined()
+    const sel = out.needsSelection.find(s => s.level === 'assignee')!
+    // both 张伟 branches are surfaced (fuzzy recall may also include a near-match like
+    // 张亮 — fine; the point is the agent gets the distinguishing branches).
+    expect(sel.candidates.map(c => c.id)).toEqual(expect.arrayContaining(['E007', 'E012']))
+    // each candidate carries its FULL id+label chain so the agent can ask which branch
+    expect(sel.candidates.find(c => c.id === 'E007')!.chain).toEqual([
+      { level: 'site', id: 'S01', label: '总部' },
+      { level: 'building', id: 'B01', label: '主楼' },
+      { level: 'department', id: 'D03', label: 'IT网络部' },
+      { level: 'assignee', id: 'E007', label: '张伟' },
+    ])
   })
 })

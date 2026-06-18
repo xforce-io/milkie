@@ -50,6 +50,16 @@ describe('fusion recall (#180) — step 1, deterministic, LLM-free', () => {
     expect(at(r, 'assignee')!.decisive).toBe('E008')
   })
 
+  it('candidate carries its ancestor ids by level (#185 back-inference)', () => {
+    // 网络部 recalled level-less from empty pinned → D03, whose ancestor chain is
+    // surfaced as ids so the orchestrator can back-fill the skipped site/building.
+    const dept = at(recall(dict, '网络部'), 'department')!.candidates[0]!
+    expect(dept.id).toBe('D03')
+    expect(dept.ancestors).toEqual({ site: 'S01', building: 'B01' })
+    // labels stay available on `path` (root→entity); ids on `ancestors`.
+    expect(dept.path).toEqual(['总部', '主楼', 'IT网络部'])
+  })
+
   it('level-less → an embedded name lands on its own level only', () => {
     // "网络部" appears in dept_name "IT网络部"; no pinned context.
     const r = recall(dict, '网络部')
