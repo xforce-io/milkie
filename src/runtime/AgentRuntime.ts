@@ -937,12 +937,16 @@ export class AgentRuntime {
       // Turn completed successfully — crystallize.
       this.lifecycle.signal('done')
       this.crystallizeTurn(turnInput)
-      // #175/D7: a non-terminal turn that finishes (pure text → waiting for the
-      // next user turn) leaves a continuation checkpoint in the event log so the
-      // next invoke / a fresh instance restores from it (portable session, serve
-      // restart recovery). Reserved terminal states (paused/failed) already
-      // persisted their own checkpoint; don't double-write.
-      if (!this.fsm.isTerminal()) {
+      // #175/D7: a finished turn leaves a continuation checkpoint in the event
+      // log so the next invoke / a fresh instance restores from it (portable
+      // session, serve restart recovery). This includes user-defined terminal
+      // states (e.g. `completed`, `confirming`) — their final WM must stay
+      // recoverable (#172). Only the reserved `paused`/`failed` lifecycle states
+      // are excluded: they already persisted their own checkpoint (paused in
+      // checkEvents before throwing InterruptSignal), so re-writing here would
+      // double-write. Discriminate on reserved-terminal-ness rather than the
+      // literal state name, so a non-terminal user state is never excluded.
+      if (!this.fsm.isReservedTerminal()) {
         const checkpoint = this.buildCheckpoint()
         await this.tryFlushTraceWrites()
         await this.persistCheckpoint(checkpoint)

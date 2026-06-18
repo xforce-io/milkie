@@ -2,6 +2,7 @@ import { AgentRuntime } from '../runtime/AgentRuntime'
 import { DefaultIOPort } from '../runtime/IOPort'
 import { Milkie } from '../runtime/Milkie'
 import { MemoryStore } from '../store/MemoryStore'
+import { WorkingMemory } from '../store/WorkingMemory'
 import { InMemoryRecorder } from '../trajectory/InMemoryRecorder'
 import { MemoryEventStore } from '../trace/MemoryEventStore'
 import { RecordingIOPort } from '../trace/RecordingIOPort'
@@ -240,6 +241,48 @@ describe('AgentRuntime', () => {
       expect(checkpoint.pendingEvents).toBeUndefined()
       expect(checkpoint.meta.contextId).toBe('ctx-interrupt')
       expect(checkpoint.meta.agentRunId).toBe(result.agentRunId)
+    })
+
+    it('#172: persists a checkpoint with the WM written in a user-defined terminal turn', async () => {
+      const stateStore = new MemoryStore()
+      const eventStore = new MemoryEventStore()
+      const rememberTool: ToolDefinition = {
+        name:        'remember',
+        description: 'write to working memory',
+        inputSchema: { type: 'object', properties: { value: { type: 'string' } } },
+        handler:     async (input, ctx) => {
+          ctx.workingMemory.set('note', (input as { value: string }).value)
+          return { ok: true }
+        },
+      }
+      const runtime = new AgentRuntime({
+        config: makeConfig({
+          fsm: { states: [{ name: 'completed', type: 'llm', terminal: true }] },
+        }),
+        goal:       'terminal turn',
+        input:      'go',
+        contextId:  'ctx-terminal',
+        stateStore,
+        eventStore,
+        recorder:   new InMemoryRecorder('trace-terminal', 'test-agent'),
+        ioPort:     new DefaultIOPort(new SequentialGateway([
+          toolCallResponse('tc-1', 'remember', { value: 'kept' }),
+          textResponse('all done'),
+        ])),
+        extraTools: [rememberTool],
+      })
+
+      const result = await runtime.run('go')
+      expect(result.status).toBe('completed')
+
+      // The recovered checkpoint contains the WM written in the terminal turn.
+      // Read it back through the public WorkingMemory API rather than reaching
+      // into the serialised internals, so the test tracks the contract (the WM
+      // value is recoverable) and not the storage shape.
+      const checkpoint = checkpointFromEvents(await eventStore.readByRunId(result.agentRunId))!
+      expect(checkpoint).toBeDefined()
+      const recoveredWM = WorkingMemory.fromJSON(checkpoint.context.workingMemory)
+      expect(recoveredWM.get('note')).toBe('kept')
     })
 
     it('resume reuses checkpoint contextId, agentRunId, and traceId', async () => {
