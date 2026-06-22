@@ -59,6 +59,8 @@ export interface AgentRuntimeOptions {
   contextId?:        string
   agentRunId?:       string  // if provided, use this (allows caller to correlate with recorder meta)
   parentId?:         string
+  /** #189 D1: previous run of this session, for self-explain window. */
+  previousRunId?:    string
   /** #82: per-turn variables injected into the volatile turn-context region (message
    *  section, after history, before current-turn). Not persisted; this turn only. */
   variables?:        Record<string, JSONValue>
@@ -133,6 +135,7 @@ export class AgentRuntime {
   private readonly makeChildPort?: MakeChildPort
   private readonly extraTools:      ToolDefinition[]
   private readonly causalCursor?:   CausalCursor
+  private readonly previousRunId?:  string
 
   private readonly fsm:         FSMEngine
   // #175 切片 1.2a：下层运行生命周期状态机（per-run，run() 开头重置）。
@@ -172,6 +175,7 @@ export class AgentRuntime {
     this.contextId       = opts.contextId ?? this.ioPort.uuid()
     this.agentRunId      = opts.agentRunId ?? this.ioPort.uuid()
     this.parentId        = opts.parentId
+    this.previousRunId   = opts.previousRunId
     this.stateStore      = opts.stateStore
     this.recorder        = opts.recorder
     this.eventStore      = opts.eventStore
@@ -328,6 +332,7 @@ export class AgentRuntime {
       stateStore:    this.stateStore,
       requestSkill:  (name: string, scope?: 'turn' | 'session') => this.requestSkill(name, scope),
       currentTurn:   this.currentTurnRaw,
+      previousRunId: this.previousRunId,
     }
     // #37/#38: only wire lineage when a sink is present (LLM-state tool calls go
     // through ioPort.invokeTool, which drains the buffer). objectId/relationId are
