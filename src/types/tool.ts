@@ -11,6 +11,10 @@ export interface ToolContext {
   requestSkill?: (name: string, scope?: 'turn' | 'session') => { requested: string; status: string; version?: string; scope?: 'turn' | 'session' }
   /** #164: raw user input for the current turn, stable across all tool-loop iterations. */
   currentTurn?:  string
+  /** #189: the previous run of this session (D1). Lets a self-explain tool
+   * resolve "my last turn(s)" without the agent passing a runId. Unset on a
+   * session's first turn. */
+  previousRunId?: string
   /**
    * #37: declare a content-addressable object (a passage read, a claim produced).
    * Returns a stable `objectId` handle (content-addressed → identical across

@@ -370,6 +370,7 @@ export class Milkie {
       childRecorderFactory,
       makeChildPort,
       causalCursor,
+      ...(previousRunId ? { previousRunId } : {}),
       ...(request.onModelEvent ? { onModelEvent: request.onModelEvent } : {}),
     })
 
