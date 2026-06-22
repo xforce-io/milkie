@@ -6,6 +6,7 @@ import { regionReuseCounts } from '../trace/RegionContextView.js'
 import { buildExecutionProjection } from '../trace/diagnostics/buildExecutionProjection.js'
 import type { ExecutionStep, ToolStep } from '../trace/diagnostics/buildExecutionProjection.js'
 import { walkRunWindow } from '../trace/diagnostics/walkRunWindow.js'
+import { resolveClaimSources } from '../trace/diagnostics/buildLineageProjection.js'
 
 /**
  * Read-Trace tools for the diagnoser agent: deterministic projections over a
@@ -77,5 +78,29 @@ export function makeTraceTools(
       return { turns }
     },
   }
-  return [get_run_io, get_execution]
+  const get_lineage: ToolDefinition = {
+    name: 'get_lineage',
+    description: '溯源:某条结论/数字引用了哪条源。传 { query } 按结论文本子串匹配(如对话里出现的数字),' +
+      '默认在自己最近 N 轮(lookback,默认 3)里搜;也可传 { runId } 限定单轮。返回 matches:{ runId, claim, sources }。',
+    inputSchema: { type: 'object', properties: {
+      runId:    { type: 'string' },
+      lookback: { type: 'number', description: '回看轮数,默认 3,上限 10' },
+      query:    { type: 'string', description: '要溯源的结论/数字文本' },
+    } },
+    handler: async (input, ctx) => {
+      const { runId, lookback, query } = (input ?? {}) as { runId?: string; lookback?: number; query?: string }
+      const window = runId
+        ? [{ runId, events: await eventStore.readByRunId(runId) }]
+        : await walkRunWindow(eventStore, (ctx as ToolContext | undefined)?.previousRunId,
+            Math.max(1, Math.min(LOOKBACK_MAX, lookback ?? LOOKBACK_DEFAULT)))
+      const matches = []
+      for (const { runId: rid, events } of window) {
+        for (const m of resolveClaimSources(events, query)) {
+          matches.push({ runId: rid, claim: m.claim, sources: m.sources })
+        }
+      }
+      return { matches }
+    },
+  }
+  return [get_run_io, get_execution, get_lineage]
 }
