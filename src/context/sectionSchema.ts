@@ -26,9 +26,10 @@ export const SECTION_SCHEMA: {
   ],
   message: [
     'history',
-    // #146: external delivered reports/projections — after stable history, before dynamic context/current turn.
-    'external-context',
     // ─── cacheBreakpoint candidate: history end (#83) — system+history 进 cache ───
+    // #192: delivered projections are no longer a standalone section here — they are
+    // merged into the current-turn user message (input first) so they never wedge a
+    // role=user turn between the last history assistant and the current reply.
     // #83: persistent session vars — after stable history, before per-turn / current turn.
     'session-context',
     // #82: per-turn variables — after stable history, before the volatile current turn.
