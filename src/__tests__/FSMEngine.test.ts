@@ -63,6 +63,49 @@ describe('FSMEngine', () => {
     })
   })
 
+  describe('isReservedTerminal()', () => {
+    it('is false for a non-terminal user state', () => {
+      const fsm = new FSMEngine(reactFSM)
+      expect(fsm.isReservedTerminal()).toBe(false)
+    })
+
+    it('is false for a user-defined terminal state (e.g. `completed`/`end`) — #172', () => {
+      // A user terminal turn must still get a continuation checkpoint, so it
+      // must NOT be classified as a reserved-terminal exclusion.
+      const fsm = new FSMEngine(terminalFSM)
+      fsm.transitionTo('end')
+      expect(fsm.isTerminal()).toBe(true)
+      expect(fsm.isReservedTerminal()).toBe(false)
+    })
+
+    it('is true for the reserved `paused` state (already self-persisted)', () => {
+      const fsm = new FSMEngine(reactFSM)
+      fsm.transitionTo('paused')
+      expect(fsm.isReservedTerminal()).toBe(true)
+    })
+
+    it('is true for the reserved `failed` state', () => {
+      const fsm = new FSMEngine(reactFSM)
+      fsm.transitionTo('failed')
+      expect(fsm.isReservedTerminal()).toBe(true)
+    })
+
+    it('is false for the reserved but non-terminal `error_handling` state', () => {
+      const fsm = new FSMEngine(reactFSM)
+      fsm.transitionTo('error_handling')
+      expect(fsm.isReservedTerminal()).toBe(false)
+    })
+
+    it('is false for a user state merely *named* `paused` that is non-terminal', () => {
+      // The terminal guard keeps a name-collision out of the reserved set, so a
+      // non-terminal user `paused` state is never wrongly excluded.
+      const fsm = new FSMEngine({ states: [{ name: 'paused', type: 'llm' }] })
+      expect(fsm.currentStateName).toBe('paused')
+      expect(fsm.isTerminal()).toBe(false)
+      expect(fsm.isReservedTerminal()).toBe(false)
+    })
+  })
+
   describe('reserved lifecycle re-entry (transitionTo)', () => {
     it('re-enters the reserved `paused` state (suspend) which is terminal', () => {
       const fsm = new FSMEngine(reactFSM)

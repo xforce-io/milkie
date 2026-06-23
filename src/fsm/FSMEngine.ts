@@ -51,6 +51,20 @@ export class FSMEngine {
   }
 
   /**
+   * Is the current state a framework-reserved terminal lifecycle state
+   * (`paused` / `failed`)? These persist their own checkpoint at the
+   * suspend/fail point, so the run() success path must NOT re-write one.
+   * Distinct from a user-defined terminal state (e.g. `completed`), whose
+   * final working memory still needs a continuation checkpoint (#172), and
+   * robust against a user state that merely happens to be *named* `paused`
+   * but is non-terminal (the terminal guard keeps it out of this set).
+   */
+  isReservedTerminal(): boolean {
+    return this.isTerminal()
+      && RESERVED_STATES.includes(this.current.name as typeof RESERVED_STATES[number])
+  }
+
+  /**
    * Re-enter a state (reserved lifecycle state or the run's single user state).
    * Used for suspend (`X → paused`), error escalation (`X → error_handling`),
    * retry-back, and resume (`paused → X`). NOT a business transition — there is
