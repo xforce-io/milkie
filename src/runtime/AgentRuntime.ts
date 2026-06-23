@@ -18,9 +18,9 @@ import {
   makeHeaderRegion,
   makeSkillRegion,
   makeCurrentTurnRegion,
+  currentTurnInput,
   makeTurnContextRegion,
   makeSessionContextRegion,
-  makeExternalContextRegion,
   makeScratchpadAssistantRegion,
   makeScratchpadToolResultRegion,
   makeStateInstructionsRegion,
@@ -442,8 +442,11 @@ export class AgentRuntime {
     return this.buildSkillLifecyclePayload(name, version, instructions)
   }
 
+  // #192: deliver projections merged into the current-turn user message (not a
+  // standalone external-context turn). setExternalContext is gone — projections
+  // ride along here so they never wedge a role=user turn between history and reply.
   private setCurrentTurn(input: string): void {
-    this.regions.set('current-turn', makeCurrentTurnRegion(input))
+    this.regions.set('current-turn', makeCurrentTurnRegion(input, this.externalProjections ?? []))
   }
 
   // #82: inject per-turn variables into the volatile turn-context region (message
@@ -470,17 +473,10 @@ export class AgentRuntime {
     }
   }
 
-  // #146: inject delivered external run outputs as read-only context for this
-  // turn. The region is turn-local, so it never crystallizes into history.
-  private setExternalContext(): void {
-    if (!this.externalProjections || this.externalProjections.length === 0) return
-    this.regions.set('external-context', makeExternalContextRegion(this.externalProjections))
-  }
-
   private getCurrentTurn(): string | null {
     const r = this.regions.get('current-turn')
     if (!r) return null
-    return r.content as string
+    return currentTurnInput(r.content)
   }
 
   private appendScratchpadAssistant(content: MessageContent[]): void {
@@ -762,7 +758,8 @@ export class AgentRuntime {
   // (so the checkpoint sees crystallized state) and from run() after FSM
   // completes (so terminal-state runs also crystallize).
   private crystallizeTurn(userInput?: string): void {
-    const input = userInput ?? (this.regions.get('current-turn')?.content as string | undefined)
+    const cur = this.regions.get('current-turn')
+    const input = userInput ?? (cur ? currentTurnInput(cur.content) : undefined)
     if (input === undefined) return
     // #30: mint the boundary event id BEFORE crystallization mutates regions —
     // runInterTurnEngine sets regions (firing region.added) and only calls onBoundary at
@@ -929,7 +926,6 @@ export class AgentRuntime {
     this.currentTurnRaw = input
     const turnInput = `Goal: ${this.goal}\n\n${input}`
     this.setCurrentTurn(turnInput)
-    this.setExternalContext()
     this.setSessionContext()
     this.setTurnContext()
     this.turnNumber++

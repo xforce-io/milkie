@@ -99,7 +99,7 @@ describe('Milkie context projections (#146)', () => {
     })).rejects.toThrow(/maxCount/)
   })
 
-  it('injects attached displayText into the next invoke as a labeled user message after history and before current-turn', async () => {
+  it('merges delivered projections into the current-turn user message (input first), never as a standalone turn between history and the reply (#192)', async () => {
     const gateway = new CapturingGateway(['first answer', 'second answer'])
     const milkie = new Milkie({
       stateStore: new MemoryStore(),
@@ -133,14 +133,32 @@ describe('Milkie context projections (#146)', () => {
     const secondRequest = gateway.requests[1]!
     const messages = textOf(secondRequest)
 
+    // history is preserved
     expect(messages[0]).toContain('first question')
     expect(messages[1]).toContain('first answer')
-    expect(messages[2]).toContain('External Delivered Context')
-    expect(messages[2]).toContain('Nightly report: all systems green.')
-    expect(messages[2]).toContain('job-run-1')
-    expect(messages[2]).toContain('job-context')
-    expect(messages[2]).toContain('not a user message')
-    expect(messages[3]).toContain('what did the report say?')
+
+    // C1: the current user input is adjacent to the last history assistant —
+    // no standalone projection turn wedged between them.
+    expect(messages).toHaveLength(3)
+    expect(secondRequest.messages[2]!.role).toBe('user')
+
+    // C2/C3: projection is merged into the current-turn message; the user's real
+    // input comes first, the delivered-context block follows, clearly labeled.
+    const cur = messages[2]!
+    expect(cur).toContain('what did the report say?')
+    expect(cur).toContain('External Delivered Context')
+    expect(cur).toContain('not a user message')
+    expect(cur).toContain('Nightly report: all systems green.')
+    expect(cur).toContain('job-run-1')
+    expect(cur).toContain('job-context')
+    expect(cur.indexOf('what did the report say?'))
+      .toBeLessThan(cur.indexOf('Nightly report: all systems green.'))
+
+    // projection never appears as its own message — only the current-turn carries it
+    const carrying = messages.filter((t) => t.includes('Nightly report: all systems green.'))
+    expect(carrying).toHaveLength(1)
+
+    // system block stays free of projection content
     expect(secondRequest.system).not.toContain('Nightly report')
   })
 
