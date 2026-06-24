@@ -13,6 +13,7 @@ run-as-product 立场、event-sourced Agent Trace、IOPort、Evolution、
 - [6. 多 Agent 模式](#6-多-agent-模式)
 - [7. 中断与恢复](#7-中断与恢复)
 - [8. Trajectory 与可观测性](#8-trajectory-与可观测性)
+  - [概念:可观测 vs 血缘](./concepts-observability-vs-lineage.md) — 「这结论哪来的、能信吗」用哪个回答
 - [9. API 参考](#9-api-参考)
 
 ---
@@ -598,6 +599,12 @@ const [t1, t2] = await Promise.all([
 console.log(r1.output, r2.output)
 console.log(t1.resolvedManifest.skills, t2.resolvedManifest.skills)
 ```
+
+### 可观测之外:血缘
+
+Trajectory 回答「**发生了什么**」——它跑了哪些工具、输出是什么、可回放可对比。但它回答不了「**报告里这条结论凭哪条源、能不能信**」:那需要**血缘**(claim 带一条防伪造的边指向它的源)。两者建在同一份 trace 上,职责不同,极易混淆。
+
+→ 概念与取舍详见 **[可观测 vs 血缘](./concepts-observability-vs-lineage.md)**(含一个易踩的陷阱:cite 到「整坨输出」算血缘吗?)。
 
 ---
 
