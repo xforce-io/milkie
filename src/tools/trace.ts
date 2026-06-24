@@ -34,7 +34,7 @@ export function makeTraceTools(
     },
   }
   const LOOKBACK_DEFAULT = 3
-  const LOOKBACK_MAX = 10
+  const LOOKBACK_MAX = 30
 
   /** Self view: drop llm step prompt/response bodies, keep tool steps. */
   function selfShape(steps: ExecutionStep[]): { toolSteps: ToolStep[]; llmStepCount: number } {
@@ -60,7 +60,7 @@ export function makeTraceTools(
       '诊断:传 { runId } 取该 run 全量投影(steps)。自溯源:不传 runId,取自己最近 N 轮(默认 3)的工具步骤摘要(turns;不含 prompt 正文),可加 { lookback }。',
     inputSchema: { type: 'object', properties: {
       runId:    { type: 'string' },
-      lookback: { type: 'number', description: '自溯源回看的轮数,默认 3,上限 10' },
+      lookback: { type: 'number', description: '自溯源回看的轮数,默认 3,上限 30' },
     } },
     handler: async (input, ctx) => {
       const { runId, lookback } = (input ?? {}) as { runId?: string; lookback?: number }
@@ -84,7 +84,7 @@ export function makeTraceTools(
       '默认在自己最近 N 轮(lookback,默认 3)里搜;也可传 { runId } 限定单轮。返回 matches:{ runId, claim, sources }。',
     inputSchema: { type: 'object', properties: {
       runId:    { type: 'string' },
-      lookback: { type: 'number', description: '回看轮数,默认 3,上限 10' },
+      lookback: { type: 'number', description: '回看轮数,默认 3,上限 30' },
       query:    { type: 'string', description: '要溯源的结论/数字文本' },
     } },
     handler: async (input, ctx) => {
