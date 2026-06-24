@@ -108,20 +108,25 @@ export class Milkie {
     this.stateStore      = opts.stateStore
     this.gatewayOverride = opts.gateway          ?? null
     this.defaultModel    = opts.defaultModel     ?? null
-    this.extraTools      = opts.tools            ?? []
+    this.extraTools      = [...(opts.tools ?? [])]   // copy: never mutate the caller's array
     this.trajectoryStore = opts.trajectoryStore  ?? null
     this.eventStore      = opts.eventStore       ?? null
     this.traceObjectStore = opts.traceObjectStore ?? null
     this.log             = opts.logger           ?? getLogger()
 
-    // #196: read-trace tools (get_execution/get_lineage/get_run_io) are generic
-    // self-explain capabilities — register them wherever an eventStore exists,
-    // symmetric with the write-side lineageTools that AgentRuntime registers
-    // unconditionally. Previously these were only wired via loadStandardAgents(),
-    // which the serve --agent path never calls, leaving serve agents unable to
-    // self-explain. Dedup is handled downstream (registry registers by name).
+    // #196: self-explain read-trace tools (get_execution/get_lineage) are generic
+    // capabilities — register them wherever an eventStore exists, symmetric with the
+    // write-side lineageTools that AgentRuntime registers unconditionally. Previously
+    // these were only wired via loadStandardAgents(), which the serve --agent path
+    // never calls, leaving serve agents unable to self-explain.
+    //
+    // selfOnly: this generic registration is SELF-溯源 only (no runId axis, no
+    // get_run_io). Reading an arbitrary runId is the diagnoser's privilege, granted by
+    // the full version via loadStandardAgents(); the full version, registered later by
+    // name, upgrades these in that opt-in path. Without selfOnly, a shared serve
+    // instance would let one session read another's recorded I/O (#196 P1).
     if (this.eventStore) {
-      this.extraTools.push(...makeTraceTools(this.eventStore, this.traceObjectStore ?? undefined))
+      this.extraTools.push(...makeTraceTools(this.eventStore, this.traceObjectStore ?? undefined, { selfOnly: true }))
     }
   }
 
