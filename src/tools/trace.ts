@@ -14,10 +14,20 @@ import { resolveClaimSources } from '../trace/diagnostics/buildLineageProjection
  * the agent. `runId` is the run being DIAGNOSED (distinct from the diagnoser's
  * own run).
  */
+/**
+ * `selfOnly` (default false): restrict to self-溯源 only — drop the `runId` axis
+ * from get_execution/get_lineage and omit get_run_io entirely. This is the GENERIC
+ * registration handed to every eventStore-enabled agent (#196). Reading an arbitrary
+ * `runId` is the diagnoser's privilege, granted via the full version through
+ * loadStandardAgents(); on a shared serve instance the full version would let one
+ * session read another's recorded I/O.
+ */
 export function makeTraceTools(
   eventStore: IEventStore,
   objectStore?: ITraceObjectStore,
+  opts?: { selfOnly?: boolean },
 ): ToolDefinition[] {
+  const selfOnly = opts?.selfOnly ?? false
   const get_run_io: ToolDefinition = {
     name: 'get_run_io',
     description: '取被诊断 run 的用户问题与最终答案。入参 { runId }。',
@@ -34,7 +44,7 @@ export function makeTraceTools(
     },
   }
   const LOOKBACK_DEFAULT = 3
-  const LOOKBACK_MAX = 10
+  const LOOKBACK_MAX = 30
 
   /** Self view: drop llm step prompt/response bodies, keep tool steps. */
   function selfShape(steps: ExecutionStep[]): { toolSteps: ToolStep[]; llmStepCount: number } {
@@ -56,14 +66,18 @@ export function makeTraceTools(
 
   const get_execution: ToolDefinition = {
     name: 'get_execution',
-    description: '取执行投影:步骤序列(LLM/工具调用、工具 query、命中证据、region 组成)。' +
-      '诊断:传 { runId } 取该 run 全量投影(steps)。自溯源:不传 runId,取自己最近 N 轮(默认 3)的工具步骤摘要(turns;不含 prompt 正文),可加 { lookback }。',
+    description: selfOnly
+      ? '自溯源执行投影:取自己最近 N 轮(默认 3)的工具步骤摘要(turns;不含 prompt 正文),可加 { lookback }。'
+      : '取执行投影:步骤序列(LLM/工具调用、工具 query、命中证据、region 组成)。' +
+        '诊断:传 { runId } 取该 run 全量投影(steps)。自溯源:不传 runId,取自己最近 N 轮(默认 3)的工具步骤摘要(turns;不含 prompt 正文),可加 { lookback }。',
     inputSchema: { type: 'object', properties: {
-      runId:    { type: 'string' },
-      lookback: { type: 'number', description: '自溯源回看的轮数,默认 3,上限 10' },
+      ...(selfOnly ? {} : { runId: { type: 'string' } }),
+      lookback: { type: 'number', description: '自溯源回看的轮数,默认 3,上限 30' },
     } },
     handler: async (input, ctx) => {
-      const { runId, lookback } = (input ?? {}) as { runId?: string; lookback?: number }
+      const raw = (input ?? {}) as { runId?: string; lookback?: number }
+      const runId = selfOnly ? undefined : raw.runId
+      const lookback = raw.lookback
       if (runId) {
         const events = await eventStore.readByRunId(runId)
         return buildExecutionProjection(events, { regionContent: await regionContentFor(events) })
@@ -80,15 +94,19 @@ export function makeTraceTools(
   }
   const get_lineage: ToolDefinition = {
     name: 'get_lineage',
-    description: '溯源:某条结论/数字引用了哪条源。传 { query } 按结论文本子串匹配(如对话里出现的数字),' +
-      '默认在自己最近 N 轮(lookback,默认 3)里搜;也可传 { runId } 限定单轮。返回 matches:{ runId, claim, sources }。',
+    description: selfOnly
+      ? '溯源:某条结论/数字引用了哪条源。传 { query } 按结论文本子串匹配,在自己最近 N 轮(lookback,默认 3)里搜。返回 matches:{ runId, claim, sources }。'
+      : '溯源:某条结论/数字引用了哪条源。传 { query } 按结论文本子串匹配(如对话里出现的数字),' +
+        '默认在自己最近 N 轮(lookback,默认 3)里搜;也可传 { runId } 限定单轮。返回 matches:{ runId, claim, sources }。',
     inputSchema: { type: 'object', properties: {
-      runId:    { type: 'string' },
-      lookback: { type: 'number', description: '回看轮数,默认 3,上限 10' },
+      ...(selfOnly ? {} : { runId: { type: 'string' } }),
+      lookback: { type: 'number', description: '回看轮数,默认 3,上限 30' },
       query:    { type: 'string', description: '要溯源的结论/数字文本' },
     } },
     handler: async (input, ctx) => {
-      const { runId, lookback, query } = (input ?? {}) as { runId?: string; lookback?: number; query?: string }
+      const raw = (input ?? {}) as { runId?: string; lookback?: number; query?: string }
+      const runId = selfOnly ? undefined : raw.runId
+      const { lookback, query } = raw
       const window = runId
         ? [{ runId, events: await eventStore.readByRunId(runId) }]
         : await walkRunWindow(eventStore, (ctx as ToolContext | undefined)?.previousRunId,
@@ -102,5 +120,5 @@ export function makeTraceTools(
       return { matches }
     },
   }
-  return [get_run_io, get_execution, get_lineage]
+  return selfOnly ? [get_execution, get_lineage] : [get_run_io, get_execution, get_lineage]
 }
