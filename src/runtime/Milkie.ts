@@ -113,6 +113,16 @@ export class Milkie {
     this.eventStore      = opts.eventStore       ?? null
     this.traceObjectStore = opts.traceObjectStore ?? null
     this.log             = opts.logger           ?? getLogger()
+
+    // #196: read-trace tools (get_execution/get_lineage/get_run_io) are generic
+    // self-explain capabilities — register them wherever an eventStore exists,
+    // symmetric with the write-side lineageTools that AgentRuntime registers
+    // unconditionally. Previously these were only wired via loadStandardAgents(),
+    // which the serve --agent path never calls, leaving serve agents unable to
+    // self-explain. Dedup is handled downstream (registry registers by name).
+    if (this.eventStore) {
+      this.extraTools.push(...makeTraceTools(this.eventStore, this.traceObjectStore ?? undefined))
+    }
   }
 
   private resolveModel(config: AgentConfig, tier?: string): ModelConfig | undefined {
