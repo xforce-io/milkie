@@ -34,3 +34,36 @@ describe('#189 get_lineage', () => {
     expect(res.matches[0]!.sources[0]!.objectId).toBe('src1')
   })
 })
+
+describe('#200 A: get_lineage exact handle dereference', () => {
+  async function seed() {
+    const store = new MemoryEventStore()
+    for (const e of [startedEvent('run1'),
+      objCreated('run1', 'src1', 'shell:stdout', { url: 'https://cnbc' }),
+      objCreated('run1', 'claim1', 'claim', { text: '某信号' }),
+      citesRel('run1', 'claim1', 'src1')]) await store.append(e)
+    await store.append(startedEvent('run2', 'run1'))
+    return store
+  }
+
+  it('deref by objectId returns the cites neighbourhood, no text match needed', async () => {
+    const store = await seed()
+    const tool = makeTraceTools(store).find(t => t.name === 'get_lineage')!
+    const res = await tool.handler({ objectId: 'src1' }, { previousRunId: 'run2' } as never) as
+      { refs: { runId: string; objectId: string; citedBy: { objectId: string }[] }[] }
+    expect(res.refs).toHaveLength(1)
+    expect(res.refs[0]!.runId).toBe('run1')
+    expect(res.refs[0]!.objectId).toBe('src1')
+    expect(res.refs[0]!.citedBy[0]!.objectId).toBe('claim1')
+  })
+
+  it('deref by claimId returns that claim\'s sources deterministically', async () => {
+    const store = await seed()
+    const tool = makeTraceTools(store).find(t => t.name === 'get_lineage')!
+    const res = await tool.handler({ claimId: 'claim1' }, { previousRunId: 'run2' } as never) as
+      { refs: { objectId: string; cites: { objectId: string }[] }[] }
+    expect(res.refs).toHaveLength(1)
+    expect(res.refs[0]!.objectId).toBe('claim1')
+    expect(res.refs[0]!.cites[0]!.objectId).toBe('src1')
+  })
+})

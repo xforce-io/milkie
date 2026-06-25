@@ -333,6 +333,11 @@ export class AgentRuntime {
       requestSkill:  (name: string, scope?: 'turn' | 'session') => this.requestSkill(name, scope),
       currentTurn:   this.currentTurnRaw,
       previousRunId: this.previousRunId,
+      // #200 C: the runIds delivered to this turn via projections — the allowlist
+      // the selfOnly trace tools gate runId dereference on.
+      ...(this.externalProjections?.length
+        ? { deliveredRunIds: [...new Set(this.externalProjections.map(p => p.sourceRunId))] }
+        : {}),
     }
     // #37/#38: only wire lineage when a sink is present (LLM-state tool calls go
     // through ioPort.invokeTool, which drains the buffer). objectId/relationId are

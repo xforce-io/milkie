@@ -15,6 +15,13 @@ export interface ToolContext {
    * resolve "my last turn(s)" without the agent passing a runId. Unset on a
    * session's first turn. */
   previousRunId?: string
+  /** #200 C: sourceRunIds of the external projections delivered to this run (#146).
+   * The capability-by-handle for selfOnly trace tools: a consumer may dereference
+   * the execution / lineage / I/O of a run that was *delivered to it*, but not an
+   * arbitrary runId — that would leak another session's run on a shared serve
+   * instance (the #196 invariant this stays within). Empty/undefined on a turn
+   * with no delivered projections. */
+  deliveredRunIds?: string[]
   /**
    * #37: declare a content-addressable object (a passage read, a claim produced).
    * Returns a stable `objectId` handle (content-addressed → identical across

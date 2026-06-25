@@ -1,8 +1,11 @@
 // src/__tests__/traceTools.selfOnly.test.ts
-// #196 follow-up (P1 security): the GENERIC registration (serve/constructor) must
-// expose only a self-view. Reading an arbitrary runId is the diagnoser's privilege,
-// granted via loadStandardAgents(), not something every eventStore-enabled agent
-// should get — otherwise a shared serve instance leaks other sessions' I/O.
+// #196 follow-up (P1 security): the GENERIC registration (serve/constructor) must not
+// let an agent read an ARBITRARY runId — otherwise a shared serve instance leaks other
+// sessions' I/O. #200 C refines "self-view only" into "self-view + delivered-runId
+// dereference": a selfOnly agent may reach a runId that was *delivered to it* via a
+// projection (ctx.deliveredRunIds), but any other runId is still ignored/refused. These
+// tests pin the security boundary (non-delivered runId leaks nothing); the positive
+// delivered-runId path lives in traceTools.deliveredDeref.test.ts.
 import { MemoryEventStore } from '../trace/MemoryEventStore'
 import { makeTraceTools } from '../tools/trace'
 import type { Event } from '../trace/types'
@@ -28,16 +31,24 @@ function completed(runId: string): Event {
 }
 
 describe('makeTraceTools selfOnly mode (generic/serve registration)', () => {
-  it('omits get_run_io entirely (it has no self meaning)', () => {
-    const names = makeTraceTools(new MemoryEventStore(), undefined, { selfOnly: true }).map(t => t.name)
-    expect(names).not.toContain('get_run_io')
-    expect(names).toEqual(expect.arrayContaining(['get_execution', 'get_lineage']))
+  it('registers get_run_io but gates it — a non-delivered runId is refused (#200 C)', async () => {
+    const store = new MemoryEventStore()
+    for (const e of [startedEvent('victim'), completed('victim')]) await store.append(e)
+    const tools = makeTraceTools(store, undefined, { selfOnly: true })
+    expect(tools.map(t => t.name)).toEqual(expect.arrayContaining(['get_run_io', 'get_execution', 'get_lineage']))
+    // No deliveredRunIds in ctx → the victim's runId is not dereferenceable.
+    const res = await tools.find(t => t.name === 'get_run_io')!.handler({ runId: 'victim' }, {} as never) as
+      { error?: string; question?: string }
+    expect(res.error).toBeDefined()
+    expect(JSON.stringify(res)).not.toContain('VICTIM ANSWER')
   })
 
-  it('get_execution drops runId from its inputSchema', () => {
+  it('get_execution exposes runId but ignores one that was not delivered (#200 C)', () => {
     const tool = makeTraceTools(new MemoryEventStore(), undefined, { selfOnly: true })
       .find(t => t.name === 'get_execution')!
-    expect((tool.inputSchema as { properties: Record<string, unknown> }).properties.runId).toBeUndefined()
+    // runId is now in the schema (delivered runs are reachable) ...
+    expect((tool.inputSchema as { properties: Record<string, unknown> }).properties.runId).toBeDefined()
+    // ... but the security behaviour is asserted below: a non-delivered runId yields the self window.
   })
 
   it('get_execution ignores a foreign runId — returns self window, never the target run', async () => {
