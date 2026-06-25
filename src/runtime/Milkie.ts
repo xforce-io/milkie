@@ -120,11 +120,13 @@ export class Milkie {
     // these were only wired via loadStandardAgents(), which the serve --agent path
     // never calls, leaving serve agents unable to self-explain.
     //
-    // selfOnly: this generic registration is SELF-溯源 only (no runId axis, no
-    // get_run_io). Reading an arbitrary runId is the diagnoser's privilege, granted by
-    // the full version via loadStandardAgents(); the full version, registered later by
-    // name, upgrades these in that opt-in path. Without selfOnly, a shared serve
-    // instance would let one session read another's recorded I/O (#196 P1).
+    // selfOnly: this generic registration withholds the diagnoser privilege of reading
+    // an ARBITRARY runId — without it a shared serve instance would let one session read
+    // another's recorded I/O (#196 P1). It is NOT a blanket ban on the runId axis: a
+    // selfOnly agent may dereference a runId DELIVERED to it via a projection
+    // (ctx.deliveredRunIds, #200 C), so a consumer can reach the execution/lineage/I/O of
+    // "the report delivered to me". The full version, registered later by name via
+    // loadStandardAgents(), upgrades these to honour any runId.
     if (this.eventStore) {
       this.extraTools.push(...makeTraceTools(this.eventStore, this.traceObjectStore ?? undefined, { selfOnly: true }))
     }
