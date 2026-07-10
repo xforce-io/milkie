@@ -410,7 +410,11 @@ export class Milkie {
     const invokeStartedAt = Date.now()
     try {
       const result = await runtime.run(request.input)
-      await rec?.detach({ status: result.status, lastTextOutput: result.output })
+      await rec?.detach({
+        status: result.status,
+        lastTextOutput: result.output,
+        ...(result.error ? { error: result.error } : {}),
+      })
       invokeLog.info({ agentId: config.agentId, durationMs: Date.now() - invokeStartedAt, status: result.status }, 'invoke completed')
       return result
     } catch (err) {

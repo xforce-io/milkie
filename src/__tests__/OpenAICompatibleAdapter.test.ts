@@ -104,3 +104,34 @@ describe('OpenAICompatibleAdapter — temperature passthrough (#126)', () => {
     expect((calls[0] as { temperature?: number }).temperature).toBe(0.7)
   })
 })
+
+describe('OpenAICompatibleAdapter — structured failures (#202)', () => {
+  const req: ModelRequest = {
+    model: 'glm-5.2', messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
+  }
+
+  test('normalizes request failures with provider/model metadata', async () => {
+    const adapter = new OpenAICompatibleAdapter({ apiKey: 'sk-test', provider: 'volcengine' })
+    const cause = Object.assign(new Error('secret endpoint'), { name: 'APIConnectionError' })
+    ;(adapter as unknown as { client: { chat: { completions: { create: unknown } } } })
+      .client.chat.completions.create = async () => { throw cause }
+
+    await expect(adapter.complete(req)).rejects.toMatchObject({
+      envelope: {
+        code: 'MODEL_CONNECTION_ERROR', message: 'Model provider connection failed.',
+        phase: 'request', provider: 'volcengine', model: 'glm-5.2', retryable: true,
+      },
+      cause,
+    })
+  })
+
+  test('classifies response parsing failures as bad responses', async () => {
+    const adapter = new OpenAICompatibleAdapter({ apiKey: 'sk-test', provider: 'volcengine' })
+    ;(adapter as unknown as { client: { chat: { completions: { create: unknown } } } })
+      .client.chat.completions.create = async () => ({ choices: [] })
+
+    await expect(adapter.complete(req)).rejects.toMatchObject({
+      envelope: { code: 'MODEL_BAD_RESPONSE', phase: 'response_parse', retryable: false },
+    })
+  })
+})

@@ -326,3 +326,28 @@ describe('OpenAICompatibleAdapter.stream — token-level streaming', () => {
     ])
   })
 })
+
+describe('OpenAICompatibleAdapter.stream — structured failures (#202)', () => {
+  test('distinguishes stream-open from stream-read failures', async () => {
+    const openAdapter = new OpenAICompatibleAdapter({ apiKey: 'sk-test', provider: 'volcengine' })
+    ;(openAdapter as unknown as { client: { chat: { completions: { create: unknown } } } })
+      .client.chat.completions.create = async () => {
+        throw Object.assign(new Error('open failed'), { name: 'APITimeoutError' })
+      }
+    const open = collect(openAdapter)
+    await expect(open).rejects.toMatchObject({
+      envelope: { code: 'MODEL_TIMEOUT', phase: 'stream_open', retryable: true },
+    })
+
+    const readAdapter = new OpenAICompatibleAdapter({ apiKey: 'sk-test', provider: 'volcengine' })
+    ;(readAdapter as unknown as { client: { chat: { completions: { create: unknown } } } })
+      .client.chat.completions.create = async () => (async function* () {
+        yield contentChunk('partial')
+        throw Object.assign(new Error('read failed'), { name: 'APIConnectionError' })
+      })()
+    const read = collect(readAdapter)
+    await expect(read).rejects.toMatchObject({
+      envelope: { code: 'MODEL_CONNECTION_ERROR', phase: 'stream_read', retryable: true },
+    })
+  })
+})

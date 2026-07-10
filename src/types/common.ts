@@ -1,4 +1,4 @@
-import type { ModelEvent } from './model.js'
+import type { ModelErrorEnvelope, ModelEvent } from './model.js'
 
 export type JSONValue = string | number | boolean | null | JSONValue[] | { [k: string]: JSONValue }
 export type JSONObject = Record<string, JSONValue>
@@ -62,6 +62,7 @@ export interface AgentResult {
   output:      string
   status:      'completed' | 'interrupted' | 'error'
   checkpointId?: string
+  error?:      ModelErrorEnvelope
 }
 
 export class InterruptSignal extends Error {

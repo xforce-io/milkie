@@ -8,6 +8,7 @@ import { BroadcastingEventStore } from '../trace/BroadcastingEventStore'
 import { createServiceLogger } from '../logging/logger'
 import type { AgentConfig } from '../types/agent'
 import type { IModelGateway, ModelRequest, ModelResponse, ModelEvent } from '../types/model'
+import { ModelGatewayError } from '../gateway/ModelGatewayError'
 
 function memorySink(): { lines: () => Record<string, unknown>[]; stream: { write: (s: string) => void } } {
   const raw: string[] = []
@@ -35,6 +36,30 @@ function buildMilkie(): { milkie: Milkie; agentId: string; broadcaster: Broadcas
   const milkie = new Milkie({ stateStore: new MemoryStore(), eventStore: broadcaster, gateway })
   milkie.registerAgent(agent)
   return { milkie, agentId: 'echo', broadcaster }
+}
+
+function buildFailingMilkie(): { milkie: Milkie; agentId: string; broadcaster: BroadcastingEventStore } {
+  const broadcaster = new BroadcastingEventStore(new MemoryEventStore())
+  const failure = new ModelGatewayError({
+    code: 'MODEL_CONNECTION_ERROR',
+    message: 'Model provider connection failed.',
+    phase: 'stream_open',
+    provider: 'volcengine',
+    model: 'glm-5.2',
+    retryable: true,
+  })
+  const gateway: IModelGateway = {
+    async complete(): Promise<ModelResponse> { throw failure },
+    async *stream(): AsyncIterable<never> { throw failure },
+  }
+  const agent: AgentConfig = {
+    agentId: 'failing', version: '1.0.0', systemPrompt: 'fail',
+    fsm: { states: [{ name: 'react', type: 'llm' }] },
+    model: { provider: 'volcengine', model: 'glm-5.2', adapter: 'openai-compatible' },
+  }
+  const milkie = new Milkie({ stateStore: new MemoryStore(), eventStore: broadcaster, gateway })
+  milkie.registerAgent(agent)
+  return { milkie, agentId: 'failing', broadcaster }
 }
 
 function listen(server: http.Server): Promise<number> {
@@ -127,5 +152,32 @@ describe('serve HTTP service log', () => {
     expect(res.text).toContain('agent.run.completed')
     const line = await waitFor(() => sink.lines().find(l => l.msg === 'http request' && l.path === '/chat'))
     expect(line.status).toBe(200)
+  })
+
+  it('logs one correlated structured error and exposes the envelope over SSE', async () => {
+    const sink = memorySink()
+    const { milkie, agentId, broadcaster } = buildFailingMilkie()
+    server = createServeServer({
+      milkie, agentId, broadcaster,
+      logger: createServiceLogger({ level: 'info', format: 'json', destination: sink.stream }),
+    })
+    const port = await listen(server)
+    const res = await post(port, '/chat', { contextId: 'ctx-failure', input: 'hi' })
+
+    expect(res.status).toBe(200)
+    expect(res.text).toContain('event: error')
+    expect(res.text).toContain('MODEL_CONNECTION_ERROR')
+    expect(res.text).toContain('agent.run.completed')
+
+    const failures = await waitFor(() => {
+      const lines = sink.lines().filter(l => l.msg === 'agent run failed')
+      return lines.length > 0 ? lines : undefined
+    })
+    expect(failures).toHaveLength(1)
+    expect(failures[0]).toMatchObject({
+      mod: 'server', contextId: 'ctx-failure', errorCode: 'MODEL_CONNECTION_ERROR',
+      retryable: true, provider: 'volcengine', model: 'glm-5.2', phase: 'stream_open',
+      runId: expect.any(String),
+    })
   })
 })

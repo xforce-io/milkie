@@ -10,6 +10,7 @@ import { BroadcastingEventStore } from '../trace/BroadcastingEventStore'
 import type { AgentConfig } from '../types/agent'
 import type { IModelGateway, ModelRequest, ModelResponse, ModelEvent } from '../types/model'
 import type { ToolDefinition } from '../types/tool'
+import { ModelGatewayError } from '../gateway/ModelGatewayError'
 
 // ─────────────────────────── test harnesses ───────────────────────────
 
@@ -134,6 +135,26 @@ function buildErrorMilkie(): { milkie: Milkie; agentId: string; broadcaster: Bro
   const milkie = new Milkie({ stateStore: new MemoryStore(), eventStore: broadcaster, gateway })
   milkie.registerAgent(agent)
   return { milkie, agentId: 'boomer', broadcaster }
+}
+
+function buildStructuredErrorMilkie(): { milkie: Milkie; agentId: string; broadcaster: BroadcastingEventStore } {
+  const broadcaster = new BroadcastingEventStore(new MemoryEventStore())
+  const failure = new ModelGatewayError({
+    code: 'MODEL_TIMEOUT', message: 'Model provider request timed out.', phase: 'stream_read',
+    provider: 'volcengine', model: 'glm-5.2', retryable: true,
+  })
+  const gateway: IModelGateway = {
+    async complete(): Promise<ModelResponse> { throw failure },
+    async *stream(): AsyncIterable<never> { throw failure },
+  }
+  const agent: AgentConfig = {
+    agentId: 'structured-boomer', version: '1.0.0', systemPrompt: 'boom',
+    fsm: { states: [{ name: 'react', type: 'llm' }] },
+    model: { provider: 'volcengine', model: 'glm-5.2', adapter: 'openai-compatible' },
+  }
+  const milkie = new Milkie({ stateStore: new MemoryStore(), eventStore: broadcaster, gateway })
+  milkie.registerAgent(agent)
+  return { milkie, agentId: 'structured-boomer', broadcaster }
 }
 
 // ─────────────────────────── http helpers ───────────────────────────
@@ -273,6 +294,24 @@ describe('createServeServer', () => {
     const terminal = events.find(e => e.event === 'agent.run.completed')
     expect(terminal).toBeDefined()
     expect((terminal!.data as { status: string }).status).toBe('error')
+  })
+
+  it('POST /chat carries a structured model error in both error and terminal frames', async () => {
+    const { milkie, agentId, broadcaster } = buildStructuredErrorMilkie()
+    const port = await listen(createServeServer({ milkie, agentId, broadcaster }))
+    const { done } = sse(port, 'POST', '/chat', { contextId: 'structured-error', input: 'go' })
+    const events = await done
+
+    expect(events.find(e => e.event === 'error')?.data).toMatchObject({
+      message: 'Model provider request timed out.',
+      error: { code: 'MODEL_TIMEOUT', retryable: true, phase: 'stream_read' },
+    })
+    expect(events.find(e => e.event === 'agent.run.completed')?.data).toMatchObject({
+      status: 'error',
+      message: 'Model provider request timed out.',
+      error: { code: 'MODEL_TIMEOUT', retryable: true, provider: 'volcengine', model: 'glm-5.2' },
+      runId: expect.any(String),
+    })
   })
 
   // ─────────────────────── #140 terminal frame carries runId ───────────────────────

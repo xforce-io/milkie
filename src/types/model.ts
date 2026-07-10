@@ -2,6 +2,26 @@ import type { Message, MessageContent } from './common.js'
 import type { ToolCall } from './tool.js'
 import type { JSONSchema } from './common.js'
 
+export type ModelErrorCode =
+  | 'MODEL_CONNECTION_ERROR'
+  | 'MODEL_TIMEOUT'
+  | 'MODEL_RATE_LIMITED'
+  | 'MODEL_AUTH_ERROR'
+  | 'MODEL_BAD_RESPONSE'
+  | 'MODEL_UNKNOWN_ERROR'
+
+export type ModelErrorPhase = 'request' | 'stream_open' | 'stream_read' | 'response_parse'
+
+export interface ModelErrorEnvelope {
+  code:       ModelErrorCode
+  message:    string
+  phase:      ModelErrorPhase
+  provider:   string
+  model:      string
+  retryable:  boolean
+  status?:    number
+}
+
 export interface ToolSchema {
   name:        string
   description: string

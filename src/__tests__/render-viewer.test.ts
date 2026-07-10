@@ -74,6 +74,24 @@ describe('renderViewer', () => {
     expect(html).toContain('<strong>重点</strong>')
   })
 
+  it('renders structured model error metadata on a failed output', () => {
+    const events: Event[] = [
+      e({ id: 'start', runId: 'r1', type: 'agent.run.started', timestamp: 1, payload: { agentId: 'x', goal: 'g', input: 'i', contextId: 'c' } }),
+      e({ id: 'done', runId: 'r1', type: 'agent.run.completed', timestamp: 2, payload: {
+        status: 'error', lastTextOutput: 'Model provider connection failed.',
+        error: {
+          code: 'MODEL_CONNECTION_ERROR', message: 'Model provider connection failed.',
+          phase: 'stream_open', provider: 'volcengine', model: 'glm-5.2', retryable: true,
+        },
+      } }),
+    ]
+    const html = renderViewer(events)
+    expect(html).toContain('MODEL_CONNECTION_ERROR')
+    expect(html).toContain('stream_open')
+    expect(html).toContain('volcengine / glm-5.2')
+    expect(html).toContain('retryable')
+  })
+
   it('trims a panel causal chain to spine decisions only', () => {
     const html = renderViewer(scenario())
     const exps = JSON.parse(html.match(/id="explanations-data">(.*?)<\/script>/s)![1]!)
