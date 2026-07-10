@@ -1,6 +1,7 @@
 import { LoggingGateway } from '../logging/LoggingGateway'
 import { createServiceLogger } from '../logging/logger'
 import { createGateway } from '../gateway/GatewayFactory'
+import { ModelGatewayError } from '../gateway/ModelGatewayError'
 import type { IModelGateway, ModelRequest, ModelResponse, ModelEvent } from '../types/model'
 
 function memorySink(): { lines: () => Record<string, unknown>[]; stream: { write: (s: string) => void } } {
@@ -60,6 +61,29 @@ describe('LoggingGateway.complete', () => {
     expect(line.level).toBe('error')
     expect(line.msg).toBe('llm call failed')
     expect((line.err as { message: string }).message).toBe('rate limited')
+  })
+
+  it('logs and rethrows a structured model error without mutating its envelope', async () => {
+    const sink = memorySink()
+    const log = createServiceLogger({ level: 'info', format: 'json', destination: sink.stream })
+    const error = new ModelGatewayError({
+      code: 'MODEL_BAD_RESPONSE',
+      message: 'Model provider rejected the request or returned an invalid response.',
+      phase: 'stream_open',
+      provider: 'openai',
+      model: 'test-model',
+      retryable: true,
+      status: 503,
+    })
+    const gateway: IModelGateway = {
+      async complete(): Promise<ModelResponse> { throw error },
+      async *stream(): AsyncIterable<ModelEvent> { throw error },
+    }
+
+    await expect(new LoggingGateway(gateway, log).complete(REQ)).rejects.toBe(error)
+    const line = sink.lines()[0]!
+    expect(line.msg).toBe('llm call failed')
+    expect((line.err as { message: string }).message).toBe(error.message)
   })
 
   it('does not log prompt or completion content (脱敏)', async () => {

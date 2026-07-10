@@ -80,7 +80,7 @@ export class ModelGatewayError extends Error {
   constructor(envelope: ModelErrorEnvelope, cause?: unknown) {
     super(envelope.message)
     this.name = 'ModelGatewayError'
-    this.envelope = Object.freeze({ ...envelope })
+    this.envelope = { ...envelope }
     this.cause = cause
   }
 
