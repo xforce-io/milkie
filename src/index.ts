@@ -24,6 +24,7 @@ export { TrajectoryStore } from './trajectory/TrajectoryStore.js'
 // Model Gateway
 export { AnthropicAdapter }         from './gateway/AnthropicAdapter.js'
 export { OpenAICompatibleAdapter }  from './gateway/OpenAICompatibleAdapter.js'
+export { ModelGatewayError, normalizeModelGatewayError } from './gateway/ModelGatewayError.js'
 export { createGateway }            from './gateway/GatewayFactory.js'
 
 // #84: portable session export/import
@@ -74,6 +75,9 @@ export type {
   ModelRequest,
   ModelResponse,
   ModelEvent,
+  ModelErrorCode,
+  ModelErrorEnvelope,
+  ModelErrorPhase,
   ToolSchema,
 } from './types/model.js'
 

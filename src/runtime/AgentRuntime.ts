@@ -45,6 +45,7 @@ import type { CausalCursor } from '../trace/CausalCursor.js'
 import { checkpointFromEvents } from '../trace/diagnostics/checkpointFromEvents.js'
 import type { Region } from '../context/Region.js'
 import type { SkillLifecyclePayload, AgentRunStartedPayload, AgentRunCompletedPayload, LineageBuffer, ObjectType } from '../trace/types.js'
+import { modelErrorEnvelope } from '../gateway/ModelGatewayError.js'
 
 export type MakeChildPort = (
   childRunId:  string,
@@ -280,7 +281,11 @@ export class AgentRuntime {
             eventStore:    this.eventStore,
             makeChildPort: this.makeChildPort,
           })
-          await finish?.({ status: result.status, lastTextOutput: result.output })
+          await finish?.({
+            status: result.status,
+            lastTextOutput: result.output,
+            ...(result.error ? { error: result.error } : {}),
+          })
 
           // #73: read the child's resume state from its event log (source of truth).
           const childCheckpoint = result.status === 'interrupted' && this.eventStore
@@ -980,11 +985,13 @@ export class AgentRuntime {
       }
       this.lifecycle.signal('error')
       this.recorder.endSpan(this.rootSpan, 'error')
+      const structuredError = modelErrorEnvelope(err)
       return {
         agentRunId: this.agentRunId,
         contextId:  this.contextId,
         output:     err instanceof Error ? err.message : String(err),
         status:     'error',
+        ...(structuredError ? { error: structuredError } : {}),
       }
     } finally {
       await this.tryFlushTraceWrites()

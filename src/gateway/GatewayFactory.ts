@@ -21,6 +21,7 @@ export function createGateway(model: ModelConfig, logger?: ServiceLogger): IMode
     adapter === 'volcengine'
   ) {
     return new LoggingGateway(new OpenAICompatibleAdapter({
+      provider: model.provider,
       baseUrl: model.baseUrl ?? process.env['VOLCENGINE_API_BASE'],
       apiKey:
         process.env['VOLCENGINE_TOKEN'] ??

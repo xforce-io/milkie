@@ -5,6 +5,7 @@ import { contextRefsAt, type RegionContentRef } from '../RegionContextView.js'
 import { renderTimelineSections } from './html.js'
 import { renderMarkdown } from './markdown.js'
 import { VIEWER_STYLES, VIEWER_SCRIPT } from './viewer-template.js'
+import type { ModelErrorEnvelope } from '../../types/model.js'
 
 function esc(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;')
@@ -51,10 +52,16 @@ function panelRecord(events: Event[], node: DecisionNode, eventById: Map<string,
   }
   // output
   const evt = eventById.get(node.eventId)
-  const out = (evt?.payload as { lastTextOutput?: string; status?: string } | undefined)
+  const out = (evt?.payload as { lastTextOutput?: string; status?: string; error?: string | ModelErrorEnvelope } | undefined)
+  const structuredError = out?.error && typeof out.error === 'object' ? out.error : undefined
+  const errorMeta = structuredError
+    ? `<div class="error-meta"><strong>${esc(structuredError.code)}</strong> · ${esc(structuredError.phase)}`
+      + ` · ${esc(structuredError.provider)} / ${esc(structuredError.model)}`
+      + ` · ${structuredError.retryable ? 'retryable' : 'terminal'}</div>`
+    : ''
   const drill = node.causeDecisionId ? '由上游决策产生(点 ← 谁导致的 下钻)' : '（无上游决策记录）'
   return { ...base, chain: [], title: '为什么是这个结果?',
-    bodyHtml: `<div>${renderMarkdown(out?.lastTextOutput ?? out?.status ?? '')}</div>`
+    bodyHtml: `<div>${renderMarkdown(out?.lastTextOutput ?? out?.status ?? '')}</div>${errorMeta}`
       + `<div style="color:#888;font-size:11px;margin-top:8px">${drill}</div>` }
 }
 

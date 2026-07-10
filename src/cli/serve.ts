@@ -116,9 +116,31 @@ export function createServeServer(opts: ServeOptions): Server {
       const result = await run(e => {
         if (e.type === 'message_delta') writeSSE(res, 'message_delta', e.data)
       })
-      writeSSE(res, 'agent.run.completed', { status: result.status, output: result.output, runId: result.agentRunId })
+      if (result.status === 'error') {
+        const message = result.error?.message ?? result.output
+        log.error({
+          runId: result.agentRunId,
+          contextId,
+          errorCode: result.error?.code,
+          retryable: result.error?.retryable,
+          provider: result.error?.provider,
+          model: result.error?.model,
+          phase: result.error?.phase,
+        }, 'agent run failed')
+        writeSSE(res, 'error', {
+          message,
+          ...(result.error ? { error: result.error } : {}),
+        })
+        writeSSE(res, 'agent.run.completed', {
+          status: 'error', output: result.output, message,
+          error: result.error ?? message, runId: result.agentRunId,
+        })
+      } else {
+        writeSSE(res, 'agent.run.completed', { status: result.status, output: result.output, runId: result.agentRunId })
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
+      log.error({ contextId, runId: capturedRunId, err }, 'agent run failed')
       writeSSE(res, 'error', { message })
       writeSSE(res, 'agent.run.completed', { status: 'error', output: '', error: message, runId: capturedRunId })
     } finally {

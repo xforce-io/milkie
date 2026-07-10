@@ -2,16 +2,20 @@ import OpenAI from 'openai'
 import type { IModelGateway, ModelRequest, ModelResponse, ModelEvent, ModelUsage } from '../types/model.js'
 import type { MessageContent } from '../types/common.js'
 import type { ToolCall } from '../types/tool.js'
+import { normalizeModelGatewayError } from './ModelGatewayError.js'
 
 export interface OpenAICompatibleAdapterOptions {
   apiKey?:  string
   baseUrl?: string
+  provider?: string
 }
 
 export class OpenAICompatibleAdapter implements IModelGateway {
   private readonly client: OpenAI
+  private readonly provider: string
 
   constructor(options: OpenAICompatibleAdapterOptions = {}) {
+    this.provider = options.provider ?? 'openai-compatible'
     this.client = new OpenAI({
       apiKey:  options.apiKey  ?? process.env['VOLCENGINE_TOKEN'] ?? process.env['OPENAI_API_KEY'] ?? '',
       baseURL: options.baseUrl ?? process.env['VOLCENGINE_API_BASE'],
@@ -19,46 +23,67 @@ export class OpenAICompatibleAdapter implements IModelGateway {
   }
 
   async complete(request: ModelRequest): Promise<ModelResponse> {
-    const raw = await this.client.chat.completions.create({
-      model:    request.model,
-      messages: this.convertMessages(request),
-      tools:    request.tools?.map(t => ({
-        type:     'function' as const,
-        function: {
-          name:        t.name,
-          description: t.description,
-          parameters:  t.inputSchema,
-        },
-      })),
-      tool_choice: request.tools?.length ? 'auto' : undefined,
-      temperature: request.temperature,
-    })
+    let raw: OpenAI.ChatCompletion
+    try {
+      raw = await this.client.chat.completions.create({
+        model:    request.model,
+        messages: this.convertMessages(request),
+        tools:    request.tools?.map(t => ({
+          type:     'function' as const,
+          function: {
+            name:        t.name,
+            description: t.description,
+            parameters:  t.inputSchema,
+          },
+        })),
+        tool_choice: request.tools?.length ? 'auto' : undefined,
+        temperature: request.temperature,
+      })
+    } catch (error) {
+      throw normalizeModelGatewayError(error, {
+        provider: this.provider, model: request.model, phase: 'request',
+      })
+    }
 
-    return this.parseResponse(raw)
+    try {
+      return this.parseResponse(raw)
+    } catch (error) {
+      throw normalizeModelGatewayError(error, {
+        provider: this.provider, model: request.model, phase: 'response_parse',
+      })
+    }
   }
 
   async *stream(request: ModelRequest): AsyncIterable<ModelEvent> {
-    const stream = await this.client.chat.completions.create({
-      model:    request.model,
-      messages: this.convertMessages(request),
-      tools:    request.tools?.map(t => ({
-        type:     'function' as const,
-        function: {
-          name:        t.name,
-          description: t.description,
-          parameters:  t.inputSchema,
-        },
-      })),
-      tool_choice:    request.tools?.length ? 'auto' : undefined,
-      temperature:    request.temperature,
-      stream:         true,
-      stream_options: { include_usage: true },
-    })
+    let stream: AsyncIterable<OpenAI.ChatCompletionChunk>
+    try {
+      stream = await this.client.chat.completions.create({
+        model:    request.model,
+        messages: this.convertMessages(request),
+        tools:    request.tools?.map(t => ({
+          type:     'function' as const,
+          function: {
+            name:        t.name,
+            description: t.description,
+            parameters:  t.inputSchema,
+          },
+        })),
+        tool_choice:    request.tools?.length ? 'auto' : undefined,
+        temperature:    request.temperature,
+        stream:         true,
+        stream_options: { include_usage: true },
+      })
+    } catch (error) {
+      throw normalizeModelGatewayError(error, {
+        provider: this.provider, model: request.model, phase: 'stream_open',
+      })
+    }
 
     // Accumulate tool_call fragments keyed by their stream `index`.
     const toolCalls = new Map<number, { id: string; argsBuf: string }>()
 
-    for await (const chunk of stream) {
+    try {
+      for await (const chunk of stream) {
       const choice = chunk.choices[0]
       const delta  = choice?.delta
 
@@ -113,6 +138,11 @@ export class OpenAICompatibleAdapter implements IModelGateway {
           },
         }
       }
+      }
+    } catch (error) {
+      throw normalizeModelGatewayError(error, {
+        provider: this.provider, model: request.model, phase: 'stream_read',
+      })
     }
   }
 
