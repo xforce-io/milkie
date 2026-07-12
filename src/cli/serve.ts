@@ -391,6 +391,7 @@ export async function buildServeStores(opts: { stateStore?: 'memory' | 'sqlite';
     const stateStore = new SQLiteStore({ path: path.join(opts.dataDir, 'state.sqlite') })
     await stateStore.init()
     const eventStore = new JsonlEventStore(path.join(opts.dataDir, 'runs'))
+    await eventStore.reconcileAbandonedRuns()
     return { stateStore, eventStore }
   }
   // Fail fast: an unknown backend (typo, or unsupported like redis) must NOT
