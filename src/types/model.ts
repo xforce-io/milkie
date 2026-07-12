@@ -22,6 +22,17 @@ export interface ModelErrorEnvelope {
   status?:    number
 }
 
+export interface RuntimeErrorEnvelope {
+  code:       'MAX_ITERATIONS_EXCEEDED'
+  message:    string
+  phase:      'agent_loop'
+  retryable:  false
+  provider?:  undefined
+  model?:     undefined
+}
+
+export type AgentErrorEnvelope = ModelErrorEnvelope | RuntimeErrorEnvelope
+
 export interface ToolSchema {
   name:        string
   description: string

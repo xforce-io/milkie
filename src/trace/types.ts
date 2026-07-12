@@ -1,4 +1,4 @@
-import type { ModelErrorEnvelope, ModelRequest, ModelResponse } from '../types/model.js'
+import type { AgentErrorEnvelope, ModelRequest, ModelResponse } from '../types/model.js'
 
 /**
  * Agent Trace event types.
@@ -124,7 +124,7 @@ export interface AgentRunStartedPayload {
 export interface AgentRunCompletedPayload {
   status:           'completed' | 'interrupted' | 'error'
   lastTextOutput?:  string
-  error?:           string | ModelErrorEnvelope
+  error?:           string | AgentErrorEnvelope
 }
 
 export interface AgentSpawnedPayload {

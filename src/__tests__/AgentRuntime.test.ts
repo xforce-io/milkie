@@ -813,6 +813,36 @@ describe('#148 run_command output is citable end-to-end', () => {
 
   // #175 切片 1.2a：RunLifecycle 成为 run 最终状态的权威（保行为）。
   describe('RunLifecycle authority (#175)', () => {
+    it('returns and persists a structured error when max iterations are exhausted', async () => {
+      const stateStore = new MemoryStore()
+      const eventStore = new MemoryEventStore()
+      const milkie = new Milkie({
+        stateStore,
+        eventStore,
+        gateway: new SequentialGateway([]),
+      })
+      milkie.registerAgent(makeConfig({
+        fsm: { states: [{ name: 'react', type: 'llm', max_iterations: 0 }] },
+      }))
+
+      const result = await milkie.invoke({
+        agentId: 'test-agent', goal: 'stop', input: 'stop', contextId: 'ctx-max-iterations',
+      })
+
+      expect(result).toMatchObject({
+        status: 'error',
+        error: {
+          code: 'MAX_ITERATIONS_EXCEEDED',
+          phase: 'agent_loop',
+          retryable: false,
+          message: 'State "react" exceeded max_iterations (0)',
+        },
+      })
+      const terminal = (await eventStore.readByRunId(result.agentRunId))
+        .find(event => event.type === 'agent.run.completed')
+      expect(terminal?.payload).toMatchObject({ status: 'error', error: result.error })
+    })
+
     it('exposes lifecycle "completed" after a successful run', async () => {
       const runtime = new AgentRuntime({
         config:     makeConfig(),
