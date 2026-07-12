@@ -3,6 +3,7 @@ import { createHash } from 'crypto'
 import type { AgentConfig, FSMState } from '../types/agent.js'
 import type { AgentResult, ContextProjection } from '../types/common.js'
 import { MaxIterationsError } from '../types/common.js'
+import type { AgentErrorEnvelope } from '../types/model.js'
 import type { IStateStore, AgentCheckpoint, ChildAgentRecord } from '../types/store.js'
 import type { ITrajectoryRecorder, Span } from '../types/trajectory.js'
 import type { ToolDefinition, ToolContext, ToolResult, ToolResultStrategy } from '../types/tool.js'
@@ -985,7 +986,14 @@ export class AgentRuntime {
       }
       this.lifecycle.signal('error')
       this.recorder.endSpan(this.rootSpan, 'error')
-      const structuredError = modelErrorEnvelope(err)
+      const structuredError: AgentErrorEnvelope | undefined = err instanceof MaxIterationsError
+        ? {
+            code:      'MAX_ITERATIONS_EXCEEDED',
+            message:   err.message,
+            phase:     'agent_loop',
+            retryable: false,
+          }
+        : modelErrorEnvelope(err)
       return {
         agentRunId: this.agentRunId,
         contextId:  this.contextId,
