@@ -84,9 +84,44 @@ describe('#130 buildServeStores — backend selection', () => {
 
     const re = await buildServeStores({ stateStore: 'sqlite', dataDir: tmpDir })
     const events = await re.eventStore.readByRunId('run-1')
-    expect(events).toHaveLength(1)
-    expect(events[0]!.runId).toBe('run-1')
+    expect(events[0]).toMatchObject({ runId: 'run-1', type: 'agent.run.started' })
+    expect(events[1]).toMatchObject({ runId: 'run-1', type: 'agent.run.completed', payload: { status: 'interrupted' } })
     closeIfPossible(re.stateStore)
+  })
+
+  it('reconciles an abandoned persisted run exactly once on restart', async () => {
+    const runsDir = path.join(tmpDir, 'runs')
+    fs.mkdirSync(runsDir, { recursive: true })
+    const started: Event = {
+      id: 'started', runId: 'run-abandoned', type: 'agent.run.started', actor: 'runtime', timestamp: 1,
+      payload: { agentId: 'recorder', goal: 'g', input: 'hi', contextId: 'C' },
+    }
+    fs.writeFileSync(path.join(runsDir, 'run-abandoned.jsonl'), `${JSON.stringify(started)}\n`)
+    const completed: Event = {
+      id: 'completed', runId: 'run-complete', type: 'agent.run.completed', actor: 'runtime', timestamp: 2,
+      payload: { status: 'completed', lastTextOutput: 'ok' },
+    }
+    fs.writeFileSync(
+      path.join(runsDir, 'run-complete.jsonl'),
+      `${JSON.stringify({ ...started, runId: 'run-complete' })}\n${JSON.stringify(completed)}\n`,
+    )
+
+    const first = await buildServeStores({ stateStore: 'sqlite', dataDir: tmpDir })
+    const firstEvents = await first.eventStore.readByRunId('run-abandoned')
+    expect(firstEvents.filter(event => event.type === 'agent.run.completed')).toHaveLength(1)
+    expect(firstEvents.at(-1)?.payload).toMatchObject({
+      status: 'interrupted',
+      error: {
+        code: 'RUN_ABANDONED', phase: 'recovery', retryable: true,
+      },
+    })
+    expect(await first.eventStore.readByRunId('run-complete')).toHaveLength(2)
+    closeIfPossible(first.stateStore)
+
+    const second = await buildServeStores({ stateStore: 'sqlite', dataDir: tmpDir })
+    const secondEvents = await second.eventStore.readByRunId('run-abandoned')
+    expect(secondEvents.filter(event => event.type === 'agent.run.completed')).toHaveLength(1)
+    closeIfPossible(second.stateStore)
   })
 
   it('state-store=sqlite without data-dir is rejected', async () => {
