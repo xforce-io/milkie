@@ -22,7 +22,7 @@ export interface ModelErrorEnvelope {
   status?:    number
 }
 
-export interface RuntimeErrorEnvelope {
+export interface MaxIterationsErrorEnvelope {
   code:       'MAX_ITERATIONS_EXCEEDED'
   message:    string
   phase:      'agent_loop'
@@ -31,6 +31,16 @@ export interface RuntimeErrorEnvelope {
   model?:     undefined
 }
 
+export interface AbandonedRunErrorEnvelope {
+  code:       'RUN_ABANDONED'
+  message:    string
+  phase:      'recovery'
+  retryable:  true
+  provider?:  undefined
+  model?:     undefined
+}
+
+export type RuntimeErrorEnvelope = MaxIterationsErrorEnvelope | AbandonedRunErrorEnvelope
 export type AgentErrorEnvelope = ModelErrorEnvelope | RuntimeErrorEnvelope
 
 export interface ToolSchema {
