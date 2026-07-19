@@ -330,6 +330,19 @@ const milkie = new Milkie({ gateway: new MockGateway() })
 |------|------|
 | `skill_list` | 返回可用 Skill 列表。（v1 stub — 当前始终返回空列表，完整 Registry 支持计划在 v2 实现。） |
 | `skill_request` | 请求在下一个 context epoch 加载某个 Skill。需要在 `AgentConfig.skills` 中声明该 Skill，并通过 `AgentConfig.skillInstructions` 提供指令内容。指令从下一 turn 起生效。 |
+| `run_command` | 执行 shell 命令（`src/tools/exec.ts`），与 cognitive/system 工具一并自动注册。 |
+
+#### `run_command` 输出分层（LLM vs event-log vs 宿主 UI）
+
+三层上限互不替代：
+
+| 层 | 控制什么 | 默认 |
+|----|----------|------|
+| **Handler stream cap** | 写入 `tool.responded` / event-log 的 stdout/stderr 上界 | 约 30k 字符（头尾保留） |
+| **`resultStrategy`（LLM 投影）** | 进入下一轮 LLM `tool_result` 的字符串 | `tail` @ **8000** 字符（`RUN_COMMAND_LLM_MAX_CHARS`）；实际变短时发 `tool.shaped` |
+| **宿主 UI 预览**（如 alfred `max_tool_output_preview_chars`） | 仅 timeline / 会话 UI | **不**改变 LLM 视图 |
+
+逃生：环境变量 `MILKIE_RUN_COMMAND_SHAPE_VERBATIM=1` 强制 LLM 侧 `verbatim`。自定义大输出工具应自行声明 `resultStrategy`，不要依赖全局截断。
 
 在 Agent 配置中声明 Skill：
 

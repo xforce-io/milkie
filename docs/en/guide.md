@@ -328,6 +328,19 @@ These are also auto-registered. No manual setup required.
 |------|-------------|
 | `skill_list` | Returns a list of available skills. (v1 stub — always returns an empty list; full registry support is planned.) |
 | `skill_request` | Requests a skill to be loaded in the next context epoch. Requires the skill to be declared in `AgentConfig.skills` and its instructions provided via `AgentConfig.skillInstructions`. The instructions appear in the LLM context from the next turn onward. |
+| `run_command` | Runs a shell command (`src/tools/exec.ts`). Auto-registered with the cognitive/system tools. |
+
+#### `run_command` output layers (LLM vs event-log vs host UI)
+
+Three separate caps apply; do not confuse them:
+
+| Layer | What it controls | Default |
+|-------|------------------|---------|
+| **Handler stream cap** | Per-stream stdout/stderr size stored on `tool.responded` / event-log | ~30k chars (head+tail) |
+| **`resultStrategy` (LLM projection)** | String shaped into the next LLM `tool_result` | `tail` @ **8000** chars (`RUN_COMMAND_LLM_MAX_CHARS`); emits `tool.shaped` when bytes change |
+| **Host UI preview** (e.g. alfred `max_tool_output_preview_chars`) | Timeline / chat UI only | Does **not** change the LLM view |
+
+Escape hatch: set `MILKIE_RUN_COMMAND_SHAPE_VERBATIM=1` to force LLM-facing `verbatim` (no shape). Prefer declaring `resultStrategy` on custom tools that return large payloads rather than relying on global truncation.
 
 To wire up a skill, declare it in the agent config:
 
