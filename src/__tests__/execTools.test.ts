@@ -34,6 +34,35 @@ describe('built-in run_command tool (#134)', () => {
     expect(runCmd.resultStrategy?.shape).toEqual(strategy.shape)
   })
 
+  describe('getRunCommandResultStrategy escape hatch', () => {
+    const envKey = 'MILKIE_RUN_COMMAND_SHAPE_VERBATIM'
+    const previous = process.env[envKey]
+
+    afterEach(() => {
+      if (previous === undefined) delete process.env[envKey]
+      else process.env[envKey] = previous
+    })
+
+    it('returns tail@RUN_COMMAND_LLM_MAX_CHARS when escape is unset', () => {
+      delete process.env[envKey]
+      expect(getRunCommandResultStrategy()).toEqual({
+        shape: { kind: 'tail', maxChars: RUN_COMMAND_LLM_MAX_CHARS },
+      })
+    })
+
+    it('returns verbatim when MILKIE_RUN_COMMAND_SHAPE_VERBATIM=1', () => {
+      process.env[envKey] = '1'
+      expect(getRunCommandResultStrategy()).toEqual({ shape: 'verbatim' })
+    })
+
+    it('ignores non-1 values (still default tail)', () => {
+      process.env[envKey] = 'true'
+      expect(getRunCommandResultStrategy()).toEqual({
+        shape: { kind: 'tail', maxChars: RUN_COMMAND_LLM_MAX_CHARS },
+      })
+    })
+  })
+
   it('runs a command and captures stdout + exitCode 0', async () => {
     const out = await runCommand({ command: 'echo hello-milkie' })
     expect(out.stdout).toContain('hello-milkie')
