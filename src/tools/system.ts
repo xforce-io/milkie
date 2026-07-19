@@ -61,24 +61,84 @@ function normalizeSkillName(name: string): string {
   return name.trim().replace(/\s+skill$/i, '')
 }
 
+/** Max chars of SKILL.md body returned in tool_result (UTF-16 code units / JS string.length). */
+export const SKILL_INSTRUCTIONS_MAX_CHARS = 16_000
+
+/**
+ * Closed-world skill load via host manifest (#164).
+ *
+ * Hit: read only manifest.dir/SKILL.md and return instructions + dir.
+ * Miss: not_found without filesystem search.
+ * Registry unconfigured: undefined so the handler keeps native unavailable.
+ */
 function manifestBackedSkillRequest(name: string): Record<string, unknown> | undefined {
   const manifest = loadSkillManifest()
   if (!manifest.registryConfigured) return undefined
 
   const normalized = normalizeSkillName(name)
   const skill = manifest.skills.find(s => normalizeSkillName(s.name) === normalized)
-  if (!skill) return undefined
+  if (!skill) {
+    return {
+      requested: normalized,
+      status:    'not_found',
+      message:   `Skill "${normalized}" is not in the skill manifest.`,
+    }
+  }
 
-  const dir = typeof skill.dir === 'string' ? skill.dir : undefined
-  const instructionPath = dir ? path.join(dir, 'SKILL.md') : undefined
+  const dirRaw = typeof skill.dir === 'string' ? skill.dir : undefined
+  const dir = dirRaw?.trim() ? dirRaw : undefined
+  if (!dir) {
+    return {
+      requested: normalized,
+      status:    'missing_dir',
+      skill,
+      message:   `Skill "${normalized}" is in the skill manifest but has no dir field; cannot load SKILL.md.`,
+    }
+  }
+  // Authoritative dir must be absolute; never resolve relative paths against cwd.
+  if (!path.isAbsolute(dir)) {
+    return {
+      requested: normalized,
+      status:    'invalid_dir',
+      skill,
+      dir,
+      message:   `Skill "${normalized}" dir must be an absolute path; got ${JSON.stringify(dir)}. Do not search the filesystem for SKILL.md.`,
+    }
+  }
+
+  const instructionPath = path.join(dir, 'SKILL.md')
+  // Closed-world: read only this absolute path; never search other directories.
+  let text: string
+  try {
+    text = fs.readFileSync(instructionPath, 'utf-8')
+  } catch {
+    return {
+      requested: normalized,
+      status:    'read_error',
+      skill,
+      dir,
+      instructionPath,
+      message:   `Failed to read skill instructions at ${instructionPath}. Do not search the filesystem for SKILL.md.`,
+    }
+  }
+
+  const truncated = text.length > SKILL_INSTRUCTIONS_MAX_CHARS
+  const instructions = truncated ? text.slice(0, SKILL_INSTRUCTIONS_MAX_CHARS) : text
   return {
     requested: normalized,
-    status:    'manifest_backed',
+    status:    'ok',
     skill,
-    ...(instructionPath ? { instructionPath } : {}),
-    message: instructionPath
-      ? `Skill "${normalized}" is available via the manifest, but this agent was not configured with inline skillInstructions. Read ${instructionPath} with run_command/cat, then follow that SKILL.md.`
-      : `Skill "${normalized}" is available via the manifest, but this agent was not configured with inline skillInstructions and the manifest entry has no dir. Use skill_list details or host instructions to locate its SKILL.md.`,
+    dir,
+    instructionPath,
+    instructions,
+    truncated,
+    ...(truncated
+      ? {
+          message:
+            `Instructions truncated to ${SKILL_INSTRUCTIONS_MAX_CHARS} chars. ` +
+            `Continue reading only at instructionPath (known absolute path); do not search the filesystem.`,
+        }
+      : {}),
   }
 }
 
@@ -94,7 +154,11 @@ export const systemTools: ToolDefinition[] = [
 
   {
     name:        'skill_request',
-    description: "Request a skill to be loaded in the next context epoch. Choose scope=turn for one-shot usage (auto-released at turn end) or scope=session for cross-turn persistence. Default: turn.",
+    description:
+      'Load skill instructions by name from the host skill manifest (closed-world). ' +
+      'On success returns instructions text and authoritative dir. Prefer this over shell find/cat to discover SKILL.md. ' +
+      'Optional scope applies when the skill is also declared in AgentConfig.skillInstructions (next context epoch). ' +
+      "Choose scope=turn for one-shot usage (auto-released at turn end) or scope=session for cross-turn persistence. Default: turn.",
     inputSchema: {
       type:       'object',
       properties: {
