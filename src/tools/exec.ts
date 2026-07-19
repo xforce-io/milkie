@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import type { ToolDefinition } from '../types/tool.js'
+import type { ToolDefinition, ToolResultStrategy } from '../types/tool.js'
 import { citeable } from './lineage.js'
 
 // Built-in shell/exec tool (#134). Lets an agent run subprocess commands —
@@ -10,6 +10,10 @@ import { citeable } from './lineage.js'
 // re-runs — see ReplayingIOPort / ExplodingInnerPort). So the subprocess forks
 // only at record time; replay reproduces the captured stdout/exit without side
 // effects. No "non-replayable" contract is needed (mirrors create_plan).
+//
+// LLM projection (alfred#160): declare resultStrategy so AgentRuntime shapes
+// tool_result for the model. Stream cap below still bounds event-log raw;
+// UI preview (alfred max_tool_output_preview_chars) is unrelated.
 
 const DEFAULT_TIMEOUT_MS = 120_000
 
@@ -18,6 +22,20 @@ const DEFAULT_TIMEOUT_MS = 120_000
 // BOTH the LLM context AND the persisted event log / CacheIndex. Head+tail is
 // kept so the agent sees how the command started and ended.
 const MAX_STREAM_CHARS = 30_000
+
+/** Default max chars of serialized run_command output sent to the LLM (alfred#160). */
+export const RUN_COMMAND_LLM_MAX_CHARS = 8_000
+
+/**
+ * LLM-facing strategy for run_command.
+ * Escape: MILKIE_RUN_COMMAND_SHAPE_VERBATIM=1 → verbatim (no shape).
+ */
+export function getRunCommandResultStrategy(): ToolResultStrategy {
+  if (process.env.MILKIE_RUN_COMMAND_SHAPE_VERBATIM === '1') {
+    return { shape: 'verbatim' }
+  }
+  return { shape: { kind: 'tail', maxChars: RUN_COMMAND_LLM_MAX_CHARS } }
+}
 
 export interface RunCommandInput {
   command:    string
@@ -84,7 +102,8 @@ export const execTools: ToolDefinition[] = [
     description:
       'Execute a shell command in a subprocess and return { objectId?, stdout, stderr, exitCode, timedOut, truncated }. ' +
       'Use this to run skill scripts (e.g. `python skills/<name>/scripts/x.py`), CLIs (`inv`, `codex-cli`), ' +
-      'and other tools. Output over 30000 chars per stream is truncated (head+tail kept). ' +
+      'and other tools. Output over 30000 chars per stream is truncated (head+tail kept) in the raw/event-log path. ' +
+      `LLM context may further apply a tail projection (default ${RUN_COMMAND_LLM_MAX_CHARS} chars; see resultStrategy). ` +
       'When stdout is non-empty the result carries an `objectId` for that output — to source a claim from this ' +
       'fetched data (a file you cat-ed, an API/DB you queried, a page you scraped), pass that objectId to the ' +
       'cite tool. Never write provenance like "(source:...)" in prose; cite the objectId instead.',
@@ -97,6 +116,8 @@ export const execTools: ToolDefinition[] = [
       },
       required:   ['command'],
     },
+    // alfred#160: non-verbatim LLM projection; raw remains on tool.responded / stream cap.
+    resultStrategy: getRunCommandResultStrategy(),
     handler: async (input, ctx) => {
       const cmd = input as RunCommandInput
       const out = await runCommand(cmd)

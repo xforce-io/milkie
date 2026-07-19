@@ -1,7 +1,13 @@
 import { mkdtemp, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { execTools, runCommand, type RunCommandOutput } from '../tools/exec'
+import {
+  execTools,
+  getRunCommandResultStrategy,
+  runCommand,
+  RUN_COMMAND_LLM_MAX_CHARS,
+  type RunCommandOutput,
+} from '../tools/exec'
 import { sha256Hex } from '../trace/hash'
 import type { ToolContext } from '../types/tool'
 
@@ -12,6 +18,20 @@ describe('built-in run_command tool (#134)', () => {
   it('registers run_command', () => {
     expect(runCmd).toBeTruthy()
     expect(runCmd.name).toBe('run_command')
+  })
+
+  it('declares non-verbatim resultStrategy for LLM projection (alfred#160)', () => {
+    // Shipped tool definition must opt into shape — default verbatim leaves 19k stdout in context.
+    expect(runCmd.resultStrategy).toBeDefined()
+    const strategy = getRunCommandResultStrategy()
+    expect(strategy.shape).not.toBe('verbatim')
+    if (typeof strategy.shape === 'object') {
+      expect(strategy.shape.kind).toBe('tail')
+      expect(strategy.shape.maxChars).toBe(RUN_COMMAND_LLM_MAX_CHARS)
+      expect(strategy.shape.maxChars).toBeLessThan(20_000)
+    }
+    // Tool registration carries the same strategy object shape
+    expect(runCmd.resultStrategy?.shape).toEqual(strategy.shape)
   })
 
   it('runs a command and captures stdout + exitCode 0', async () => {
