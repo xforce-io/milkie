@@ -683,4 +683,20 @@ describe('createServeServer', () => {
     const res = await request(port, 'POST', '/session/import', { session: bogus })
     expect(res.status).toBe(400)
   })
+
+  it('POST /session/import returns 409 when its expected checkpoint is stale', async () => {
+    const source = buildTextMilkie(['ok'])
+    const sourcePort = await listen(createServeServer(source))
+    await (await sse(sourcePort, 'POST', '/chat', { contextId: 'import-race', input: 'old' }).done)
+    const exported = (await request(sourcePort, 'POST', '/session/export', { contextId: 'import-race' })).json
+
+    const destination = buildTextMilkie(['new'])
+    const destinationPort = await listen(createServeServer(destination))
+    await (await sse(destinationPort, 'POST', '/chat', { contextId: 'import-race', input: 'new' }).done)
+    const res = await request(destinationPort, 'POST', '/session/import', {
+      session: exported,
+      expectedLatestRunId: (exported as { manifest: { latestRunId: string } }).manifest.latestRunId,
+    })
+    expect(res.status).toBe(409)
+  })
 })

@@ -3,6 +3,13 @@ import type { Message } from './common.js'
 export interface IStateStore {
   set(key: string, value: unknown, ttl?: number): Promise<void>
   get(key: string): Promise<unknown>
+  /**
+   * Atomically replace a key only when it still holds ``expected``.
+   *
+   * Used by session import to ensure a delayed snapshot cannot replace a
+   * checkpoint that a newer turn has already published.
+   */
+  compareAndSet(key: string, expected: unknown, value: unknown): Promise<boolean>
   delete(key: string): Promise<void>
   exists(key: string): Promise<boolean>
   /**

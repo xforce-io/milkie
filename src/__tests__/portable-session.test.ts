@@ -128,6 +128,42 @@ describe('#84 portable session round-trip (single agent)', () => {
     const prompt = JSON.stringify((firstLlm.payload as { request: unknown }).request)
     expect(prompt).toContain('fact1')
   })
+
+  it('does not let a delayed conditional import replace a newer checkpoint', async () => {
+    const src = new Milkie({
+      stateStore: new MemoryStore(),
+      eventStore: new MemoryEventStore(),
+      gateway: endTurnGateway(),
+    })
+    src.registerAgent(recorderAgent)
+    const contextId = 'ctx-import-race'
+    await src.invoke({ agentId: 'recorder', goal: 'g', input: 'old', contextId })
+    const session = await src.exportSession(contextId)
+
+    class AdvanceBeforeCasStore extends MemoryStore {
+      override async compareAndSet(key: string, expected: unknown, value: unknown): Promise<boolean> {
+        await this.set(key, 'newer-run')
+        return super.compareAndSet(key, expected, value)
+      }
+    }
+
+    const stateStore = new AdvanceBeforeCasStore()
+    await stateStore.set(
+      `context:${contextId}:checkpoint-run:latest`,
+      session.manifest.latestRunId,
+    )
+    const dst = new Milkie({
+      stateStore,
+      eventStore: new MemoryEventStore(),
+      gateway: endTurnGateway(),
+    })
+    dst.registerAgent(recorderAgent)
+
+    await expect(
+      dst.importSession(session, { expectedLatestRunId: session.manifest.latestRunId }),
+    ).rejects.toThrow(/advanced after export/)
+    expect(await stateStore.get(`context:${contextId}:checkpoint-run:latest`)).toBe('newer-run')
+  })
 })
 
 // ---- multi-agent: a supervisor that spawns a worker sub-agent ----
