@@ -1,5 +1,5 @@
 import http, { type IncomingMessage, type ServerResponse, type Server } from 'http'
-import { Milkie } from '../runtime/Milkie.js'
+import { Milkie, SessionImportConflictError } from '../runtime/Milkie.js'
 import { BroadcastingEventStore } from '../trace/BroadcastingEventStore.js'
 import { MemoryStore } from '../store/MemoryStore.js'
 import { MemoryEventStore } from '../trace/MemoryEventStore.js'
@@ -26,7 +26,7 @@ import { getLogger, type ServiceLogger } from '../logging/logger.js'
  *   POST /resume { contextId, input? }        → text/event-stream
  *   POST /llm { system?, messages, stream? }  → JSON (or SSE when stream) (#124)
  *   POST /session/export { contextId }        → PortableSession JSON (#124)
- *   POST /session/import { session }          → { contextId } (#124)
+ *   POST /session/import { session, expectedLatestRunId? } → { contextId } (#124)
  *   POST /session/history { contextId }       → { messages: Message[] } full transcript (#128)
  *   POST /projection/attach { contextId, sourceRunId, displayText, ... } → { projection } (#146)
  *   POST /projection/list { contextId }       → { projections } (#146)
@@ -281,12 +281,24 @@ export function createServeServer(opts: ServeOptions): Server {
   }
 
   async function handleSessionImport(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    const { session } = JSON.parse(await readBody(req)) as { session?: PortableSession }
+    const { session, expectedLatestRunId } = JSON.parse(await readBody(req)) as {
+      session?: PortableSession
+      expectedLatestRunId?: string
+    }
     if (!session) return sendJson(res, 400, { error: 'session is required' })
     try {
-      sendJson(res, 200, await milkie.importSession(session))
+      const result = await milkie.importSession(session, { expectedLatestRunId })
+      sendJson(res, 200, {
+        ...result,
+        // Lets callers fail closed against an older sidecar that silently
+        // ignores expectedLatestRunId.
+        conditionApplied: expectedLatestRunId !== undefined,
+      })
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
+      if (err instanceof SessionImportConflictError) {
+        return sendJson(res, 409, { error: message })
+      }
       sendJson(res, /schemaVersion/.test(message) ? 400 : 500, { error: message })
     }
   }

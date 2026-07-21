@@ -25,6 +25,13 @@ export class MemoryStore implements IStateStore {
     return entry.value
   }
 
+  async compareAndSet(key: string, expected: unknown, value: unknown): Promise<boolean> {
+    const current = await this.get(key)
+    if (JSON.stringify(current) !== JSON.stringify(expected)) return false
+    await this.set(key, value)
+    return true
+  }
+
   async delete(key: string): Promise<void> {
     this.store.delete(key)
   }

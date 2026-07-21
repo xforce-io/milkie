@@ -58,6 +58,14 @@ export class SQLiteStore implements IStateStore {
     return JSON.parse(row.value) as unknown
   }
 
+  async compareAndSet(key: string, expected: unknown, value: unknown): Promise<boolean> {
+    const stmt = this.db.prepare(
+      'UPDATE kv SET value = ?, expires = NULL WHERE key = ? AND value = ?'
+    )
+    const result = stmt.run(JSON.stringify(value), key, JSON.stringify(expected))
+    return result.changes === 1
+  }
+
   async delete(key: string): Promise<void> {
     this.db.prepare('DELETE FROM kv WHERE key = ?').run(key)
   }

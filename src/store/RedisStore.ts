@@ -67,6 +67,18 @@ export class RedisStore implements IStateStore {
     return JSON.parse(raw) as unknown
   }
 
+  async compareAndSet(key: string, expected: unknown, value: unknown): Promise<boolean> {
+    if (!this.client) throw new Error('RedisStore is not initialized')
+    const result = await this.client.eval(
+      "if redis.call('GET', KEYS[1]) == ARGV[1] then redis.call('SET', KEYS[1], ARGV[2]); return 1 else return 0 end",
+      1,
+      key,
+      JSON.stringify(expected),
+      JSON.stringify(value),
+    )
+    return result === 1
+  }
+
   async delete(key: string): Promise<void> {
     if (!this.client) throw new Error('RedisStore is not initialized')
     await this.client.del(key)

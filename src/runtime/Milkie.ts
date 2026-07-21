@@ -59,6 +59,16 @@ export interface ContextRunState {
   interruptSignaled: boolean
 }
 
+/** A conditional session import lost to a newer completed turn. */
+export class SessionImportConflictError extends Error {
+  constructor(contextId: string, expectedLatestRunId: string) {
+    super(
+      `Session ${contextId} advanced after export; expected latest run ${expectedLatestRunId}`,
+    )
+    this.name = 'SessionImportConflictError'
+  }
+}
+
 export interface MilkieOptions {
   /**
    * #99: required — no silent in-memory fallback. Choose the backend explicitly:
@@ -686,7 +696,10 @@ export class Milkie {
    * its persistent vars. Afterwards `invoke({ contextId })` continues the
    * conversation with the prior history. Returns the contextId now installed.
    */
-  async importSession(session: PortableSession): Promise<{ contextId: string }> {
+  async importSession(
+    session: PortableSession,
+    options: { expectedLatestRunId?: string } = {},
+  ): Promise<{ contextId: string }> {
     if (!this.eventStore) {
       throw new Error('Milkie has no eventStore; cannot import a portable session')
     }
@@ -696,13 +709,34 @@ export class Milkie {
         `this build imports v${PORTABLE_SESSION_SCHEMA_VERSION}`)
     }
     const { contextId, latestRunId } = session.manifest
+    const checkpointRunKey = `context:${contextId}:checkpoint-run:latest`
+
+    // Fast-fail before appending copied events. The compare-and-set below is
+    // still required: a chat turn can finish while this import is appending.
+    if (options.expectedLatestRunId !== undefined) {
+      const current = await this.stateStore.get(checkpointRunKey)
+      if (current !== options.expectedLatestRunId) {
+        throw new SessionImportConflictError(contextId, options.expectedLatestRunId)
+      }
+    }
 
     for (const event of session.events) {
       await this.eventStore.append(event)
     }
     // Routing pointer: invoke() reads this to project the resume checkpoint from
     // the event log (#73).
-    await this.stateStore.set(`context:${contextId}:checkpoint-run:latest`, latestRunId)
+    if (options.expectedLatestRunId !== undefined) {
+      const applied = await this.stateStore.compareAndSet(
+        checkpointRunKey,
+        options.expectedLatestRunId,
+        latestRunId,
+      )
+      if (!applied) {
+        throw new SessionImportConflictError(contextId, options.expectedLatestRunId)
+      }
+    } else {
+      await this.stateStore.set(checkpointRunKey, latestRunId)
+    }
 
     for (const [name, value] of Object.entries(session.variables)) {
       await this.setContextVar(contextId, name, value)
