@@ -28,6 +28,8 @@ export type EventKind =
   | 'agent.checkpoint'
   | 'object.created'
   | 'relation.created'
+  /** #217 / s-016: post-hoc task-level judgment (not execution status). */
+  | 'task.outcome.recorded'
 
 export interface Event<P = unknown> {
   id: string
@@ -310,6 +312,18 @@ export interface RelationCreatedPayload {
   meta?:      Record<string, unknown>
 }
 
+/**
+ * #217 / s-016: payload for `task.outcome.recorded`.
+ * Task success/failure independent of `agent.run.completed.status`.
+ * Query uses last-write-wins over this event type per runId.
+ */
+export interface TaskOutcomeRecordedPayload {
+  value:   'success' | 'failure' | 'partial' | 'unknown'
+  source:  string
+  note?:   string
+  scores?: Array<{ name: string; value: number | string | boolean }>
+}
+
 // ---- Lineage buffer (declared during a tool call, flushed by RecordingIOPort) ----
 
 /** A createObject declaration, buffered during a tool call. */
@@ -367,6 +381,7 @@ export type SkillLoadedEvent       = Event<SkillLifecyclePayload>    & { type: '
 export type SkillUnloadedEvent     = Event<SkillLifecyclePayload>    & { type: 'skill.unloaded' }
 export type ObjectCreatedEvent     = Event<ObjectCreatedPayload>     & { type: 'object.created' }
 export type RelationCreatedEvent   = Event<RelationCreatedPayload>   & { type: 'relation.created' }
+export type TaskOutcomeRecordedEvent = Event<TaskOutcomeRecordedPayload> & { type: 'task.outcome.recorded' }
 
 export type AnyEvent =
   | LlmRequestedEvent
@@ -388,3 +403,4 @@ export type AnyEvent =
   | SkillUnloadedEvent
   | ObjectCreatedEvent
   | RelationCreatedEvent
+  | TaskOutcomeRecordedEvent

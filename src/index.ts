@@ -64,6 +64,18 @@ export type {
 } from './types/common.js'
 
 export type {
+  TaskOutcome,
+  TaskOutcomeValue,
+  TaskOutcomeSource,
+  TaskOutcomeScore,
+  RecordTaskOutcomeInput,
+} from './types/outcome.js'
+export {
+  TaskOutcomeError,
+  TaskOutcomeRunNotFoundError,
+} from './types/outcome.js'
+
+export type {
   ToolDefinition,
   ToolContext,
   ToolCall,

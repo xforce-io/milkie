@@ -34,8 +34,13 @@ import { ReplayingIOPort } from '../trace/ReplayingIOPort.js'
 import { ReplayError } from '../trace/ReplayError.js'
 import { ReplayDivergenceError } from '../trace/ReplayDivergenceError.js'
 import { extractRunSnapshot } from '../trace/RunSnapshot.js'
-import type { Event, AgentRunStartedPayload } from '../trace/types.js'
+import type { Event, AgentRunStartedPayload, TaskOutcomeRecordedPayload } from '../trace/types.js'
 import { makeTraceTools } from '../tools/trace.js'
+import type { RecordTaskOutcomeInput, TaskOutcome } from '../types/outcome.js'
+import {
+  TaskOutcomeError,
+  TaskOutcomeRunNotFoundError,
+} from '../types/outcome.js'
 import {
   type PortableSession,
   PORTABLE_SESSION_SCHEMA_VERSION,
@@ -935,6 +940,97 @@ export class Milkie {
         Object.entries(config.skills ?? {}).map(([name, version]) => [name, { version }]),
       ),
       subAgents,
+    }
+  }
+
+  /**
+   * #217 / s-016: post-hoc task outcome for a completed (or any) run.
+   * Appends `task.outcome.recorded`; never mutates execution status events.
+   * Requires `eventStore`. Last write wins on subsequent `getTaskOutcome`.
+   */
+  async recordTaskOutcome(input: RecordTaskOutcomeInput): Promise<TaskOutcome> {
+    if (!this.eventStore) {
+      throw new TaskOutcomeError(
+        'recordTaskOutcome requires eventStore (pass eventStore when constructing Milkie)',
+      )
+    }
+    const runId = input?.runId?.trim()
+    if (!runId) throw new TaskOutcomeError('recordTaskOutcome requires a non-empty runId')
+    const source = input?.source?.trim()
+    if (!source) throw new TaskOutcomeError('recordTaskOutcome requires a non-empty source')
+    const value = input.value
+    if (value !== 'success' && value !== 'failure' && value !== 'partial' && value !== 'unknown') {
+      throw new TaskOutcomeError(
+        `recordTaskOutcome invalid value "${String(value)}"; expected success|failure|partial|unknown`,
+      )
+    }
+
+    const events = await this.eventStore.readByRunId(runId)
+    if (events.length === 0) {
+      throw new TaskOutcomeRunNotFoundError(runId)
+    }
+
+    const recordedAt = Date.now()
+    const payload: TaskOutcomeRecordedPayload = {
+      value,
+      source,
+      ...(input.note !== undefined ? { note: input.note } : {}),
+      ...(input.scores !== undefined ? { scores: input.scores } : {}),
+    }
+    const event: Event<TaskOutcomeRecordedPayload> = {
+      id:        uuid(),
+      runId,
+      type:      'task.outcome.recorded',
+      actor:     'milkie',
+      timestamp: recordedAt,
+      payload,
+    }
+    await this.eventStore.append(event)
+
+    return {
+      runId,
+      value,
+      source,
+      recordedAt,
+      ...(input.note !== undefined ? { note: input.note } : {}),
+      ...(input.scores !== undefined ? { scores: input.scores } : {}),
+    }
+  }
+
+  /**
+   * #217 / s-016: latest task outcome for `runId`, or `null` if the run exists
+   * but no outcome was recorded. Unknown runId → TaskOutcomeRunNotFoundError.
+   */
+  async getTaskOutcome(runId: string): Promise<TaskOutcome | null> {
+    if (!this.eventStore) {
+      throw new TaskOutcomeError(
+        'getTaskOutcome requires eventStore (pass eventStore when constructing Milkie)',
+      )
+    }
+    const id = runId?.trim()
+    if (!id) throw new TaskOutcomeError('getTaskOutcome requires a non-empty runId')
+
+    const events = await this.eventStore.readByRunId(id)
+    if (events.length === 0) {
+      throw new TaskOutcomeRunNotFoundError(id)
+    }
+
+    let latest: Event<TaskOutcomeRecordedPayload> | undefined
+    for (const e of events) {
+      if (e.type === 'task.outcome.recorded') {
+        latest = e as Event<TaskOutcomeRecordedPayload>
+      }
+    }
+    if (!latest) return null
+
+    const p = latest.payload
+    return {
+      runId:      id,
+      value:      p.value,
+      source:     p.source,
+      recordedAt: latest.timestamp,
+      ...(p.note !== undefined ? { note: p.note } : {}),
+      ...(p.scores !== undefined ? { scores: p.scores } : {}),
     }
   }
 
