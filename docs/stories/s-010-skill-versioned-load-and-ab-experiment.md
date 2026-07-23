@@ -19,7 +19,9 @@ tests:
   - tests/e2e/s-010-skill-versioned-load-and-ab-experiment.e2e.test.ts
 related:
   - ARCHITECTURE.md#evolution
+  - ARCHITECTURE.md#retry-fork-and-reconfigure-action-vocabulary
   - docs/superpowers/specs/2026-05-16-agent-e2e-scenarios.md
+  - docs/stories/s-016-record-and-query-task-outcome.md
 ---
 
 ## 场景叙事
@@ -91,3 +93,4 @@ v1.1.0 输出含 "来源 / source / 引用" 关键词，v1.0.0 不含
 - **Skill 卸载（unload）/ 版本回退** → 未来
 - **Skill 之间的依赖解析** → 未来
 - **prefix cache 命中的细粒度行为**（cache_control 标记的内部实现）→ 不属于用户场景
+- **Task outcome 存储本身** → 见 [s-016](./s-016-record-and-query-task-outcome.md)。本 story 的 A/B / Experiment 对比在指标上应**优先使用 task outcome（及 scores）**，而不是把 execution `status: completed` 当作任务成功；本 issue 不拆分 epoch vs A/B，也不实现 Outcome API

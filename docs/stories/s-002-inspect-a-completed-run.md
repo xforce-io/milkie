@@ -15,6 +15,7 @@ tests:
   - tests/e2e/s-002-inspect-a-completed-run.e2e.test.ts
 related:
   - ARCHITECTURE.md#agent-trace
+  - docs/stories/s-016-record-and-query-task-outcome.md
 ---
 
 ## 场景叙事
@@ -64,3 +65,4 @@ inspect (无 LLM 调用)
 - **确定性回放** → 见 [s-005](./s-005-deterministic-replay.md)
 - **跨多个 run 的批量查询 / suite replay** → 见 [s-012](./s-012-batch-replay-suite-and-classify-divergences.md)
 - **in-flight 查询语义**（运行中的 run） → 见 [s-015](./s-015-subagent-reads-parent-trace-runtime.md)
+- **Task outcome 的后置写入与查询**（execution status ≠ 任务成败）→ 见 [s-016](./s-016-record-and-query-task-outcome.md)；inspect 只保证「发生了什么」，不判定任务是否做对

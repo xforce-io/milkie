@@ -19,7 +19,10 @@ tests:
   - tests/e2e/s-009-multi-turn-with-tool-error-recovery.e2e.test.ts
 related:
   - ARCHITECTURE.md#agent-runtime
+  - ARCHITECTURE.md#retry-fork-and-reconfigure-action-vocabulary
   - docs/superpowers/specs/2026-05-16-agent-e2e-scenarios.md
+  - docs/stories/s-006-fork-at-event-for-what-if.md
+  - docs/stories/s-016-record-and-query-task-outcome.md
 ---
 
 ## 场景叙事
@@ -85,3 +88,5 @@ milkie.invoke({
 - **中断与恢复**（Interrupt / Resume）→ s-008
 - **不可重试错误的终止行为**（非 retryable） → 未来的 error story
 - **多 contextId 之间的隔离** → 未来的 context-isolation story
+- **Fork / 当前任务决策修复** → 见 [s-006](./s-006-fork-at-event-for-what-if.md)。本 story 是 **Retry**（`retryable` 工具 + `error_handling`），不是 Fork
+- **Task outcome（业务/任务成败）** → 见 [s-016](./s-016-record-and-query-task-outcome.md)；工具重试成功只影响 execution 路径，不自动等于 task success

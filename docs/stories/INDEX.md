@@ -4,7 +4,9 @@ Projected view over every story in this directory. Conventions live in
 `README.md`. A regenerator script may overwrite the tables below; the
 **Notes** section is hand-maintained.
 
-Last updated: 2026-05-24 (re-calibrated readiness view against ARCHITECTURE.md Implementation Status; Phase 3 — IOPort / Event log / Cache / structural Replay — has landed; the five "verify-in-code" TODOs are confirmed implemented; ARCHITECTURE.md now records Yield point + interrupt signal and Supervisor tree as Implemented today; 6 stories now `active` after 2026-05-24 e2e run)
+Last updated: 2026-07-23 (#214 minimal learning loop: s-016 task-outcome draft;
+s-006 title/narrative → current-task repair; pointer Out/related on
+s-002/003/005/009/010)
 
 ## By id
 
@@ -15,7 +17,7 @@ Last updated: 2026-05-24 (re-calibrated readiness view against ARCHITECTURE.md I
 | [s-003](./s-003-explain-a-decision-with-context.md) | Explain an agent decision with its full context | active | agent-trace | `tests/e2e/s-003-explain-a-decision-with-context.e2e.test.ts` |
 | [s-004](./s-004-lineage-from-artifact-to-source.md) | Trace lineage from an artifact back to its source | draft | agent-trace | `tests/e2e/s-004-lineage-from-artifact-to-source.e2e.test.ts` |
 | [s-005](./s-005-deterministic-replay.md) | Deterministically replay a recorded agent run | active | agent-trace · agent-runtime | `tests/e2e/s-005-deterministic-replay.e2e.test.ts` |
-| [s-006](./s-006-fork-at-event-for-what-if.md) | Fork a run at an event to explore a counterfactual | draft | agent-trace · agent-runtime | `tests/e2e/s-006-fork-at-event-for-what-if.e2e.test.ts` |
+| [s-006](./s-006-fork-at-event-for-what-if.md) | Fork a failed run at an event to repair the current task | draft | agent-trace · agent-runtime | `tests/e2e/s-006-fork-at-event-for-what-if.e2e.test.ts` |
 | [s-007](./s-007-inter-agent-parallel-code-review.md) | Inter-agent parallel via named sub-agent tools | active | agent-runtime · agent-trace | `tests/e2e/s-007-inter-agent-parallel-code-review.e2e.test.ts` |
 | [s-008](./s-008-long-task-interrupt-and-resume.md) | Interrupt a long-running agent and resume from checkpoint | active | agent-runtime · agent-trace | `tests/e2e/s-008-long-task-interrupt-and-resume.e2e.test.ts` |
 | [s-009](./s-009-multi-turn-with-tool-error-recovery.md) | Multi-turn conversation with tool error recovery | active | agent-runtime · agent-trace | `tests/e2e/s-009-multi-turn-with-tool-error-recovery.e2e.test.ts` |
@@ -25,6 +27,7 @@ Last updated: 2026-05-24 (re-calibrated readiness view against ARCHITECTURE.md I
 | [s-013](./s-013-variant-search-with-bounded-cost.md) | Variant search with bounded amortized cost | draft | agent-trace · evolution | `tests/e2e/s-013-variant-search-with-bounded-cost.e2e.test.ts` |
 | [s-014](./s-014-reverse-reference-lineage-query.md) | Reverse-reference lineage query | draft | agent-trace | `tests/e2e/s-014-reverse-reference-lineage-query.e2e.test.ts` |
 | [s-015](./s-015-subagent-reads-parent-trace-runtime.md) | Sub-agent reads parent's in-flight trace at runtime | draft | agent-runtime · agent-trace | `tests/e2e/s-015-subagent-reads-parent-trace-runtime.e2e.test.ts` |
+| [s-016](./s-016-record-and-query-task-outcome.md) | Record and query task outcome after a run | draft | agent-trace | `tests/e2e/s-016-record-and-query-task-outcome.e2e.test.ts` |
 
 ## By implementation readiness
 
@@ -52,11 +55,12 @@ These work today in degraded / basic form; full story validation requires
 target capabilities to land.
 
 - **s-005** Deterministic replay — IOPort ✓, Event log ✓, Cache ✓, structural Replay ✓ (Phase 3); byte-identical replay still needs Non-determinism log (Phase 4)
-- **s-006** Fork at event — IOPort ✓, Event log ✓, Response cache ✓; still needs Fork primitive (Phase 5)
+- **s-006** Fork at event (current-task repair) — IOPort ✓, Event log ✓, Response cache ✓; still needs Fork primitive (Phase 5)
 - **s-008** Interrupt + resume — FSM Core ✓, State stores ✓, Yield point + interrupt signal ✓ confirmed in `FSMEngine.ts:11,61-62` and `Milkie.ts:297-300` (test file exists)
-- **s-010** Skill load + A/B — FSM Core ✓, working context ✓, Skill epoch loading ✓ confirmed in `ContextLayer.ts:19,40-46` (test file exists); Evolution components are target only
+- **s-010** Skill load + A/B — FSM Core ✓, working context ✓, Skill epoch loading ✓ confirmed in `ContextLayer.ts:19,40-46` (test file exists); Evolution components are target only; experiment metrics should prefer task outcome (s-016) when available
 - **s-012** Batch replay + classify — Replay ✓, Cache ✓; still needs Structural diff, Suite definition + batch replay (Phase 5)
 - **s-013** Variant search bounded cost — Cache ✓; still needs Fork primitive, Structural diff (Phase 5)
+- **s-016** Task outcome record/query — Event log basic ✓; still needs Task outcome record API/storage (target)
 
 ### Blocked (all or most requires are target only)
 
@@ -71,7 +75,7 @@ as design specification.
 
 ### draft
 
-- s-004, s-006, s-010, s-012, s-013, s-014, s-015 (7 stories)
+- s-004, s-006, s-010, s-012, s-013, s-014, s-015, **s-016** (8 stories)
 
 ### active
 
@@ -85,6 +89,7 @@ as design specification.
 - **s-011** Multi-state FSM intent routing + slot filling
 
 s-010 stays `draft` until its Evolution requires are split (current test only validates skill-epoch loading, not Experiment Registry).
+s-016 stays `draft` until Outcome storage/API + e2e land (tracking #215 stage 2).
 
 ### deprecated
 
@@ -103,7 +108,7 @@ appear here.
 
 ### agent-trace
 
-- s-001 through s-015 (every story)
+- s-001 through s-016 (every story)
 
 ### evolution
 
@@ -128,20 +133,13 @@ appear here.
 | variant-search | s-013 |
 | lineage-reverse-reference | s-014 |
 | runtime-trace-consumption | s-015 |
+| task-outcome | s-016 |
 
 ## Notes
 
-- 15 stories total; 7 `draft`, 8 `active` (s-001 / s-002 / s-003 / s-005 / s-007 / s-008 / s-009 / s-011). Readiness varies — see the "By implementation readiness" view above. E2E run 2026-05-24: 9/9 existing test suites green; s-002 / s-003 added as hermetic stub-gateway tests against TrajectoryStore + Agent Trace event log; s-009 switched from Redis-gated to MemoryStore-by-default; s-010 still `draft` until Evolution requires are split.
+- 16 stories total; 8 `draft`, 8 `active` (s-001 / s-002 / s-003 / s-005 / s-007 / s-008 / s-009 / s-011). Readiness varies — see the "By implementation readiness" view above.
+- **#214 (2026-07-23)** aligned stories with ARCH minimal learning loop: new **s-016** (task outcome); **s-006** primary narrative = current-task repair (slug unchanged); pointer Out/related on s-002, s-003, s-005, s-009, s-010. Active acceptance checklists were not rewritten.
 - s-012 / s-013 / s-014 / s-015 are **agent-first scenarios** added to mirror ARCHITECTURE.md invariants 12-13 (Agent Trace is agent-first; CLI is the agent-facing protocol facade). They sit alongside the existing single-run / single-consumer stories (s-002–s-006) and cover batch / runtime / reverse-graph patterns.
-- **Tests exist for 7 stories** (s-001, s-005, s-007, s-008, s-009, s-010, s-011). Of these only s-005 is `active`; the rest are still `draft`. When those tests are green in CI, flip them to `active` per the README lifecycle.
-- Next wave of E2E test writing: **s-002 / s-003** are the lowest-hanging Partial stories (Trajectory observability already supports basic timeline / span query); they exercise observable + diagnosable capabilities against today's TrajectoryStore.
-- Several migrated stories (s-009, s-010, s-011) carry **internal sub-scenarios** that may be split per the README's granularity rule after discussion. Flagged inside each story.
-- Migration source: `docs/superpowers/specs/2026-05-16-agent-e2e-scenarios.md` (Cases 2–6 ported as s-007 to s-011).
 - The "Test" path column reserves filenames per the convention; matching E2E test files may not yet exist while stories are in `draft`.
-- **Verify-in-code TODOs resolved (2026-05-24)** — all five marked architectural checkpoints confirmed implemented in source:
-  - Sub-agent as named tool — `src/runtime/AgentRuntime.ts:116-198` (AgentFactory.spawn)
-  - Error handling FSM transition — `src/fsm/FSMEngine.ts:11,64-66` (global `error` → `error_handling`)
-  - Action state with `ctx.emit` — `src/types/agent.ts`, `src/fsm/FSMEngine.ts:44-49`, `src/runtime/AgentRuntime.ts:223`
-  - Yield point + interrupt signal — `src/fsm/FSMEngine.ts:11,61-62`, `src/runtime/Milkie.ts:297-300`
-  - Skill epoch loading — `src/context/ContextLayer.ts:19,40-46`
+- Parent tracking for Outcome → Fork implementation: GitHub #215.
 - When code lands closing a target capability, update `ARCHITECTURE.md`'s Implementation Status first, then this index's readiness view will need to be regenerated.

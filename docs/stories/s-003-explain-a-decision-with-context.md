@@ -15,6 +15,7 @@ tests:
   - tests/e2e/s-003-explain-a-decision-with-context.e2e.test.ts
 related:
   - ARCHITECTURE.md#agent-trace
+  - docs/stories/s-016-record-and-query-task-outcome.md
 ---
 
 ## 场景叙事
@@ -70,3 +71,5 @@ explain a decision (无 LLM 调用)
 - **从 source 反推到所有引用它的 run（lineage reverse）** → 见 [s-014](./s-014-reverse-reference-lineage-query.md)
 - **重放该决策点** → 见 [s-005](./s-005-deterministic-replay.md)
 - **替换该决策后看 outcome 变化（fork）** → 见 [s-006](./s-006-fork-at-event-for-what-if.md)
+- **Task outcome（任务成败判定记录）** → 见 [s-016](./s-016-record-and-query-task-outcome.md)
+- **结构化 Attribution 判决**（category / suggestedAction 等）→ 延后；本 story 的 explain 只提供**证据材料**，不是 Attribution 记录
