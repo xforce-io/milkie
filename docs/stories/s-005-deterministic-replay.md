@@ -19,6 +19,7 @@ tests:
   - tests/e2e/s-005-deterministic-replay.e2e.test.ts
 related:
   - ARCHITECTURE.md#agent-trace
+  - docs/stories/s-006-fork-at-event-for-what-if.md
 ---
 
 > Phase 3 provides structural replay; byte-identical pending Phase 4 non-determinism log.
@@ -31,4 +32,10 @@ related:
 
 典型用法：本地复现一个生产故障；examples / demo 在无 API key 环境下能 ship；regression test 把昨日的 run 当今日的 baseline。
 
-> 待补：interaction flow / 验收准则 / 不在此 story 范围
+> 待补：interaction flow / 完整验收准则（既有 e2e 为权威实现锚点）。
+
+## 不在此 story 范围
+
+- **Fork / debug rerun**（从某事件分支并修改决策以修复**当前任务**）→ 见 [s-006](./s-006-fork-at-event-for-what-if.md)。**Replay ≠ Fork**：replay 忠实重放已录 log，不声称修好错误决策
+- **工具瞬时 Retry** → 见 [s-009](./s-009-multi-turn-with-tool-error-recovery.md)
+- **Task outcome 写入** → 见 [s-016](./s-016-record-and-query-task-outcome.md)
