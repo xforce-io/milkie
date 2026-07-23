@@ -15,8 +15,10 @@ It describes the **target** architecture for milkie as a library.
 **Definition.** milkie is a TypeScript library where the agent **run** —
 the full reasoning trajectory, not just the output it produces — is the
 primary engineering product. Runs are addressable, reproducible, forkable,
-comparable, and attributable; the agent system improves through controlled
-experiments over them.
+comparable, and attributable. A run is also the **evidence atom** for later
+judgment and improvement: task outcome, optional failure attribution, repair
+of the current task, and versioned reconfiguration for future tasks all hang
+off runs (and their traces), not off free-floating chat logs.
 
 **Goal.** Move LLM agents from one-off scripts to durable engineering
 systems — and elevate the **run** from byproduct to primary deliverable.
@@ -25,10 +27,30 @@ multi-state workflows, multi-agent orchestration); every run is
 deterministically reproducible despite LLM non-determinism; every shipped
 agent has a first-class path to measurably improve the runs it produces.
 
+That path is a **minimal learning loop**, not a separate “learning OS”:
+
+```
+Task → Run (Runtime; Trace records)
+         → Task outcome          (did the task succeed? ≠ execution status)
+         → optional Attribution  (structured judgment; external writers)
+         → current task: Retry | Fork
+         → future tasks: reconfigure (versioned agent/skill/config) ± Evolution
+```
+
 **Value.** A milkie agent's product is the **run** — machine-operable,
 diagnosable, debuggable, auditable, and improvable as a first-class artifact.
 Outputs are views over runs, not vice versa. Agents that produce only outputs
-become black boxes that work until they don't.
+become black boxes that work until they don't. Separating **execution status**
+from **task outcome** makes silent business failures visible; thin optional
+attribution and fork/reconfigure give a path from “it failed” to “fix this
+task” / “improve the next one” without embedding an autonomous reflection
+brain in the library.
+
+**Non-goals (architecture).** milkie does **not** ship an in-core attribution
+engine, a control-plane subsystem, or a learnable-delta platform. Open-ended
+judgment and change proposal stay outside the three peer subsystems (human,
+script, or meta-agent via facades). Evolution stays a narrow, mechanical
+experiment/promotion layer when present — not a memory or policy brain.
 
 ## Overview
 
@@ -380,6 +402,63 @@ meta-agents that propose variants). Neither carries logic of its own.
 *Not:* subsystems. See the Overview diagram — facades are the top boxes;
 subsystems (Agent Runtime, Agent Trace, Evolution) sit below them.
 
+### Outcome (task outcome)
+
+A **task-level** judgment of whether a run met its goal — success, failure,
+partial, or unknown — independent of whether the runtime finished cleanly.
+Outcome may be written **after** the run ends (human label, rule check, eval
+harness, business callback). It is keyed by `runId` and must remain queryable
+for that run (append-only event or equivalent auditable record; concrete
+schema is a design-doc concern).
+
+Optional scores (named metrics) may hang off the same run as supporting
+evidence for the outcome; they do not replace it.
+
+*Example:* a run returns `status: 'completed'` with a wrong recommendation;
+a later `outcome: failure` from an eval or reviewer makes that failure visible
+to dashboards and experiments.
+*Not:* execution `status` (`completed` / `error` / `interrupted`). *Not:* a
+natural-language postmortem. *Not:* Evolution's traffic decision — Evolution
+may *consume* outcomes as metrics; it does not invent task success.
+
+### Attribution (optional, thin)
+
+A **structured judgment record** that points at evidence already in the
+Trace — optional, never required for inspect/replay. Writers live **outside**
+the three subsystems (human, rule script, meta-agent). milkie owns schema and
+storage/query; it does **not** embed an attribution engine or auto-trigger
+repair from an attribution.
+
+Minimal content: `runId`, a coarse `category` (e.g. knowledge / process /
+tool / capability / transient / other), `evidenceRefs` into existing Trace
+capabilities (event ids, explain anchors, object ids), optional
+`primaryEventId`, optional `suggestedAction` (`retry` | `fork` |
+`reconfigure` | `ignore`), who wrote it and when.
+
+*Example:* after a failed procurement recommendation, an operator records
+`category: process`, `evidenceRefs` to the decision spine node that skipped
+inventory check, `suggestedAction: reconfigure`.
+*Not:* the explain/lineage **evidence** itself (those stay Trace projections).
+*Not:* a mandatory gate before promote or fork. *Not:* automatic Runtime or
+Evolution side effects.
+
+### Retry, Fork, and Reconfigure (action vocabulary)
+
+Three **semantic** repairs — not a new subsystem or action type machine:
+
+| Action | Fixes | Changes the agent? | Owner |
+|---|---|---|---|
+| **Retry** | Transient execution failure (timeouts, retryable tool errors) | No | Runtime (existing error_handling / retryable tools) |
+| **Fork** | Decision error on the **current** task: branch at an event and continue | No (new branch run) | Agent Trace derivation (target: fork-at-event) |
+| **Reconfigure** | **Future** tasks: ship a new agent/skill/FSM/prompt version | Yes | Outside milkie core initially; Evolution may promote versions mechanically later |
+
+**Debug rerun** means attribution (optional) plus **Fork** (and optional
+local patch) — not Retry. **Replay** proves the log is faithful; it is not
+by itself a repair path.
+
+*Not:* “Learn” as a fourth peer subsystem. Versioned reconfiguration plus
+optional Evolution is enough until a real second promote surface appears.
+
 ---
 
 ### Pairs that are often confused
@@ -397,6 +476,10 @@ subsystems (Agent Runtime, Agent Trace, Evolution) sit below them.
 | **Transition** vs **the event that triggers it** | The event (emitted by a tool) is the cause; the transition (`fsm.transition`) is the effect. |
 | **Context boundary** vs **LLM request** | The boundary is the policy that selects/orders Regions. The request is its serialized output. |
 | **Snapshot** vs **Event-sourced view** | A snapshot is a checkpoint or acceleration artifact. The view is derived from Events plus content-addressed objects and remains reconstructable without the snapshot. |
+| **Execution status** vs **Task outcome** | Status is whether the runtime finished, errored, or paused. Outcome is whether the **task** succeeded. `completed` does not imply success. |
+| **Explain / lineage** vs **Attribution** | Explain and lineage are **evidence** projections over the Trace. Attribution is an optional **judgment** record that points at that evidence. |
+| **Retry** vs **Fork** vs **Replay** | Retry re-executes under the same config for transient failure. Fork branches a recorded run to fix the current task. Replay re-serves the log without claiming to repair a bad decision. |
+| **Reconfigure** vs **Evolution** | Reconfigure is shipping a new version (often human-driven). Evolution is mechanical experiment traffic and promote/rollback over declared variants — it does not invent the change. |
 
 ---
 
@@ -580,21 +663,33 @@ target shape; `TrajectoryStore` is the current bridge.
 
 **Definition.** Evolution is the subsystem that runs controlled experiments
 over agent configurations — registering variants, splitting traffic,
-collecting outcomes, and applying mechanical promotion rules. It calls no
+collecting metrics, and applying mechanical promotion rules. It calls no
 LLM and contains no embedded intelligence.
 
-Goal and Value paragraphs are deliberately deferred — Evolution's
-integration with the run-as-product stance is still being thought through.
-For now, the existing component breakdown below stands as the operative
-description.
+**Goal.** Given declared configuration variants (agent/skill/FSM/prompt
+versions), route traffic, aggregate **task outcomes** and related scores from
+runs, and promote, hold, or roll back by fixed rules — so improvement is
+measurable rather than anecdotal.
+
+**Value.** Reconfigure stays cheap and reversible: a new version can be
+canaried against historical or live outcome rates without embedding learning
+logic in Runtime or Trace. Evolution does not invent what to change; it only
+governs how declared changes are tried and kept.
+
+**Scope stays narrow.** No control plane, no learnable-delta product, no
+in-core failure clustering. Those remain non-goals until a second real
+promote surface appears. Until Evolution is implemented, **reconfigure** is
+simply shipping a new version by hand or by external automation.
 
 - **Experiment Registry** — declares variant configurations, the metric
   to optimize, hard guardrails, and traffic split rules.
 - **Traffic Splitter** — routes incoming requests to variants per the
   registered rules. Supports shadow, canary, and full A/B as first-class
   modes.
-- **Outcome Collector** — pulls metric values from Agent Trace, watches
-  guardrails, applies time-windowed and cohort-aware aggregation.
+- **Outcome Collector** — pulls **task outcomes** (and optional scores /
+  guardrail signals) associated with runs — preferably the Outcome records
+  in the Concept Model, not execution `status` alone — and applies
+  time-windowed and cohort-aware aggregation.
 - **Promotion Gate** — rule-based decision (significance threshold +
   guardrail status) to promote, hold, or roll back a variant.
 
@@ -605,11 +700,12 @@ What Evolution **does not** contain:
   can be a human, a script, or a **milkie meta-agent** that consumes
   Agent Trace through the CLI facade and registers experiments
   programmatically.
-- No root-cause analysis — querying Agent Trace is the consumer's job
-  (human or agent).
+- No root-cause analysis — querying Agent Trace and optional Attribution
+  records is the consumer's job (human or agent). Attribution is never a
+  hard gate inside Evolution unless a specific experiment declares it.
 - No learning memory store — Experiment declarations live in the Experiment
-  Registry; agent outcomes are read from Agent Trace; promotion/rollback
-  decisions may be written as Evolution audit events.
+  Registry; task outcomes are read from run-associated records / Trace;
+  promotion/rollback decisions may be written as Evolution audit events.
 - No multi-objective Pareto optimization — single metric + hard
   guardrails; combine objectives outside if needed.
 
@@ -741,7 +837,9 @@ typically signals a structural mistake, not a tradeoff.
    deliverable is its full reasoning trajectory — decisions, claims,
    evidence, intermediate state, and lineage — not the terminal output
    alone. Storage, sharing, evaluation, and improvement all target the
-   run; the output is one projection among many.
+   run; the output is one projection among many. Task outcome and optional
+   attribution hang off the run as judgments over that evidence, not as
+   substitutes for the run itself.
 2. **IOPort is part of Agent Runtime's design**, not an Agent Trace-imposed
    hook. The port exists because the runtime declares its own
    non-determinism boundary. Agent Trace is a decorator implementation of
@@ -795,6 +893,12 @@ typically signals a structural mistake, not a tradeoff.
     friendly rendering is an optional projection. A new consumer-facing
     capability ships with a CLI entry point, or it is not reachable by agent
     consumers.
+14. **Execution status is not task outcome.** `completed` / `error` /
+    `interrupted` describe runtime termination. Task success or failure is a
+    separate Outcome record (or equivalent) keyed by `runId`. Evaluation,
+    failure visibility, and Evolution metrics must not treat execution status
+    alone as task success. Attribution remains optional and never replaces
+    Outcome.
 
 ---
 
