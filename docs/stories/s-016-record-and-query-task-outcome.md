@@ -1,14 +1,14 @@
 ---
 id: s-016
 title: Record and query task outcome after a run
-status: draft
+status: active
 kind: scenario
 subsystems:
   - agent-trace
 capability: task-outcome
 requires:
   - Agent Trace event log (basic)
-  - Task outcome record (target)
+  - Task outcome record
 owner: "@xupeng"
 created: 2026-07-23
 tests:
@@ -58,14 +58,16 @@ query path（无额外 LLM）
 
 ## 验收准则
 
-- [ ] 存在一次 `invoke` 返回 `status: 'completed'` 且带可用 `runId` / `agentRunId`
-- [ ] 对该 `runId` **后置**写入 task outcome，`value: 'failure'`（或等价枚举），`source` 非空
-- [ ] 按同一 `runId` 查询，读回的 outcome `value` 与写入一致
-- [ ] 写入 outcome **之后**，该 run 的 execution status 仍为 `completed`（未被改成 error/failed 等）
-- [ ] 允许 `status: 'completed'` 与 outcome `failure` **同时成立**（核心：跑完 ≠ 做对）
-- [ ] （可选）写入时附带至少一条 score；查询时可读到，且不改变 outcome `value` 语义
-- [ ] 从未写入 outcome 的另一 `runId`：查询为 absent 或 `unknown`，且不抛成「run 不存在」（与非法 runId 错误可区分）
-- [ ] 记录 / 查询路径不要求再次调用真实 LLM（hermetic 测试可用 stub gateway）
+- [x] 存在一次 `invoke` 返回 `status: 'completed'` 且带可用 `runId` / `agentRunId`
+- [x] 对该 `runId` **后置**写入 task outcome，`value: 'failure'`（或等价枚举），`source` 非空
+- [x] 按同一 `runId` 查询，读回的 outcome `value` 与写入一致
+- [x] 写入 outcome **之后**，该 run 的 execution status 仍为 `completed`（未被改成 error/failed 等）
+- [x] 允许 `status: 'completed'` 与 outcome `failure` **同时成立**（核心：跑完 ≠ 做对）
+- [x] （可选）写入时附带至少一条 score；查询时可读到，且不改变 outcome `value` 语义
+- [x] 从未写入 outcome 的另一 `runId`：查询为 absent 或 `unknown`，且不抛成「run 不存在」（与非法 runId 错误可区分）
+- [x] 记录 / 查询路径不要求再次调用真实 LLM（hermetic 测试可用 stub gateway）
+
+> 实现：`Milkie.recordTaskOutcome` / `getTaskOutcome`；事件 `task.outcome.recorded`；e2e `tests/e2e/s-016-record-and-query-task-outcome.e2e.test.ts`（#217）。
 
 ## 不在此 story 范围
 

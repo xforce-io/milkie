@@ -4,9 +4,7 @@ Projected view over every story in this directory. Conventions live in
 `README.md`. A regenerator script may overwrite the tables below; the
 **Notes** section is hand-maintained.
 
-Last updated: 2026-07-23 (#214 minimal learning loop: s-016 task-outcome draft;
-s-006 title/narrative → current-task repair; pointer Out/related on
-s-002/003/005/009/010)
+Last updated: 2026-07-23 (#217 task outcome implemented; s-016 active)
 
 ## By id
 
@@ -27,7 +25,7 @@ s-002/003/005/009/010)
 | [s-013](./s-013-variant-search-with-bounded-cost.md) | Variant search with bounded amortized cost | draft | agent-trace · evolution | `tests/e2e/s-013-variant-search-with-bounded-cost.e2e.test.ts` |
 | [s-014](./s-014-reverse-reference-lineage-query.md) | Reverse-reference lineage query | draft | agent-trace | `tests/e2e/s-014-reverse-reference-lineage-query.e2e.test.ts` |
 | [s-015](./s-015-subagent-reads-parent-trace-runtime.md) | Sub-agent reads parent's in-flight trace at runtime | draft | agent-runtime · agent-trace | `tests/e2e/s-015-subagent-reads-parent-trace-runtime.e2e.test.ts` |
-| [s-016](./s-016-record-and-query-task-outcome.md) | Record and query task outcome after a run | draft | agent-trace | `tests/e2e/s-016-record-and-query-task-outcome.e2e.test.ts` |
+| [s-016](./s-016-record-and-query-task-outcome.md) | Record and query task outcome after a run | active | agent-trace | `tests/e2e/s-016-record-and-query-task-outcome.e2e.test.ts` |
 
 ## By implementation readiness
 
@@ -60,7 +58,7 @@ target capabilities to land.
 - **s-010** Skill load + A/B — FSM Core ✓, working context ✓, Skill epoch loading ✓ confirmed in `ContextLayer.ts:19,40-46` (test file exists); Evolution components are target only; experiment metrics should prefer task outcome (s-016) when available
 - **s-012** Batch replay + classify — Replay ✓, Cache ✓; still needs Structural diff, Suite definition + batch replay (Phase 5)
 - **s-013** Variant search bounded cost — Cache ✓; still needs Fork primitive, Structural diff (Phase 5)
-- **s-016** Task outcome record/query — Event log basic ✓; still needs Task outcome record API/storage (target)
+- **s-016** Task outcome record/query — Event log + `task.outcome.recorded` + Milkie record/get API ✓ (active, #217)
 
 ### Blocked (all or most requires are target only)
 
@@ -75,7 +73,7 @@ as design specification.
 
 ### draft
 
-- s-004, s-006, s-010, s-012, s-013, s-014, s-015, **s-016** (8 stories)
+- s-004, s-006, s-010, s-012, s-013, s-014, s-015 (7 stories)
 
 ### active
 
@@ -87,9 +85,9 @@ as design specification.
 - **s-008** Interrupt + resume (incl. Supervisor Tree interrupt propagation)
 - **s-009** Multi-turn + tool error recovery (uses MemoryStore by default; Redis variant lives separately)
 - **s-011** Multi-state FSM intent routing + slot filling
+- **s-016** Task outcome record/query (`recordTaskOutcome` / `getTaskOutcome`, #217)
 
 s-010 stays `draft` until its Evolution requires are split (current test only validates skill-epoch loading, not Experiment Registry).
-s-016 stays `draft` until Outcome storage/API + e2e land (tracking #215 stage 2).
 
 ### deprecated
 
@@ -137,8 +135,9 @@ appear here.
 
 ## Notes
 
-- 16 stories total; 8 `draft`, 8 `active` (s-001 / s-002 / s-003 / s-005 / s-007 / s-008 / s-009 / s-011). Readiness varies — see the "By implementation readiness" view above.
-- **#214 (2026-07-23)** aligned stories with ARCH minimal learning loop: new **s-016** (task outcome); **s-006** primary narrative = current-task repair (slug unchanged); pointer Out/related on s-002, s-003, s-005, s-009, s-010. Active acceptance checklists were not rewritten.
+- 16 stories total; 7 `draft`, 9 `active` (… + **s-016**). Readiness varies — see the "By implementation readiness" view above.
+- **#214 (2026-07-23)** aligned stories with ARCH minimal learning loop: new **s-016** (task outcome); **s-006** primary narrative = current-task repair (slug unchanged); pointer Out/related on s-002, s-003, s-005, s-009, s-010.
+- **#217 (2026-07-23)** implemented task outcome API + e2e; s-016 → `active`.
 - s-012 / s-013 / s-014 / s-015 are **agent-first scenarios** added to mirror ARCHITECTURE.md invariants 12-13 (Agent Trace is agent-first; CLI is the agent-facing protocol facade). They sit alongside the existing single-run / single-consumer stories (s-002–s-006) and cover batch / runtime / reverse-graph patterns.
 - The "Test" path column reserves filenames per the convention; matching E2E test files may not yet exist while stories are in `draft`.
 - Parent tracking for Outcome → Fork implementation: GitHub #215.
