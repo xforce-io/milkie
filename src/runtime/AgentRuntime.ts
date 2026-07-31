@@ -1157,6 +1157,32 @@ export class AgentRuntime {
       throw new Error(`Action handler "${state.handler}" not found in tool registry`)
     }
 
+    const actionInput = {
+      goal:  this.goal,
+      input: `Context: ${JSON.stringify(this.memory.toJSON())}\nCurrent turn: ${this.getCurrentTurn() ?? ''}`,
+    }
+
+    if (!this.tryConsumeToolCall()) {
+      const error = this.toolCallBudgetExceededError()
+      const span = this.recorder.startSpan('tool.call', {
+        toolName: state.handler,
+        turn:     this.turnNumber,
+        state:    state.name,
+      })
+      try {
+        await this.ioPort.invokeTool(
+          state.handler,
+          actionInput,
+          async () => { throw error },
+        )
+      } catch {
+        // The synthetic rejection is recorded by RecordingIOPort before this action fails.
+      }
+      this.recorder.recordEvent(span, 'tool.result', { error: error.message, code: error.code })
+      this.recorder.endSpan(span, 'error')
+      throw error
+    }
+
     const ctx = this.buildToolContext()
 
     const span = this.recorder.startSpan('tool.call', {
@@ -1164,11 +1190,6 @@ export class AgentRuntime {
       turn:     this.turnNumber,
       state:    state.name,
     })
-
-    const actionInput = {
-      goal:  this.goal,
-      input: `Context: ${JSON.stringify(this.memory.toJSON())}\nCurrent turn: ${this.getCurrentTurn() ?? ''}`,
-    }
 
     try {
       const output = await tool.handler(actionInput, ctx)
@@ -1233,16 +1254,20 @@ export class AgentRuntime {
     return true
   }
 
+  private toolCallBudgetExceededError(): Error & { code: string; retryable: boolean } {
+    return Object.assign(new Error(`Tool call budget exceeded (max_tool_calls=${this.maxToolCalls})`), {
+      code: 'TOOL_CALL_BUDGET_EXCEEDED',
+      retryable: false,
+    })
+  }
+
   private async executeSingleTool(
     call: { id: string; name: string; input: unknown },
     batchId: string | null,
   ): Promise<ToolResult> {
     if (!this.tryConsumeToolCall()) {
       const start = this.ioPort.now()
-      const error = Object.assign(new Error(`Tool call budget exceeded (max_tool_calls=${this.maxToolCalls})`), {
-        code: 'TOOL_CALL_BUDGET_EXCEEDED',
-        retryable: false,
-      })
+      const error = this.toolCallBudgetExceededError()
       const span = this.recorder.startSpan('tool.call', {
         toolName: call.name,
         toolCallId: call.id,

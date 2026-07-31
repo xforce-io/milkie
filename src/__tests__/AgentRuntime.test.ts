@@ -1114,6 +1114,47 @@ describe('AgentRuntime tool call budgets', () => {
     expect(response.error?.code).toBe('TOOL_CALL_BUDGET_EXCEEDED')
   })
 
+  it('blocks action-state handlers at budget zero and records the rejection', async () => {
+    const handler = jest.fn(async () => 'unexpected')
+    const eventStore = new MemoryEventStore()
+    const runtime = new AgentRuntime({
+      config: makeConfig({
+        fsm: {
+          states: [{ name: 'act', type: 'action', handler: 'action' }],
+          max_tool_calls: 0,
+        },
+      }),
+      goal: 'budget test',
+      input: 'go',
+      stateStore: new MemoryStore(),
+      eventStore,
+      recorder: new InMemoryRecorder('trace-action-budget', 'test-agent'),
+      ioPort: new RecordingIOPort(
+        new DefaultIOPort(new SequentialGateway([])),
+        eventStore,
+        'trace-action-budget',
+      ),
+      extraTools: [{
+        name: 'action',
+        description: 'action',
+        inputSchema: { type: 'object', properties: {} },
+        handler,
+      }],
+    })
+
+    const result = await runtime.run('go')
+
+    expect(handler).not.toHaveBeenCalled()
+    expect(result.status).toBe('error')
+    const response = (await eventStore.readByRunId('trace-action-budget'))
+      .find(event => event.type === 'tool.responded')!.payload as {
+        status: string
+        error?: { code?: string }
+      }
+    expect(response.status).toBe('error')
+    expect(response.error?.code).toBe('TOOL_CALL_BUDGET_EXCEEDED')
+  })
+
   it('keeps tool dispatch unlimited when max_tool_calls is omitted', async () => {
     const handler = jest.fn(async () => 'ok')
     const gateway = new SequentialGateway([
