@@ -80,7 +80,7 @@ export class OpenAICompatibleAdapter implements IModelGateway {
     }
 
     // Accumulate tool_call fragments keyed by their stream `index`.
-    const toolCalls = new Map<number, { id: string; argsBuf: string }>()
+    const toolCalls = new Map<number, { id: string; argsBuf: string; sawArguments: boolean }>()
 
     try {
       for await (const chunk of stream) {
@@ -97,14 +97,17 @@ export class OpenAICompatibleAdapter implements IModelGateway {
         if (!entry) {
           // id 仅在该 index 首片读取（OpenAI 协议保证 id 在首片出现，后续片省略）。
           const id = tc.id ?? `idx-${index}`
-          entry = { id, argsBuf: '' }
+          entry = { id, argsBuf: '', sawArguments: false }
           toolCalls.set(index, entry)
           yield { type: 'tool_call_start', data: { toolCallId: id, name: tc.function?.name ?? '' } }
         }
         const argsPiece = tc.function?.arguments
-        if (argsPiece) {
-          entry.argsBuf += argsPiece
-          yield { type: 'tool_call_delta', data: { toolCallId: entry.id, delta: argsPiece } }
+        if (argsPiece !== undefined) {
+          entry.sawArguments = true
+          if (argsPiece) {
+            entry.argsBuf += argsPiece
+            yield { type: 'tool_call_delta', data: { toolCallId: entry.id, delta: argsPiece } }
+          }
         }
       }
 
@@ -114,7 +117,13 @@ export class OpenAICompatibleAdapter implements IModelGateway {
         for (const entry of toolCalls.values()) {
           let input: unknown = {}
           let invalidArguments: ToolCall['invalidArguments']
-          if (entry.argsBuf) {
+          if (!entry.sawArguments) {
+            invalidArguments = {
+              code:      'TOOL_ARGUMENTS_INVALID_JSON',
+              message:   'Tool arguments are not valid JSON',
+              rawLength: 0,
+            }
+          } else if (entry.argsBuf) {
             try {
               input = JSON.parse(entry.argsBuf)
             } catch {

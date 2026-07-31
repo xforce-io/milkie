@@ -291,9 +291,32 @@ describe('OpenAICompatibleAdapter.stream — token-level streaming', () => {
     })
   })
 
-  test('7b. empty arguments buffer → tool_call_done input = {}', async () => {
+  test('7b. missing arguments field → tool_call_done preserves failure metadata', async () => {
     const { adapter } = adapterWithChunks([
-      toolChunk([{ index: 0, id: 'call_empty', name: 'noargs' }]),
+      toolChunk([{ index: 0, id: 'call_missing', name: 'noargs' }]),
+      toolChunk([], 'tool_calls'),
+    ])
+    const events = await collect(adapter)
+    expect(events).toEqual([
+      { type: 'tool_call_start', data: { toolCallId: 'call_missing', name: 'noargs' } },
+      {
+        type: 'tool_call_done',
+        data: {
+          toolCallId: 'call_missing',
+          input:      {},
+          invalidArguments: {
+            code:      'TOOL_ARGUMENTS_INVALID_JSON',
+            message:   'Tool arguments are not valid JSON',
+            rawLength: 0,
+          },
+        },
+      },
+    ])
+  })
+
+  test('7c. explicit empty arguments fragment remains a valid empty input', async () => {
+    const { adapter } = adapterWithChunks([
+      toolChunk([{ index: 0, id: 'call_empty', name: 'noargs', arguments: '' }]),
       toolChunk([], 'tool_calls'),
     ])
     const events = await collect(adapter)
