@@ -1,4 +1,4 @@
-import type { Message, MessageContent } from './common.js'
+import type { InvalidToolArguments, Message, MessageContent } from './common.js'
 import type { ToolCall } from './tool.js'
 import type { JSONSchema } from './common.js'
 
@@ -76,7 +76,7 @@ export type ModelEvent =
   | { type: 'message_delta'; data: { text: string } }
   | { type: 'tool_call_start'; data: { toolCallId: string; name: string } }
   | { type: 'tool_call_delta'; data: { toolCallId: string; delta: unknown } }
-  | { type: 'tool_call_done'; data: { toolCallId: string; input: unknown } }
+  | { type: 'tool_call_done'; data: { toolCallId: string; input: unknown; invalidArguments?: InvalidToolArguments } }
   | { type: 'usage'; data: ModelUsage }
   | { type: 'error'; data: { code: string; message: string; retryable?: boolean } }
 

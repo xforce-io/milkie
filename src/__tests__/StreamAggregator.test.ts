@@ -258,13 +258,23 @@ describe('StreamAggregator — tool_call TC-3: JSON.parse 失败回退 {}', () =
     expect(result.toolCalls).toHaveLength(1)
     const tc3 = result.toolCalls[0]!
     expect(tc3.input).toEqual({})
+    expect(tc3).toMatchObject({
+      invalidArguments: {
+        code:      'TOOL_ARGUMENTS_INVALID_JSON',
+        message:   'Tool arguments are not valid JSON',
+        rawLength: 'invalid-json{'.length,
+      },
+    })
 
     // content 里也是 {}
-    expect(result.content[0]).toEqual({
+    expect(result.content[0]).toMatchObject({
       type: 'tool_use',
-      id: 'tc-3',
+      id:   'tc-3',
       name: 'broken',
       input: {},
+      invalidArguments: {
+        code: 'TOOL_ARGUMENTS_INVALID_JSON',
+      },
     })
   })
 })

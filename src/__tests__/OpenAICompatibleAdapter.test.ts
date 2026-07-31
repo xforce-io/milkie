@@ -71,6 +71,53 @@ describe('OpenAICompatibleAdapter — cache stats extraction', () => {
   })
 })
 
+describe('OpenAICompatibleAdapter — invalid tool arguments', () => {
+  test('preserves malformed arguments metadata while valid empty object remains valid', () => {
+    const adapter = new OpenAICompatibleAdapter({ apiKey: 'sk-test' })
+    const response = parseResponseOf(adapter, {
+      choices: [{
+        message: {
+          role: 'assistant',
+          tool_calls: [{
+            id:       'call-invalid',
+            type:     'function',
+            function: { name: 'search', arguments: '{"query":' },
+          }],
+        },
+        finish_reason: 'tool_calls',
+      }],
+    })
+    const validEmpty = parseResponseOf(adapter, {
+      choices: [{
+        message: {
+          role: 'assistant',
+          tool_calls: [{
+            id:       'call-empty',
+            type:     'function',
+            function: { name: 'search', arguments: '{}' },
+          }],
+        },
+        finish_reason: 'tool_calls',
+      }],
+    })
+
+    expect(response.toolCalls[0]).toMatchObject({
+      input: {},
+      invalidArguments: {
+        code:      'TOOL_ARGUMENTS_INVALID_JSON',
+        message:   'Tool arguments are not valid JSON',
+        rawLength: '{"query":'.length,
+      },
+    })
+    expect(response.content[0]).toMatchObject({
+      type: 'tool_use',
+      input: {},
+      invalidArguments: { code: 'TOOL_ARGUMENTS_INVALID_JSON' },
+    })
+    expect(validEmpty.toolCalls[0]).not.toHaveProperty('invalidArguments')
+  })
+})
+
 describe('OpenAICompatibleAdapter — temperature passthrough (#126)', () => {
   const baseReq: ModelRequest = {
     model:    'qwen-turbo',

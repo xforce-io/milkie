@@ -113,14 +113,26 @@ export class OpenAICompatibleAdapter implements IModelGateway {
       if (choice?.finish_reason && toolCalls.size > 0) {
         for (const entry of toolCalls.values()) {
           let input: unknown = {}
+          let invalidArguments: ToolCall['invalidArguments']
           if (entry.argsBuf) {
             try {
               input = JSON.parse(entry.argsBuf)
             } catch {
-              input = {}
+              invalidArguments = {
+                code:      'TOOL_ARGUMENTS_INVALID_JSON',
+                message:   'Tool arguments are not valid JSON',
+                rawLength: entry.argsBuf.length,
+              }
             }
           }
-          yield { type: 'tool_call_done', data: { toolCallId: entry.id, input } }
+          yield {
+            type: 'tool_call_done',
+            data: {
+              toolCallId: entry.id,
+              input,
+              ...(invalidArguments !== undefined ? { invalidArguments } : {}),
+            },
+          }
         }
         toolCalls.clear()
       }
@@ -217,13 +229,30 @@ export class OpenAICompatibleAdapter implements IModelGateway {
     for (const tc of msg.tool_calls ?? []) {
       if (tc.type !== 'function') continue
       let input: unknown
+      let invalidArguments: ToolCall['invalidArguments']
       try {
         input = JSON.parse(tc.function.arguments)
       } catch {
         input = {}
+        invalidArguments = {
+          code:      'TOOL_ARGUMENTS_INVALID_JSON',
+          message:   'Tool arguments are not valid JSON',
+          rawLength: tc.function.arguments.length,
+        }
       }
-      content.push({ type: 'tool_use', id: tc.id, name: tc.function.name, input })
-      toolCalls.push({ id: tc.id, name: tc.function.name, input })
+      content.push({
+        type: 'tool_use',
+        id: tc.id,
+        name: tc.function.name,
+        input,
+        ...(invalidArguments !== undefined ? { invalidArguments } : {}),
+      })
+      toolCalls.push({
+        id: tc.id,
+        name: tc.function.name,
+        input,
+        ...(invalidArguments !== undefined ? { invalidArguments } : {}),
+      })
     }
 
     // PR-D follow-up: OpenAI's chat completions response includes
