@@ -11,6 +11,7 @@ export interface FSMState {
 
 export interface FSMDefinition {
   states: FSMState[]
+  max_tool_calls?: number
 }
 
 export interface ModelConfig {

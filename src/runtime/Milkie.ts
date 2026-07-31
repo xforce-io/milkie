@@ -1035,9 +1035,17 @@ export class Milkie {
   }
 
   private parseConfig(data: Record<string, unknown>, systemPrompt: string): AgentConfig {
-    const fsm = data['fsm'] as { states: unknown[] } | undefined
+    const fsm = data['fsm'] as { states: unknown[]; max_tool_calls?: unknown } | undefined
     if (!fsm || !Array.isArray(fsm.states)) {
       throw new Error('Agent config must have fsm.states')
+    }
+
+    const maxToolCalls = fsm.max_tool_calls
+    if (
+      maxToolCalls !== undefined &&
+      (typeof maxToolCalls !== 'number' || !Number.isInteger(maxToolCalls) || maxToolCalls < 0)
+    ) {
+      throw new Error('Agent config fsm.max_tool_calls must be a non-negative integer')
     }
 
     const model = data['model'] as Record<string, string> | undefined
