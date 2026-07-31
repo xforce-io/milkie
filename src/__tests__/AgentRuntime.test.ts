@@ -12,7 +12,7 @@ import type { AgentConfig } from '../types/agent'
 import type { AgentCheckpoint } from '../types/store'
 import type { IModelGateway, ModelRequest, ModelResponse } from '../types/model'
 import type { ToolDefinition } from '../types/tool'
-import type { AgentReturnedPayload } from '../trace/types'
+import type { AgentReturnedPayload, ToolRequestedPayload, ToolRespondedPayload } from '../trace/types'
 
 // ---- Fixtures ----
 
@@ -42,7 +42,10 @@ class SequentialGateway implements IModelGateway {
     this.responses = responses
   }
 
-  async complete(_req: ModelRequest): Promise<ModelResponse> {
+  requests: ModelRequest[] = []
+
+  async complete(req: ModelRequest): Promise<ModelResponse> {
+    this.requests.push(req)
     const r = this.responses[this.index++]
     if (!r) throw new Error('No more mock responses')
     return r
@@ -664,6 +667,92 @@ describe('#81 readable tool payload through a run', () => {
     expect(res.toolCallId).toBe(req.toolCallId)
     expect(res.status).toBe('ok')
     expect(res.output).toEqual({ results: ['result1'] })
+  })
+})
+
+describe('#219 invalid tool arguments', () => {
+  it('rejects malformed JSON before the handler, records its identity, and still permits a valid empty input', async () => {
+    const eventStore = new MemoryEventStore()
+    const handler = jest.fn(async () => ({ ok: true }))
+    const gateway = new SequentialGateway([
+      {
+        content: [{
+          type: 'tool_use',
+          id:   'invalid-call',
+          name: 'search',
+          input: {},
+          invalidArguments: {
+            code:      'TOOL_ARGUMENTS_INVALID_JSON',
+            message:   'Tool arguments are not valid JSON',
+            rawLength: 9,
+          },
+        }],
+        toolCalls: [{
+          id:   'invalid-call',
+          name: 'search',
+          input: {},
+          invalidArguments: {
+            code:      'TOOL_ARGUMENTS_INVALID_JSON',
+            message:   'Tool arguments are not valid JSON',
+            rawLength: 9,
+          },
+        }],
+        finishReason: 'tool_use',
+      },
+      toolCallResponse('valid-empty-call', 'search', {}),
+      textResponse('done'),
+    ])
+    const runId = 'run-219'
+    const runtime = new AgentRuntime({
+      config:     makeConfig(),
+      goal:       'test malformed tool arguments',
+      input:      'go',
+      stateStore: new MemoryStore(),
+      recorder:   new InMemoryRecorder(),
+      ioPort:     new RecordingIOPort(new DefaultIOPort(gateway), eventStore, runId),
+      eventStore,
+      agentRunId: runId,
+      extraTools: [{
+        name:        'search',
+        description: 'search',
+        inputSchema: { type: 'object', properties: {} },
+        handler,
+      }],
+    })
+
+    await expect(runtime.run('go')).resolves.toMatchObject({ status: 'completed', output: 'done' })
+    expect(handler).toHaveBeenCalledTimes(1)
+    expect(handler).toHaveBeenCalledWith({}, expect.anything())
+
+    const rejectedResult = gateway.requests[1]!.messages
+      .flatMap(message => message.content)
+      .find(content => content.type === 'tool_result')
+    expect(rejectedResult).toMatchObject({
+      is_error: true,
+      content: JSON.stringify({
+        code:    'TOOL_ARGUMENTS_INVALID_JSON',
+        message: 'Tool arguments are not valid JSON',
+      }),
+    })
+
+    const events = await eventStore.readByRunId(runId)
+    const requests = events
+      .filter(event => event.type === 'tool.requested')
+      .map(event => event.payload as ToolRequestedPayload)
+    const responses = events
+      .filter(event => event.type === 'tool.responded')
+      .map(event => event.payload as ToolRespondedPayload)
+    expect(requests).toHaveLength(2)
+    expect(requests[0]).toMatchObject({
+      toolCallId: 'invalid-call',
+      invalidArguments: { code: 'TOOL_ARGUMENTS_INVALID_JSON' },
+    })
+    expect(responses[0]).toMatchObject({
+      toolCallId: 'invalid-call',
+      status:     'error',
+      error:      { code: 'TOOL_ARGUMENTS_INVALID_JSON' },
+    })
+    expect(requests[0]!.requestHash).not.toBe(requests[1]!.requestHash)
   })
 })
 

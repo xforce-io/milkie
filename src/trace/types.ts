@@ -1,4 +1,5 @@
 import type { AgentErrorEnvelope, ModelRequest, ModelResponse } from '../types/model.js'
+import type { InvalidToolArguments } from '../types/common.js'
 
 /**
  * Agent Trace event types.
@@ -73,6 +74,8 @@ export interface ToolRequestedPayload {
    */
   toolCallId?: string
   /** Phase 3: hash of canonicalized (toolName + input); cache key for replay. */
+  /** #219: malformed provider arguments rejected before handler execution. */
+  invalidArguments?: InvalidToolArguments
   requestHash: string
 }
 
@@ -97,6 +100,8 @@ export interface ToolRespondedPayload {
     name?:      string
   }
   /** Mirrors the requested-event hash. */
+  /** Mirrors the requested invalid-argument metadata when the call was rejected. */
+  invalidArguments?: InvalidToolArguments
   requestHash: string
   /** #25: 成功时 hashCanonical(output) → "sha256:..."；error 分支不填。 */
   outputHash?:   string

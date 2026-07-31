@@ -74,11 +74,16 @@ export interface ToolCall {
   invalidArguments?: InvalidToolArguments
 }
 
+export interface ToolError {
+  code:    string
+  message: string
+}
+
 export interface ToolResult {
   toolCallId: string
   toolName:   string
   output:     unknown
-  error?:     string
+  error?:     string | ToolError
   isError:    boolean
   duration:   number
 }

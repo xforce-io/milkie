@@ -1,5 +1,5 @@
 import type { ModelRequest, ModelResponse, ModelEvent } from '../types/model.js'
-import type { IIOPort } from '../runtime/IOPort.js'
+import type { IIOPort, ToolInvocationOptions } from '../runtime/IOPort.js'
 import type { IEventStore } from './EventStore.js'
 import type {
   LlmRequestedPayload,
@@ -228,10 +228,10 @@ export class RecordingIOPort implements IIOPort {
     toolName: string,
     input: unknown,
     execute: () => Promise<unknown>,
-    opts?: { toolCallId?: string; lineage?: LineageBuffer },
+    opts?: ToolInvocationOptions,
   ): Promise<unknown> {
     await this.flushPendingNondet()
-    const requestHash = hashToolCall(toolName, input)
+    const requestHash = hashToolCall(toolName, input, opts?.invalidArguments)
     // #81: only stamp toolCallId when supplied, so id-less callers stay clean and
     // old traces (no id) read back identically.
     const idField = opts?.toolCallId ? { toolCallId: opts.toolCallId } : {}
@@ -244,7 +244,7 @@ export class RecordingIOPort implements IIOPort {
       // edge 1: this call was decided by the most recent llm.responded (the frame carrying toolCalls).
       ...(this.cursor?.lastLlmRespondedId ? { causedBy: this.cursor.lastLlmRespondedId } : {}),
       timestamp: this.inner.now(),
-      payload:   { toolName, ...idField, input, requestHash } satisfies ToolRequestedPayload,
+      payload:   { toolName, ...idField, input, requestHash, ...(opts?.invalidArguments ? { invalidArguments: opts.invalidArguments } : {}) } satisfies ToolRequestedPayload,
     })
     if (this.cursor) this.cursor.lastIoEventId = reqEventId
 
@@ -294,7 +294,7 @@ export class RecordingIOPort implements IIOPort {
         actor:     this.actor,
         causedBy:  reqEventId,
         timestamp: this.inner.now(),
-        payload:   { toolName, ...idField, status: 'error', error: errorPayload, requestHash } satisfies ToolRespondedPayload,
+        payload:   { toolName, ...idField, status: 'error', error: errorPayload, requestHash, ...(opts?.invalidArguments ? { invalidArguments: opts.invalidArguments } : {}) } satisfies ToolRespondedPayload,
       })
       // An errored tool.responded still terminates the turn — the next llm.requested follows it.
       if (this.cursor) {

@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from 'uuid'
 import type { ModelRequest, ModelResponse, ModelEvent, IModelGateway } from '../types/model.js'
+import type { InvalidToolArguments } from '../types/common.js'
 import type { LineageBuffer } from '../trace/types.js'
 import { aggregateStream } from '../gateway/StreamAggregator.js'
 
@@ -27,6 +28,12 @@ import { aggregateStream } from '../gateway/StreamAggregator.js'
  *   - (target) ReplayIOPort: serves cached responses by request hash, returns
  *     recorded clock / UUID values from the non-determinism log.
  */
+export interface ToolInvocationOptions {
+  toolCallId?:       string
+  lineage?:          LineageBuffer
+  invalidArguments?: InvalidToolArguments
+}
+
 export interface IIOPort {
   /**
    * Invoke a language model.
@@ -60,7 +67,7 @@ export interface IIOPort {
     toolName: string,
     input: unknown,
     execute: () => Promise<unknown>,
-    opts?: { toolCallId?: string; lineage?: LineageBuffer },
+    opts?: ToolInvocationOptions,
   ): Promise<unknown>
 
   /** Current epoch milliseconds. Replacement for direct `Date.now()`. */
