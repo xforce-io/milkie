@@ -120,6 +120,31 @@ describe('OpenAICompatibleAdapter — invalid tool arguments', () => {
     expect(validEmpty.toolCalls[0]).not.toHaveProperty('invalidArguments')
     expect(response.raw).toBeUndefined()
   })
+  test('marks missing function arguments invalid with a safe zero raw length', () => {
+    const adapter = new OpenAICompatibleAdapter({ apiKey: 'sk-test' })
+    const response = parseResponseOf(adapter, {
+      choices: [{
+        message: {
+          role: 'assistant',
+          tool_calls: [{
+            id:       'call-missing',
+            type:     'function',
+            function: { name: 'search' },
+          }],
+        },
+        finish_reason: 'tool_calls',
+      }],
+    })
+
+    expect(response.toolCalls[0]).toMatchObject({
+      input: {},
+      invalidArguments: {
+        code:      'TOOL_ARGUMENTS_INVALID_JSON',
+        message:   'Tool arguments are not valid JSON',
+        rawLength: 0,
+      },
+    })
+  })
   test('does not record malformed provider arguments in llm.responded', async () => {
     const adapter = new OpenAICompatibleAdapter({ apiKey: 'sk-test' })
     const response = parseResponseOf(adapter, {

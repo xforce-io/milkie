@@ -228,16 +228,24 @@ export class OpenAICompatibleAdapter implements IModelGateway {
 
     for (const tc of msg.tool_calls ?? []) {
       if (tc.type !== 'function') continue
-      let input: unknown
+      let input: unknown = {}
       let invalidArguments: ToolCall['invalidArguments']
-      try {
-        input = JSON.parse(tc.function.arguments)
-      } catch {
-        input = {}
+      const argumentsText = tc.function.arguments
+      if (typeof argumentsText !== 'string') {
         invalidArguments = {
           code:      'TOOL_ARGUMENTS_INVALID_JSON',
           message:   'Tool arguments are not valid JSON',
-          rawLength: tc.function.arguments.length,
+          rawLength: 0,
+        }
+      } else {
+        try {
+          input = JSON.parse(argumentsText)
+        } catch {
+          invalidArguments = {
+            code:      'TOOL_ARGUMENTS_INVALID_JSON',
+            message:   'Tool arguments are not valid JSON',
+            rawLength: argumentsText.length,
+          }
         }
       }
       content.push({
