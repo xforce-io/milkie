@@ -198,6 +198,9 @@ sys`
       writeTerminalErrorAgentFile('router.md', 'router')
       writeManifest([{ id: 'router', file: '../agents/router.md' }])
 
+      const childEnv = { ...process.env }
+      delete childEnv.LOG_LEVEL
+
       const child = spawnSync(
         process.execPath,
         [
@@ -210,7 +213,7 @@ sys`
           '--input',
           'fail',
         ],
-        { cwd: tmpDir, encoding: 'utf8' },
+        { cwd: tmpDir, encoding: 'utf8', env: childEnv },
       )
 
       expect(child.status).toBe(1)
