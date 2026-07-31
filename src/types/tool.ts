@@ -1,4 +1,4 @@
-import type { JSONSchema } from './common.js'
+import type { InvalidToolArguments, JSONSchema } from './common.js'
 import type { WorkingMemory } from '../store/WorkingMemory.js'
 import type { IStateStore } from './store.js'
 import type { AgentFactory } from '../runtime/AgentFactory.js'
@@ -68,16 +68,22 @@ export interface ToolDefinition {
 }
 
 export interface ToolCall {
-  id:    string
-  name:  string
-  input: unknown
+  id:                string
+  name:              string
+  input:             unknown
+  invalidArguments?: InvalidToolArguments
+}
+
+export interface ToolError {
+  code:    string
+  message: string
 }
 
 export interface ToolResult {
   toolCallId: string
   toolName:   string
   output:     unknown
-  error?:     string
+  error?:     string | ToolError
   isError:    boolean
   duration:   number
 }

@@ -1,5 +1,6 @@
 import { createHash } from 'crypto'
 import type { ModelRequest } from '../types/model.js'
+import type { InvalidToolArguments } from '../types/common.js'
 
 /**
  * Canonical JSON serialization: object keys sorted recursively,
@@ -46,6 +47,10 @@ export function hashModelRequest(req: ModelRequest): string {
   return sha256Hex(canonicalize(req))
 }
 
-export function hashToolCall(toolName: string, input: unknown): string {
-  return sha256Hex(canonicalize({ toolName, input }))
+export function hashToolCall(
+  toolName: string,
+  input: unknown,
+  invalidArguments?: InvalidToolArguments,
+): string {
+  return sha256Hex(canonicalize({ toolName, input, invalidArguments }))
 }

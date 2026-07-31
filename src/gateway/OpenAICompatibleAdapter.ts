@@ -80,7 +80,7 @@ export class OpenAICompatibleAdapter implements IModelGateway {
     }
 
     // Accumulate tool_call fragments keyed by their stream `index`.
-    const toolCalls = new Map<number, { id: string; argsBuf: string }>()
+    const toolCalls = new Map<number, { id: string; argsBuf: string; sawArguments: boolean }>()
 
     try {
       for await (const chunk of stream) {
@@ -97,14 +97,17 @@ export class OpenAICompatibleAdapter implements IModelGateway {
         if (!entry) {
           // id 仅在该 index 首片读取（OpenAI 协议保证 id 在首片出现，后续片省略）。
           const id = tc.id ?? `idx-${index}`
-          entry = { id, argsBuf: '' }
+          entry = { id, argsBuf: '', sawArguments: false }
           toolCalls.set(index, entry)
           yield { type: 'tool_call_start', data: { toolCallId: id, name: tc.function?.name ?? '' } }
         }
         const argsPiece = tc.function?.arguments
-        if (argsPiece) {
-          entry.argsBuf += argsPiece
-          yield { type: 'tool_call_delta', data: { toolCallId: entry.id, delta: argsPiece } }
+        if (argsPiece !== undefined) {
+          entry.sawArguments = true
+          if (argsPiece) {
+            entry.argsBuf += argsPiece
+            yield { type: 'tool_call_delta', data: { toolCallId: entry.id, delta: argsPiece } }
+          }
         }
       }
 
@@ -113,14 +116,32 @@ export class OpenAICompatibleAdapter implements IModelGateway {
       if (choice?.finish_reason && toolCalls.size > 0) {
         for (const entry of toolCalls.values()) {
           let input: unknown = {}
-          if (entry.argsBuf) {
+          let invalidArguments: ToolCall['invalidArguments']
+          if (!entry.sawArguments || entry.argsBuf === '') {
+            invalidArguments = {
+              code:      'TOOL_ARGUMENTS_INVALID_JSON',
+              message:   'Tool arguments are not valid JSON',
+              rawLength: 0,
+            }
+          } else {
             try {
               input = JSON.parse(entry.argsBuf)
             } catch {
-              input = {}
+              invalidArguments = {
+                code:      'TOOL_ARGUMENTS_INVALID_JSON',
+                message:   'Tool arguments are not valid JSON',
+                rawLength: entry.argsBuf.length,
+              }
             }
           }
-          yield { type: 'tool_call_done', data: { toolCallId: entry.id, input } }
+          yield {
+            type: 'tool_call_done',
+            data: {
+              toolCallId: entry.id,
+              input,
+              ...(invalidArguments !== undefined ? { invalidArguments } : {}),
+            },
+          }
         }
         toolCalls.clear()
       }
@@ -216,14 +237,39 @@ export class OpenAICompatibleAdapter implements IModelGateway {
 
     for (const tc of msg.tool_calls ?? []) {
       if (tc.type !== 'function') continue
-      let input: unknown
-      try {
-        input = JSON.parse(tc.function.arguments)
-      } catch {
-        input = {}
+      let input: unknown = {}
+      let invalidArguments: ToolCall['invalidArguments']
+      const argumentsText = tc.function.arguments
+      if (typeof argumentsText !== 'string') {
+        invalidArguments = {
+          code:      'TOOL_ARGUMENTS_INVALID_JSON',
+          message:   'Tool arguments are not valid JSON',
+          rawLength: 0,
+        }
+      } else {
+        try {
+          input = JSON.parse(argumentsText)
+        } catch {
+          invalidArguments = {
+            code:      'TOOL_ARGUMENTS_INVALID_JSON',
+            message:   'Tool arguments are not valid JSON',
+            rawLength: argumentsText.length,
+          }
+        }
       }
-      content.push({ type: 'tool_use', id: tc.id, name: tc.function.name, input })
-      toolCalls.push({ id: tc.id, name: tc.function.name, input })
+      content.push({
+        type: 'tool_use',
+        id: tc.id,
+        name: tc.function.name,
+        input,
+        ...(invalidArguments !== undefined ? { invalidArguments } : {}),
+      })
+      toolCalls.push({
+        id: tc.id,
+        name: tc.function.name,
+        input,
+        ...(invalidArguments !== undefined ? { invalidArguments } : {}),
+      })
     }
 
     // PR-D follow-up: OpenAI's chat completions response includes
@@ -240,6 +286,6 @@ export class OpenAICompatibleAdapter implements IModelGateway {
         }
       : undefined
 
-    return { content, toolCalls, usage, finishReason: choice.finish_reason ?? undefined, raw }
+    return { content, toolCalls, usage, finishReason: choice.finish_reason ?? undefined }
   }
 }

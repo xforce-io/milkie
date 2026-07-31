@@ -258,14 +258,58 @@ describe('StreamAggregator — tool_call TC-3: JSON.parse 失败回退 {}', () =
     expect(result.toolCalls).toHaveLength(1)
     const tc3 = result.toolCalls[0]!
     expect(tc3.input).toEqual({})
+    expect(tc3).toMatchObject({
+      invalidArguments: {
+        code:      'TOOL_ARGUMENTS_INVALID_JSON',
+        message:   'Tool arguments are not valid JSON',
+        rawLength: 'invalid-json{'.length,
+      },
+    })
 
     // content 里也是 {}
-    expect(result.content[0]).toEqual({
+    expect(result.content[0]).toMatchObject({
       type: 'tool_use',
-      id: 'tc-3',
+      id:   'tc-3',
       name: 'broken',
       input: {},
+      invalidArguments: {
+        code: 'TOOL_ARGUMENTS_INVALID_JSON',
+      },
     })
+  })
+})
+
+describe('StreamAggregator — missing streamed tool arguments', () => {
+  test('start followed by done without input or deltas preserves invalid arguments metadata', async () => {
+    const result = await aggregateStream(events([
+      { type: 'tool_call_start', data: { toolCallId: 'tc-empty', name: 'missing_arguments' } },
+      { type: 'tool_call_done', data: { toolCallId: 'tc-empty', input: undefined } },
+    ]))
+
+    expect(result.toolCalls).toEqual([{
+      id:       'tc-empty',
+      name:     'missing_arguments',
+      input:    {},
+      invalidArguments: {
+        code:      'TOOL_ARGUMENTS_INVALID_JSON',
+        message:   'Tool arguments are not valid JSON',
+        rawLength: 0,
+      },
+    }])
+  })
+})
+
+describe('StreamAggregator — explicit empty object arguments', () => {
+  test('an explicit empty object delta remains valid', async () => {
+    const result = await aggregateStream(events([
+      { type: 'tool_call_start', data: { toolCallId: 'tc-object', name: 'empty_object' } },
+      { type: 'tool_call_delta', data: { toolCallId: 'tc-object', delta: '{}' } },
+      { type: 'tool_call_done', data: { toolCallId: 'tc-object', input: undefined } },
+    ]))
+
+    expect(result.toolCalls).toEqual([
+      { id: 'tc-object', name: 'empty_object', input: {} },
+    ])
   })
 })
 
@@ -374,24 +418,32 @@ describe('StreamAggregator — tool_call TC-7: text + tool_call 共存', () => {
 })
 
 // ---------------------------------------------------------------------------
-// TC-8. 空 argsBuf（start → done，无 delta，无 done.input）→ input={}
+// TC-8. 空 argsBuf（start → done，无 delta，无 done.input）→ invalidArguments
 // ---------------------------------------------------------------------------
-describe('StreamAggregator — tool_call TC-8: 空 argsBuf → input={}', () => {
-  test('只有 start 和 done（无 delta，done 无 input），toolCalls[0].input = {}', async () => {
+describe('StreamAggregator — tool_call TC-8: empty argsBuf is invalid', () => {
+  test('start and done without delta or input preserves invalid arguments metadata', async () => {
     const input: ModelEvent[] = [
       { type: 'tool_call_start', data: { toolCallId: 'tc-8', name: 'ping' } },
       { type: 'tool_call_done',  data: { toolCallId: 'tc-8', input: undefined } },
     ]
     const result = await aggregateStream(events(input))
 
-    expect(result.toolCalls).toHaveLength(1)
-    expect(result.toolCalls[0]).toEqual({ id: 'tc-8', name: 'ping', input: {} })
-
-    expect(result.content[0]).toEqual({
+    expect(result.toolCalls).toEqual([{
+      id:       'tc-8',
+      name:     'ping',
+      input:    {},
+      invalidArguments: {
+        code:      'TOOL_ARGUMENTS_INVALID_JSON',
+        message:   'Tool arguments are not valid JSON',
+        rawLength: 0,
+      },
+    }])
+    expect(result.content[0]).toMatchObject({
       type: 'tool_use',
-      id: 'tc-8',
+      id:   'tc-8',
       name: 'ping',
       input: {},
+      invalidArguments: { code: 'TOOL_ARGUMENTS_INVALID_JSON' },
     })
   })
 })
@@ -451,27 +503,34 @@ describe('StreamAggregator — robustness / null input: done.input=null 的语�
 })
 
 // ---------------------------------------------------------------------------
-// ROBUSTNESS-3. 先 delta 后 start（乱序）→ delta 被忽略，最终 input={}
+// ROBUSTNESS-3. 先 delta 后 start（乱序）→ delta 被忽略，参数无效
 // ---------------------------------------------------------------------------
-describe('StreamAggregator — robustness / out-of-order: delta 先于 start 到达', () => {
-  test('delta(z) 在 start(z) 之前：delta 静默丢弃，argsBuf 为空，最终 input={}', async () => {
+describe('StreamAggregator — robustness / out-of-order: delta before start', () => {
+  test('a discarded pre-start delta leaves the tool arguments invalid', async () => {
     const input: ModelEvent[] = [
-      // delta 先到，此时 Map 中还没有 'z'，守卫 if(acc) 静默跳过
+      // The accumulator does not exist yet, so this delta is ignored.
       { type: 'tool_call_delta', data: { toolCallId: 'z', delta: '{"a":1}' } },
-      // start 后到，建立空 argsBuf
       { type: 'tool_call_start', data: { toolCallId: 'z', name: 'late-start' } },
       { type: 'tool_call_done',  data: { toolCallId: 'z', input: undefined } },
     ]
     const result = await aggregateStream(events(input))
 
-    expect(result.toolCalls).toHaveLength(1)
-    // delta 被丢弃 → argsBuf='' → 空字符串走 falsy 分支 → input={}
-    expect(result.toolCalls[0]).toEqual({ id: 'z', name: 'late-start', input: {} })
-    expect(result.content[0]).toEqual({
+    expect(result.toolCalls).toEqual([{
+      id:       'z',
+      name:     'late-start',
+      input:    {},
+      invalidArguments: {
+        code:      'TOOL_ARGUMENTS_INVALID_JSON',
+        message:   'Tool arguments are not valid JSON',
+        rawLength: 0,
+      },
+    }])
+    expect(result.content[0]).toMatchObject({
       type: 'tool_use',
-      id: 'z',
+      id:   'z',
       name: 'late-start',
       input: {},
+      invalidArguments: { code: 'TOOL_ARGUMENTS_INVALID_JSON' },
     })
   })
 })

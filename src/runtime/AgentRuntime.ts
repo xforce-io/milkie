@@ -6,7 +6,7 @@ import { MaxIterationsError } from '../types/common.js'
 import type { AgentErrorEnvelope } from '../types/model.js'
 import type { IStateStore, AgentCheckpoint, ChildAgentRecord } from '../types/store.js'
 import type { ITrajectoryRecorder, Span } from '../types/trajectory.js'
-import type { ToolDefinition, ToolContext, ToolResult, ToolResultStrategy } from '../types/tool.js'
+import type { ToolDefinition, ToolContext, ToolCall, ToolResult, ToolResultStrategy } from '../types/tool.js'
 import { applyShape, serializeOutput } from './toolResultStrategy.js'
 import type { MessageContent, JSONValue } from '../types/common.js'
 import { FSMEngine } from '../fsm/FSMEngine.js'
@@ -1207,7 +1207,7 @@ export class AgentRuntime {
   }
 
   private async executeTools(
-    calls: Array<{ id: string; name: string; input: unknown }>,
+    calls: ToolCall[],
     allowedTools?: string[],
   ): Promise<ToolResult[]> {
     const tools    = this.registry.getForState(allowedTools)
@@ -1262,7 +1262,7 @@ export class AgentRuntime {
   }
 
   private async executeSingleTool(
-    call: { id: string; name: string; input: unknown },
+    call: ToolCall,
     batchId: string | null,
   ): Promise<ToolResult> {
 
@@ -1320,8 +1320,15 @@ export class AgentRuntime {
         const output   = await this.ioPort.invokeTool(
           call.name,
           call.input,
-          () => this.registry.execute(call.name, call.input, ctx),
-          { toolCallId: call.id, lineage },  // #81 pairing id; #37/#38 lineage sink
+          () => {
+            if (call.invalidArguments) {
+              return Promise.reject(Object.assign(new Error(call.invalidArguments.message), {
+                code: call.invalidArguments.code,
+              }))
+            }
+            return this.registry.execute(call.name, call.input, ctx)
+          },
+          { toolCallId: call.id, lineage, invalidArguments: call.invalidArguments },  // #81 pairing id; #37/#38 lineage sink
         )
         span.attributes['output'] = output
         // SPIKE(#73): event-source tool WM side-effects so replay reconstructs them.
@@ -1353,7 +1360,16 @@ export class AgentRuntime {
         if (!retryable || isLastAttempt) {
           const error = err instanceof Error ? err.message : String(err)
           this.recorder.endSpan(span, 'error')
-          return { toolCallId: call.id, toolName: call.name, output: null, error, isError: true, duration }
+          return {
+            toolCallId: call.id,
+            toolName:   call.name,
+            output:     null,
+            error:      call.invalidArguments
+              ? { code: call.invalidArguments.code, message: call.invalidArguments.message }
+              : error,
+            isError:    true,
+            duration,
+          }
         }
 
         this.recorder.endSpan(span, 'error')

@@ -4,6 +4,13 @@ export type JSONValue = string | number | boolean | null | JSONValue[] | { [k: s
 export type JSONObject = Record<string, JSONValue>
 export type JSONSchema = Record<string, unknown>
 
+export interface InvalidToolArguments {
+  code:      'TOOL_ARGUMENTS_INVALID_JSON'
+  message:   string
+  rawLength?: number
+}
+
+
 export interface Message {
   role: 'user' | 'assistant' | 'tool'
   content: MessageContent[]
@@ -11,7 +18,7 @@ export interface Message {
 
 export type MessageContent =
   | { type: 'text'; text: string }
-  | { type: 'tool_use'; id: string; name: string; input: unknown }
+  | { type: 'tool_use'; id: string; name: string; input: unknown; invalidArguments?: InvalidToolArguments }
   | { type: 'tool_result'; tool_use_id: string; content: string; is_error?: boolean }
 
 export type TaskResult =

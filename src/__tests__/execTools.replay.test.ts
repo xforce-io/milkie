@@ -8,8 +8,13 @@ import { join } from 'node:path'
 import { Milkie } from '../runtime/Milkie'
 import { MemoryStore } from '../store/MemoryStore'
 import { MemoryEventStore } from '../trace/MemoryEventStore'
+import { RecordingIOPort } from '../trace/RecordingIOPort'
+import { ReplayingIOPort } from '../trace/ReplayingIOPort'
+import { CacheIndex } from '../trace/CacheIndex'
+import type { IIOPort } from '../runtime/IOPort'
 import type { IModelGateway, ModelRequest, ModelResponse } from '../types/model'
 import type { AgentConfig } from '../types/agent'
+import type { ToolRequestedPayload } from '../trace/types'
 
 function toolResp(id: string, name: string, input: unknown): ModelResponse {
   return { content: [{ type: 'tool_use', id, name, input }], toolCalls: [{ id, name, input }], finishReason: 'tool_use' }
@@ -25,6 +30,23 @@ class ScriptedGateway implements IModelGateway {
   }
   async *stream(_r: ModelRequest): AsyncIterable<never> { yield* [] }
 }
+
+class ReplayInnerPort implements IIOPort {
+  private clock = 0
+  private uuidValue = 0
+
+  async invokeLLM(_req: ModelRequest): Promise<ModelResponse> {
+    return { content: [], toolCalls: [], finishReason: 'end_turn' }
+  }
+
+  async invokeTool(_name: string, _input: unknown, execute: () => Promise<unknown>): Promise<unknown> {
+    return execute()
+  }
+
+  now(): number { return this.clock++ }
+  uuid(): string { return `replay-${this.uuidValue++}` }
+}
+
 
 const agent: AgentConfig = {
   agentId: 'shell-runner', version: '1.0.0',
@@ -64,5 +86,42 @@ describe('determinism: run_command (#134) replays from cache without re-executin
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
+  })
+})
+describe('#219 invalid tool arguments retain distinct replay identity', () => {
+  it('replays the rejected malformed call separately from a valid empty call without executing again', async () => {
+    const store = new MemoryEventStore()
+    const invalidArguments = {
+      code:      'TOOL_ARGUMENTS_INVALID_JSON' as const,
+      message:   'Tool arguments are not valid JSON',
+      rawLength: 9,
+    }
+    const record = new RecordingIOPort(new ReplayInnerPort(), store, 'run-219')
+    const rejectedHandler = jest.fn(async () => {
+      throw Object.assign(new Error(invalidArguments.message), { code: invalidArguments.code })
+    })
+    const validHandler = jest.fn(async () => ({ ok: true }))
+
+    await expect(record.invokeTool('noop', {}, rejectedHandler, { invalidArguments }))
+      .rejects.toMatchObject({ code: 'TOOL_ARGUMENTS_INVALID_JSON' })
+    await expect(record.invokeTool('noop', {}, validHandler)).resolves.toEqual({ ok: true })
+    expect(rejectedHandler).toHaveBeenCalledTimes(1)
+    expect(validHandler).toHaveBeenCalledTimes(1)
+
+    const events = await store.readByRunId('run-219')
+    const requests = events
+      .filter(event => event.type === 'tool.requested')
+      .map(event => event.payload as ToolRequestedPayload)
+    expect(requests[0]).toMatchObject({
+      invalidArguments: { code: 'TOOL_ARGUMENTS_INVALID_JSON' },
+    })
+    expect(requests[0]!.requestHash).not.toBe(requests[1]!.requestHash)
+
+    const replayHandler = jest.fn(async () => { throw new Error('replay must not execute') })
+    const replay = new ReplayingIOPort(CacheIndex.fromEvents(events), new ReplayInnerPort())
+    await expect(replay.invokeTool('noop', {}, replayHandler, { invalidArguments }))
+      .rejects.toMatchObject({ code: 'TOOL_ARGUMENTS_INVALID_JSON' })
+    await expect(replay.invokeTool('noop', {}, replayHandler)).resolves.toEqual({ ok: true })
+    expect(replayHandler).not.toHaveBeenCalled()
   })
 })

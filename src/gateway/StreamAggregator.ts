@@ -1,11 +1,12 @@
 import type { ModelEvent, ModelResponse, ModelUsage } from '../types/model.js'
-import type { MessageContent } from '../types/common.js'
+import type { InvalidToolArguments, MessageContent } from '../types/common.js'
 import type { ToolCall } from '../types/tool.js'
 
 interface ToolCallAccumulator {
-  id:      string
-  name:    string
-  argsBuf: string
+  id:                string
+  name:              string
+  argsBuf:           string
+  invalidArguments?: InvalidToolArguments
 }
 
 /**
@@ -60,9 +61,14 @@ export async function aggregateStream(
 
       case 'tool_call_done': {
         const acc = toolCallMap.get(event.data.toolCallId)
-        if (acc && event.data.input !== undefined) {
-          // input 字段有权威值，直接序列化为 argsBuf
-          acc.argsBuf = JSON.stringify(event.data.input)
+        if (acc) {
+          if (event.data.input !== undefined) {
+            // input 字段有权威值，直接序列化为 argsBuf
+            acc.argsBuf = JSON.stringify(event.data.input)
+          }
+          if (event.data.invalidArguments !== undefined) {
+            acc.invalidArguments = event.data.invalidArguments
+          }
         }
         break
       }
@@ -92,13 +98,39 @@ export async function aggregateStream(
   for (const id of toolCallOrder) {
     const acc = toolCallMap.get(id)!
     let input: unknown
-    try {
-      input = acc.argsBuf ? JSON.parse(acc.argsBuf) : {}
-    } catch {
+    let invalidArguments = acc.invalidArguments
+    if (acc.argsBuf === '') {
       input = {}
+      invalidArguments ??= {
+        code:      'TOOL_ARGUMENTS_INVALID_JSON',
+        message:   'Tool arguments are not valid JSON',
+        rawLength: 0,
+      }
+    } else {
+      try {
+        input = JSON.parse(acc.argsBuf)
+      } catch {
+        input = {}
+        invalidArguments ??= {
+          code:      'TOOL_ARGUMENTS_INVALID_JSON',
+          message:   'Tool arguments are not valid JSON',
+          rawLength: acc.argsBuf.length,
+        }
+      }
     }
-    content.push({ type: 'tool_use', id: acc.id, name: acc.name, input })
-    toolCalls.push({ id: acc.id, name: acc.name, input })
+    content.push({
+      type: 'tool_use',
+      id: acc.id,
+      name: acc.name,
+      input,
+      ...(invalidArguments !== undefined ? { invalidArguments } : {}),
+    })
+    toolCalls.push({
+      id: acc.id,
+      name: acc.name,
+      input,
+      ...(invalidArguments !== undefined ? { invalidArguments } : {}),
+    })
   }
 
   return {

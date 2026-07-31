@@ -132,6 +132,31 @@ describe('OpenAICompatibleAdapter.stream — token-level streaming', () => {
     ])
   })
 
+  test('marks truncated tool arguments as invalid without exposing their contents', async () => {
+    const argumentsText = '{"city":'
+    const { adapter } = adapterWithChunks([
+      toolChunk([{ index: 0, id: 'call-invalid', name: 'get_weather', arguments: argumentsText }]),
+      toolChunk([], 'tool_calls'),
+    ])
+
+    await expect(collect(adapter)).resolves.toEqual([
+      { type: 'tool_call_start', data: { toolCallId: 'call-invalid', name: 'get_weather' } },
+      { type: 'tool_call_delta', data: { toolCallId: 'call-invalid', delta: argumentsText } },
+      {
+        type: 'tool_call_done',
+        data: {
+          toolCallId: 'call-invalid',
+          input:      {},
+          invalidArguments: {
+            code:      'TOOL_ARGUMENTS_INVALID_JSON',
+            message:   'Tool arguments are not valid JSON',
+            rawLength: argumentsText.length,
+          },
+        },
+      },
+    ])
+  })
+
   test('3. mixed text + tool_call', async () => {
     const { adapter } = adapterWithChunks([
       contentChunk('Let me check. '),
@@ -241,9 +266,10 @@ describe('OpenAICompatibleAdapter.stream — token-level streaming', () => {
     ])
   })
 
-  test('7. invalid JSON arguments → tool_call_done input = {} (no throw)', async () => {
+  test('7. invalid JSON arguments → tool_call_done preserves failure metadata', async () => {
+    const argumentsText = 'not json{'
     const { adapter } = adapterWithChunks([
-      toolChunk([{ index: 0, id: 'call_bad', name: 'broken', arguments: 'not json{' }]),
+      toolChunk([{ index: 0, id: 'call_bad', name: 'broken', arguments: argumentsText }]),
       toolChunk([], 'tool_calls'),
     ])
     const events = await collect(adapter)
@@ -253,19 +279,74 @@ describe('OpenAICompatibleAdapter.stream — token-level streaming', () => {
     })
     expect(events).toContainEqual({
       type: 'tool_call_done',
-      data: { toolCallId: 'call_bad', input: {} },
+      data: {
+        toolCallId: 'call_bad',
+        input:      {},
+        invalidArguments: {
+          code:      'TOOL_ARGUMENTS_INVALID_JSON',
+          message:   'Tool arguments are not valid JSON',
+          rawLength: argumentsText.length,
+        },
+      },
     })
   })
 
-  test('7b. empty arguments buffer → tool_call_done input = {}', async () => {
+  test('7b. missing arguments field → tool_call_done preserves failure metadata', async () => {
     const { adapter } = adapterWithChunks([
-      toolChunk([{ index: 0, id: 'call_empty', name: 'noargs' }]),
+      toolChunk([{ index: 0, id: 'call_missing', name: 'noargs' }]),
+      toolChunk([], 'tool_calls'),
+    ])
+    const events = await collect(adapter)
+    expect(events).toEqual([
+      { type: 'tool_call_start', data: { toolCallId: 'call_missing', name: 'noargs' } },
+      {
+        type: 'tool_call_done',
+        data: {
+          toolCallId: 'call_missing',
+          input:      {},
+          invalidArguments: {
+            code:      'TOOL_ARGUMENTS_INVALID_JSON',
+            message:   'Tool arguments are not valid JSON',
+            rawLength: 0,
+          },
+        },
+      },
+    ])
+  })
+
+  test('7c. explicit empty arguments fragment is invalid rather than a valid empty input', async () => {
+    const { adapter } = adapterWithChunks([
+      toolChunk([{ index: 0, id: 'call_empty', name: 'noargs', arguments: '' }]),
       toolChunk([], 'tool_calls'),
     ])
     const events = await collect(adapter)
     expect(events).toEqual([
       { type: 'tool_call_start', data: { toolCallId: 'call_empty', name: 'noargs' } },
-      { type: 'tool_call_done', data: { toolCallId: 'call_empty', input: {} } },
+      {
+        type: 'tool_call_done',
+        data: {
+          toolCallId: 'call_empty',
+          input:      {},
+          invalidArguments: {
+            code:      'TOOL_ARGUMENTS_INVALID_JSON',
+            message:   'Tool arguments are not valid JSON',
+            rawLength: 0,
+          },
+        },
+      },
+    ])
+  })
+
+  test('7d. explicit empty object arguments fragment remains valid', async () => {
+    const { adapter } = adapterWithChunks([
+      toolChunk([{ index: 0, id: 'call-object', name: 'noargs', arguments: '{}' }]),
+      toolChunk([], 'tool_calls'),
+    ])
+
+    expect(await collect(adapter)).toEqual([
+      { type: 'tool_call_start', data: { toolCallId: 'call-object', name: 'noargs' } },
+      { type: 'tool_call_delta', data: { toolCallId: 'call-object', delta: '{}' } },
+      { type: 'tool_call_done', data: { toolCallId: 'call-object', input: {} } },
     ])
   })
 

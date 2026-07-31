@@ -8,8 +8,11 @@
 import type { AgentConfig } from '../../src/types/agent.js'
 import type { IModelGateway, ModelRequest, ModelResponse } from '../../src/types/model.js'
 import type { ToolDefinition } from '../../src/types/tool.js'
+import type { ToolRespondedPayload } from '../../src/trace/types.js'
+import { OpenAICompatibleAdapter } from '../../src/gateway/OpenAICompatibleAdapter.js'
 import { Milkie } from '../../src/runtime/Milkie.js'
 import { MemoryStore } from '../../src/store/MemoryStore.js'
+import { MemoryEventStore } from '../../src/trace/MemoryEventStore.js'
 import { TrajectoryStore } from '../../src/trajectory/TrajectoryStore.js'
 
 function text(text: string): ModelResponse {
@@ -71,6 +74,14 @@ class SubAgentGateway implements IModelGateway {
   }
 }
 
+function fakeProvider(responses: unknown[]): OpenAICompatibleAdapter {
+  const adapter = new OpenAICompatibleAdapter({ apiKey: 'sk-test', provider: 'fake' })
+  // This hermetic fixture replaces the private OpenAI client; the public adapter API has no transport seam.
+  const fixture = adapter as unknown as { client: { chat: { completions: { create: unknown } } } }
+  fixture.client.chat.completions.create = async () => responses.shift()
+  return adapter
+}
+
 function agent(config: Partial<AgentConfig>): AgentConfig {
   return {
     agentId:      'agent',
@@ -118,6 +129,55 @@ describe('Deterministic e2e: framework semantics', () => {
     expect(searchSpans).toHaveLength(3)
     expect(new Set(searchSpans.map(s => s.attributes['turn']))).toHaveProperty('size', 1)
     expect(new Set(searchSpans.map(s => s.attributes['parallelBatchId']))).toHaveProperty('size', 1)
+  })
+
+  it('rejects malformed fake-provider tool arguments before invoking a handler', async () => {
+    let handlerCalls = 0
+    const eventStore = new MemoryEventStore()
+    const milkie = new Milkie({
+      stateStore: new MemoryStore(),
+      eventStore,
+      gateway: fakeProvider([
+        {
+          choices: [{
+            message: {
+              content: null,
+              tool_calls: [{
+                id:       'malformed-call',
+                type:     'function',
+                function: { name: 'side_effect', arguments: '{"target":' },
+              }],
+            },
+            finish_reason: 'tool_calls',
+          }],
+        },
+        { choices: [{ message: { content: 'recovered', tool_calls: [] }, finish_reason: 'stop' }] },
+      ]),
+      tools: [{
+        name:         'side_effect',
+        description:  'must not execute malformed input',
+        inputSchema:  { type: 'object', properties: { target: { type: 'string' } }, required: ['target'] },
+        parallelSafe: false,
+        handler:      async () => {
+          handlerCalls++
+          return { executed: true }
+        },
+      }],
+    })
+    milkie.registerAgent(agent({ agentId: 'invalid-arguments-agent' }))
+
+    const result = await milkie.invoke({
+      agentId: 'invalid-arguments-agent',
+      goal:    'exercise malformed provider arguments',
+      input:   'go',
+    })
+    const events = await eventStore.readByRunId(result.agentRunId)
+    const toolRespondedEvent = events.find(event => event.type === 'tool.responded')!
+    const toolResponded = toolRespondedEvent.payload as ToolRespondedPayload
+    const run = { trace: { toolResponded }, handlerCalls }
+
+    expect(run.trace.toolResponded.error?.code).toBe('TOOL_ARGUMENTS_INVALID_JSON')
+    expect(run.handlerCalls).toBe(0)
   })
 
   it('spawns sub-agents concurrently with isolated child traces', async () => {
