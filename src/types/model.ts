@@ -60,6 +60,8 @@ export interface ModelRequest {
   metadata?:       Record<string, unknown>
   /** #126: sampling temperature. When set, adapters forward it to the provider; when omitted, the param is not sent (provider default). */
   temperature?:    number
+  /** Soft cap on completion tokens. OpenAI-compatible adapters default this when omitted. */
+  maxTokens?:      number
   /** PR-D Phase 1: when 'system-end', adapter wraps system block with cache_control. */
   cacheBreakpoint?: 'system-end'
 }

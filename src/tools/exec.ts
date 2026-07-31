@@ -119,8 +119,18 @@ export const execTools: ToolDefinition[] = [
     // alfred#160: non-verbatim LLM projection; raw remains on tool.responded / stream cap.
     resultStrategy: getRunCommandResultStrategy(),
     handler: async (input, ctx) => {
-      const cmd = input as RunCommandInput
-      const out = await runCommand(cmd)
+      const cmd = input as Partial<RunCommandInput>
+      if (typeof cmd.command !== 'string' || cmd.command.length === 0) {
+        throw Object.assign(
+          new Error('run_command requires a non-empty string "command" field'),
+          { code: 'RUN_COMMAND_MISSING_COMMAND', retryable: false },
+        )
+      }
+      const out = await runCommand({
+        command: cmd.command,
+        cwd: cmd.cwd,
+        timeoutMs: cmd.timeoutMs,
+      })
       // #148/#155: lazily register non-empty stdout as a citable object via the shared
       // `citeable` helper, so any shell-fetched evidence (file / network / db) can be
       // sourced via the `cite` tool with no per-skill refactoring. The helper is lazy

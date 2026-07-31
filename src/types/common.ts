@@ -5,7 +5,7 @@ export type JSONObject = Record<string, JSONValue>
 export type JSONSchema = Record<string, unknown>
 
 export interface InvalidToolArguments {
-  code:      'TOOL_ARGUMENTS_INVALID_JSON'
+  code:      'TOOL_ARGUMENTS_INVALID_JSON' | 'TOOL_ARGUMENTS_TRUNCATED'
   message:   string
   rawLength?: number
 }

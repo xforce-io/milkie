@@ -71,6 +71,19 @@ describe('built-in run_command tool (#134)', () => {
     expect(out.truncated).toBe(false)
   })
 
+  it('rejects missing command without spawning (#225)', async () => {
+    await expect(runCmd.handler({}, {} as ToolContext)).rejects.toMatchObject({
+      code: 'RUN_COMMAND_MISSING_COMMAND',
+    })
+  })
+
+  it('rejects non-string command without spawning (#225)', async () => {
+    await expect(runCmd.handler({ command: 1 }, {} as ToolContext)).rejects.toMatchObject({
+      code: 'RUN_COMMAND_MISSING_COMMAND',
+    })
+  })
+
+
   it('propagates a non-zero exit code', async () => {
     const out = await runCommand({ command: 'exit 3' })
     expect(out.exitCode).toBe(3)

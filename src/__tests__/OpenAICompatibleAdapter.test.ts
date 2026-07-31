@@ -212,6 +212,68 @@ describe('OpenAICompatibleAdapter — temperature passthrough (#126)', () => {
   })
 })
 
+describe('OpenAICompatibleAdapter — default max_tokens (#225)', () => {
+  const baseReq: ModelRequest = {
+    model:    'glm-latest',
+    messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
+  }
+
+  test('complete sends max_tokens >= 8192 by default', async () => {
+    const adapter = new OpenAICompatibleAdapter({ apiKey: 'sk-test' })
+    const { calls } = stubCreate(adapter)
+    await adapter.complete(baseReq)
+    const params = calls[0]
+    expect(params && typeof params === 'object' && 'max_tokens' in params ? params.max_tokens : undefined)
+      .toBeGreaterThanOrEqual(8192)
+  })
+
+  test('complete honors explicit request.maxTokens', async () => {
+    const adapter = new OpenAICompatibleAdapter({ apiKey: 'sk-test' })
+    const { calls } = stubCreate(adapter)
+    await adapter.complete({ ...baseReq, maxTokens: 2048 })
+    const params = calls[0]
+    expect(params && typeof params === 'object' && 'max_tokens' in params ? params.max_tokens : undefined)
+      .toBe(2048)
+  })
+
+  test('stream sends max_tokens >= 8192 by default', async () => {
+    const adapter = new OpenAICompatibleAdapter({ apiKey: 'sk-test' })
+    const calls: unknown[] = []
+    const create = async (params: unknown): Promise<AsyncIterable<never>> => {
+      calls.push(params)
+      return (async function* () { /* no chunks */ })()
+    }
+    ;(adapter as unknown as { client: { chat: { completions: { create: unknown } } } })
+      .client.chat.completions.create = create
+    for await (const _e of adapter.stream(baseReq)) { void _e }
+    const params = calls[0]
+    expect(params && typeof params === 'object' && 'max_tokens' in params ? params.max_tokens : undefined)
+      .toBeGreaterThanOrEqual(8192)
+  })
+
+  test('marks empty tool arguments invalid when finish_reason is length', () => {
+    const adapter = new OpenAICompatibleAdapter({ apiKey: 'sk-test' })
+    const response = parseResponseOf(adapter, {
+      choices: [{
+        message: {
+          role: 'assistant',
+          content: null,
+          tool_calls: [{
+            id: 'call_empty',
+            type: 'function',
+            function: { name: 'run_command', arguments: '' },
+          }],
+        },
+        finish_reason: 'length',
+      }],
+    })
+    expect(response.finishReason).toBe('length')
+    expect(response.toolCalls[0]?.name).toBe('run_command')
+    expect(response.toolCalls[0]?.invalidArguments?.code).toBe('TOOL_ARGUMENTS_TRUNCATED')
+  })
+})
+
+
 describe('OpenAICompatibleAdapter — structured failures (#202)', () => {
   const req: ModelRequest = {
     model: 'glm-5.2', messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
