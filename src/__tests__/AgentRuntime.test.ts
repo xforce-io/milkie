@@ -14,6 +14,9 @@ import type { IModelGateway, ModelRequest, ModelResponse } from '../types/model'
 import type { ToolDefinition } from '../types/tool'
 import type { AgentReturnedPayload } from '../trace/types'
 
+import fs from 'fs'
+import os from 'os'
+import path from 'path'
 // ---- Fixtures ----
 
 function makeConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
@@ -105,6 +108,18 @@ async function waitFor(
     await new Promise<void>(resolve => setTimeout(resolve, 10))
   }
   throw new Error('Timed out waiting for condition')
+}
+
+function loadAgentFromFrontmatter(frontmatter: string): AgentConfig {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'milkie-agent-config-'))
+  const agentFile = path.join(tmpDir, 'agent.md')
+  fs.writeFileSync(agentFile, `---\n${frontmatter}\n---\nYou are a test agent.`)
+
+  try {
+    return new Milkie({ stateStore: new MemoryStore() }).loadAgentFile(agentFile)
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true })
+  }
 }
 
 // ---- Tests ----
@@ -903,5 +918,32 @@ describe('#148 run_command output is citable end-to-end', () => {
       expect(checkpoint.lifecycle?.status).toBe('interrupted')
       expect(checkpoint.fsm).toBeUndefined()
     })
+  })
+})
+
+describe('agent frontmatter fsm configuration', () => {
+  const baseFrontmatter = `
+agentId: configured-agent
+fsm:
+  states:
+    - name: react
+      type: llm`
+
+  it('loads an optional non-negative integer max_tool_calls', () => {
+    const config = loadAgentFromFrontmatter(`${baseFrontmatter}
+  max_tool_calls: 2`)
+
+    expect(config.fsm.max_tool_calls).toBe(2)
+  })
+
+  it('rejects invalid max_tool_calls values', () => {
+    for (const value of ['-1', '1.5', 'unlimited']) {
+      expect(() => loadAgentFromFrontmatter(`${baseFrontmatter}
+  max_tool_calls: ${value}`)).toThrow('fsm.max_tool_calls')
+    }
+  })
+
+  it('leaves max_tool_calls undefined when omitted', () => {
+    expect(loadAgentFromFrontmatter(baseFrontmatter).fsm.max_tool_calls).toBeUndefined()
   })
 })
