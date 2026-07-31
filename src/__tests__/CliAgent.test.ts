@@ -4,6 +4,7 @@ import { SQLiteStore } from '../store/SQLiteStore'
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
+import { spawnSync } from 'child_process'
 
 describe('CLI: agent list', () => {
   let tmpDir: string
@@ -191,6 +192,30 @@ sys`
       } finally {
         cwdSpy.mockRestore()
       }
+    })
+
+    it('CLI entry process exits 1 for a terminal agent error', () => {
+      writeTerminalErrorAgentFile('router.md', 'router')
+      writeManifest([{ id: 'router', file: '../agents/router.md' }])
+
+      const child = spawnSync(
+        process.execPath,
+        [
+          '--import',
+          path.join(__dirname, '..', '..', 'node_modules', 'tsx', 'dist', 'loader.mjs'),
+          path.join(__dirname, '..', 'cli', 'index.ts'),
+          'agent',
+          'run',
+          'router',
+          '--input',
+          'fail',
+        ],
+        { cwd: tmpDir, encoding: 'utf8' },
+      )
+
+      expect(child.status).toBe(1)
+      expect(JSON.parse(child.stdout.trim()).status).toBe('error')
+      expect(JSON.parse(child.stderr.trim()).error.code).toBe('AGENT_RUN_ERROR')
     })
 
     it('agent resume emits terminal error JSON to stdout and AGENT_RUN_ERROR to stderr', async () => {
