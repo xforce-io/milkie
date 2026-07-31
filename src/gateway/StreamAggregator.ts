@@ -99,14 +99,23 @@ export async function aggregateStream(
     const acc = toolCallMap.get(id)!
     let input: unknown
     let invalidArguments = acc.invalidArguments
-    try {
-      input = acc.argsBuf ? JSON.parse(acc.argsBuf) : {}
-    } catch {
+    if (acc.argsBuf === '') {
       input = {}
       invalidArguments ??= {
         code:      'TOOL_ARGUMENTS_INVALID_JSON',
         message:   'Tool arguments are not valid JSON',
-        rawLength: acc.argsBuf.length,
+        rawLength: 0,
+      }
+    } else {
+      try {
+        input = JSON.parse(acc.argsBuf)
+      } catch {
+        input = {}
+        invalidArguments ??= {
+          code:      'TOOL_ARGUMENTS_INVALID_JSON',
+          message:   'Tool arguments are not valid JSON',
+          rawLength: acc.argsBuf.length,
+        }
       }
     }
     content.push({

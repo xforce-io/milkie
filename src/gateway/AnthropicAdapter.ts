@@ -185,7 +185,13 @@ export class AnthropicAdapter implements IModelGateway {
         if (slot) {
           let input: unknown = {}
           let invalidArguments: ToolCall['invalidArguments']
-          if (slot.buf !== '') {
+          if (slot.buf === '') {
+            invalidArguments = {
+              code:      'TOOL_ARGUMENTS_INVALID_JSON',
+              message:   'Tool arguments are not valid JSON',
+              rawLength: 0,
+            }
+          } else {
             try {
               input = JSON.parse(slot.buf)
             } catch {

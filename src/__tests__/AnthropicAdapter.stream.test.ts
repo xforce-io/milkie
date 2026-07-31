@@ -222,7 +222,7 @@ describe('AnthropicAdapter.parseStreamEvent — edge cases', () => {
     ])
   })
 
-  test('content_block_stop with empty buffer → done.input={}', () => {
+  test('content_block_stop with no input_json_delta preserves invalid arguments metadata', () => {
     const adapter = freshAdapter()
     parse(adapter, {
       type:          'content_block_start',
@@ -231,7 +231,36 @@ describe('AnthropicAdapter.parseStreamEvent — edge cases', () => {
     })
     const events = parse(adapter, { type: 'content_block_stop', index: 0 })
     expect(events).toEqual([
-      { type: 'tool_call_done', data: { toolCallId: 'toolu_empty', input: {} } },
+      {
+        type: 'tool_call_done',
+        data: {
+          toolCallId: 'toolu_empty',
+          input:      {},
+          invalidArguments: {
+            code:      'TOOL_ARGUMENTS_INVALID_JSON',
+            message:   'Tool arguments are not valid JSON',
+            rawLength: 0,
+          },
+        },
+      },
+    ])
+  })
+
+  test('content_block_stop after an explicit empty object delta remains valid', () => {
+    const adapter = freshAdapter()
+    parse(adapter, {
+      type:          'content_block_start',
+      index:         0,
+      content_block: { type: 'tool_use', id: 'toolu_object', name: 'fn' },
+    })
+    parse(adapter, {
+      type:  'content_block_delta',
+      index: 0,
+      delta: { type: 'input_json_delta', partial_json: '{}' },
+    })
+
+    expect(parse(adapter, { type: 'content_block_stop', index: 0 })).toEqual([
+      { type: 'tool_call_done', data: { toolCallId: 'toolu_object', input: {} } },
     ])
   })
 
