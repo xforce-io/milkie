@@ -947,3 +947,197 @@ fsm:
     expect(loadAgentFromFrontmatter(baseFrontmatter).fsm.max_tool_calls).toBeUndefined()
   })
 })
+
+describe('AgentRuntime tool call budgets', () => {
+  it('shares a serial budget across tool batches and returns a stable error without executing the rejected handler', async () => {
+    const executed: string[] = []
+    const requests: ModelRequest[] = []
+    const gateway: IModelGateway = {
+      async complete(request: ModelRequest): Promise<ModelResponse> {
+        requests.push(request)
+        if (requests.length === 1) {
+          return {
+            content: [
+              { type: 'tool_use', id: 'first', name: 'first', input: {} },
+              { type: 'tool_use', id: 'second', name: 'second', input: {} },
+            ],
+            toolCalls: [
+              { id: 'first', name: 'first', input: {} },
+              { id: 'second', name: 'second', input: {} },
+            ],
+            finishReason: 'tool_use',
+          }
+        }
+        if (requests.length === 2) return toolCallResponse('third', 'third', {})
+        return textResponse('done')
+      },
+      async *stream(_request: ModelRequest): AsyncIterable<never> {
+        yield* []
+      },
+    }
+    const tool = (name: string): ToolDefinition => ({
+      name,
+      description: name,
+      inputSchema: { type: 'object', properties: {} },
+      handler: async () => {
+        executed.push(name)
+        return name
+      },
+    })
+    const runtime = new AgentRuntime({
+      config: makeConfig({ fsm: { states: [{ name: 'react', type: 'llm' }], max_tool_calls: 2 } }),
+      goal: 'budget test',
+      input: 'go',
+      stateStore: new MemoryStore(),
+      recorder: new InMemoryRecorder(),
+      ioPort: new DefaultIOPort(gateway),
+      extraTools: [tool('first'), tool('second'), tool('third')],
+    })
+
+    await runtime.run('go')
+
+    expect(executed).toEqual(['first', 'second'])
+    const rejected = requests[2]!.messages
+      .flatMap(message => message.content)
+      .find(content => content.type === 'tool_result' && content.tool_use_id === 'third') as { content: string; is_error: boolean }
+    expect(rejected.is_error).toBe(true)
+    expect(JSON.parse(rejected.content).code).toBe('TOOL_CALL_BUDGET_EXCEEDED')
+  })
+
+  it('reserves parallel slots before dispatching handlers', async () => {
+    const parallelHandler = jest.fn(async () => 'ok')
+    const requests: ModelRequest[] = []
+    const gateway: IModelGateway = {
+      async complete(request: ModelRequest): Promise<ModelResponse> {
+        requests.push(request)
+        if (requests.length === 1) {
+          const toolCalls = ['one', 'two', 'three'].map(id => ({ id, name: 'parallel', input: { id } }))
+          return {
+            content: toolCalls.map(call => ({ type: 'tool_use' as const, ...call })),
+            toolCalls,
+            finishReason: 'tool_use',
+          }
+        }
+        return textResponse('done')
+      },
+      async *stream(_request: ModelRequest): AsyncIterable<never> {
+        yield* []
+      },
+    }
+    const runtime = new AgentRuntime({
+      config: makeConfig({ fsm: { states: [{ name: 'react', type: 'llm' }], max_tool_calls: 2 } }),
+      goal: 'budget test',
+      input: 'go',
+      stateStore: new MemoryStore(),
+      recorder: new InMemoryRecorder(),
+      ioPort: new DefaultIOPort(gateway),
+      extraTools: [{
+        name: 'parallel',
+        description: 'parallel',
+        inputSchema: { type: 'object', properties: {} },
+        parallelSafe: true,
+        handler: parallelHandler,
+      }],
+    })
+
+    await runtime.run('go')
+
+    expect(parallelHandler).toHaveBeenCalledTimes(2)
+    const rejected = requests[1]!.messages
+      .flatMap(message => message.content)
+      .find(content => content.type === 'tool_result' && content.tool_use_id === 'three') as { content: string; is_error: boolean }
+    expect(rejected.is_error).toBe(true)
+    expect(JSON.parse(rejected.content).code).toBe('TOOL_CALL_BUDGET_EXCEEDED')
+  })
+
+  it('rejects every handler when max_tool_calls is zero', async () => {
+    const handler = jest.fn(async () => 'unexpected')
+    const gateway = new SequentialGateway([
+      toolCallResponse('zero', 'zero', {}),
+      textResponse('done'),
+    ])
+    const runtime = new AgentRuntime({
+      config: makeConfig({ fsm: { states: [{ name: 'react', type: 'llm' }], max_tool_calls: 0 } }),
+      goal: 'budget test',
+      input: 'go',
+      stateStore: new MemoryStore(),
+      recorder: new InMemoryRecorder(),
+      ioPort: new DefaultIOPort(gateway),
+      extraTools: [{
+        name: 'zero',
+        description: 'zero',
+        inputSchema: { type: 'object', properties: {} },
+        handler,
+      }],
+    })
+
+    await runtime.run('go')
+
+    expect(handler).not.toHaveBeenCalled()
+  })
+
+  it('records a budget rejection as a traceable tool error', async () => {
+    const handler = jest.fn(async () => 'unexpected')
+    const eventStore = new MemoryEventStore()
+    const runtime = new AgentRuntime({
+      config: makeConfig({ fsm: { states: [{ name: 'react', type: 'llm' }], max_tool_calls: 0 } }),
+      goal: 'budget test',
+      input: 'go',
+      stateStore: new MemoryStore(),
+      eventStore,
+      recorder: new InMemoryRecorder('trace-budget', 'test-agent'),
+      ioPort: new RecordingIOPort(
+        new DefaultIOPort(new SequentialGateway([
+          toolCallResponse('budgeted', 'budgeted', {}),
+          textResponse('done'),
+        ])),
+        eventStore,
+        'trace-budget',
+      ),
+      extraTools: [{
+        name: 'budgeted',
+        description: 'budgeted',
+        inputSchema: { type: 'object', properties: {} },
+        handler,
+      }],
+    })
+
+    await runtime.run('go')
+
+    expect(handler).not.toHaveBeenCalled()
+    const response = (await eventStore.readByRunId('trace-budget'))
+      .find(event => event.type === 'tool.responded')!.payload as {
+        status: string
+        error?: { code?: string }
+      }
+    expect(response.status).toBe('error')
+    expect(response.error?.code).toBe('TOOL_CALL_BUDGET_EXCEEDED')
+  })
+
+  it('keeps tool dispatch unlimited when max_tool_calls is omitted', async () => {
+    const handler = jest.fn(async () => 'ok')
+    const gateway = new SequentialGateway([
+      toolCallResponse('unlimited-one', 'unlimited', {}),
+      toolCallResponse('unlimited-two', 'unlimited', {}),
+      textResponse('done'),
+    ])
+    const runtime = new AgentRuntime({
+      config: makeConfig(),
+      goal: 'budget test',
+      input: 'go',
+      stateStore: new MemoryStore(),
+      recorder: new InMemoryRecorder(),
+      ioPort: new DefaultIOPort(gateway),
+      extraTools: [{
+        name: 'unlimited',
+        description: 'unlimited',
+        inputSchema: { type: 'object', properties: {} },
+        handler,
+      }],
+    })
+
+    await runtime.run('go')
+
+    expect(handler).toHaveBeenCalledTimes(2)
+  })
+})

@@ -138,6 +138,8 @@ export class AgentRuntime {
   private readonly extraTools:      ToolDefinition[]
   private readonly causalCursor?:   CausalCursor
   private readonly previousRunId?:  string
+  private readonly maxToolCalls?: number
+  private toolCallsUsed: number = 0
 
   private readonly fsm:         FSMEngine
   // #175 切片 1.2a：下层运行生命周期状态机（per-run，run() 开头重置）。
@@ -188,6 +190,7 @@ export class AgentRuntime {
     this.makeChildPort   = opts.makeChildPort
     this.extraTools      = opts.extraTools ?? []
     this.causalCursor    = opts.causalCursor
+    this.maxToolCalls    = opts.config.fsm.max_tool_calls
 
     this.fsm     = new FSMEngine(opts.config.fsm)
     this.memory  = new WorkingMemory()
@@ -943,6 +946,7 @@ export class AgentRuntime {
 
     // #175 切片 1.2a：per-run 生命周期，run() 开头重置为 running。
     this.lifecycle = new RunLifecycle()
+    this.toolCallsUsed = 0
 
     try {
       await this.executeFSM()
@@ -1222,11 +1226,53 @@ export class AgentRuntime {
     return results
   }
 
+  private tryConsumeToolCall(): boolean {
+    if (this.maxToolCalls === undefined) return true
+    if (this.toolCallsUsed >= this.maxToolCalls) return false
+    this.toolCallsUsed += 1
+    return true
+  }
+
   private async executeSingleTool(
     call: { id: string; name: string; input: unknown },
     batchId: string | null,
   ): Promise<ToolResult> {
-    // #37/#38: handler declares objects/relations into this buffer; RecordingIOPort
+    if (!this.tryConsumeToolCall()) {
+      const start = this.ioPort.now()
+      const error = Object.assign(new Error(`Tool call budget exceeded (max_tool_calls=${this.maxToolCalls})`), {
+        code: 'TOOL_CALL_BUDGET_EXCEEDED',
+        retryable: false,
+      })
+      const span = this.recorder.startSpan('tool.call', {
+        toolName: call.name,
+        toolCallId: call.id,
+        input: call.input,
+        turn: this.turnNumber,
+        parallelBatchId: batchId ?? undefined,
+      })
+      try {
+        await this.ioPort.invokeTool(
+          call.name,
+          call.input,
+          async () => { throw error },
+          { toolCallId: call.id },
+        )
+      } catch {
+        // The synthetic rejection is recorded by RecordingIOPort and becomes the ToolResult below.
+      }
+      const duration = this.ioPort.now() - start
+      this.recorder.recordEvent(span, 'tool.result', { error: error.message, code: error.code })
+      this.recorder.endSpan(span, 'error')
+      return {
+        toolCallId: call.id,
+        toolName: call.name,
+        output: null,
+        error: JSON.stringify({ code: error.code, message: error.message }),
+        isError: true,
+        duration,
+      }
+    }
+
     // drains it into object.created/relation.created right after tool.responded.
     const lineage: LineageBuffer = { objects: [], relations: [] }
     // #160: backfill producerEventId on lazily-registered objects once RecordingIOPort
