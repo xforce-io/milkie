@@ -1,4 +1,7 @@
 import { OpenAICompatibleAdapter } from '../gateway/OpenAICompatibleAdapter'
+import { DefaultIOPort } from '../runtime/IOPort'
+import { MemoryEventStore } from '../trace/MemoryEventStore'
+import { RecordingIOPort } from '../trace/RecordingIOPort'
 import type { ModelRequest, ModelResponse } from '../types/model'
 
 // parseResponse is private; we exercise it via cast — no network call.
@@ -81,7 +84,7 @@ describe('OpenAICompatibleAdapter — invalid tool arguments', () => {
           tool_calls: [{
             id:       'call-invalid',
             type:     'function',
-            function: { name: 'search', arguments: '{"query":' },
+            function: { name: 'search', arguments: 'secret-malformed-token' },
           }],
         },
         finish_reason: 'tool_calls',
@@ -106,7 +109,7 @@ describe('OpenAICompatibleAdapter — invalid tool arguments', () => {
       invalidArguments: {
         code:      'TOOL_ARGUMENTS_INVALID_JSON',
         message:   'Tool arguments are not valid JSON',
-        rawLength: '{"query":'.length,
+        rawLength: 'secret-malformed-token'.length,
       },
     })
     expect(response.content[0]).toMatchObject({
@@ -115,8 +118,40 @@ describe('OpenAICompatibleAdapter — invalid tool arguments', () => {
       invalidArguments: { code: 'TOOL_ARGUMENTS_INVALID_JSON' },
     })
     expect(validEmpty.toolCalls[0]).not.toHaveProperty('invalidArguments')
+    expect(response.raw).toBeUndefined()
+  })
+  test('does not record malformed provider arguments in llm.responded', async () => {
+    const adapter = new OpenAICompatibleAdapter({ apiKey: 'sk-test' })
+    const response = parseResponseOf(adapter, {
+      choices: [{
+        message: {
+          role: 'assistant',
+          tool_calls: [{
+            id:       'call-trace',
+            type:     'function',
+            function: { name: 'search', arguments: 'secret-trace-token' },
+          }],
+        },
+        finish_reason: 'tool_calls',
+      }],
+    })
+    const store = new MemoryEventStore()
+    const port = new RecordingIOPort(new DefaultIOPort({
+      async complete(): Promise<ModelResponse> { return response },
+      async *stream(): AsyncIterable<never> { yield* [] },
+    }), store, 'raw-trace')
+
+    await port.invokeLLM({
+      model:    'test',
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
+    })
+
+    const responded = (await store.readByRunId('raw-trace'))
+      .find(event => event.type === 'llm.responded')
+    expect(JSON.stringify(responded?.payload)).not.toContain('secret-trace-token')
   })
 })
+
 
 describe('OpenAICompatibleAdapter — temperature passthrough (#126)', () => {
   const baseReq: ModelRequest = {

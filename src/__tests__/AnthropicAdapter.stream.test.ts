@@ -193,7 +193,7 @@ describe('AnthropicAdapter.parseStreamEvent — usage', () => {
 })
 
 describe('AnthropicAdapter.parseStreamEvent — edge cases', () => {
-  test('8. content_block_stop with malformed JSON buffer → done.input={}', () => {
+  test('8. content_block_stop with malformed JSON buffer → invalid arguments metadata', () => {
     const adapter = freshAdapter()
     parse(adapter, {
       type:          'content_block_start',
@@ -207,7 +207,18 @@ describe('AnthropicAdapter.parseStreamEvent — edge cases', () => {
     })
     const events = parse(adapter, { type: 'content_block_stop', index: 0 })
     expect(events).toEqual([
-      { type: 'tool_call_done', data: { toolCallId: 'toolu_bad', input: {} } },
+      {
+        type: 'tool_call_done',
+        data: {
+          toolCallId: 'toolu_bad',
+          input:      {},
+          invalidArguments: {
+            code:      'TOOL_ARGUMENTS_INVALID_JSON',
+            message:   'Tool arguments are not valid JSON',
+            rawLength: '{not json'.length,
+          },
+        },
+      },
     ])
   })
 

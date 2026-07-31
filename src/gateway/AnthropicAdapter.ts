@@ -184,15 +184,27 @@ export class AnthropicAdapter implements IModelGateway {
         const slot = this.streamTools.get(e.index)
         if (slot) {
           let input: unknown = {}
+          let invalidArguments: ToolCall['invalidArguments']
           if (slot.buf !== '') {
             try {
               input = JSON.parse(slot.buf)
             } catch {
-              input = {}
+              invalidArguments = {
+                code:      'TOOL_ARGUMENTS_INVALID_JSON',
+                message:   'Tool arguments are not valid JSON',
+                rawLength: slot.buf.length,
+              }
             }
           }
           this.streamTools.delete(e.index)
-          yield { type: 'tool_call_done', data: { toolCallId: slot.id, input } }
+          yield {
+            type: 'tool_call_done',
+            data: {
+              toolCallId: slot.id,
+              input,
+              ...(invalidArguments !== undefined ? { invalidArguments } : {}),
+            },
+          }
         }
       }
     } else if (e.type === 'message_delta') {

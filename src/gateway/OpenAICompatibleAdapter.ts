@@ -269,6 +269,6 @@ export class OpenAICompatibleAdapter implements IModelGateway {
         }
       : undefined
 
-    return { content, toolCalls, usage, finishReason: choice.finish_reason ?? undefined, raw }
+    return { content, toolCalls, usage, finishReason: choice.finish_reason ?? undefined }
   }
 }
