@@ -1265,38 +1265,6 @@ export class AgentRuntime {
     call: { id: string; name: string; input: unknown },
     batchId: string | null,
   ): Promise<ToolResult> {
-    if (!this.tryConsumeToolCall()) {
-      const start = this.ioPort.now()
-      const error = this.toolCallBudgetExceededError()
-      const span = this.recorder.startSpan('tool.call', {
-        toolName: call.name,
-        toolCallId: call.id,
-        input: call.input,
-        turn: this.turnNumber,
-        parallelBatchId: batchId ?? undefined,
-      })
-      try {
-        await this.ioPort.invokeTool(
-          call.name,
-          call.input,
-          async () => { throw error },
-          { toolCallId: call.id },
-        )
-      } catch {
-        // The synthetic rejection is recorded by RecordingIOPort and becomes the ToolResult below.
-      }
-      const duration = this.ioPort.now() - start
-      this.recorder.recordEvent(span, 'tool.result', { error: error.message, code: error.code })
-      this.recorder.endSpan(span, 'error')
-      return {
-        toolCallId: call.id,
-        toolName: call.name,
-        output: null,
-        error: JSON.stringify({ code: error.code, message: error.message }),
-        isError: true,
-        duration,
-      }
-    }
 
     // drains it into object.created/relation.created right after tool.responded.
     const lineage: LineageBuffer = { objects: [], relations: [] }
@@ -1322,6 +1290,31 @@ export class AgentRuntime {
         attempt,
         parallelBatchId: batchId ?? undefined,
       })
+      if (!this.tryConsumeToolCall()) {
+        const error = this.toolCallBudgetExceededError()
+        try {
+          await this.ioPort.invokeTool(
+            call.name,
+            call.input,
+            async () => { throw error },
+            { toolCallId: call.id },
+          )
+        } catch {
+          // The synthetic rejection is recorded by RecordingIOPort and becomes the ToolResult below.
+        }
+        const duration = this.ioPort.now() - start
+        this.recorder.recordEvent(span, 'tool.result', { error: error.message, code: error.code })
+        this.recorder.endSpan(span, 'error')
+        return {
+          toolCallId: call.id,
+          toolName: call.name,
+          output: null,
+          error: JSON.stringify({ code: error.code, message: error.message }),
+          isError: true,
+          duration,
+        }
+      }
+
 
       try {
         const output   = await this.ioPort.invokeTool(

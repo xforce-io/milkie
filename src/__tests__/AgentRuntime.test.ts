@@ -1114,6 +1114,44 @@ describe('AgentRuntime tool call budgets', () => {
     expect(response.error?.code).toBe('TOOL_CALL_BUDGET_EXCEEDED')
   })
 
+  it('counts retryable handler attempts against the budget and records the rejected retry', async () => {
+    const handler = jest.fn(async () => {
+      throw Object.assign(new Error('retry me'), { retryable: true })
+    })
+    const eventStore = new MemoryEventStore()
+    const runtime = new AgentRuntime({
+      config: makeConfig({ fsm: { states: [{ name: 'react', type: 'llm' }], max_tool_calls: 1 } }),
+      goal: 'budget test',
+      input: 'go',
+      stateStore: new MemoryStore(),
+      eventStore,
+      recorder: new InMemoryRecorder('trace-retry-budget', 'test-agent'),
+      ioPort: new RecordingIOPort(
+        new DefaultIOPort(new SequentialGateway([
+          toolCallResponse('retryable', 'retryable', {}),
+          textResponse('done'),
+        ])),
+        eventStore,
+        'trace-retry-budget',
+      ),
+      extraTools: [{
+        name: 'retryable',
+        description: 'retryable',
+        inputSchema: { type: 'object', properties: {} },
+        handler,
+      }],
+    })
+
+    await runtime.run('go')
+
+    expect(handler).toHaveBeenCalledTimes(1)
+    const responses = (await eventStore.readByRunId('trace-retry-budget'))
+      .filter(event => event.type === 'tool.responded')
+      .map(event => event.payload as { error?: { code?: string } })
+    expect(responses).toHaveLength(2)
+    expect(responses.at(-1)?.error?.code).toBe('TOOL_CALL_BUDGET_EXCEEDED')
+  })
+
   it('blocks action-state handlers at budget zero and records the rejection', async () => {
     const handler = jest.fn(async () => 'unexpected')
     const eventStore = new MemoryEventStore()
