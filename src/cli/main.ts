@@ -11,16 +11,16 @@ import { checkpointFromEvents } from '../trace/diagnostics/checkpointFromEvents.
 import { serveMain } from './serve.js'
 import type { AgentResult } from '../types/common.js'
 
-function toTerminalResult(result: AgentResult): { runId: string, contextId: string, status: AgentResult['status'], lastOutput: string } {
+function toTerminalResult(result: AgentResult, contextId = result.contextId): { runId: string, contextId: string, status: AgentResult['status'], lastOutput: string } {
   return {
     runId:      result.agentRunId,
-    contextId:  result.contextId,
+    contextId,
     status:     result.status,
     lastOutput: result.output,
   }
 }
 
-function toAgentRunError(result: AgentResult): {
+function toAgentRunError(result: AgentResult, contextId = result.contextId): {
   code: 'AGENT_RUN_ERROR'
   message: string
   status: 'error'
@@ -33,15 +33,15 @@ function toAgentRunError(result: AgentResult): {
     message:   result.error?.message ?? result.output ?? 'Agent run failed',
     status:    'error',
     runId:     result.agentRunId,
-    contextId: result.contextId,
+    contextId,
     ...(result.error ? { details: result.error } : {}),
   }
 }
 
-function emitAgentResult(result: AgentResult, stdout: string[], stderr: string[]): number {
-  stdout.push(JSON.stringify(toTerminalResult(result)) + '\n')
+function emitAgentResult(result: AgentResult, stdout: string[], stderr: string[], contextId = result.contextId): number {
+  stdout.push(JSON.stringify(toTerminalResult(result, contextId)) + '\n')
   if (result.status !== 'error') return 0
-  stderr.push(JSON.stringify({ error: toAgentRunError(result) }) + '\n')
+  stderr.push(JSON.stringify({ error: toAgentRunError(result, contextId) }) + '\n')
   return 1
 }
 
@@ -168,7 +168,7 @@ export async function main(argv: string[]): Promise<MainResult> {
         throw new Error(`no checkpoint found for contextId "${contextId}"`)
       }
       const result = await milkie.resume(cpKey, checkpoint.meta.agentId, checkpoint.goal, '')
-      exitCode = emitAgentResult(result, stdout, stderr)
+      exitCode = emitAgentResult(result, stdout, stderr, contextId)
     })
 
   agent

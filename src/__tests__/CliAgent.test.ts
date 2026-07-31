@@ -146,7 +146,6 @@ sys`
           agentRunId: runId,
           timestamp:  1,
           traceId:    'trace-terminal-error',
-          contextId,
         },
       }
       fs.mkdirSync(path.join(tmpDir, '.milkie', 'runs'), { recursive: true })
