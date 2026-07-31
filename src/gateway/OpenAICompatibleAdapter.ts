@@ -13,6 +13,8 @@ export interface OpenAICompatibleAdapterOptions {
 export class OpenAICompatibleAdapter implements IModelGateway {
   private readonly client: OpenAI
   private readonly provider: string
+  /** Default completion budget — long tool-arg payloads (e.g. JSON writes) need headroom above common 4k gateway defaults. */
+  static readonly DEFAULT_MAX_TOKENS = 8192
 
   constructor(options: OpenAICompatibleAdapterOptions = {}) {
     this.provider = options.provider ?? 'openai-compatible'
@@ -38,6 +40,7 @@ export class OpenAICompatibleAdapter implements IModelGateway {
         })),
         tool_choice: request.tools?.length ? 'auto' : undefined,
         temperature: request.temperature,
+        max_tokens:  request.maxTokens ?? OpenAICompatibleAdapter.DEFAULT_MAX_TOKENS,
       })
     } catch (error) {
       throw normalizeModelGatewayError(error, {
@@ -70,6 +73,7 @@ export class OpenAICompatibleAdapter implements IModelGateway {
         })),
         tool_choice:    request.tools?.length ? 'auto' : undefined,
         temperature:    request.temperature,
+        max_tokens:     request.maxTokens ?? OpenAICompatibleAdapter.DEFAULT_MAX_TOKENS,
         stream:         true,
         stream_options: { include_usage: true },
       })
@@ -114,13 +118,16 @@ export class OpenAICompatibleAdapter implements IModelGateway {
       // finish_reason marks the completion of tool calls — emit done for every
       // accumulated call, then reset for any subsequent independent batch.
       if (choice?.finish_reason && toolCalls.size > 0) {
+        const finishReason = choice.finish_reason
         for (const entry of toolCalls.values()) {
           let input: unknown = {}
           let invalidArguments: ToolCall['invalidArguments']
           if (!entry.sawArguments || entry.argsBuf === '') {
             invalidArguments = {
-              code:      'TOOL_ARGUMENTS_INVALID_JSON',
-              message:   'Tool arguments are not valid JSON',
+              code:      finishReason === 'length' ? 'TOOL_ARGUMENTS_TRUNCATED' : 'TOOL_ARGUMENTS_INVALID_JSON',
+              message:   finishReason === 'length'
+                ? 'Tool arguments were truncated before a complete JSON object was produced'
+                : 'Tool arguments are not valid JSON',
               rawLength: 0,
             }
           } else {
@@ -128,8 +135,10 @@ export class OpenAICompatibleAdapter implements IModelGateway {
               input = JSON.parse(entry.argsBuf)
             } catch {
               invalidArguments = {
-                code:      'TOOL_ARGUMENTS_INVALID_JSON',
-                message:   'Tool arguments are not valid JSON',
+                code:      finishReason === 'length' ? 'TOOL_ARGUMENTS_TRUNCATED' : 'TOOL_ARGUMENTS_INVALID_JSON',
+                message:   finishReason === 'length'
+                  ? 'Tool arguments were truncated before a complete JSON object was produced'
+                  : 'Tool arguments are not valid JSON',
                 rawLength: entry.argsBuf.length,
               }
             }
@@ -240,10 +249,21 @@ export class OpenAICompatibleAdapter implements IModelGateway {
       let input: unknown = {}
       let invalidArguments: ToolCall['invalidArguments']
       const argumentsText = tc.function.arguments
+      const finishReason = choice.finish_reason ?? undefined
       if (typeof argumentsText !== 'string') {
         invalidArguments = {
-          code:      'TOOL_ARGUMENTS_INVALID_JSON',
-          message:   'Tool arguments are not valid JSON',
+          code:      finishReason === 'length' ? 'TOOL_ARGUMENTS_TRUNCATED' : 'TOOL_ARGUMENTS_INVALID_JSON',
+          message:   finishReason === 'length'
+            ? 'Tool arguments were truncated before a complete JSON object was produced'
+            : 'Tool arguments are not valid JSON',
+          rawLength: 0,
+        }
+      } else if (argumentsText === '') {
+        invalidArguments = {
+          code:      finishReason === 'length' ? 'TOOL_ARGUMENTS_TRUNCATED' : 'TOOL_ARGUMENTS_INVALID_JSON',
+          message:   finishReason === 'length'
+            ? 'Tool arguments were truncated before a complete JSON object was produced'
+            : 'Tool arguments are not valid JSON',
           rawLength: 0,
         }
       } else {
@@ -251,8 +271,10 @@ export class OpenAICompatibleAdapter implements IModelGateway {
           input = JSON.parse(argumentsText)
         } catch {
           invalidArguments = {
-            code:      'TOOL_ARGUMENTS_INVALID_JSON',
-            message:   'Tool arguments are not valid JSON',
+            code:      finishReason === 'length' ? 'TOOL_ARGUMENTS_TRUNCATED' : 'TOOL_ARGUMENTS_INVALID_JSON',
+            message:   finishReason === 'length'
+              ? 'Tool arguments were truncated before a complete JSON object was produced'
+              : 'Tool arguments are not valid JSON',
             rawLength: argumentsText.length,
           }
         }
