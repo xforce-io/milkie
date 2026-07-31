@@ -9,11 +9,14 @@ import fs from 'fs'
 import path from 'path'
 import type { AgentConfig } from '../../src/types/agent.js'
 import type { AgentResult } from '../../src/types/common.js'
+import type { IModelGateway, ModelRequest, ModelResponse } from '../../src/types/model.js'
 import type { Trajectory } from '../../src/types/trajectory.js'
 import type { ToolDefinition } from '../../src/types/tool.js'
+import type { ToolRespondedPayload } from '../../src/trace/types.js'
 import { Milkie } from '../../src/runtime/Milkie.js'
 import { TrajectoryStore } from '../../src/trajectory/TrajectoryStore.js'
 import { MemoryStore } from '../../src/store/MemoryStore.js'
+import { MemoryEventStore } from '../../src/trace/MemoryEventStore.js'
 import { lookupSearch } from './fixtures/search.js'
 
 const SKIP = !process.env['VOLCENGINE_TOKEN'] || !process.env['VOLCENGINE_API_BASE']
@@ -192,5 +195,90 @@ describe('Case 1: Plan-and-Act — 竞品分析', () => {
     const lines = fs.readFileSync(file, 'utf-8').trim().split('\n')
     expect(lines.length).toBeGreaterThan(0)
     expect(JSON.parse(lines[0]!).span.name).toBeDefined()
+  })
+})
+
+describe('bounded parallel tool budget', () => {
+  test('records the rejected parallel call after the budget is exhausted', async () => {
+    const parallelToolCallIds = ['first', 'second']
+    const responses: ModelResponse[] = [
+      {
+        content: [
+          { type: 'tool_use', id: 'first',  name: 'bounded_parallel', input: { value: 'first' } },
+          { type: 'tool_use', id: 'second', name: 'bounded_parallel', input: { value: 'second' } },
+        ],
+        toolCalls: [
+          { id: 'first',  name: 'bounded_parallel', input: { value: 'first' } },
+          { id: 'second', name: 'bounded_parallel', input: { value: 'second' } },
+        ],
+        finishReason: 'tool_use',
+      },
+      { content: [{ type: 'text', text: 'done' }], toolCalls: [], finishReason: 'end_turn' },
+    ]
+    const gateway: IModelGateway = {
+      async complete(_request: ModelRequest): Promise<ModelResponse> {
+        const response = responses.shift()
+        if (!response) throw new Error('stub gateway exhausted')
+        return response
+      },
+      async *stream(_request: ModelRequest): AsyncIterable<never> {
+        yield* []
+      },
+    }
+    const executed: string[] = []
+    const eventStore = new MemoryEventStore()
+    const milkie = new Milkie({
+      stateStore: new MemoryStore(),
+      eventStore,
+      gateway,
+      tools: [{
+        name:        'bounded_parallel',
+        description: 'A deterministic parallel tool for budget verification',
+        inputSchema: {
+          type:       'object',
+          properties: { value: { type: 'string' } },
+          required:   ['value'],
+        },
+        parallelSafe: true,
+        handler: async (input: unknown) => {
+          const { value } = input as { value: string }
+          executed.push(value)
+          return { value }
+        },
+      }],
+    })
+    milkie.registerAgent({
+      agentId:      'bounded-parallel',
+      version:      '1.0.0',
+      systemPrompt: 'Use the available tool.',
+      fsm: {
+        states: [{ name: 'react', type: 'llm', tools: ['bounded_parallel'] }],
+        max_tool_calls: 1,
+      },
+      model: { provider: 'stub', model: 'stub', adapter: 'stub' },
+    })
+
+    const result = await milkie.invoke({
+      agentId: 'bounded-parallel',
+      goal:    'execute the two requested tools',
+      input:   'run them in parallel',
+    })
+    const events = await eventStore.readByRunId(result.agentRunId)
+    const toolRequested = events.filter(event => event.type === 'tool.requested')
+    const responsesByToolCallId = new Map(
+      events
+        .filter(event => event.type === 'tool.responded')
+        .map(event => event.payload as ToolRespondedPayload)
+        .map(response => [response.toolCallId, response]),
+    )
+    const trace = {
+      toolRequested,
+      toolResponded: parallelToolCallIds.map(id => responsesByToolCallId.get(id)),
+    }
+
+    expect(result.status).toBe('completed')
+    expect(executed).toEqual(['first'])
+    expect(trace.toolRequested).toHaveLength(2)
+    expect(trace.toolResponded.at(-1)?.error?.code).toBe('TOOL_CALL_BUDGET_EXCEEDED')
   })
 })
