@@ -9,6 +9,41 @@ import { SQLiteStore } from '../store/SQLiteStore.js'
 import { MemoryStore } from '../store/MemoryStore.js'
 import { checkpointFromEvents } from '../trace/diagnostics/checkpointFromEvents.js'
 import { serveMain } from './serve.js'
+import type { AgentResult } from '../types/common.js'
+
+function toTerminalResult(result: AgentResult, contextId = result.contextId): { runId: string, contextId: string, status: AgentResult['status'], lastOutput: string } {
+  return {
+    runId:      result.agentRunId,
+    contextId,
+    status:     result.status,
+    lastOutput: result.output,
+  }
+}
+
+function toAgentRunError(result: AgentResult, contextId = result.contextId): {
+  code: 'AGENT_RUN_ERROR'
+  message: string
+  status: 'error'
+  runId: string
+  contextId: string
+  details?: AgentResult['error']
+} {
+  return {
+    code:      'AGENT_RUN_ERROR',
+    message:   result.error?.message ?? result.output ?? 'Agent run failed',
+    status:    'error',
+    runId:     result.agentRunId,
+    contextId,
+    ...(result.error ? { details: result.error } : {}),
+  }
+}
+
+function emitAgentResult(result: AgentResult, stdout: string[], stderr: string[], contextId = result.contextId): number {
+  stdout.push(JSON.stringify(toTerminalResult(result, contextId)) + '\n')
+  if (result.status !== 'error') return 0
+  stderr.push(JSON.stringify({ error: toAgentRunError(result, contextId) }) + '\n')
+  return 1
+}
 
 function findMilkieDir(startDir: string): string | undefined {
   let dir = startDir
@@ -117,12 +152,7 @@ export async function main(argv: string[]): Promise<MainResult> {
         input,
         contextId: opts.contextId,
       })
-      stdout.push(JSON.stringify({
-        runId:      result.agentRunId,
-        contextId:  result.contextId,
-        status:     result.status,
-        lastOutput: result.output,
-      }) + '\n')
+      exitCode = emitAgentResult(result, stdout, stderr)
     })
 
   agent
@@ -138,12 +168,7 @@ export async function main(argv: string[]): Promise<MainResult> {
         throw new Error(`no checkpoint found for contextId "${contextId}"`)
       }
       const result = await milkie.resume(cpKey, checkpoint.meta.agentId, checkpoint.goal, '')
-      stdout.push(JSON.stringify({
-        runId:      result.agentRunId,
-        contextId,
-        status:     result.status,
-        lastOutput: result.output,
-      }) + '\n')
+      exitCode = emitAgentResult(result, stdout, stderr, contextId)
     })
 
   agent
