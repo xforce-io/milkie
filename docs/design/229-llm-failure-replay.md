@@ -40,6 +40,7 @@
 
 Recording 的事实顺序固定为：
 
+0. public `invokeLLM` 入口先同步调用 #228 唯一 shared `resolveIOInvocationControl`，且只能使用返回的 snapshot。非法 control 直接 reject `IOInvocationValidationError`：不构造/append request，不调用 inner，不进入 sanitizer。合法的 pre-aborted/expired control 不是 validation error，继续以下流程并记录稳定 control terminal。
 1. 构造 v2 request event，并尝试 append；失败则 fail closed，绝不调用 inner。
 2. inner settle 后在内存中归一化为 success 或稳定 failure outcome。
 3. 从 outcome 构造唯一 terminal event，并且只调用一次 append。
@@ -133,7 +134,7 @@ flowchart LR
 | `src/trace/LlmOutcome.ts` | 集中 normalize/decode/reconstruct；三类 envelope、payload 和秘密字段约束只有一个实现。 |
 | `src/trace/TraceWriteError.ts` | 稳定 stage/operation/eventId 与安全 message；live cause 不序列化。 |
 | `src/trace/TraceIntegrityError.ts` | 稳定 integrity kind 和 event 标识，不包含 payload。 |
-| `src/trace/RecordingIOPort.ts` | request fail-closed、inner outcome 捕获、单 terminal append、trusted provider context、cursor 更新。 |
+| `src/trace/RecordingIOPort.ts` | 任何 request event 前调用 #228 shared control resolver；随后 request fail-closed、inner outcome 捕获、单 terminal append、trusted provider context、cursor 更新。 |
 | `src/trace/CausalCursor.ts` | 新增 `lastLlmTerminalId`；保留 `lastLlmRespondedId` 的成功 decision 语义。 |
 | `src/trace/CacheIndex.ts` | v2 严格配对、legacy 兼容、request-order `LlmOutcome` FIFO。 |
 | `src/trace/ReplayingIOPort.ts` | 重建 failure；只把 `CacheIndexEmptyError` 转为 divergence。 |
@@ -240,6 +241,8 @@ export type RecordedLlmFailureEnvelope =
 2. sanitizer 接受并安全重建的 IOControlError；
 3. 其他全部 generic。
 
+`IOInvocationValidationError` 不属于三类 invocation failure，也不得降级为 generic。它必须已由每个 IOPort public entry 的 shared resolver 在 request/inner/FIFO 副作用前拦截。`IO_CANCELLED/IO_DEADLINE_EXCEEDED` 只来自已通过 shape validation 的 control 在 preflight/运行期结算，因此才进入第 2 类 sanitizer。
+
 ### 8.4 TraceWriteError
 
 ```ts
@@ -299,7 +302,7 @@ export type TraceIntegrityErrorKind =
 - **并发与顺序**：同 hash 并发 invocation 按 request append index 重放，不按 terminal 完成时间。request append 本身定义结构调用顺序。
 - **错误优先级**：terminal append rejection 总是覆盖 inner outcome；否则调用方可能拿到一个无法确认已记录的 success/failure。
 - **安全**：不信任公开 Error 类自带自由字段；所有持久化字段经闭集校验、安全映射或固定值重建。
-- **control**：#228 validation/preflight 在 Replay consume 前；control 不进 hash。已消费 outcome 后的迟到 abort 不改变同步 Replay 结果。
+- **control**：#228 shared resolver 在 Recording request append 与 Replay FIFO 前拒绝非法 control，validation error 不进 sanitizer/Trace；合法 control 的 preflight 在 Replay consume 前，control 不进 hash。已消费 outcome 后的迟到 abort 不改变同步 Replay 结果。
 - **in-flight Trace**：只在 Replay/完整性检查时要求 terminal；实时 viewer 读取正在执行的 run 可以显示 pending request，不能提前把它标为 corruption。
 - **EventStore 故障**：request append fail closed，避免发生未记录的 provider side effect；terminal failure不尝试补偿写，避免双 terminal。
 - **性能**：CacheIndex 构建为事件数线性扫描，使用 eventId map 配对；不增加外部存储或网络 I/O。
@@ -330,6 +333,7 @@ export type TraceIntegrityErrorKind =
   3. 逐项断言 Replay 的 class/name/code/envelope 与 live Recording 及 terminal 稳定字段一致，`Milkie.replay().error` 保留 generic envelope，provider 调用次数为 0。
 - **Integration**：
   - request pre-commit rejection：append 一次、provider 0、`TraceWriteError.stage=request`。
+  - direct RecordingIOPort 非法 deadline：typed `IOInvocationValidationError`、request/terminal event 均为 0、provider 调用 0；合法 pre-aborted/expired control 则 request 1、control terminal 1。
   - terminal pre-commit rejection：request 1、terminal 0、provider 1、无第二次 append、返回 terminal TraceWriteError。
   - terminal after-commit rejection：request 1、terminal 1、无第二次 append；调用方仍得 TraceWriteError，但 CacheIndex 依事件事实正常构建。
   - failure Trace 的 session history 不产生 assistant message；execution projection、decision spine、explain、viewer/tree/CLI 均显示同一 code/固定 message/phase，failure label 不得是 `LLM → 文本`，且任何输出都不含 secret。
@@ -344,6 +348,7 @@ export type TraceIntegrityErrorKind =
   - public barrel 可导入 `LlmInvocationError`、`TraceWriteError`、`TraceIntegrityError` 及类型，`instanceof` 对实际抛出的对象成立；#228 `IOControlError` 保持同一类身份。
   - CacheIndex empty 仍是 divergence，integrity error 不被转换。
   - #228 pre-cancel 优先于 expired，两个 preflight 分支都不消费 FIFO。
+  - shared resolver 对 direct Recording/Replaying 非法 control 在副作用前拒绝；非法值不归一化为 generic、不消费 FIFO。
 
 所有 store double 明确区分 pre-commit rejection 与 after-commit rejection；所有并发顺序使用 barrier，不用裸 sleep。
 
@@ -357,6 +362,7 @@ export type TraceIntegrityErrorKind =
 - D6：新增 `lastLlmTerminalId`，不污染成功 decision 使用的 `lastLlmRespondedId`。
 - D7：provider 只记录 GatewayFactory 产生的闭集 family；custom/injected gateway 为 `unknown`。
 - D8：所有生产消费者同批迁移到集中 decoder。
+- D9：Recording/Replaying public 入口在任何 request/FIFO 前复用 #228 shared resolver；非法 control 不是 recorded failure，合法 preflight control failure 才进入 v2 terminal。
 
 无开放问题。
 
