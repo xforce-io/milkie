@@ -1,16 +1,23 @@
 import { promises as fs } from 'fs'
 import path from 'path'
 import { randomUUID } from 'crypto'
-import type { IEventStore } from './EventStore.js'
+import type { ICrashSafeEventStore } from './EventStore.js'
 import type { Event } from './types.js'
+import {
+  fsyncDirectory,
+  fsyncStoreHierarchy,
+  mkdirDurable,
+} from './durableFs.js'
 
 /**
  * Per-run JSONL file event store. Each run gets a `${runId}.jsonl` file
  * in `baseDir`; events are appended as JSON lines.
  *
- * Directory is created lazily on first write.
+ * Directory is created lazily on first write with durable parent fsync
+ * (#227 crash-safe evidence). confirmRunDurable always fsyncs base parent.
  */
-export class JsonlEventStore implements IEventStore {
+export class JsonlEventStore implements ICrashSafeEventStore {
+  readonly durability = 'crash-safe' as const
   private dirEnsured = false
 
   constructor(private readonly baseDir: string) {}
@@ -21,7 +28,7 @@ export class JsonlEventStore implements IEventStore {
 
   private async ensureDir(): Promise<void> {
     if (this.dirEnsured) return
-    await fs.mkdir(this.baseDir, { recursive: true })
+    await mkdirDurable(this.baseDir)
     this.dirEnsured = true
   }
 
@@ -49,6 +56,35 @@ export class JsonlEventStore implements IEventStore {
     return count !== undefined
       ? all.slice(fromIndex, fromIndex + count)
       : all.slice(fromIndex)
+  }
+
+  /**
+   * #227: fsync the run's JSONL file and the directory chain from baseDir
+   * through the configured base parent so crash-safe finalization can treat
+   * event evidence as durable across process takeover.
+   */
+  async confirmRunDurable(runId: string): Promise<void> {
+    await this.ensureDir()
+    const file = this.fileFor(runId)
+    // Ensure the file is readable before confirming durability.
+    let fh: fs.FileHandle | undefined
+    try {
+      fh = await fs.open(file, 'r')
+      await fh.sync()
+    } catch (err) {
+      if (fh) {
+        try { await fh.close() } catch { /* ignore */ }
+      }
+      throw err
+    }
+    await fh.close()
+
+    // leaf == base for flat per-run files; always fsync base parent.
+    await fsyncStoreHierarchy({
+      leafDir: this.baseDir,
+      baseDir: this.baseDir,
+      syncDirectory: fsyncDirectory,
+    })
   }
 
   async reconcileAbandonedRuns(): Promise<number> {
