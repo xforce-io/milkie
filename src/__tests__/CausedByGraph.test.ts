@@ -15,8 +15,8 @@ class ExecInnerPort implements IIOPort {
   async invokeLLM(_req: ModelRequest): Promise<ModelResponse> {
     return { content: [], toolCalls: [], finishReason: 'end_turn' }
   }
-  async invokeTool(_n: string, _i: unknown, execute: () => Promise<unknown>): Promise<unknown> {
-    return execute()
+  async invokeTool(_n: string, _i: unknown, execute: (signal: AbortSignal) => Promise<unknown>): Promise<unknown> {
+    return execute(new AbortController().signal)
   }
   now():  number { return this.nextClock++ }
   uuid(): string { return `uuid-${this.nextUuid++}` }

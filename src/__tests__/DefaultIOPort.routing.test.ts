@@ -51,7 +51,7 @@ describe('DefaultIOPort.invokeLLM routing', () => {
     const port = new DefaultIOPort(gw)
     const events: ModelEvent[] = []
 
-    const res = await port.invokeLLM(req, (e) => events.push(e))
+    const res = await port.invokeLLM(req, { onEvent: e => events.push(e) })
 
     expect(gw.streamCalled).toBe(true)
     expect(gw.completeCalled).toBe(false)
@@ -68,7 +68,7 @@ describe('DefaultIOPort.invokeLLM routing', () => {
     const port = new DefaultIOPort(gw)
     const events: ModelEvent[] = []
 
-    const res = await port.invokeLLM(req, (e) => events.push(e))
+    const res = await port.invokeLLM(req, { onEvent: e => events.push(e) })
 
     expect(gw.streamCalled).toBe(true)
     expect(gw.completeCalled).toBe(false)
@@ -85,8 +85,7 @@ describe('DefaultIOPort.invokeLLM routing', () => {
     const gw = new SpyGateway()
     const port = new DefaultIOPort(gw)
 
-    const res = await port.invokeLLM(req, undefined)
-
+    const res = await port.invokeLLM(req)
     expect(gw.completeCalled).toBe(true)
     expect(gw.streamCalled).toBe(false)
     expect(res.content).toEqual([{ type: 'text', text: 'from-complete' }])

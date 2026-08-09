@@ -9,7 +9,7 @@ class ExplodingInnerPort implements IIOPort {
   async invokeLLM(_req: ModelRequest): Promise<ModelResponse> {
     throw new Error('inner.invokeLLM must not be called during replay')
   }
-  async invokeTool(_n: string, _i: unknown, _e: () => Promise<unknown>): Promise<unknown> {
+  async invokeTool(_n: string, _i: unknown, _e: (signal: AbortSignal) => Promise<unknown>): Promise<unknown> {
     throw new Error('inner.invokeTool must not be called during replay')
   }
   now(): number { throw new Error('inner.now must not be called during nondet replay') }

@@ -304,3 +304,44 @@ describe('OpenAICompatibleAdapter — structured failures (#202)', () => {
     })
   })
 })
+
+
+describe('OpenAICompatibleAdapter — cancellation signal passthrough', () => {
+  const request: ModelRequest = { model: 'test', messages: [] }
+
+  test('passes signal in complete SDK request options', async () => {
+    const adapter = new OpenAICompatibleAdapter({ apiKey: 'sk-test' })
+    const controller = new AbortController()
+    let sdkOptions: unknown
+    ;(adapter as unknown as { client: { chat: { completions: { create: unknown } } } })
+      .client.chat.completions.create = async (_params: unknown, options: unknown) => {
+        sdkOptions = options
+        return { choices: [{ message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }] }
+      }
+
+    await adapter.complete(request, { signal: controller.signal })
+
+    expect(sdkOptions).toEqual({ signal: controller.signal })
+  })
+
+  test('passes signal in stream SDK request options', async () => {
+    const adapter = new OpenAICompatibleAdapter({ apiKey: 'sk-test' })
+    const controller = new AbortController()
+    let sdkOptions: unknown
+    ;(adapter as unknown as { client: { chat: { completions: { create: unknown } } } })
+      .client.chat.completions.create = async (_params: unknown, options: unknown) => {
+        sdkOptions = options
+        return {
+          async *[Symbol.asyncIterator]() {
+            yield { choices: [], usage: { prompt_tokens: 1, completion_tokens: 1 } }
+          },
+        }
+      }
+
+    for await (const _event of adapter.stream(request, { signal: controller.signal })) {
+      // Drain the provider stream.
+    }
+
+    expect(sdkOptions).toEqual({ signal: controller.signal })
+  })
+})

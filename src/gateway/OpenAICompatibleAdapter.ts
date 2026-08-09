@@ -1,5 +1,12 @@
 import OpenAI from 'openai'
-import type { IModelGateway, ModelRequest, ModelResponse, ModelEvent, ModelUsage } from '../types/model.js'
+import type {
+  GatewayInvocationOptions,
+  IModelGateway,
+  ModelEvent,
+  ModelRequest,
+  ModelResponse,
+  ModelUsage,
+} from '../types/model.js'
 import type { MessageContent } from '../types/common.js'
 import type { ToolCall } from '../types/tool.js'
 import { normalizeModelGatewayError } from './ModelGatewayError.js'
@@ -24,7 +31,7 @@ export class OpenAICompatibleAdapter implements IModelGateway {
     })
   }
 
-  async complete(request: ModelRequest): Promise<ModelResponse> {
+  async complete(request: ModelRequest, options?: GatewayInvocationOptions): Promise<ModelResponse> {
     let raw: OpenAI.ChatCompletion
     try {
       raw = await this.client.chat.completions.create({
@@ -41,7 +48,7 @@ export class OpenAICompatibleAdapter implements IModelGateway {
         tool_choice: request.tools?.length ? 'auto' : undefined,
         temperature: request.temperature,
         max_tokens:  request.maxTokens ?? OpenAICompatibleAdapter.DEFAULT_MAX_TOKENS,
-      })
+      }, options?.signal ? { signal: options.signal } : undefined)
     } catch (error) {
       throw normalizeModelGatewayError(error, {
         provider: this.provider, model: request.model, phase: 'request',
@@ -57,7 +64,7 @@ export class OpenAICompatibleAdapter implements IModelGateway {
     }
   }
 
-  async *stream(request: ModelRequest): AsyncIterable<ModelEvent> {
+  async *stream(request: ModelRequest, options?: GatewayInvocationOptions): AsyncIterable<ModelEvent> {
     let stream: AsyncIterable<OpenAI.ChatCompletionChunk>
     try {
       stream = await this.client.chat.completions.create({
@@ -76,7 +83,7 @@ export class OpenAICompatibleAdapter implements IModelGateway {
         max_tokens:     request.maxTokens ?? OpenAICompatibleAdapter.DEFAULT_MAX_TOKENS,
         stream:         true,
         stream_options: { include_usage: true },
-      })
+      }, options?.signal ? { signal: options.signal } : undefined)
     } catch (error) {
       throw normalizeModelGatewayError(error, {
         provider: this.provider, model: request.model, phase: 'stream_open',

@@ -15,7 +15,13 @@ import type {
 } from '../types/common.js'
 import type { ChildAgentRecord, IStateStore, AgentCheckpoint } from '../types/store.js'
 import type { ToolDefinition } from '../types/tool.js'
-import type { IModelGateway, ModelEvent, ModelRequest, ModelResponse } from '../types/model.js'
+import type {
+  IModelGateway,
+  IOInvocationControl,
+  ModelEvent,
+  ModelRequest,
+  ModelResponse,
+} from '../types/model.js'
 import { aggregateStream } from '../gateway/StreamAggregator.js'
 import type { ResolvedManifest } from '../types/trajectory.js'
 import { MemoryStore } from '../store/MemoryStore.js'
@@ -24,7 +30,11 @@ import { TrajectoryStore } from '../trajectory/TrajectoryStore.js'
 import { createGateway } from '../gateway/GatewayFactory.js'
 import { AgentRuntime } from './AgentRuntime.js'
 import { readCheckpointLifecycle } from './checkpointSchema.js'
-import { DefaultIOPort, type IIOPort } from './IOPort.js'
+import {
+  DefaultIOPort,
+  resolveIOInvocationControl,
+  type IIOPort,
+} from './IOPort.js'
 import type { IEventStore } from '../trace/EventStore.js'
 import { RecordingIOPort } from '../trace/RecordingIOPort.js'
 import { CausalCursor } from '../trace/CausalCursor.js'
@@ -326,6 +336,7 @@ export class Milkie {
   }
 
   async invoke(request: AgentInvokeRequest): Promise<AgentResult> {
+    const control = resolveIOInvocationControl(request.control)
     const config = this.agents.get(request.agentId)
     if (!config) {
       throw new Error(`Agent not found: "${request.agentId}". Call registerAgent() or loadAgentFile() first.`)
@@ -395,6 +406,7 @@ export class Milkie {
       stateStore:      this.stateStore,
       recorder,
       ioPort,
+      control,
       eventStore:      this.eventStore ?? undefined,
       traceObjectStore: this.traceObjectStore ?? undefined,
       extraTools:      this.extraTools,
@@ -442,7 +454,14 @@ export class Milkie {
   /**
    * Resume execution from a saved checkpoint.
    */
-  async resume(checkpointId: string, agentId: string, goal: string, input: string, opts?: { onModelEvent?: (e: ModelEvent) => void }): Promise<AgentResult> {
+  async resume(
+    checkpointId: string,
+    agentId: string,
+    goal: string,
+    input: string,
+    opts?: { onModelEvent?: (e: ModelEvent) => void; control?: IOInvocationControl },
+  ): Promise<AgentResult> {
+    const control = resolveIOInvocationControl(opts?.control)
     const config = this.agents.get(agentId)
     if (!config) {
       throw new Error(`Agent not found: "${agentId}". Call registerAgent() or loadAgentFile() first.`)
@@ -494,6 +513,7 @@ export class Milkie {
       stateStore: this.stateStore,
       recorder,
       ioPort:          this.wrapIOPort(gateway, agentRunId, causalCursor),
+      control,
       eventStore:      this.eventStore ?? undefined,
       traceObjectStore: this.traceObjectStore ?? undefined,
       extraTools:      this.extraTools,
@@ -577,17 +597,21 @@ export class Milkie {
     let divergenceError: ReplayDivergenceError | undefined
 
     const proxyPort: IIOPort = {
-      async invokeLLM(req) {
+      async invokeLLM(req, options) {
+        const control = resolveIOInvocationControl(options?.control)
+        const resolvedOptions = control ? { ...options, control } : options
         try {
-          return await ioPort.invokeLLM(req)
+          return await ioPort.invokeLLM(req, resolvedOptions)
         } catch (err) {
           if (err instanceof ReplayDivergenceError) divergenceError = err
           throw err
         }
       },
       async invokeTool(name, input, execute, opts) {
+        const control = resolveIOInvocationControl(opts?.control)
+        const resolvedOptions = control ? { ...opts, control } : opts
         try {
-          return await ioPort.invokeTool(name, input, execute, opts)
+          return await ioPort.invokeTool(name, input, execute, resolvedOptions)
         } catch (err) {
           if (err instanceof ReplayDivergenceError) divergenceError = err
           throw err

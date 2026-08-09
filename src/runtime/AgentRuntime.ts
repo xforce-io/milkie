@@ -3,7 +3,14 @@ import { createHash } from 'crypto'
 import type { AgentConfig, FSMState } from '../types/agent.js'
 import type { AgentResult, ContextProjection } from '../types/common.js'
 import { MaxIterationsError } from '../types/common.js'
-import type { AgentErrorEnvelope } from '../types/model.js'
+import {
+  IOControlError,
+  type AgentErrorEnvelope,
+  type IOInvocationControl,
+  type ModelEvent,
+  type ModelRequest,
+  type ToolSchema,
+} from '../types/model.js'
 import type { IStateStore, AgentCheckpoint, ChildAgentRecord } from '../types/store.js'
 import type { ITrajectoryRecorder, Span } from '../types/trajectory.js'
 import type { ToolDefinition, ToolContext, ToolCall, ToolResult, ToolResultStrategy } from '../types/tool.js'
@@ -30,11 +37,15 @@ import {
   runInterTurnEngine,
   rehydrateSnapshot,
 } from '../context/lifecycleEngine.js'
-import type { ToolSchema, ModelRequest, ModelEvent } from '../types/model.js'
 import { ToolRegistry } from '../tools/ToolRegistry.js'
 import { WorkingMemory } from '../store/WorkingMemory.js'
 import { AgentFactory, type AgentSpawnOptions } from './AgentFactory.js'
-import type { IIOPort } from './IOPort.js'
+import {
+  resolveIOInvocationControl,
+  waitWithIOInvocationControl,
+  type IIOPort,
+  type ResolvedIOInvocationControl,
+} from './IOPort.js'
 import { cognitiveTools } from '../tools/cognitive.js'
 import { systemTools } from '../tools/system.js'
 import { lineageTools } from '../tools/lineage.js'
@@ -74,6 +85,7 @@ export interface AgentRuntimeOptions {
   stateStore:        IStateStore
   recorder:          ITrajectoryRecorder
   ioPort:            IIOPort
+  control?:           IOInvocationControl
   /**
    * #80: optional sink for streamed `ModelEvent`s from the main LLM call.
    * When provided, the main conversation loop's invokeLLM streams and forwards
@@ -123,6 +135,7 @@ export class AgentRuntime {
   private readonly recorder:         ITrajectoryRecorder
   private readonly ioPort:           IIOPort
   private readonly onModelEvent?:    (e: ModelEvent) => void  // #80
+  private readonly control?:         ResolvedIOInvocationControl
   private readonly eventStore?:      import('../trace/EventStore.js').IEventStore
   private readonly traceObjectStore?: ITraceObjectStore
   private readonly replayWmSnapshots?: unknown[]  // SPIKE(#73)
@@ -169,6 +182,7 @@ export class AgentRuntime {
   private currentTurnRaw?: string
 
   constructor(opts: AgentRuntimeOptions) {
+    this.control         = resolveIOInvocationControl(opts.control)
     this.ioPort          = opts.ioPort
     this.onModelEvent    = opts.onModelEvent
     this.config          = opts.config
@@ -208,6 +222,7 @@ export class AgentRuntime {
         childRecorderFactory: this.childRecorderFactory,
         eventStore:           this.eventStore,
         makeChildPort:        this.makeChildPort,
+        control:              this.control,
       })
       return child.run(spawnOpts.input)
     })
@@ -284,6 +299,7 @@ export class AgentRuntime {
             extraTools:    this.extraTools,
             eventStore:    this.eventStore,
             makeChildPort: this.makeChildPort,
+            control:       this.control,
           })
           await finish?.({
             status: result.status,
@@ -333,12 +349,14 @@ export class AgentRuntime {
   }
 
   private buildToolContext(
+    signal: AbortSignal,
     lineage?: LineageBuffer,
   ): ToolContext {
     const ctx: ToolContext = {
       workingMemory: this.memory,
       agentFactory:  this.factory,
       stateStore:    this.stateStore,
+      signal,
       requestSkill:  (name: string, scope?: 'turn' | 'session') => this.requestSkill(name, scope),
       currentTurn:   this.currentTurnRaw,
       previousRunId: this.previousRunId,
@@ -990,14 +1008,16 @@ export class AgentRuntime {
       }
       this.lifecycle.signal('error')
       this.recorder.endSpan(this.rootSpan, 'error')
-      const structuredError: AgentErrorEnvelope | undefined = err instanceof MaxIterationsError
-        ? {
-            code:      'MAX_ITERATIONS_EXCEEDED',
-            message:   err.message,
-            phase:     'agent_loop',
-            retryable: false,
-          }
-        : modelErrorEnvelope(err)
+      const structuredError: AgentErrorEnvelope | undefined = err instanceof IOControlError
+        ? err.envelope
+        : err instanceof MaxIterationsError
+          ? {
+              code:      'MAX_ITERATIONS_EXCEEDED',
+              message:   err.message,
+              phase:     'agent_loop',
+              retryable: false,
+            }
+          : modelErrorEnvelope(err)
       return {
         agentRunId: this.agentRunId,
         contextId:  this.contextId,
@@ -1089,7 +1109,10 @@ export class AgentRuntime {
         contextEpoch: this.regions.getEpoch(),
       })
 
-      const response = await this.ioPort.invokeLLM(request, this.onModelEvent)
+      const response = await this.ioPort.invokeLLM(request, {
+        onEvent: this.onModelEvent,
+        control: this.control,
+      })
 
       this.recorder.recordEvent(llmSpan, 'usage', {
         inputTokens:         response.usage?.inputTokens,
@@ -1174,8 +1197,13 @@ export class AgentRuntime {
           state.handler,
           actionInput,
           async () => { throw error },
+          { control: this.control },
         )
-      } catch {
+      } catch (caught) {
+        if (caught instanceof IOControlError) {
+          this.recorder.endSpan(span, 'error')
+          throw caught
+        }
         // The synthetic rejection is recorded by RecordingIOPort before this action fails.
       }
       this.recorder.recordEvent(span, 'tool.result', { error: error.message, code: error.code })
@@ -1183,7 +1211,6 @@ export class AgentRuntime {
       throw error
     }
 
-    const ctx = this.buildToolContext()
 
     const span = this.recorder.startSpan('tool.call', {
       toolName: state.handler,
@@ -1192,7 +1219,12 @@ export class AgentRuntime {
     })
 
     try {
-      const output = await tool.handler(actionInput, ctx)
+      const output = await this.ioPort.invokeTool(
+        state.handler,
+        actionInput,
+        signal => tool.handler(actionInput, this.buildToolContext(signal)),
+        { control: this.control },
+      )
       span.attributes['output'] = output
       this.recorder.endSpan(span, 'ok')
       if (output && typeof output === 'string') this.lastTextOutput = output
@@ -1231,6 +1263,11 @@ export class AgentRuntime {
       const settled = await Promise.allSettled(
         parallel.map(c => this.executeSingleTool(c, batchId))
       )
+      const controlFailure = settled.find(
+        (result): result is PromiseRejectedResult =>
+          result.status === 'rejected' && result.reason instanceof IOControlError,
+      )
+      if (controlFailure) throw controlFailure.reason
       for (const r of settled) {
         results.push(
           r.status === 'fulfilled'
@@ -1276,7 +1313,7 @@ export class AgentRuntime {
         if (o && !o.producerEventId) o.producerEventId = respEventId
       }
     }
-    const ctx = this.buildToolContext(lineage)
+
 
     const maxRetries = 3
 
@@ -1297,9 +1334,13 @@ export class AgentRuntime {
             call.name,
             call.input,
             async () => { throw error },
-            { toolCallId: call.id },
+            { toolCallId: call.id, control: this.control },
           )
-        } catch {
+        } catch (caught) {
+          if (caught instanceof IOControlError) {
+            this.recorder.endSpan(span, 'error')
+            throw caught
+          }
           // The synthetic rejection is recorded by RecordingIOPort and becomes the ToolResult below.
         }
         const duration = this.ioPort.now() - start
@@ -1320,15 +1361,20 @@ export class AgentRuntime {
         const output   = await this.ioPort.invokeTool(
           call.name,
           call.input,
-          () => {
+          signal => {
             if (call.invalidArguments) {
               return Promise.reject(Object.assign(new Error(call.invalidArguments.message), {
                 code: call.invalidArguments.code,
               }))
             }
-            return this.registry.execute(call.name, call.input, ctx)
+            return this.registry.execute(call.name, call.input, this.buildToolContext(signal, lineage))
           },
-          { toolCallId: call.id, lineage, invalidArguments: call.invalidArguments },  // #81 pairing id; #37/#38 lineage sink
+          {
+            toolCallId: call.id,
+            lineage,
+            invalidArguments: call.invalidArguments,
+            control: this.control,
+          },
         )
         span.attributes['output'] = output
         // SPIKE(#73): event-source tool WM side-effects so replay reconstructs them.
@@ -1353,6 +1399,10 @@ export class AgentRuntime {
         this.recorder.endSpan(span, 'ok')
         return { toolCallId: call.id, toolName: call.name, output, isError: false, duration }
       } catch (err) {
+        if (err instanceof IOControlError) {
+          this.recorder.endSpan(span, 'error')
+          throw err
+        }
         const retryable = (err as { retryable?: boolean }).retryable === true
         const isLastAttempt = attempt === maxRetries - 1
         const duration      = this.ioPort.now() - start
@@ -1379,7 +1429,7 @@ export class AgentRuntime {
         // state, not business transitions.
         const retryFromState = this.fsm.currentState.name
         this.fsm.transitionTo('error_handling', { name: 'error' })
-        await new Promise<void>(r => setTimeout(r, 500))
+        await waitWithIOInvocationControl(500, this.control, 'tool')
         this.fsm.transitionTo(retryFromState, { name: 'RETRY' })
       }
     }
