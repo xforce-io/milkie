@@ -85,11 +85,11 @@ flowchart LR
 
 职责边界：
 
-- SDK facade 校验并快照公开 control，在 run 启动前拒绝非法 deadline。
+- SDK facade 与每个 IOPort implementation/decorator 都先调用同一 shared control resolver；在 run/effect/request event 启动前拒绝非法 deadline。
 - AgentRuntime 传播 resolved control，不创建新的业务预算，也不重置 deadline；control error 是不可降级的运行终态。
 - DefaultIOPort 拥有 signal 组合、终态 latch、timer/listener 清理和及时 settle。
-- RecordingIOPort 透传 control，并由 #229 记录 inner 的稳定失败。
-- ReplayingIOPort 执行 control preflight 后消费已录 outcome，不访问真实 Gateway/Tool。
+- RecordingIOPort 在任何 request event 前 resolve/validate control；合法的 pre-aborted/expired control 再由 #229 记录 inner 的稳定 control failure。
+- ReplayingIOPort 在任何 FIFO 访问前 resolve/validate control，再执行 preflight；不访问真实 Gateway/Tool。
 - Gateway adapter 只把 effective signal 映射到 SDK；不得重新分类已被本地 control latch 的 AbortError。
 - 所有注册 Tool 路径都经 `invokeTool`；executor 用收到的 effective signal 构造 `ToolContext.signal`。普通 Tool 捕获 `IOControlError` 时必须原样向上抛出，不得转换成 `ToolResult`、重试或继续 LLM loop。
 
@@ -127,14 +127,14 @@ Runtime 的顶层 `run()` 识别 `IOControlError` 并把原 envelope 写入 `Age
 |---|---|
 | `src/types/common.ts` | `AgentInvokeRequest.control?`；`AgentResult.error` 接受新增 control envelope。 |
 | `src/types/model.ts` | 公共 control、Gateway options、control error envelope；扩展 `AgentErrorEnvelope`；固定 Gateway 新签名。 |
-| `src/runtime/IOPort.ts` | LLM options、Tool options、Tool executor signal、DefaultIOPort latch 与 cleanup。 |
-| `src/runtime/Milkie.ts` | `invoke/resume` facade 校验并快照 resolved control，传入 Runtime；replay proxy 迁移新签名。 |
+| `src/runtime/IOPort.ts` | LLM/Tool options、Tool executor signal、shared `resolveIOInvocationControl`、DefaultIOPort latch 与 cleanup。 |
+| `src/runtime/Milkie.ts` | `invoke/resume` facade 调用 shared resolver 并传入 Runtime；replay proxy 迁移新签名。 |
 | `src/runtime/AgentRuntime.ts` | 所有效果、action-state Tool、重试、并行 Tool 与 child 继承同一快照；control error 原样终止 run，Tool 不降级为 `ToolResult`；retry backoff 改为 control-aware wait。 |
 | `src/types/tool.ts` / ToolContext | 暴露只读 `signal: AbortSignal`，由 `invokeTool` executor 收到的 effective signal 构造。 |
 | `src/gateway/*Adapter.ts` | 把 `GatewayInvocationOptions.signal` 传入各 SDK request options。 |
 | `src/gateway/StreamAggregator.ts` | 实现内部 `StreamSession`：持有 iterator、回调前检查 latch、幂等 `return/finally` cleanup；不阻塞 IOPort 及时 reject。 |
-| `src/trace/RecordingIOPort.ts` | 透传 options/control；失败记录由 #229 定义。 |
-| `src/trace/ReplayingIOPort.ts` | control preflight、FIFO 不消费规则；已录 outcome 由 #229 重建。 |
+| `src/trace/RecordingIOPort.ts` | public LLM/Tool 入口先调用 shared resolver；非法 control 不写 request，合法 inner 失败记录由 #229 定义。 |
+| `src/trace/ReplayingIOPort.ts` | public 入口先调用 shared resolver，再做 control preflight/FIFO 不消费；已录 outcome 由 #229 重建。 |
 
 ## 8. API / CLI 设计
 
@@ -166,9 +166,9 @@ export interface GatewayInvocationOptions {
 }
 ```
 
-在 `Milkie.invoke/resume` 中，验证发生在 run/effect 启动前：Promise reject，不返回 `AgentResult`，不创建 I/O Trace 事件。直接调用 IOPort 时也遵守同一错误类型。
+在 `Milkie.invoke/resume` 中，验证发生在 run/effect 启动前：Promise reject，不返回 `AgentResult`，不创建 I/O Trace 事件。直接调用 Default/Recording/Replaying IOPort 也遵守同一错误类型；非法 control 不进入 #229 sanitizer，不写 `llm.requested/responded` 或 Tool request/terminal，也不消费 Replay FIFO。
 
-`readonly` 表达调用方意图但不是运行期隔离手段。facade/直接 IOPort 入口都必须在任何异步边界前复制 `deadlineAt` 的数值，形成内部 `ResolvedIOInvocationControl`；只保留原 signal 引用以继续观察 abort。Runtime、retry、parallel batch 与 child 仅接收该快照。
+`src/runtime/IOPort.ts` 提供唯一 shared `resolveIOInvocationControl(control?)`。它不 await、在任何异步副作用前验证 deadline，并复制 `deadlineAt` 数值形成内部 readonly `ResolvedIOInvocationControl`；只保留原 signal 引用以继续观察 abort。每个 public IOPort implementation/decorator 入口必须先调用该 resolver，后续 decorator/inner、Runtime、retry、parallel batch 与 child 只接收同一快照，禁止重新读取 caller control 对象。resolver 只做 shape validation/snapshot；合法的 pre-aborted signal 或已过期 deadline 属于后续 preflight control failure，不是 validation error。
 
 ### 8.2 IOPort 与 Gateway
 
@@ -288,10 +288,13 @@ export interface IOControlErrorEnvelope {
   - OpenAI-compatible 与 Anthropic complete/stream 均把 signal 放入正确 SDK request options。
   - 受控 StreamSession 证明 iterator `return/finally`、late event 丢弃、cleanup 幂等，且不协作 iterator 不阻塞 IOPort 在 100ms 内 reject。
   - action-state Tool、普通 Tool、三次重试、并行批次、child Agent 均观察 resolved control 的同一 signal/deadline。
+  - direct RecordingIOPort 的 LLM/Tool 非法 deadline：shared resolver 在 request append 前拒绝，event 数 0、provider/executor 调用数 0。
   - retryable Tool 失败进入 backoff 后分别 abort/到期；断言 100ms 内 settle 且没有第二次 Tool 调用。
   - #229 落地后，Recording→Replay 的 cancel/deadline 失败不访问真实 provider，调用次数为 0。
 - **Unit**：
   - non-finite/negative deadline；`0` 与 `now === deadlineAt`。
+  - shared resolver 对 facade、Default/Recording/Replaying LLM/Tool 入口返回同一 `IOInvocationValidationError`；非法输入无 Trace/FIFO/provider side effect。
+  - 合法 pre-aborted/expired direct Recording 调用会经过 request + #229 control terminal，不与非法 control 分支混淆。
   - preflight caller-cancel 优先级。
   - 调用开始后修改原 control 对象，不改变 resolved deadline。
   - 四方 latch 全矩阵与 late result 忽略。
@@ -310,6 +313,7 @@ export interface IOControlErrorEnvelope {
 - D5：control 不进入 request hash；Replay preflight 失败不消费 FIFO。
 - D6：公共签名一次性迁移，不保留兼容 overload。
 - D7：LLM 失败事件、CacheIndex outcome 联合与 Replay 错误重建由 #229 定义。
+- D8：所有 IOPort decorator 在任何 Trace/inner/FIFO 副作用前调用同一 shared resolver；非法 control 无 Trace，合法 preflight control failure 可记录。
 
 无开放问题。
 
