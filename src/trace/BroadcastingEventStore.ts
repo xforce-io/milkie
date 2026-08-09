@@ -1,4 +1,5 @@
-import type { IEventStore } from './EventStore.js'
+import type { ICrashSafeEventStore, IEventStore } from './EventStore.js'
+import { isCrashSafeEventStore } from './EventStore.js'
 import type { Event } from './types.js'
 
 type Subscriber = (event: Event) => void
@@ -23,8 +24,16 @@ type Subscriber = (event: Event) => void
 export class BroadcastingEventStore implements IEventStore {
   private readonly subscribers: Map<string, Set<Subscriber>> = new Map()
   private readonly contextIdByRunId: Map<string, string> = new Map()
+  private readonly crashSafeInner: ICrashSafeEventStore | null
 
-  constructor(private readonly inner: IEventStore) {}
+  constructor(private readonly inner: IEventStore) {
+    this.crashSafeInner = isCrashSafeEventStore(inner) ? inner : null
+  }
+
+  /** Present only when the inner store is crash-safe — enables finalization durability. */
+  get durability(): 'crash-safe' | undefined {
+    return this.crashSafeInner ? 'crash-safe' : undefined
+  }
 
   async append(event: Event): Promise<void> {
     await this.inner.append(event)
@@ -67,6 +76,19 @@ export class BroadcastingEventStore implements IEventStore {
 
   async readRange(runId: string, fromIndex: number, count?: number): Promise<Event[]> {
     return this.inner.readRange(runId, fromIndex, count)
+  }
+
+  /**
+   * #227: proxy run durability confirmation when the inner store supports it.
+   * Throws if the inner store is not crash-safe.
+   */
+  async confirmRunDurable(runId: string): Promise<void> {
+    if (!this.crashSafeInner) {
+      throw new Error(
+        'BroadcastingEventStore.confirmRunDurable requires a crash-safe inner event store',
+      )
+    }
+    await this.crashSafeInner.confirmRunDurable(runId)
   }
 
   /**

@@ -26,7 +26,7 @@ Last updated: 2026-08-09 (#227 adds s-017 immutable task outcome finalization dr
 | [s-014](./s-014-reverse-reference-lineage-query.md) | Reverse-reference lineage query | draft | agent-trace | `tests/e2e/s-014-reverse-reference-lineage-query.e2e.test.ts` |
 | [s-015](./s-015-subagent-reads-parent-trace-runtime.md) | Sub-agent reads parent's in-flight trace at runtime | draft | agent-runtime · agent-trace | `tests/e2e/s-015-subagent-reads-parent-trace-runtime.e2e.test.ts` |
 | [s-016](./s-016-record-and-query-task-outcome.md) | Record and query task outcome after a run | active | agent-trace | `tests/e2e/s-016-record-and-query-task-outcome.e2e.test.ts` |
-| [s-017](./s-017-immutable-task-outcome-finalization.md) | Finalize an immutable task outcome with evidence | draft | agent-runtime · agent-trace | `tests/e2e/s-017-immutable-task-outcome-finalization.e2e.test.ts` |
+| [s-017](./s-017-immutable-task-outcome-finalization.md) | Finalize an immutable task outcome with evidence | active | agent-runtime · agent-trace | `tests/e2e/s-017-immutable-task-outcome-finalization.e2e.test.ts` |
 
 ## By implementation readiness
 Derived from each story's `requires:` field, cross-referenced with current
@@ -46,6 +46,7 @@ exists and is green. Implementation gates are clear.
 - **s-007** Inter-agent parallel — Sub-agent as named tool ✓ confirmed in `AgentRuntime.ts:116-198` via AgentFactory (active)
 - **s-009** Multi-turn + error recovery — Error handling FSM transition ✓ confirmed in `FSMEngine.ts:11,64-66` (active)
 - **s-011** Multi-state FSM intent routing — Action state + `ctx.emit` ✓ confirmed in `types/agent.ts`, `FSMEngine.ts:44-49`, `AgentRuntime.ts:223` (active)
+- **s-017** Immutable task outcome finalization — finalization store + durability confirm + Milkie finalize/getFinal ✓ (#227) (active)
 
 ### Partial (some requires implemented, some target only)
 
@@ -59,7 +60,6 @@ target capabilities to land.
 - **s-012** Batch replay + classify — Replay ✓, Cache ✓; still needs Structural diff, Suite definition + batch replay (Phase 5)
 - **s-013** Variant search bounded cost — Cache ✓; still needs Fork primitive, Structural diff (Phase 5)
 - **s-016** Task outcome record/query — Event log + `task.outcome.recorded` + Milkie record/get API ✓ (active, #217)
-- **s-017** Immutable task outcome finalization — Event log ✓ (`src/trace/EventStore.ts:13-30`), Trace object store ✓ (`src/trace/TraceObjectStore.ts:5-8,30-100`); finalization store and Milkie finalize/query API are target-only in #227
 
 ### Blocked (all or most requires are target only)
 
@@ -74,7 +74,7 @@ as design specification.
 
 ### draft
 
-- s-004, s-006, s-010, s-012, s-013, s-014, s-015, s-017 (8 stories)
+- s-004, s-006, s-010, s-012, s-013, s-014, s-015 (7 stories)
 
 ### active
 
@@ -87,6 +87,7 @@ as design specification.
 - **s-009** Multi-turn + tool error recovery (uses MemoryStore by default; Redis variant lives separately)
 - **s-011** Multi-state FSM intent routing + slot filling
 - **s-016** Task outcome record/query (`recordTaskOutcome` / `getTaskOutcome`, #217)
+- **s-017** Immutable task outcome finalization (`finalizeTaskOutcome` / `getFinalTaskOutcome`, #227)
 
 s-010 stays `draft` until its Evolution requires are split (current test only validates skill-epoch loading, not Experiment Registry).
 
@@ -137,10 +138,11 @@ appear here.
 
 ## Notes
 
-- 17 stories total; 8 `draft`, 9 `active` (… + **s-016**). Readiness varies — see the "By implementation readiness" view above.
+- 17 stories total; 7 `draft`, 10 `active` (… + **s-016**, **s-017**). Readiness varies — see the "By implementation readiness" view above.
 - **#214 (2026-07-23)** aligned stories with ARCH minimal learning loop: new **s-016** (task outcome); **s-006** primary narrative = current-task repair (slug unchanged); pointer Out/related on s-002, s-003, s-005, s-009, s-010.
 - **#217 (2026-07-23)** implemented task outcome API + e2e; s-016 → `active`.
 - **#227 (2026-08-09)** specifies immutable, evidence-bound task outcome finalization as **s-017** (s-016 remains mutable observation) and corrects the stale readiness convention that referenced a removed `ARCHITECTURE.md ## Implementation Status`; readiness now uses `requires` plus cited architecture/repository evidence.
+- **#227 implementation** lands finalization store (Memory/File), evidence durability capabilities, and Milkie finalize/getFinal APIs; s-017 → `active`.
 - s-012 / s-013 / s-014 / s-015 are **agent-first scenarios** added to mirror ARCHITECTURE.md invariants 12-13 (Agent Trace is agent-first; CLI is the agent-facing protocol facade). They sit alongside the existing single-run / single-consumer stories (s-002–s-006) and cover batch / runtime / reverse-graph patterns.
 - The "Test" path column reserves filenames per the convention; matching E2E test files may not yet exist while stories are in `draft`.
 - Parent tracking for Outcome → Fork implementation: GitHub #215.

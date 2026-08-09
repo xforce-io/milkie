@@ -46,11 +46,34 @@ import { ReplayDivergenceError } from '../trace/ReplayDivergenceError.js'
 import { extractRunSnapshot } from '../trace/RunSnapshot.js'
 import type { Event, AgentRunStartedPayload, TaskOutcomeRecordedPayload, TrustedProviderFamily } from '../trace/types.js'
 import { makeTraceTools } from '../tools/trace.js'
-import type { RecordTaskOutcomeInput, TaskOutcome } from '../types/outcome.js'
+import type {
+  FinalizationAttemptResult,
+  FinalizeTaskOutcomeInput,
+  RecordTaskOutcomeInput,
+  TaskOutcome,
+  TaskOutcomeFinalization,
+} from '../types/outcome.js'
 import {
   TaskOutcomeError,
+  TaskOutcomeFinalizationConfigurationError,
+  TaskOutcomeFinalizationValidationError,
   TaskOutcomeRunNotFoundError,
 } from '../types/outcome.js'
+import type { ITaskOutcomeFinalizationStore } from '../outcome/TaskOutcomeFinalizationStore.js'
+import {
+  assertFinalizationId,
+  assembleFinalization,
+  buildRecordWithoutHash,
+  normalizeFinalizationIntent,
+  snapshotFinalization,
+} from '../outcome/finalizationHash.js'
+import {
+  assertDurabilityCompatibility,
+  buildEvidenceContext,
+  confirmEvidenceDurable,
+  resolveAgainstExisting,
+  validateEvidenceRefs,
+} from '../outcome/validateEvidence.js'
 import {
   type PortableSession,
   PORTABLE_SESSION_SCHEMA_VERSION,
@@ -107,6 +130,11 @@ export interface MilkieOptions {
    */
   eventStore?:      IEventStore
   traceObjectStore?: ITraceObjectStore
+  /**
+   * #227 / s-017: immutable task outcome finalization store.
+   * Must be configured explicitly — no silent Memory fallback.
+   */
+  outcomeFinalizationStore?: ITaskOutcomeFinalizationStore
   /** #79：服务日志 logger；缺省用进程级 getLogger()。测试注入内存 sink。 */
   logger?:          ServiceLogger
 }
@@ -119,6 +147,7 @@ export class Milkie {
   private readonly trajectoryStore: TrajectoryStore | null
   private readonly eventStore:      IEventStore | null
   private readonly traceObjectStore: ITraceObjectStore | null
+  private readonly outcomeFinalizationStore: ITaskOutcomeFinalizationStore | null
   private readonly log:             ServiceLogger
 
   private readonly agents:   Map<string, AgentConfig> = new Map()
@@ -137,6 +166,7 @@ export class Milkie {
     this.trajectoryStore = opts.trajectoryStore  ?? null
     this.eventStore      = opts.eventStore       ?? null
     this.traceObjectStore = opts.traceObjectStore ?? null
+    this.outcomeFinalizationStore = opts.outcomeFinalizationStore ?? null
     this.log             = opts.logger           ?? getLogger()
 
     // #196: self-explain read-trace tools (get_execution/get_lineage) are generic
@@ -1094,6 +1124,124 @@ export class Milkie {
       ...(p.note !== undefined ? { note: p.note } : {}),
       ...(p.scores !== undefined ? { scores: p.scores } : {}),
     }
+  }
+
+  /**
+   * #227 / s-017: finalize an immutable, evidence-bound task outcome for a run.
+   * create-if-absent on the finalization store; never dual-writes into EventStore.
+   * Observation API (`recordTaskOutcome` / `getTaskOutcome`) remains independent LWW.
+   */
+  async finalizeTaskOutcome(input: FinalizeTaskOutcomeInput): Promise<FinalizationAttemptResult> {
+    if (!this.eventStore) {
+      throw new TaskOutcomeFinalizationConfigurationError(
+        'finalizeTaskOutcome requires eventStore (pass eventStore when constructing Milkie)',
+      )
+    }
+    if (!this.outcomeFinalizationStore) {
+      throw new TaskOutcomeFinalizationConfigurationError(
+        'finalizeTaskOutcome requires outcomeFinalizationStore (pass outcomeFinalizationStore when constructing Milkie)',
+      )
+    }
+    if (!input || typeof input !== 'object') {
+      throw new TaskOutcomeFinalizationValidationError('finalizeTaskOutcome input must be an object')
+    }
+    if (input.expectedState !== 'unfinalized') {
+      throw new TaskOutcomeFinalizationValidationError(
+        'expectedState must be the literal "unfinalized"',
+      )
+    }
+
+    const finalizationId = assertFinalizationId(input.finalizationId)
+    const { intent, intentHash } = normalizeFinalizationIntent({
+      runId: input.runId,
+      value: input.value,
+      verifierClaim: input.verifierClaim,
+      evidence: input.evidence,
+      note: input.note,
+      scores: input.scores,
+    })
+
+    const hasObjectEvidence = intent.evidence.some(e => e.kind === 'object')
+    const durable = assertDurabilityCompatibility({
+      finalDurability: this.outcomeFinalizationStore.durability,
+      eventStore: this.eventStore,
+      objectStore: this.traceObjectStore,
+      hasObjectEvidence,
+    })
+
+    const events = await this.eventStore.readByRunId(intent.runId)
+    if (events.length === 0) {
+      throw new TaskOutcomeRunNotFoundError(intent.runId)
+    }
+
+    // Fast path: already finalized → resolve without re-validating evidence.
+    const preexisting = await this.outcomeFinalizationStore.get(intent.runId)
+    if (preexisting) {
+      return resolveAgainstExisting(preexisting, {
+        finalizationId,
+        value: intent.value,
+        intentHash,
+      })
+    }
+
+    // New finalization: validate run lifecycle + evidence, then durable-confirm.
+    const evidenceCtx = buildEvidenceContext(events)
+    await validateEvidenceRefs(intent.evidence, evidenceCtx, this.traceObjectStore)
+    await confirmEvidenceDurable({
+      runId: intent.runId,
+      evidence: intent.evidence,
+      crashSafeEvent: durable.crashSafeEvent,
+      crashSafeObject: durable.crashSafeObject,
+    })
+
+    const finalizedAt = Date.now()
+    const withoutHash = buildRecordWithoutHash({
+      intent,
+      finalizationId,
+      intentHash,
+      finalizedAt,
+    })
+    const record = assembleFinalization(withoutHash)
+
+    const createResult = await this.outcomeFinalizationStore.create(record)
+    if (createResult.created) {
+      return { status: 'finalized', final: createResult.record }
+    }
+    return resolveAgainstExisting(createResult.existing, {
+      finalizationId,
+      value: intent.value,
+      intentHash,
+    })
+  }
+
+  /**
+   * #227 / s-017: query the immutable final task outcome for a run, or null if
+   * the known run is unfinalized. Unknown runId → TaskOutcomeRunNotFoundError.
+   * Independent of observation LWW (`getTaskOutcome`).
+   */
+  async getFinalTaskOutcome(runId: string): Promise<TaskOutcomeFinalization | null> {
+    if (!this.eventStore) {
+      throw new TaskOutcomeFinalizationConfigurationError(
+        'getFinalTaskOutcome requires eventStore (pass eventStore when constructing Milkie)',
+      )
+    }
+    if (!this.outcomeFinalizationStore) {
+      throw new TaskOutcomeFinalizationConfigurationError(
+        'getFinalTaskOutcome requires outcomeFinalizationStore (pass outcomeFinalizationStore when constructing Milkie)',
+      )
+    }
+    const id = typeof runId === 'string' ? runId.trim() : ''
+    if (!id) {
+      throw new TaskOutcomeFinalizationValidationError('getFinalTaskOutcome requires a non-empty runId')
+    }
+
+    const events = await this.eventStore.readByRunId(id)
+    if (events.length === 0) {
+      throw new TaskOutcomeRunNotFoundError(id)
+    }
+
+    const final = await this.outcomeFinalizationStore.get(id)
+    return final ? snapshotFinalization(final) : null
   }
 
   private parseConfig(data: Record<string, unknown>, systemPrompt: string): AgentConfig {

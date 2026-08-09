@@ -1,7 +1,7 @@
 ---
 id: s-017
 title: Finalize an immutable task outcome with evidence
-status: draft
+status: active
 kind: scenario
 subsystems:
   - agent-runtime

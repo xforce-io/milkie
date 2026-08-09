@@ -45,8 +45,22 @@ export { MemoryEventStore } from './trace/MemoryEventStore.js'
 export { JsonlEventStore } from './trace/JsonlEventStore.js'
 export { MemoryTraceObjectStore, FileTraceObjectStore } from './trace/TraceObjectStore.js'
 export { contextAt, contextBefore, getRegionAt, getRegionBefore } from './trace/RegionContextView.js'
-export type { ITraceObjectStore } from './trace/TraceObjectStore.js'
+export type { ITraceObjectStore, ICrashSafeTraceObjectStore } from './trace/TraceObjectStore.js'
+export { isCrashSafeTraceObjectStore } from './trace/TraceObjectStore.js'
+export type { IEventStore, ICrashSafeEventStore } from './trace/EventStore.js'
+export { isCrashSafeEventStore } from './trace/EventStore.js'
 export type { RegionContentRef, ContextFoldMode } from './trace/RegionContextView.js'
+
+// #227 / s-017: immutable task outcome finalization
+export {
+  MemoryTaskOutcomeFinalizationStore,
+  FileTaskOutcomeFinalizationStore,
+} from './outcome/TaskOutcomeFinalizationStore.js'
+export type {
+  ITaskOutcomeFinalizationStore,
+  FileFinalizationFsOps,
+  FileTaskOutcomeFinalizationStoreOptions,
+} from './outcome/TaskOutcomeFinalizationStore.js'
 
 // Built-in tools
 export { cognitiveTools } from './tools/cognitive.js'
@@ -78,10 +92,25 @@ export type {
   TaskOutcomeSource,
   TaskOutcomeScore,
   RecordTaskOutcomeInput,
+  VerifierClaimType,
+  VerifierClaim,
+  EvidenceRef,
+  FinalizeTaskOutcomeInput,
+  TaskOutcomeFinalization,
+  FinalizationConflictKind,
+  FinalizationAttemptResult,
+  DurabilityClass,
+  TaskOutcomeEvidenceErrorReason,
+  TaskOutcomeFinalizationStoreErrorKind,
 } from './types/outcome.js'
 export {
   TaskOutcomeError,
   TaskOutcomeRunNotFoundError,
+  TaskOutcomeFinalizationValidationError,
+  TaskOutcomeFinalizationConfigurationError,
+  TaskOutcomeEvidenceError,
+  TaskOutcomeFinalizationStoreError,
+  TaskOutcomeFinalizationCorruptionError,
 } from './types/outcome.js'
 
 export type {
