@@ -4,7 +4,7 @@ Projected view over every story in this directory. Conventions live in
 `README.md`. A regenerator script may overwrite the tables below; the
 **Notes** section is hand-maintained.
 
-Last updated: 2026-07-23 (#217 task outcome implemented; s-016 active)
+Last updated: 2026-08-09 (#227 adds s-017 immutable task outcome finalization draft)
 
 ## By id
 
@@ -26,14 +26,14 @@ Last updated: 2026-07-23 (#217 task outcome implemented; s-016 active)
 | [s-014](./s-014-reverse-reference-lineage-query.md) | Reverse-reference lineage query | draft | agent-trace | `tests/e2e/s-014-reverse-reference-lineage-query.e2e.test.ts` |
 | [s-015](./s-015-subagent-reads-parent-trace-runtime.md) | Sub-agent reads parent's in-flight trace at runtime | draft | agent-runtime · agent-trace | `tests/e2e/s-015-subagent-reads-parent-trace-runtime.e2e.test.ts` |
 | [s-016](./s-016-record-and-query-task-outcome.md) | Record and query task outcome after a run | active | agent-trace | `tests/e2e/s-016-record-and-query-task-outcome.e2e.test.ts` |
+| [s-017](./s-017-immutable-task-outcome-finalization.md) | Finalize an immutable task outcome with evidence | draft | agent-runtime · agent-trace | `tests/e2e/s-017-immutable-task-outcome-finalization.e2e.test.ts` |
 
 ## By implementation readiness
-
-Derived from each story's `requires:` field cross-referenced with
-`ARCHITECTURE.md`'s `## Implementation Status` section. A story is **ready**
-when every entry in its `requires:` appears under "Implemented today",
-**partial** when some are implemented and some are target only, and
-**blocked** when none are implemented yet.
+Derived from each story's `requires:` field, cross-referenced with current
+`ARCHITECTURE.md` claims and the repository implementation evidence cited
+below. A story is **ready** when every requirement is implemented and its
+matching E2E exists and is green, **partial** when some are implemented and
+some are target only, and **blocked** when none are implemented yet.
 
 ### Ready (all requires implemented today)
 
@@ -59,6 +59,7 @@ target capabilities to land.
 - **s-012** Batch replay + classify — Replay ✓, Cache ✓; still needs Structural diff, Suite definition + batch replay (Phase 5)
 - **s-013** Variant search bounded cost — Cache ✓; still needs Fork primitive, Structural diff (Phase 5)
 - **s-016** Task outcome record/query — Event log + `task.outcome.recorded` + Milkie record/get API ✓ (active, #217)
+- **s-017** Immutable task outcome finalization — Event log ✓ (`src/trace/EventStore.ts:13-30`), Trace object store ✓ (`src/trace/TraceObjectStore.ts:5-8,30-100`); finalization store and Milkie finalize/query API are target-only in #227
 
 ### Blocked (all or most requires are target only)
 
@@ -73,7 +74,7 @@ as design specification.
 
 ### draft
 
-- s-004, s-006, s-010, s-012, s-013, s-014, s-015 (7 stories)
+- s-004, s-006, s-010, s-012, s-013, s-014, s-015, s-017 (8 stories)
 
 ### active
 
@@ -102,11 +103,11 @@ appear here.
 
 ### agent-runtime
 
-- s-001, s-005, s-006, s-007, s-008, s-009, s-010, s-011, s-015
+- s-001, s-005, s-006, s-007, s-008, s-009, s-010, s-011, s-015, s-017
 
 ### agent-trace
 
-- s-001 through s-016 (every story)
+- s-001 through s-017 (every story)
 
 ### evolution
 
@@ -132,13 +133,15 @@ appear here.
 | lineage-reverse-reference | s-014 |
 | runtime-trace-consumption | s-015 |
 | task-outcome | s-016 |
+| task-outcome-finalization | s-017 |
 
 ## Notes
 
-- 16 stories total; 7 `draft`, 9 `active` (… + **s-016**). Readiness varies — see the "By implementation readiness" view above.
+- 17 stories total; 8 `draft`, 9 `active` (… + **s-016**). Readiness varies — see the "By implementation readiness" view above.
 - **#214 (2026-07-23)** aligned stories with ARCH minimal learning loop: new **s-016** (task outcome); **s-006** primary narrative = current-task repair (slug unchanged); pointer Out/related on s-002, s-003, s-005, s-009, s-010.
 - **#217 (2026-07-23)** implemented task outcome API + e2e; s-016 → `active`.
+- **#227 (2026-08-09)** specifies immutable, evidence-bound task outcome finalization as **s-017** (s-016 remains mutable observation) and corrects the stale readiness convention that referenced a removed `ARCHITECTURE.md ## Implementation Status`; readiness now uses `requires` plus cited architecture/repository evidence.
 - s-012 / s-013 / s-014 / s-015 are **agent-first scenarios** added to mirror ARCHITECTURE.md invariants 12-13 (Agent Trace is agent-first; CLI is the agent-facing protocol facade). They sit alongside the existing single-run / single-consumer stories (s-002–s-006) and cover batch / runtime / reverse-graph patterns.
 - The "Test" path column reserves filenames per the convention; matching E2E test files may not yet exist while stories are in `draft`.
 - Parent tracking for Outcome → Fork implementation: GitHub #215.
-- When code lands closing a target capability, update `ARCHITECTURE.md`'s Implementation Status first, then this index's readiness view will need to be regenerated.
+- When code lands closing a target capability, update the relevant `ARCHITECTURE.md` claim or cite the implementing module here, then regenerate this readiness view.
