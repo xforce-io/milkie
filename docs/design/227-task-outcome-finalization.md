@@ -444,6 +444,8 @@ E2E fixture 通过真实 Tool/Recording 路径：先 `putCanonical(bytes)` 获�
 - Issue: https://github.com/xforce-io/milkie/issues/227
 - L1 概要: https://github.com/xforce-io/milkie/issues/227#issuecomment-5229390704
 - L1 reviewer: https://github.com/xforce-io/milkie/issues/227#issuecomment-5229391250
+- L2 reviewer: https://github.com/xforce-io/milkie/issues/227#issuecomment-5229459616
+- PR: https://github.com/xforce-io/milkie/pull/232
 - 现有 observation story: `docs/stories/s-016-record-and-query-task-outcome.md`
 - 新 finalization story: `docs/stories/s-017-immutable-task-outcome-finalization.md`
 - 相关模块：`src/types/outcome.ts`、`src/runtime/Milkie.ts`、`src/trace/TraceObjectStore.ts`、`src/trace/hash.ts`
