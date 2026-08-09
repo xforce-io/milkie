@@ -323,6 +323,7 @@ export interface IOControlErrorEnvelope {
 - L1 概要: https://github.com/xforce-io/milkie/issues/228#issuecomment-5229238511
 - L1 reviewer: https://github.com/xforce-io/milkie/issues/228#issuecomment-5229238815
 - L2 reviewer: https://github.com/xforce-io/milkie/issues/228#issuecomment-5229268847
+- 跨需求 reviewer: https://github.com/xforce-io/milkie/issues/228#issuecomment-5229482301
 - PR: https://github.com/xforce-io/milkie/pull/230
 - 配套 Issue: https://github.com/xforce-io/milkie/issues/229
 - 相关模块：`src/runtime/IOPort.ts`、`src/runtime/AgentRuntime.ts`、`src/runtime/Milkie.ts`、`src/types/model.ts`、`src/gateway/StreamAggregator.ts`
