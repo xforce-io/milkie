@@ -5,6 +5,7 @@ import type { AgentResult, ContextProjection } from '../types/common.js'
 import { MaxIterationsError } from '../types/common.js'
 import {
   IOControlError,
+  LlmInvocationError,
   type AgentErrorEnvelope,
   type IOInvocationControl,
   type ModelEvent,
@@ -1010,6 +1011,8 @@ export class AgentRuntime {
       this.recorder.endSpan(this.rootSpan, 'error')
       const structuredError: AgentErrorEnvelope | undefined = err instanceof IOControlError
         ? err.envelope
+        : err instanceof LlmInvocationError
+          ? err.envelope
         : err instanceof MaxIterationsError
           ? {
               code:      'MAX_ITERATIONS_EXCEEDED',

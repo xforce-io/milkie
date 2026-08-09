@@ -94,6 +94,7 @@ export type {
 export {
   IOControlError,
   IOInvocationValidationError,
+  LlmInvocationError,
 } from './types/model.js'
 export type {
   IModelGateway,
@@ -109,8 +110,24 @@ export type {
   IOControlErrorEnvelope,
   IOControlOperation,
   IOInvocationControl,
+  LlmInvocationFailureEnvelope,
   ToolSchema,
 } from './types/model.js'
+
+// #229: LLM failure replay public errors
+export { TraceWriteError } from './trace/TraceWriteError.js'
+export type { TraceWriteErrorDetails, TraceWriteStage } from './trace/TraceWriteError.js'
+export { TraceIntegrityError } from './trace/TraceIntegrityError.js'
+export type { TraceIntegrityErrorDetails, TraceIntegrityErrorKind } from './trace/TraceIntegrityError.js'
+export type {
+  LlmOutcome,
+  LlmSuccessOutcome,
+  LlmFailureOutcome,
+  LlmFailureView,
+} from './trace/LlmOutcome.js'
+export { decodeLlmOutcome, reconstructLlmError } from './trace/LlmOutcome.js'
+export type { RecordedLlmFailureEnvelope, TrustedProviderFamily } from './trace/types.js'
+export { LLM_OUTCOME_SCHEMA_VERSION } from './trace/types.js'
 
 export type {
   IStateStore,

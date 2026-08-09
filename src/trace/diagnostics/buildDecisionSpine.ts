@@ -1,10 +1,12 @@
 import type { Event } from '../types.js'
 import { walkCausedBy } from './walkCausedBy.js'
+import { decodeLlmOutcome } from '../LlmOutcome.js'
+import { TraceIntegrityError } from '../TraceIntegrityError.js'
 
 /**
  * #175 de-core: the decision spine no longer carries `fsm.transition` business
  * nodes. A decision is an I/O EFFECT — `llm.responded` (the model chose tools /
- * text) and `tool.responded` (a tool produced a result) — plus the final
+ * text, or failed) and `tool.responded` (a tool produced a result) — plus the final
  * output. This is the same anchor `explainDecision` reads.
  */
 export type DecisionKind = 'llm' | 'tool' | 'output'
@@ -16,6 +18,9 @@ export interface DecisionNode {
   timestamp:        number
   causedByEventId?: string
   causeDecisionId?: string
+  /** LLM branch only: success vs recorded failure. */
+  status?:          'ok' | 'error'
+  error?:           { code: string; message: string; phase: string }
 }
 
 export interface DecisionSpine {
@@ -30,14 +35,42 @@ function kindOf(type: string): DecisionKind {
   return 'output'
 }
 
-function labelOf(e: Event): string {
+function labelOf(e: Event): { label: string; status?: 'ok' | 'error'; error?: DecisionNode['error'] } {
   if (e.type === 'llm.responded') {
-    const resp = (e.payload as { response?: { toolCalls?: Array<{ name: string }> } }).response
-    const tools = resp?.toolCalls ?? []
-    return tools.length ? `LLM → ${tools.map(t => t.name).join(', ')}` : 'LLM → 文本'
+    try {
+      const outcome = decodeLlmOutcome(e)
+      if (outcome.status === 'error') {
+        return {
+          label: `LLM failure · ${outcome.error.code}`,
+          status: 'error',
+          error: {
+            code: outcome.error.code,
+            message: outcome.error.message,
+            phase: outcome.error.phase,
+          },
+        }
+      }
+      const tools = outcome.response.toolCalls ?? []
+      return {
+        label: tools.length ? `LLM → ${tools.map(t => t.name).join(', ')}` : 'LLM → 文本',
+        status: 'ok',
+      }
+    } catch (err) {
+      if (err instanceof TraceIntegrityError) {
+        return { label: `LLM integrity · ${err.kind}`, status: 'error' }
+      }
+      throw err
+    }
   }
-  if (e.type === 'tool.responded') return `tool: ${String((e.payload as { toolName?: unknown }).toolName ?? '?')}`
-  return '输出'
+  if (e.type === 'tool.responded') {
+    const payload = e.payload
+    const toolName =
+      payload && typeof payload === 'object' && 'toolName' in payload && typeof payload.toolName === 'string'
+        ? payload.toolName
+        : '?'
+    return { label: `tool: ${toolName}` }
+  }
+  return { label: '输出' }
 }
 
 /**
@@ -52,11 +85,14 @@ export function buildDecisionSpine(events: Event[]): DecisionSpine {
     .filter(e => SPINE_TYPES.has(e.type))
     .map(e => {
       const ancestor = walkCausedBy(events, e.id).slice(1).find(a => spineIds.has(a.id))
+      const labeled = labelOf(e)
       return {
         eventId:   e.id,
         kind:      kindOf(e.type),
-        label:     labelOf(e),
+        label:     labeled.label,
         timestamp: e.timestamp,
+        ...(labeled.status ? { status: labeled.status } : {}),
+        ...(labeled.error ? { error: labeled.error } : {}),
         ...(e.causedBy ? { causedByEventId: e.causedBy } : {}),
         ...(ancestor ? { causeDecisionId: ancestor.id } : {}),
       }

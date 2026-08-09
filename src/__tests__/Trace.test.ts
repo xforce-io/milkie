@@ -249,8 +249,12 @@ describe('RecordingIOPort', () => {
     expect(reqEvent?.runId).toBe('run-1')
     expect(respEvent?.causedBy).toBe(reqEvent?.id)
     expect((reqEvent?.payload as LlmRequestedPayload).request.model).toBe('test')
-    expect((respEvent?.payload as LlmRespondedPayload).response.content[0])
-      .toMatchObject({ type: 'text', text: 'reply' })
+    expect((reqEvent?.payload as LlmRequestedPayload).outcomeSchemaVersion).toBe(2)
+    const respPayload = respEvent?.payload as LlmRespondedPayload
+    expect(respPayload.status).toBe('ok')
+    if (respPayload.status === 'ok') {
+      expect(respPayload.response.content[0]).toMatchObject({ type: 'text', text: 'reply' })
+    }
   })
 
   it('emits paired tool events for successful invocation', async () => {

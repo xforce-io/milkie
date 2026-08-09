@@ -13,7 +13,7 @@ import {
   type ModelRequest,
   type ModelResponse,
 } from '../types/model'
-import type { Event, LlmRespondedPayload, ToolRespondedPayload } from '../trace/types'
+import type { Event, ToolRespondedPayload } from '../trace/types'
 
 const REQUEST: ModelRequest = { model: 'test-model', messages: [] }
 const RESPONSE: ModelResponse = {
@@ -270,7 +270,7 @@ describe('IOPort decorator preflight', () => {
     const toolOutput = { ok: true }
     const llmHash = hashModelRequest(REQUEST)
     const toolHash = hashToolCall('tool', toolInput)
-    const cachedLLM: Event<LlmRespondedPayload> = {
+    const cachedLLM: Event = {
       id: 'llm-1',
       runId: 'run-1',
       type: 'llm.responded',

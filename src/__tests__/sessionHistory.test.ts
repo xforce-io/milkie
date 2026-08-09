@@ -83,4 +83,27 @@ describe('#128 runEventsToMessages — one run → Message[]', () => {
       content: [{ type: 'tool_result', tool_use_id: 'c1', content: 'plain text' }],
     })
   })
+
+  it('skips v2 failure terminals and does not emit assistant messages for them', () => {
+    const events: Event[] = [
+      ev('agent.run.started', { agentId: 'a', goal: 'g', input: 'hi', contextId: 'X' }),
+      ev('llm.requested', { request: { model: 'm', messages: [] }, requestHash: 'h1', outcomeSchemaVersion: 2 }),
+      ev('llm.responded', {
+        status: 'error',
+        requestHash: 'h1',
+        error: {
+          code: 'MODEL_TIMEOUT',
+          message: 'Model provider request timed out.',
+          phase: 'request',
+          provider: 'anthropic',
+          model: 'm',
+          retryable: true,
+        },
+      }),
+      ev('agent.run.completed', { status: 'error' }),
+    ]
+    expect(runEventsToMessages(events)).toEqual([
+      { role: 'user', content: [{ type: 'text', text: 'hi' }] },
+    ])
+  })
 })

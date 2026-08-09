@@ -28,7 +28,7 @@ import { MemoryStore } from '../store/MemoryStore.js'
 import { InMemoryRecorder } from '../trajectory/InMemoryRecorder.js'
 import { TrajectoryStore } from '../trajectory/TrajectoryStore.js'
 import { createGateway } from '../gateway/GatewayFactory.js'
-import { AgentRuntime } from './AgentRuntime.js'
+import { AgentRuntime, type MakeChildPort } from './AgentRuntime.js'
 import { readCheckpointLifecycle } from './checkpointSchema.js'
 import {
   DefaultIOPort,
@@ -44,7 +44,7 @@ import { ReplayingIOPort } from '../trace/ReplayingIOPort.js'
 import { ReplayError } from '../trace/ReplayError.js'
 import { ReplayDivergenceError } from '../trace/ReplayDivergenceError.js'
 import { extractRunSnapshot } from '../trace/RunSnapshot.js'
-import type { Event, AgentRunStartedPayload, TaskOutcomeRecordedPayload } from '../trace/types.js'
+import type { Event, AgentRunStartedPayload, TaskOutcomeRecordedPayload, TrustedProviderFamily } from '../trace/types.js'
 import { makeTraceTools } from '../tools/trace.js'
 import type { RecordTaskOutcomeInput, TaskOutcome } from '../types/outcome.js'
 import {
@@ -176,21 +176,59 @@ export class Milkie {
     return createGateway(model, this.log.child({ mod: 'gateway' }))
   }
 
-  private wrapIOPort(gateway: IModelGateway, runId: string, cursor?: CausalCursor): IIOPort {
+  /**
+   * Closed provider family for LLM failure sanitizer. Only GatewayFactory paths
+   * produce a trusted family; injected/custom gateways are `unknown`.
+   */
+  private trustedProviderFamily(config: AgentConfig, tier?: string): TrustedProviderFamily | 'unknown' {
+    if (this.gatewayOverride) return 'unknown'
+    const model = this.resolveModel(config, tier)
+    if (!model) return 'unknown'
+    const adapter = model.adapter.toLowerCase()
+    if (adapter === 'anthropic') return 'anthropic'
+    if (adapter === 'openai-compatible' || adapter === 'openai' || adapter === 'volcengine') {
+      return 'openai-compatible'
+    }
+    return 'unknown'
+  }
+
+  private wrapIOPort(
+    gateway: IModelGateway,
+    runId: string,
+    cursor?: CausalCursor,
+    trustedProvider?: TrustedProviderFamily | 'unknown',
+  ): IIOPort {
     const base = new DefaultIOPort(gateway)
     return this.eventStore
-      ? new RecordingIOPort(base, this.eventStore, runId, undefined, this.traceObjectStore ?? undefined, cursor)
+      ? new RecordingIOPort(
+          base,
+          this.eventStore,
+          runId,
+          undefined,
+          this.traceObjectStore ?? undefined,
+          cursor,
+          trustedProvider,
+        )
       : base
   }
 
-  private buildMakeChildPort(): import('./AgentRuntime.js').MakeChildPort | undefined {
+  private buildMakeChildPort(): MakeChildPort | undefined {
     if (!this.eventStore) return undefined
     const eventStore = this.eventStore
     const objectStore = this.traceObjectStore ?? undefined
     return async (childRunId, childConfig, start) => {
       const gw     = this.resolveGateway(childConfig)
       const cursor = new CausalCursor()
-      const port   = new RecordingIOPort(new DefaultIOPort(gw), eventStore, childRunId, undefined, objectStore, cursor)
+      const trusted = this.trustedProviderFamily(childConfig)
+      const port   = new RecordingIOPort(
+        new DefaultIOPort(gw),
+        eventStore,
+        childRunId,
+        undefined,
+        objectStore,
+        cursor,
+        trusted,
+      )
       await port.attach(start)
       return { port, finish: (c) => port.detach(c), cursor }
     }
@@ -385,7 +423,7 @@ export class Milkie {
       : new InMemoryRecorder(undefined, config.agentId)
 
     const causalCursor = new CausalCursor()
-    const ioPort = this.wrapIOPort(gateway, agentRunId, causalCursor)
+    const ioPort = this.wrapIOPort(gateway, agentRunId, causalCursor, this.trustedProviderFamily(config))
     const makeChildPort = this.buildMakeChildPort()
 
     // #83: snapshot this context's persistent vars at invoke entry (next-invoke visibility).
@@ -512,7 +550,7 @@ export class Milkie {
       contextId,
       stateStore: this.stateStore,
       recorder,
-      ioPort:          this.wrapIOPort(gateway, agentRunId, causalCursor),
+      ioPort:          this.wrapIOPort(gateway, agentRunId, causalCursor, this.trustedProviderFamily(config)),
       control,
       eventStore:      this.eventStore ?? undefined,
       traceObjectStore: this.traceObjectStore ?? undefined,

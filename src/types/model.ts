@@ -97,8 +97,41 @@ export interface AbandonedRunErrorEnvelope {
   model?:     undefined
 }
 
+export interface LlmInvocationFailureEnvelope {
+  code:       'LLM_INVOCATION_FAILED'
+  message:    'LLM invocation failed.'
+  phase:      'ioport'
+  model:      string
+  retryable:  false
+  provider?:  undefined
+}
+
+export class LlmInvocationError extends Error {
+  readonly code = 'LLM_INVOCATION_FAILED' as const
+  readonly phase = 'ioport' as const
+  readonly retryable = false as const
+  readonly envelope: LlmInvocationFailureEnvelope
+
+  constructor(model: string) {
+    const envelope: LlmInvocationFailureEnvelope = {
+      code: 'LLM_INVOCATION_FAILED',
+      message: 'LLM invocation failed.',
+      phase: 'ioport',
+      model,
+      retryable: false,
+    }
+    super(envelope.message)
+    this.name = 'LlmInvocationError'
+    this.envelope = { ...envelope }
+  }
+}
+
 export type RuntimeErrorEnvelope = MaxIterationsErrorEnvelope | AbandonedRunErrorEnvelope
-export type AgentErrorEnvelope = ModelErrorEnvelope | RuntimeErrorEnvelope | IOControlErrorEnvelope
+export type AgentErrorEnvelope =
+  | ModelErrorEnvelope
+  | RuntimeErrorEnvelope
+  | IOControlErrorEnvelope
+  | LlmInvocationFailureEnvelope
 
 export interface ToolSchema {
   name:        string
