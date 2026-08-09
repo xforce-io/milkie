@@ -372,6 +372,7 @@ export type TraceIntegrityErrorKind =
 - L1 概要: https://github.com/xforce-io/milkie/issues/229#issuecomment-5229309028
 - L1 reviewer: https://github.com/xforce-io/milkie/issues/229#issuecomment-5229309513
 - L2 reviewer: https://github.com/xforce-io/milkie/issues/229#issuecomment-5229352913
+- 跨需求 reviewer: https://github.com/xforce-io/milkie/issues/229#issuecomment-5229482619
 - PR: https://github.com/xforce-io/milkie/pull/231
 - 配套 Issue: https://github.com/xforce-io/milkie/issues/228
 - #228 L2: https://github.com/xforce-io/milkie/blob/feat/228-ioport-deadline-cancellation/docs/design/228-ioport-deadline-cancellation.md
