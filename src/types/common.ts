@@ -1,4 +1,4 @@
-import type { AgentErrorEnvelope, ModelEvent } from './model.js'
+import type { AgentErrorEnvelope, IOInvocationControl, ModelEvent } from './model.js'
 
 export type JSONValue = string | number | boolean | null | JSONValue[] | { [k: string]: JSONValue }
 export type JSONObject = Record<string, JSONValue>
@@ -36,6 +36,8 @@ export interface AgentInvokeRequest {
   variables?: Record<string, JSONValue>
   /** When provided, the run streams token-level ModelEvents to this callback. */
   onModelEvent?: (e: ModelEvent) => void
+  /** Absolute deadline and caller cancellation signal for this invocation. */
+  control?: IOInvocationControl
 }
 
 export interface ProjectionBound {

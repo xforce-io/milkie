@@ -4,6 +4,7 @@ import type { IStateStore } from '../types/store.js'
 import type { ITrajectoryRecorder } from '../types/trajectory.js'
 import type { ToolDefinition } from '../types/tool.js'
 import type { IIOPort } from './IOPort.js'
+import type { IOInvocationControl } from '../types/model.js'
 
 export interface AgentSpawnOptions {
   config:      AgentConfig
@@ -15,6 +16,7 @@ export interface AgentSpawnOptions {
   stateStore:  IStateStore
   recorder:    ITrajectoryRecorder
   ioPort:      IIOPort
+  control?:     IOInvocationControl
   causalCursor?:  import('../trace/CausalCursor.js').CausalCursor
   extraTools?:    ToolDefinition[]
   eventStore?:    import('../trace/EventStore.js').IEventStore

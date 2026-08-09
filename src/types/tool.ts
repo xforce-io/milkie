@@ -8,6 +8,8 @@ export interface ToolContext {
   workingMemory: WorkingMemory
   agentFactory:  AgentFactory
   stateStore:    IStateStore
+  /** Effective per-effect cancellation signal supplied by IOPort. */
+  readonly signal: AbortSignal
   requestSkill?: (name: string, scope?: 'turn' | 'session') => { requested: string; status: string; version?: string; scope?: 'turn' | 'session' }
   /** #164: raw user input for the current turn, stable across all tool-loop iterations. */
   currentTurn?:  string

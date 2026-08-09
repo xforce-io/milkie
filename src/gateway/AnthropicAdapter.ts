@@ -1,5 +1,12 @@
 import Anthropic from '@anthropic-ai/sdk'
-import type { IModelGateway, ModelRequest, ModelResponse, ModelEvent, ModelUsage } from '../types/model.js'
+import type {
+  GatewayInvocationOptions,
+  IModelGateway,
+  ModelEvent,
+  ModelRequest,
+  ModelResponse,
+  ModelUsage,
+} from '../types/model.js'
 import type { Message, MessageContent } from '../types/common.js'
 import type { ToolCall } from '../types/tool.js'
 
@@ -23,19 +30,25 @@ export class AnthropicAdapter implements IModelGateway {
     })
   }
 
-  async complete(request: ModelRequest): Promise<ModelResponse> {
+  async complete(request: ModelRequest, options?: GatewayInvocationOptions): Promise<ModelResponse> {
     const params = this.buildParams(request)
-    const raw = await (this.client.messages.create as (p: unknown) => Promise<Anthropic.Message>)({
+    const raw = await (this.client.messages.create as (
+      p: unknown,
+      options?: GatewayInvocationOptions,
+    ) => Promise<Anthropic.Message>)({
       ...params,
       stream: false,
-    })
+    }, options?.signal ? { signal: options.signal } : undefined)
 
     return this.parseResponse(raw as Anthropic.Message)
   }
 
-  async *stream(request: ModelRequest): AsyncIterable<ModelEvent> {
+  async *stream(request: ModelRequest, options?: GatewayInvocationOptions): AsyncIterable<ModelEvent> {
     const params = this.buildParams(request)
-    const stream = (this.client.messages.stream as (p: unknown) => AsyncIterable<unknown>)(params)
+    const stream = (this.client.messages.stream as (
+      p: unknown,
+      options?: GatewayInvocationOptions,
+    ) => AsyncIterable<unknown>)(params, options?.signal ? { signal: options.signal } : undefined)
     this.streamTools.clear()
     try {
       for await (const event of stream) {

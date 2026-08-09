@@ -1,5 +1,10 @@
-import type { ModelRequest, ModelResponse, ModelEvent } from '../types/model.js'
-import type { IIOPort, ToolInvocationOptions } from '../runtime/IOPort.js'
+import type { ModelRequest, ModelResponse } from '../types/model.js'
+import {
+  resolveIOInvocationControl,
+  type IIOPort,
+  type LLMInvocationOptions,
+  type ToolInvocationOptions,
+} from '../runtime/IOPort.js'
 import type { IEventStore } from './EventStore.js'
 import type {
   LlmRequestedPayload,
@@ -150,7 +155,9 @@ export class RecordingIOPort implements IIOPort {
     })
   }
 
-  async invokeLLM(request: ModelRequest, onEvent?: (e: ModelEvent) => void): Promise<ModelResponse> {
+  async invokeLLM(request: ModelRequest, options?: LLMInvocationOptions): Promise<ModelResponse> {
+    const control = resolveIOInvocationControl(options?.control)
+    const resolvedOptions = control ? { ...options, control } : options
     await this.flushPendingNondet()
     const requestHash = hashModelRequest(request)
     const reqEventId  = this.inner.uuid()
@@ -166,7 +173,7 @@ export class RecordingIOPort implements IIOPort {
     })
     if (this.cursor) this.cursor.lastIoEventId = reqEventId
 
-    const response = await this.inner.invokeLLM(request, onEvent)
+    const response = await this.inner.invokeLLM(request, resolvedOptions)
 
     const respEventId = this.inner.uuid()
     await this.store.append({
@@ -227,9 +234,11 @@ export class RecordingIOPort implements IIOPort {
   async invokeTool(
     toolName: string,
     input: unknown,
-    execute: () => Promise<unknown>,
+    execute: (signal: AbortSignal) => Promise<unknown>,
     opts?: ToolInvocationOptions,
   ): Promise<unknown> {
+    const control = resolveIOInvocationControl(opts?.control)
+    const resolvedOptions = control ? { ...opts, control } : opts
     await this.flushPendingNondet()
     const requestHash = hashToolCall(toolName, input, opts?.invalidArguments)
     // #81: only stamp toolCallId when supplied, so id-less callers stay clean and
@@ -249,7 +258,7 @@ export class RecordingIOPort implements IIOPort {
     if (this.cursor) this.cursor.lastIoEventId = reqEventId
 
     try {
-      const output = await this.inner.invokeTool(toolName, input, execute, opts)
+      const output = await this.inner.invokeTool(toolName, input, execute, resolvedOptions)
       const meta = await this.outputMetadata(output)
       // #37: the handler may have declared objects during execute; list their ids
       // on tool.responded (artifactRefs) and emit object.created/relation.created.

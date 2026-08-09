@@ -172,3 +172,48 @@ describe('AnthropicAdapter — response usage extraction', () => {
     expect(resp.usage).toEqual({ inputTokens: 500, outputTokens: 30 })
   })
 })
+
+
+describe('AnthropicAdapter — cancellation signal passthrough', () => {
+  const request: ModelRequest = { model: 'claude-test', messages: [] }
+
+  test('passes signal in complete SDK request options', async () => {
+    const adapter = new AnthropicAdapter({ apiKey: 'sk-test' })
+    const controller = new AbortController()
+    let sdkOptions: unknown
+    const client = (adapter as unknown as {
+      client: { messages: { create: unknown; stream: unknown } }
+    }).client
+    client.messages.create = async (_params: unknown, options: unknown) => {
+      sdkOptions = options
+      return { content: [{ type: 'text', text: 'ok' }], stop_reason: 'end_turn', usage: {} }
+    }
+
+    await adapter.complete(request, { signal: controller.signal })
+
+    expect(sdkOptions).toEqual({ signal: controller.signal })
+  })
+
+  test('passes signal in stream SDK request options', async () => {
+    const adapter = new AnthropicAdapter({ apiKey: 'sk-test' })
+    const controller = new AbortController()
+    let sdkOptions: unknown
+    const client = (adapter as unknown as {
+      client: { messages: { create: unknown; stream: unknown } }
+    }).client
+    client.messages.stream = (_params: unknown, options: unknown) => {
+      sdkOptions = options
+      return {
+        async *[Symbol.asyncIterator]() {
+          yield { type: 'message_stop' }
+        },
+      }
+    }
+
+    for await (const _event of adapter.stream(request, { signal: controller.signal })) {
+      // Drain the provider stream.
+    }
+
+    expect(sdkOptions).toEqual({ signal: controller.signal })
+  })
+})

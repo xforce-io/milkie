@@ -3,6 +3,15 @@
 export { Milkie } from './runtime/Milkie.js'
 export { AgentRuntime } from './runtime/AgentRuntime.js'
 export { AgentFactory } from './runtime/AgentFactory.js'
+export {
+  DefaultIOPort,
+  resolveIOInvocationControl,
+} from './runtime/IOPort.js'
+export type {
+  IIOPort,
+  LLMInvocationOptions,
+  ToolInvocationOptions,
+} from './runtime/IOPort.js'
 export { FSMEngine } from './fsm/FSMEngine.js'
 export { ContextRegions } from './context/ContextRegions.js'
 export { assemble, type AssembleScope, type AssembledContext } from './context/assemble.js'
@@ -82,6 +91,10 @@ export type {
   ToolResult,
 } from './types/tool.js'
 
+export {
+  IOControlError,
+  IOInvocationValidationError,
+} from './types/model.js'
 export type {
   IModelGateway,
   ModelRequest,
@@ -90,6 +103,12 @@ export type {
   ModelErrorCode,
   ModelErrorEnvelope,
   ModelErrorPhase,
+  AgentErrorEnvelope,
+  GatewayInvocationOptions,
+  IOControlErrorCode,
+  IOControlErrorEnvelope,
+  IOControlOperation,
+  IOInvocationControl,
   ToolSchema,
 } from './types/model.js'
 

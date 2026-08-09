@@ -9,6 +9,11 @@ interface ToolCallAccumulator {
   invalidArguments?: InvalidToolArguments
 }
 
+export interface StreamAggregationControl {
+  readonly signal: AbortSignal
+  readonly isLatched: () => boolean
+}
+
 /**
  * 消费 AsyncIterable<ModelEvent>，将每个事件透传给 onEvent（若提供），
  * 同时将分片聚合成一个完整的 ModelResponse。
@@ -23,6 +28,7 @@ interface ToolCallAccumulator {
 export async function aggregateStream(
   stream: AsyncIterable<ModelEvent>,
   onEvent?: (e: ModelEvent) => void,
+  control?: StreamAggregationControl,
 ): Promise<ModelResponse> {
   let textBuf = ''
   let usage: ModelUsage | undefined
@@ -32,57 +38,91 @@ export async function aggregateStream(
   const toolCallOrder: string[] = []
   const toolCallMap = new Map<string, ToolCallAccumulator>()
 
-  for await (const event of stream) {
-    // 先透传给 onEvent
-    onEvent?.(event)
-
-    switch (event.type) {
-      case 'message_delta':
-        textBuf += event.data.text
-        break
-
-      case 'tool_call_start': {
-        const { toolCallId, name } = event.data
-        if (!toolCallMap.has(toolCallId)) {
-          toolCallOrder.push(toolCallId)
-          toolCallMap.set(toolCallId, { id: toolCallId, name, argsBuf: '' })
-        }
-        break
-      }
-
-      case 'tool_call_delta': {
-        const acc = toolCallMap.get(event.data.toolCallId)
-        if (acc) {
-          const delta = event.data.delta
-          acc.argsBuf += typeof delta === 'string' ? delta : JSON.stringify(delta)
-        }
-        break
-      }
-
-      case 'tool_call_done': {
-        const acc = toolCallMap.get(event.data.toolCallId)
-        if (acc) {
-          if (event.data.input !== undefined) {
-            // input 字段有权威值，直接序列化为 argsBuf
-            acc.argsBuf = JSON.stringify(event.data.input)
-          }
-          if (event.data.invalidArguments !== undefined) {
-            acc.invalidArguments = event.data.invalidArguments
-          }
-        }
-        break
-      }
-
-      case 'usage':
-        usage = event.data
-        break
-
-      case 'error':
-        if (!finishReason) {
-          finishReason = 'error'
-        }
-        break
+  const iterator = stream[Symbol.asyncIterator]()
+  let returnStarted = false
+  let completed = false
+  const isStopped = () => control?.signal.aborted === true || control?.isLatched() === true
+  const closeIterator = () => {
+    if (returnStarted) return
+    returnStarted = true
+    if (iterator.return) {
+      void Promise.resolve(iterator.return()).catch(() => undefined)
     }
+  }
+  const onAbort = () => closeIterator()
+  control?.signal.addEventListener('abort', onAbort, { once: true })
+
+  try {
+    while (!isStopped()) {
+      const next = await iterator.next()
+      if (next.done) {
+        completed = true
+        break
+      }
+      if (isStopped()) {
+        closeIterator()
+        break
+      }
+      const event = next.value
+
+      // Check control immediately before the externally observable callback.
+      if (isStopped()) {
+        closeIterator()
+        break
+      }
+      onEvent?.(event)
+
+      switch (event.type) {
+        case 'message_delta':
+          textBuf += event.data.text
+          break
+
+        case 'tool_call_start': {
+          const { toolCallId, name } = event.data
+          if (!toolCallMap.has(toolCallId)) {
+            toolCallOrder.push(toolCallId)
+            toolCallMap.set(toolCallId, { id: toolCallId, name, argsBuf: '' })
+          }
+          break
+        }
+
+        case 'tool_call_delta': {
+          const acc = toolCallMap.get(event.data.toolCallId)
+          if (acc) {
+            const delta = event.data.delta
+            acc.argsBuf += typeof delta === 'string' ? delta : JSON.stringify(delta)
+          }
+          break
+        }
+
+        case 'tool_call_done': {
+          const acc = toolCallMap.get(event.data.toolCallId)
+          if (acc) {
+            if (event.data.input !== undefined) {
+              // input 字段有权威值，直接序列化为 argsBuf
+              acc.argsBuf = JSON.stringify(event.data.input)
+            }
+            if (event.data.invalidArguments !== undefined) {
+              acc.invalidArguments = event.data.invalidArguments
+            }
+          }
+          break
+        }
+
+        case 'usage':
+          usage = event.data
+          break
+
+        case 'error':
+          if (!finishReason) {
+            finishReason = 'error'
+          }
+          break
+      }
+    }
+  } finally {
+    control?.signal.removeEventListener('abort', onAbort)
+    if (!completed) closeIterator()
   }
 
   // 构造 content

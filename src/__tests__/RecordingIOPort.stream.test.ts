@@ -45,7 +45,7 @@ describe('RecordingIOPort — onEvent 透传 + 录制不变', () => {
     const port  = new RecordingIOPort(inner, store, 'r1')
 
     const seen: ModelEvent[] = []
-    const response = await port.invokeLLM(REQ, e => seen.push(e))
+    const response = await port.invokeLLM(REQ, { onEvent: e => seen.push(e) })
 
     // onEvent 收到 2 个 delta（流式透传到 inner 的证据）
     expect(seen).toEqual([
@@ -92,7 +92,7 @@ describe('RecordingIOPort — onEvent 透传 + 录制不变', () => {
     const port  = new RecordingIOPort(inner, store, 'r3')
 
     const seen: ModelEvent[] = []
-    const response = await port.invokeLLM(REQ, e => seen.push(e))
+    const response = await port.invokeLLM(REQ, { onEvent: e => seen.push(e) })
 
     // 流式事件透传（4 个 tool_call 事件）
     expect(seen.map(e => e.type)).toEqual([
@@ -119,7 +119,7 @@ describe('RecordingIOPort — onEvent 透传 + 录制不变', () => {
     const store = new MemoryEventStore()
     const port  = new RecordingIOPort(inner, store, 'r4')
 
-    await port.invokeLLM(REQ, () => {})
+    await port.invokeLLM(REQ, { onEvent: () => {} })
 
     const events = await store.readByRunId('r4')
     const requested = events.filter(e => e.type === 'llm.requested')
