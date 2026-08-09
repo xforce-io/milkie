@@ -128,7 +128,7 @@ fail deterministically
 
     expect(error?.data).toMatchObject({
       error: {
-        code: 'MODEL_CONNECTION_ERROR', phase: 'stream_open', provider: 'local-stub',
+        code: 'MODEL_CONNECTION_ERROR', phase: 'stream_open', provider: 'openai-compatible',
         model: 'failing-model', retryable: true,
       },
     })

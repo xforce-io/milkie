@@ -10,7 +10,7 @@ export interface ModelErrorContext {
   phase:    ModelErrorPhase
 }
 
-const SAFE_MESSAGES: Record<ModelErrorCode, string> = {
+export const SAFE_MESSAGES: Record<ModelErrorCode, string> = {
   MODEL_CONNECTION_ERROR: 'Model provider connection failed.',
   MODEL_TIMEOUT:          'Model provider request timed out.',
   MODEL_RATE_LIMITED:     'Model provider rate limit exceeded.',

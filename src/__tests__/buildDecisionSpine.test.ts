@@ -12,7 +12,7 @@ function scenario(): Event[] {
   return [
     ev('start', 'agent.run.started', { agentId: 'a', goal: 'g', input: 'i', contextId: 'c' }, undefined, 1),
     ev('llm1', 'llm.requested', { model: 'm' }, 'start', 2),
-    ev('lr1', 'llm.responded', { response: { toolCalls: [{ name: 'classify_intent' }] } }, 'llm1', 3),
+    ev('lr1', 'llm.responded', { response: { content: [], toolCalls: [{ name: 'classify_intent', input: {} }] }, requestHash: 'h1' }, 'llm1', 3),
     ev('treq', 'tool.requested', { toolName: 'classify_intent', input: {} }, 'lr1', 4),
     ev('tres', 'tool.responded', { toolName: 'classify_intent', output: {} }, 'treq', 5),
     ev('done', 'agent.run.completed', { status: 'completed', lastTextOutput: 'ok' }, 'tres', 7),
@@ -41,5 +41,27 @@ describe('buildDecisionSpine', () => {
 
   it('returns empty spine for a run with no decisions', () => {
     expect(buildDecisionSpine([ev('s', 'agent.run.started', {})]).nodes).toEqual([])
+  })
+
+  it('labels v2 failure terminals as LLM failure · code, not text success', () => {
+    const events: Event[] = [
+      ev('llm1', 'llm.requested', { requestHash: 'h', outcomeSchemaVersion: 2 }, undefined, 1),
+      ev('lr1', 'llm.responded', {
+        status: 'error',
+        requestHash: 'h',
+        error: {
+          code: 'MODEL_RATE_LIMITED',
+          message: 'Model provider rate limit exceeded.',
+          phase: 'request',
+          provider: 'anthropic',
+          model: 'm',
+          retryable: true,
+        },
+      }, 'llm1', 2),
+    ]
+    const node = buildDecisionSpine(events).nodes.find(n => n.eventId === 'lr1')!
+    expect(node.label).toBe('LLM failure · MODEL_RATE_LIMITED')
+    expect(node.status).toBe('error')
+    expect(node.label).not.toBe('LLM → 文本')
   })
 })

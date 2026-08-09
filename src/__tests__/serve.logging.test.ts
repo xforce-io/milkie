@@ -176,7 +176,7 @@ describe('serve HTTP service log', () => {
     expect(failures).toHaveLength(1)
     expect(failures[0]).toMatchObject({
       mod: 'server', contextId: 'ctx-failure', errorCode: 'MODEL_CONNECTION_ERROR',
-      retryable: true, provider: 'volcengine', model: 'glm-5.2', phase: 'stream_open',
+      retryable: true, provider: 'unknown', model: 'glm-5.2', phase: 'stream_open',
       runId: expect.any(String),
     })
   })

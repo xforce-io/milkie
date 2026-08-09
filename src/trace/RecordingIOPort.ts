@@ -18,10 +18,20 @@ import type {
   ObjectCreatedPayload,
   RelationCreatedPayload,
   LineageBuffer,
+  TrustedProviderFamily,
 } from './types.js'
+import { LLM_OUTCOME_SCHEMA_VERSION } from './types.js'
 import { hashModelRequest, hashToolCall, canonicalize, contentAddressForCanonicalBytes } from './hash.js'
 import type { ITraceObjectStore } from './TraceObjectStore.js'
 import type { CausalCursor } from './CausalCursor.js'
+import {
+  buildFailureTerminalPayload,
+  buildSuccessTerminalPayload,
+  normalizeLlmFailure,
+  reconstructLlmError,
+  type TrustedProviderContext,
+} from './LlmOutcome.js'
+import { TraceWriteError } from './TraceWriteError.js'
 
 function cacheStatsFrom(response: ModelResponse): {
   readTokens:       number
@@ -71,6 +81,7 @@ export class RecordingIOPort implements IIOPort {
     private readonly actor: string = 'runtime',
     private readonly objectStore?: ITraceObjectStore,
     private readonly cursor?: CausalCursor,
+    private readonly trustedProvider?: TrustedProviderFamily | 'unknown',
   ) {}
 
   private async outputMetadata(output: unknown): Promise<{ outputHash?: string; outputBytes?: number }> {
@@ -141,60 +152,103 @@ export class RecordingIOPort implements IIOPort {
 
   async detach(payload: AgentRunCompletedPayload): Promise<void> {
     await this.flushPendingNondet()
+    // Prefer lastLlmTerminalId so error completions link to the failure terminal;
+    // fall back to lastLlmRespondedId for older cursors / success-only paths.
+    const completionCause =
+      this.cursor?.lastLlmTerminalId ?? this.cursor?.lastLlmRespondedId
     await this.store.append({
       id:        this.inner.uuid(),
       runId:     this.runId,
       type:      'agent.run.completed',
       actor:     this.actor,
-      // The final output is produced by the last LLM response; link to it so the
-      // output node can drill to the final decision (nearest-decision-ancestor).
+      // The final output / error terminal; link so the output node can drill to it.
       // causedBy is trace metadata (a bare uuid) — replay never compares it.
-      ...(this.cursor?.lastLlmRespondedId ? { causedBy: this.cursor.lastLlmRespondedId } : {}),
+      ...(completionCause ? { causedBy: completionCause } : {}),
       timestamp: this.inner.now(),
       payload,
     })
   }
 
   async invokeLLM(request: ModelRequest, options?: LLMInvocationOptions): Promise<ModelResponse> {
+    // 0. Shared #228 control resolve first — invalid rejects before any request/inner.
     const control = resolveIOInvocationControl(options?.control)
     const resolvedOptions = control ? { ...options, control } : options
     await this.flushPendingNondet()
+
     const requestHash = hashModelRequest(request)
     const reqEventId  = this.inner.uuid()
-    await this.store.append({
-      id:        reqEventId,
-      runId:     this.runId,
-      type:      'llm.requested',
-      actor:     this.actor,
-      // edge 2: this call was provoked by the previous turn terminator.
-      ...(this.cursor?.lastTerminatorId ? { causedBy: this.cursor.lastTerminatorId } : {}),
-      timestamp: this.inner.now(),
-      payload:   { request, requestHash } satisfies LlmRequestedPayload,
-    })
+    const trustedContext: TrustedProviderContext | undefined =
+      this.trustedProvider !== undefined
+        ? { providerFamily: this.trustedProvider }
+        : undefined
+
+    // 1. v2 request append — fail closed (no inner call on rejection).
+    try {
+      await this.store.append({
+        id:        reqEventId,
+        runId:     this.runId,
+        type:      'llm.requested',
+        actor:     this.actor,
+        // edge 2: this call was provoked by the previous turn terminator.
+        ...(this.cursor?.lastTerminatorId ? { causedBy: this.cursor.lastTerminatorId } : {}),
+        timestamp: this.inner.now(),
+        payload:   {
+          request,
+          requestHash,
+          outcomeSchemaVersion: LLM_OUTCOME_SCHEMA_VERSION,
+        } satisfies LlmRequestedPayload,
+      })
+    } catch (err) {
+      throw new TraceWriteError({ stage: 'request', operation: 'llm', eventId: reqEventId }, err)
+    }
     if (this.cursor) this.cursor.lastIoEventId = reqEventId
 
-    const response = await this.inner.invokeLLM(request, resolvedOptions)
-
-    const respEventId = this.inner.uuid()
-    await this.store.append({
-      id:        respEventId,
-      runId:     this.runId,
-      type:      'llm.responded',
-      actor:     this.actor,
-      causedBy:  reqEventId,
-      timestamp: this.inner.now(),
-      payload:   {
+    // 2. Capture inner outcome in memory (never rethrow original untrusted error).
+    let terminalPayload: LlmRespondedPayload
+    let successResponse: ModelResponse | undefined
+    try {
+      const response = await this.inner.invokeLLM(request, resolvedOptions)
+      successResponse = response
+      terminalPayload = buildSuccessTerminalPayload(
         response,
         requestHash,
-        ...(cacheStatsFrom(response) ? { cacheStats: cacheStatsFrom(response) } : {}),
-      } satisfies LlmRespondedPayload,
-    })
-    if (this.cursor) {
-      this.cursor.lastLlmRespondedId = respEventId
-      this.cursor.lastIoEventId      = respEventId
+        cacheStatsFrom(response),
+      )
+    } catch (err) {
+      const envelope = normalizeLlmFailure(err, request, trustedContext)
+      terminalPayload = buildFailureTerminalPayload(envelope, requestHash)
     }
 
-    return response
+    // 3. Exactly one terminal append. Rejection → TraceWriteError; no second append.
+    const respEventId = this.inner.uuid()
+    try {
+      await this.store.append({
+        id:        respEventId,
+        runId:     this.runId,
+        type:      'llm.responded',
+        actor:     this.actor,
+        causedBy:  reqEventId,
+        timestamp: this.inner.now(),
+        payload:   terminalPayload,
+      })
+    } catch (err) {
+      throw new TraceWriteError({ stage: 'terminal', operation: 'llm', eventId: respEventId }, err)
+    }
+
+    // 4. Cursor update from the written terminal, then return/rebuild.
+    if (this.cursor) {
+      this.cursor.lastLlmTerminalId = respEventId
+      this.cursor.lastIoEventId = respEventId
+      if (terminalPayload.status === 'ok') {
+        this.cursor.lastLlmRespondedId = respEventId
+      }
+    }
+
+    if (terminalPayload.status === 'ok') {
+      return successResponse!
+    }
+    // Rebuild typed error from the written envelope so live/Trace/Replay share identity.
+    throw reconstructLlmError(terminalPayload.error)
   }
 
   /**

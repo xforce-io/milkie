@@ -1,5 +1,7 @@
-import type { Event, LlmRespondedPayload, ToolRespondedPayload, AgentRunStartedPayload } from '../types.js'
+import type { Event, ToolRespondedPayload, AgentRunStartedPayload } from '../types.js'
 import type { Message, MessageContent } from '../../types/common.js'
+import { decodeLlmOutcome } from '../LlmOutcome.js'
+import { TraceIntegrityError } from '../TraceIntegrityError.js'
 
 /**
  * #128: project ONE run's events into a canonical `Message[]` transcript.
@@ -8,9 +10,10 @@ import type { Message, MessageContent } from '../../types/common.js'
  * assistant `tool_use` → `tool_result` → assistant final) and emits, from the
  * discrete I/O events only:
  *   - `agent.run.started.input`        → a user message
- *   - `llm.responded.response.content` → an assistant message (text + tool_use)
+ *   - success `llm.responded` content  → an assistant message (text + tool_use)
  *   - `tool.responded`                 → a tool message (tool_result, paired by toolCallId)
  *
+ * Failure LLM terminals are skipped (they produce no assistant message).
  * Using responded events (not the `llm.requested.messages` snapshot) means a run
  * contributes only its own turn — the restored prior-turn prefix is never
  * re-emitted as events — so concatenating per-run projections does not duplicate.
@@ -26,8 +29,15 @@ export function runEventsToMessages(events: Event[]): Message[] {
         break
       }
       case 'llm.responded': {
-        const { response } = e.payload as LlmRespondedPayload
-        const content = response.content ?? []
+        let outcome
+        try {
+          outcome = decodeLlmOutcome(e)
+        } catch (err) {
+          if (err instanceof TraceIntegrityError) break
+          throw err
+        }
+        if (outcome.status !== 'ok') break
+        const content = outcome.response.content ?? []
         if (content.length > 0) messages.push({ role: 'assistant', content })
         break
       }

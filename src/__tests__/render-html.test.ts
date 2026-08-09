@@ -66,7 +66,7 @@ describe('renderHtml', () => {
       e({ id: 'q', runId: 'r1', type: 'llm.requested', timestamp: 2,
           payload: { request: { messages: [{ role: 'user', content: 'hello-payload-marker' }] }, requestHash: 'h-marker' } }),
       e({ id: 'a', runId: 'r1', type: 'llm.responded', timestamp: 3, causedBy: 'q',
-          payload: { response: { content: [{ type: 'text', text: 'response-marker' }] }, requestHash: 'h-marker' } }),
+          payload: { response: { content: [{ type: 'text', text: 'response-marker' }], toolCalls: [] }, requestHash: 'h-marker' } }),
     ]
     const html = renderHtml(events)
     // payload <pre> exists inside an entry
@@ -258,5 +258,88 @@ describe('#26 Assembled by', () => {
     expect(body).toContain('class="filters"')
     expect(body).toContain('data-run-id="r1"')
     expect(body).not.toContain('<!doctype html>')
+  })
+})
+
+describe('#229 LLM terminal render safety', () => {
+  const SECRET = 'sk-live-tampered-token-LEAKME'
+
+  it('does not stringify raw secrets from a tampered llm.responded terminal', () => {
+    const events: Event[] = [
+      e({ id: 's', runId: 'r1', type: 'agent.run.started', timestamp: 1,
+          payload: { agentId: 'echo', goal: 'g', input: 'i', contextId: 'r1' } }),
+      e({ id: 'q', runId: 'r1', type: 'llm.requested', timestamp: 2,
+          payload: {
+            request: { model: 'm', messages: [] },
+            requestHash: 'h',
+            outcomeSchemaVersion: 2,
+          } }),
+      e({ id: 'a', runId: 'r1', type: 'llm.responded', timestamp: 3, causedBy: 'q',
+          payload: {
+            status: 'error',
+            requestHash: 'h',
+            error: {
+              code: 'MODEL_TIMEOUT',
+              message: 'Model provider request timed out.',
+              phase: 'request',
+              provider: 'anthropic',
+              model: 'm',
+              retryable: true,
+              stack: SECRET,
+              cause: { message: SECRET, token: SECRET },
+            },
+            token: SECRET,
+          } }),
+    ]
+    const html = renderHtml(events)
+    expect(html).not.toContain(SECRET)
+    expect(html).toContain('malformed_payload')
+    expect(html).toContain('LLM integrity')
+    // Embedded archive must also be sanitized.
+    const embedded = html.match(/id="trace-data">(.*?)<\/script>/s)?.[1] ?? ''
+    expect(embedded).not.toContain(SECRET)
+    expect(embedded).toContain('"status":"malformed"')
+  })
+
+  it('renders validated success/error terminals via decoder-safe view only', () => {
+    const events: Event[] = [
+      e({ id: 's', runId: 'r1', type: 'agent.run.started', timestamp: 1,
+          payload: { agentId: 'echo', goal: 'g', input: 'i', contextId: 'r1' } }),
+      e({ id: 'q', runId: 'r1', type: 'llm.requested', timestamp: 2,
+          payload: {
+            request: { model: 'm', messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }] },
+            requestHash: 'h-ok',
+            outcomeSchemaVersion: 2,
+          } }),
+      e({ id: 'a', runId: 'r1', type: 'llm.responded', timestamp: 3, causedBy: 'q',
+          payload: {
+            status: 'ok',
+            requestHash: 'h-ok',
+            response: { content: [{ type: 'text', text: 'safe-ok-marker' }], toolCalls: [], finishReason: 'end_turn' },
+          } }),
+      e({ id: 'q2', runId: 'r1', type: 'llm.requested', timestamp: 4,
+          payload: {
+            request: { model: 'm', messages: [] },
+            requestHash: 'h-err',
+            outcomeSchemaVersion: 2,
+          } }),
+      e({ id: 'a2', runId: 'r1', type: 'llm.responded', timestamp: 5, causedBy: 'q2',
+          payload: {
+            status: 'error',
+            requestHash: 'h-err',
+            error: {
+              code: 'MODEL_RATE_LIMITED',
+              message: 'Model provider rate limit exceeded.',
+              phase: 'request',
+              provider: 'openai-compatible',
+              model: 'm',
+              retryable: true,
+            },
+          } }),
+    ]
+    const html = renderHtml(events)
+    expect(html).toContain('safe-ok-marker')
+    expect(html).toContain('LLM failure · MODEL_RATE_LIMITED')
+    expect(html).toContain('MODEL_RATE_LIMITED')
   })
 })

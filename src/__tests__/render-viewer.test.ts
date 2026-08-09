@@ -11,7 +11,7 @@ function scenario(): Event[] {
   return [
     e({ id: 'start', runId: 'r1', type: 'agent.run.started', timestamp: 1, payload: { agentId: 'x', goal: 'g', input: 'i', contextId: 'c' } }),
     e({ id: 'llm1', runId: 'r1', type: 'llm.requested', timestamp: 2, causedBy: 'start', payload: { model: 'm' } }),
-    e({ id: 'lr1', runId: 'r1', type: 'llm.responded', timestamp: 3, causedBy: 'llm1', payload: { response: { toolCalls: [{ name: 'classify_intent', input: {} }] } } }),
+    e({ id: 'lr1', runId: 'r1', type: 'llm.responded', timestamp: 3, causedBy: 'llm1', payload: { response: { content: [], toolCalls: [{ name: 'classify_intent', input: {} }] }, requestHash: 'h1' } }),
     e({ id: 'treq', runId: 'r1', type: 'tool.requested', timestamp: 4, causedBy: 'lr1', payload: { toolName: 'classify_intent', input: {}, requestHash: 'h' } }),
     e({ id: 'tres', runId: 'r1', type: 'tool.responded', timestamp: 5, causedBy: 'treq', payload: { toolName: 'classify_intent', output: {}, status: 'ok', requestHash: 'h' } }),
     e({ id: 'done', runId: 'r1', type: 'agent.run.completed', timestamp: 6, causedBy: 'tres', payload: { status: 'completed', lastTextOutput: 'ok' } }),
@@ -66,7 +66,7 @@ describe('renderViewer', () => {
     const events: Event[] = [
       e({ id: 'start', runId: 'r1', type: 'agent.run.started', timestamp: 1, payload: { agentId: 'x', goal: 'g', input: 'i', contextId: 'c' } }),
       e({ id: 'llm1', runId: 'r1', type: 'llm.requested', timestamp: 2, causedBy: 'start', payload: { model: 'm' } }),
-      e({ id: 'lr1', runId: 'r1', type: 'llm.responded', timestamp: 3, causedBy: 'llm1', payload: {} }),
+      e({ id: 'lr1', runId: 'r1', type: 'llm.responded', timestamp: 3, causedBy: 'llm1', payload: { response: { content: [], toolCalls: [] }, requestHash: 'h' } }),
       e({ id: 'done', runId: 'r1', type: 'agent.run.completed', timestamp: 4, causedBy: 'lr1', payload: { status: 'completed', lastTextOutput: '## 标题\n**重点**' } }),
     ]
     const html = renderViewer(events)
@@ -117,8 +117,49 @@ describe('renderViewer', () => {
   })
 
   it('renders without crashing for a run with no decisions', () => {
-    const html = renderViewer([{ id: 's', runId: 'r1', actor: 'a', type: 'agent.run.started', timestamp: 1, payload: {} } as Event])
+    const html = renderViewer([{ id: 's', runId: 'r1', actor: 'a', type: 'agent.run.started', timestamp: 1, payload: {} as Event['payload'] } as Event])
     expect(html.startsWith('<!doctype html>')).toBe(true)
     expect(html).toContain('id="why-panel"')
+  })
+
+  it('does not leak secrets from a tampered llm.responded terminal in rawJson or timeline', () => {
+    const SECRET = 'sk-viewer-tampered-token-LEAKME'
+    const events: Event[] = [
+      e({ id: 'start', runId: 'r1', type: 'agent.run.started', timestamp: 1,
+          payload: { agentId: 'x', goal: 'g', input: 'i', contextId: 'c' } }),
+      e({ id: 'llm1', runId: 'r1', type: 'llm.requested', timestamp: 2, causedBy: 'start',
+          payload: {
+            request: { model: 'm', messages: [] },
+            requestHash: 'h1',
+            outcomeSchemaVersion: 2,
+          } }),
+      e({ id: 'lr1', runId: 'r1', type: 'llm.responded', timestamp: 3, causedBy: 'llm1',
+          payload: {
+            status: 'error',
+            requestHash: 'h1',
+            error: {
+              code: 'MODEL_AUTH_ERROR',
+              message: 'Model provider authentication failed.',
+              phase: 'request',
+              provider: 'anthropic',
+              model: 'm',
+              retryable: false,
+              stack: SECRET,
+              cause: SECRET,
+            },
+            token: SECRET,
+          } }),
+      e({ id: 'done', runId: 'r1', type: 'agent.run.completed', timestamp: 4, causedBy: 'lr1',
+          payload: { status: 'error', lastTextOutput: 'failed' } }),
+    ]
+    const html = renderViewer(events)
+    expect(html).not.toContain(SECRET)
+    expect(html).toContain('malformed_payload')
+    const exps = JSON.parse(html.match(/id="explanations-data">(.*?)<\/script>/s)![1]!)
+    expect(exps['lr1'].rawJson).not.toContain(SECRET)
+    expect(exps['lr1'].rawJson).toContain('malformed')
+    // Raw timeline tab reuses sanitized embed.
+    const embedded = html.match(/id="trace-data">(.*?)<\/script>/s)?.[1] ?? ''
+    expect(embedded).not.toContain(SECRET)
   })
 })

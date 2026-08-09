@@ -5,7 +5,7 @@ import { ReplayDivergenceError } from '../trace/ReplayDivergenceError'
 import { hashModelRequest, hashToolCall } from '../trace/hash'
 import type { IIOPort } from '../runtime/IOPort'
 import type { IModelGateway, ModelRequest, ModelResponse } from '../types/model'
-import type { Event, LlmRespondedPayload, ToolRespondedPayload } from '../trace/types'
+import type { Event, ToolRespondedPayload } from '../trace/types'
 
 class FailingGateway implements IModelGateway {
   complete(): Promise<ModelResponse> { throw new Error('inner gateway must not be called during replay') }
@@ -22,7 +22,7 @@ describe('ReplayingIOPort', () => {
   it('serves LLM from cache; never calls inner', async () => {
     const req: ModelRequest = { model: 'm', messages: [], system: '', tools: [] }
     const h = hashModelRequest(req)
-    const ev: Event<LlmRespondedPayload> = {
+    const ev: Event = {
       id: 'e1', runId: 'r1', type: 'llm.responded', actor: 'runtime', timestamp: 1,
       payload: { response: llmResp('cached'), requestHash: h },
     }

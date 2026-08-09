@@ -1,6 +1,8 @@
-import type { Event, EventKind, LlmRespondedPayload, ToolRespondedPayload } from '../types.js'
+import type { Event, EventKind, ToolRespondedPayload } from '../types.js'
 import { walkCausedBy } from './walkCausedBy.js'
 import { summarizeEvent } from './summarizeEvent.js'
+import { decodeLlmOutcome, failureViewOf, type LlmFailureView } from '../LlmOutcome.js'
+import { TraceIntegrityError } from '../TraceIntegrityError.js'
 
 /**
  * explainDecision — the #175 diagnostic anchor that replaces the old
@@ -10,7 +12,7 @@ import { summarizeEvent } from './summarizeEvent.js'
  * EFFECT that already lives in the event log:
  *
  *   - `llm.responded`  — the model chose what to do: which tools to call (and
- *                        with what input) and/or what text to emit.
+ *                        with what input) and/or what text to emit — or failed.
  *   - `tool.responded` — a tool produced a result the loop folds back in.
  *
  * Because the anchor is an effect (not authored control flow), this covers
@@ -26,14 +28,15 @@ export interface DecisionExplanation {
   kind: DecisionAnchorKind
   /**
    * For an llm decision: the tools the model selected this turn (name + short
-   * input) plus whether it emitted final text. For a tool decision: the tool
-   * name and its ok/error outcome.
+   * input) plus whether it emitted final text, or a stable failure view.
+   * For a tool decision: the tool name and its ok/error outcome.
    */
   chose: {
-    tools:    Array<{ name: string; input?: unknown }>
-    text?:    string
+    tools: Array<{ name: string; input?: unknown }>
+    text?: string
     toolName?: string
-    status?:  'ok' | 'error'
+    status?: 'ok' | 'error'
+    error?: LlmFailureView
   }
   trigger: {
     causedByEventId?: string
@@ -62,33 +65,70 @@ export function explainDecision(events: Event[], decisionEventId: string): Decis
 
   const causalChain = walkCausedBy(events, decisionEventId).map(e => ({
     eventId: e.id,
-    type:    e.type,
+    type: e.type,
     summary: summarizeEvent(e),
   }))
 
   const triggerSource = causeSummary ?? '(无上游记录)'
+  const trigger = {
+    ...(evt.causedBy ? { causedByEventId: evt.causedBy } : {}),
+    ...(causeSummary ? { causedBySummary: causeSummary } : {}),
+  }
 
   if (evt.type === 'llm.responded') {
-    const resp = (evt.payload as LlmRespondedPayload).response
-    const tools = (resp?.toolCalls ?? []).map(c => ({ name: c.name, ...(c.input !== undefined ? { input: c.input } : {}) }))
-    const textBlock = resp?.content?.find(
-      (c): c is { type: 'text'; text: string } => c.type === 'text' && !!c.text,
-    )
-    const text = textBlock?.text
-    const what = tools.length
-      ? `调用 ${tools.map(t => t.name).join('、')}`
-      : text ? `输出文本(完成)` : '无动作'
-    const summary = `LLM 决策:${what};由 ${triggerSource} 触发`
-    return {
-      decisionEventId,
-      kind: 'llm',
-      chose: { tools, ...(text ? { text } : {}) },
-      trigger: {
-        ...(evt.causedBy ? { causedByEventId: evt.causedBy } : {}),
-        ...(causeSummary ? { causedBySummary: causeSummary } : {}),
-      },
-      causalChain,
-      summary,
+    try {
+      const outcome = decodeLlmOutcome(evt)
+      if (outcome.status === 'error') {
+        const view = failureViewOf(outcome.error)
+        return {
+          decisionEventId,
+          kind: 'llm',
+          chose: { tools: [], status: 'error', error: view },
+          trigger,
+          causalChain,
+          summary: `LLM failure · ${view.code};由 ${triggerSource} 触发`,
+        }
+      }
+      const tools = (outcome.response.toolCalls ?? []).map(c => ({
+        name: c.name,
+        ...(c.input !== undefined ? { input: c.input } : {}),
+      }))
+      const textBlock = outcome.response.content?.find(
+        (c): c is { type: 'text'; text: string } => c.type === 'text' && !!c.text,
+      )
+      const text = textBlock?.text
+      const what = tools.length
+        ? `调用 ${tools.map(t => t.name).join('、')}`
+        : text ? `输出文本(完成)` : '无动作'
+      return {
+        decisionEventId,
+        kind: 'llm',
+        chose: { tools, status: 'ok', ...(text ? { text } : {}) },
+        trigger,
+        causalChain,
+        summary: `LLM 决策:${what};由 ${triggerSource} 触发`,
+      }
+    } catch (err) {
+      if (err instanceof TraceIntegrityError) {
+        return {
+          decisionEventId,
+          kind: 'llm',
+          chose: {
+            tools: [],
+            status: 'error',
+            error: {
+              code: err.kind,
+              message: err.message,
+              phase: 'integrity',
+              retryable: false,
+            },
+          },
+          trigger,
+          causalChain,
+          summary: `LLM integrity · ${err.kind};由 ${triggerSource} 触发`,
+        }
+      }
+      throw err
     }
   }
 
@@ -101,10 +141,7 @@ export function explainDecision(events: Event[], decisionEventId: string): Decis
     decisionEventId,
     kind: 'tool',
     chose: { tools: [], toolName, status },
-    trigger: {
-      ...(evt.causedBy ? { causedByEventId: evt.causedBy } : {}),
-      ...(causeSummary ? { causedBySummary: causeSummary } : {}),
-    },
+    trigger,
     causalChain,
     summary,
   }

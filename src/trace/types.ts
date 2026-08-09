@@ -1,4 +1,11 @@
-import type { AgentErrorEnvelope, ModelRequest, ModelResponse } from '../types/model.js'
+import type {
+  AgentErrorEnvelope,
+  IOControlErrorEnvelope,
+  LlmInvocationFailureEnvelope,
+  ModelErrorEnvelope,
+  ModelRequest,
+  ModelResponse,
+} from '../types/model.js'
 import type { InvalidToolArguments } from '../types/common.js'
 
 /**
@@ -42,26 +49,70 @@ export interface Event<P = unknown> {
   payload: P
 }
 
-// ---- I/O payloads (Phase 2 shapes + Phase 3 requestHash) ----
+// ---- I/O payloads (Phase 2 shapes + Phase 3 requestHash + #229 v2 outcome) ----
 
+export const LLM_OUTCOME_SCHEMA_VERSION = 2 as const
+
+export type TrustedProviderFamily = 'anthropic' | 'openai-compatible'
+
+export interface LlmCacheStats {
+  readTokens:       number
+  creationTokens:   number
+  totalInputTokens: number
+  /** readTokens / totalInputTokens, [0, 1]. 0 when totalInputTokens === 0. */
+  hitRate:          number
+}
+
+/** New writes always use v2. Legacy wire payloads are read only via LlmOutcome decoder. */
 export interface LlmRequestedPayload {
   request: ModelRequest
   /** Phase 3: hash of canonicalized request; cache key for replay. */
   requestHash: string
+  /** #229: explicit outcome schema generation for the paired terminal. */
+  outcomeSchemaVersion: typeof LLM_OUTCOME_SCHEMA_VERSION
 }
 
-export interface LlmRespondedPayload {
-  response: ModelResponse
-  /** Mirrors the requested-event hash so consumers don't need to re-join. */
+/** Historical request payload without outcomeSchemaVersion (Phase 3 / earlier). */
+export interface LlmRequestedPayloadLegacy {
+  request: ModelRequest
   requestHash: string
-  /** PR-D: cache-health snapshot lifted from response.usage; null when provider does not report. */
-  cacheStats?: {
-    readTokens:       number
-    creationTokens:   number
-    totalInputTokens: number
-    /** readTokens / totalInputTokens, [0, 1]. 0 when totalInputTokens === 0. */
-    hitRate:          number
-  }
+  outcomeSchemaVersion?: undefined
+}
+
+export type RecordedLlmFailureEnvelope =
+  | ModelErrorEnvelope
+  | IOControlErrorEnvelope
+  | LlmInvocationFailureEnvelope
+
+export interface LlmSucceededPayloadV2 {
+  status: 'ok'
+  response: ModelResponse
+  requestHash: string
+  cacheStats?: LlmCacheStats
+  error?: never
+}
+
+export interface LlmFailedPayloadV2 {
+  status: 'error'
+  error: RecordedLlmFailureEnvelope
+  requestHash: string
+  response?: never
+  cacheStats?: never
+}
+
+/** Strict v2 terminal union written by RecordingIOPort. */
+export type LlmRespondedPayload = LlmSucceededPayloadV2 | LlmFailedPayloadV2
+
+/**
+ * Historical success terminal (no status discriminant). Only accepted by the
+ * legacy decoder path — never written by current RecordingIOPort.
+ */
+export interface LlmRespondedPayloadLegacy {
+  response: ModelResponse
+  requestHash: string
+  cacheStats?: LlmCacheStats
+  status?: undefined
+  error?: undefined
 }
 
 export interface ToolRequestedPayload {
