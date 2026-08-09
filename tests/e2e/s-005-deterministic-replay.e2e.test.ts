@@ -31,37 +31,37 @@ const text = (s: string): ModelResponse => ({
   content: [{ type: 'text', text: s }], toolCalls: [], finishReason: 'end_turn',
 })
 
-const twoStepAgent: AgentConfig = {
+const singleStateAgent: AgentConfig = {
   agentId: 'replay-demo',
   version: '0.0.0',
   systemPrompt: 'you are a friendly bot',
   fsm: {
+    // #175 / #233: single authored llm state — one text response completes the run.
     states: [
-      { name: 'greet',    type: 'llm', instructions: 'say hello',           tools: [], on: { DONE: 'farewell' } },
-      { name: 'farewell', type: 'llm', instructions: 'say goodbye briefly', tools: [] },
+      { name: 'greet', type: 'llm', instructions: 'say hello', tools: [] },
     ],
   },
   model: { provider: 'stub', model: 'stub', adapter: 'stub' },
 } as AgentConfig
 
 describe('s-005 deterministic replay (Phase 4 byte-identical)', () => {
-  test('record a 2-step run, then replay it without a live gateway', async () => {
+  test('record a single-state run, then replay it without a live gateway', async () => {
     const eventStore = new MemoryEventStore()
 
     // ---- Record ----
-    const recordGateway = new SequentialGateway([text('Hello!'), text('Goodbye!')])
+    const recordGateway = new SequentialGateway([text('Hello!')])
     const recordMilkie = new Milkie({
       stateStore: new MemoryStore(),
       gateway:    recordGateway,
       eventStore,
     })
-    recordMilkie.registerAgent(twoStepAgent)
+    recordMilkie.registerAgent(singleStateAgent)
     const original = await recordMilkie.invoke({
       agentId: 'replay-demo', goal: 'demo replay', input: 'start',
     })
 
     expect(original.status).toBe('completed')
-    expect(recordGateway.callCount).toBe(2)
+    expect(recordGateway.callCount).toBe(1)
 
     // Phase 4: recording captured nondet events. The actual count depends on
     // the runtime's port.now/port.uuid calls along the recorded path; we just
@@ -78,7 +78,7 @@ describe('s-005 deterministic replay (Phase 4 byte-identical)', () => {
       gateway:    replayGateway,
       eventStore,
     })
-    replayMilkie.registerAgent(twoStepAgent)
+    replayMilkie.registerAgent(singleStateAgent)
 
     const replayed = await replayMilkie.replay(original.agentRunId)
 
@@ -89,13 +89,13 @@ describe('s-005 deterministic replay (Phase 4 byte-identical)', () => {
 
   test('replay is repeatable: re-running against the same recording produces identical results', async () => {
     const eventStore = new MemoryEventStore()
-    const recordGateway = new SequentialGateway([text('Hello!'), text('Goodbye!')])
+    const recordGateway = new SequentialGateway([text('Hello!')])
     const recordMilkie = new Milkie({
       stateStore: new MemoryStore(),
       gateway:    recordGateway,
       eventStore,
     })
-    recordMilkie.registerAgent(twoStepAgent)
+    recordMilkie.registerAgent(singleStateAgent)
     const original = await recordMilkie.invoke({
       agentId: 'replay-demo', goal: 'demo replay', input: 'start',
     })
@@ -112,7 +112,7 @@ describe('s-005 deterministic replay (Phase 4 byte-identical)', () => {
         gateway:    new SequentialGateway([]),
         eventStore,
       })
-      replayMilkie.registerAgent(twoStepAgent)
+      replayMilkie.registerAgent(singleStateAgent)
       const r = await replayMilkie.replay(original.agentRunId)
       replays.push({ status: r.status, output: r.output })
     }
