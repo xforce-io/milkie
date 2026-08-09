@@ -76,9 +76,9 @@ const inspectableAgent: AgentConfig = {
   version:      '0.0.0',
   systemPrompt: 'you are a friendly bot',
   fsm: {
+    // #175 / #233: single authored user state; tool + text end the run (2 LLM calls).
     states: [
-      { name: 'greet',    type: 'llm', instructions: 'greet the user',  tools: ['echo'], on: { DONE: 'finalize' } },
-      { name: 'finalize', type: 'llm', instructions: 'wrap up briefly', tools: [] },
+      { name: 'greet', type: 'llm', instructions: 'greet the user', tools: ['echo'] },
     ],
   },
   model: { provider: 'stub', model: 'stub', adapter: 'stub' },
@@ -97,9 +97,8 @@ describe('s-002 inspect a completed run', () => {
     eventStore      = new MemoryEventStore()
     trajectoryStore = new TrajectoryStore()
     gateway         = new SequentialGateway([
-      toolCall('echo', { text: 'hi' }),  // greet turn 1 → tool
-      textOnly('greeted'),                // greet turn 2 → DONE → finalize
-      textOnly('wrapped'),                // finalize turn 1 → terminal LLM end
+      toolCall('echo', { text: 'hi' }),  // turn 1 → tool
+      textOnly('greeted'),                // turn 2 → text end
     ])
 
     const milkie = new Milkie({
@@ -142,12 +141,12 @@ describe('s-002 inspect a completed run', () => {
     }
   })
 
-  test('Trajectory contains llm.call, tool.call, fsm.transition spans', async () => {
+  test('Trajectory contains llm.call and tool.call spans', async () => {
     const traj = await trajectoryStore.getByRunId(runId)
     const names = new Set(traj.spans.map(s => s.name))
     expect(names.has('llm.call')).toBe(true)
     expect(names.has('tool.call')).toBe(true)
-    expect(names.has('fsm.transition')).toBe(true)
+    // #175 de-core: no business fsm.transition on the single-state path
   })
 
   test('Event log opens with agent.run.started and closes with agent.run.completed', async () => {
@@ -165,7 +164,7 @@ describe('s-002 inspect a completed run', () => {
     const reqs = events.filter(e => e.type === 'llm.requested')
     const resps = events.filter(e => e.type === 'llm.responded')
 
-    expect(reqs.length).toBe(3)        // 3 LLM turns
+    expect(reqs.length).toBe(2)        // toolCall + textOnly
     expect(resps.length).toBe(reqs.length)
 
     for (const req of reqs) {
@@ -228,7 +227,7 @@ describe('s-002 inspect a completed run', () => {
   })
 
   test('Inspection does not trigger any extra LLM calls', () => {
-    const expected = 3                  // calls made during the original invoke
+    const expected = 2                  // calls made during the original invoke
     expect(gateway.callCount).toBe(expected)
     // The pure-read operations above ran after invoke returned;
     // gateway.callCount must remain at the invoke-time value.

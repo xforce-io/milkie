@@ -20,7 +20,7 @@ related:
 
 ## 场景叙事
 
-开发者跑完一个 agent run（成功或失败），手里只有一个 `agentRunId`，想**前向浏览**这次运行里发生的一切——agent 生命周期事件、FSM 状态转移、LLM 请求/响应、tool 调用——按时间顺序呈现，并能按事件类型或时间窗过滤。
+开发者跑完一个 agent run（成功或失败），手里只有一个 `agentRunId`，想**前向浏览**这次运行里发生的一切——agent 生命周期事件、LLM 请求/响应、tool 调用——按时间顺序呈现，并能按事件类型或时间窗过滤。
 
 不重跑、不分叉、不沿因果链反向追溯，**纯阅读**。这是大多数用户第一次接触 Agent Trace 的入口，校验 ARCHITECTURE.md 里"observable"这条 capability：给定 `runId`，timeline 可读、有序、可过滤。
 
@@ -31,7 +31,7 @@ related:
 ```
 test
   ├─ 构造 milkie，挂上 TrajectoryStore + MemoryEventStore + 一个 echo 工具
-  ├─ 注册一个 2-state FSM（greet → finalize），第一个状态调用一次 echo 工具
+  ├─ 注册一个单 authored llm state（greet，tools: echo）
   └─ milkie.invoke({...}) → 得到 result.agentRunId
 
 inspect (无 LLM 调用)
@@ -46,10 +46,10 @@ inspect (无 LLM 调用)
 
 - [ ] `milkie.invoke(...)` 返回 `status: 'completed'`，含可用 `agentRunId`
 - [ ] `trajectoryStore.getByRunId(runId).status === 'completed'`
-- [ ] Trajectory 中包含至少 1 个 `llm.call` span、1 个 `tool.call` span、1 个 `fsm.transition` span
+- [ ] Trajectory 中包含至少 1 个 `llm.call` span、1 个 `tool.call` span（#175 单状态路径不要求业务 `fsm.transition`）
 - [ ] Trajectory 中所有 span 的 `endTime` 都 `>= startTime`，整体按 startTime 升序可排
 - [ ] `eventStore.readByRunId(runId)` 返回的事件数 `>= 6`（start + 2×LLM 配对 + 1×tool 配对 + completed）
-- [ ] 首条事件 `type === 'agent.run.started'`，末条 `type === 'agent.run.completed'`
+- [ ] 事件流中存在 `agent.run.started`，末条为 `agent.run.completed`（`clock.read` / `uuid.generated` 可能先于 started flush，故不要求 started 位于 index 0）
 - [ ] 每个 `llm.requested` 都有恰好一个 `llm.responded` 与之配对（同 `requestHash`），`responded.causedBy === requested.id`
 - [ ] 每个 `tool.requested` 都有恰好一个 `tool.responded` 与之配对（同 `requestHash`），`responded.causedBy === requested.id`
 - [ ] 事件按 `timestamp` 单调不降
