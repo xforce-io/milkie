@@ -36,7 +36,7 @@ Evolution 实验子系统。当前实现 vs. target 架构的对账详见
 ## 安装
 
 ```bash
-npm install @xforce/milkie@0.1.0
+npm install @freemanxu/milkie@0.1.1
 ```
 
 需要 Node.js ≥ 20。
@@ -46,8 +46,8 @@ npm install @xforce/milkie@0.1.0
 ## 快速开始
 
 ```typescript
-import { Milkie, MemoryStore } from '@xforce/milkie'
-import type { AgentConfig, ToolDefinition } from '@xforce/milkie'
+import { Milkie, MemoryStore } from '@freemanxu/milkie'
+import type { AgentConfig, ToolDefinition } from '@freemanxu/milkie'
 
 // 1. 定义工具
 const webSearch: ToolDefinition = {

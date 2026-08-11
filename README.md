@@ -38,7 +38,7 @@ target architecture.
 ## Install
 
 ```bash
-npm install @xforce/milkie@0.1.0
+npm install @freemanxu/milkie@0.1.1
 ```
 
 Node.js ≥ 20 required.
@@ -48,8 +48,8 @@ Node.js ≥ 20 required.
 ## Quickstart
 
 ```typescript
-import { Milkie, MemoryStore, TrajectoryStore } from '@xforce/milkie'
-import type { AgentConfig, ToolDefinition } from '@xforce/milkie'
+import { Milkie, MemoryStore, TrajectoryStore } from '@freemanxu/milkie'
+import type { AgentConfig, ToolDefinition } from '@freemanxu/milkie'
 
 // 1. Define a tool
 const webSearch: ToolDefinition = {

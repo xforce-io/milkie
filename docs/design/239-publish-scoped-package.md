@@ -14,12 +14,12 @@ Milkie 的源码包名为 `milkie`，但 npm registry 中该非 scoped 名称已
 
 - **发布工件**：由目标 commit 构建、经 `npm pack` 生成并上传 registry 的 tarball；它是消费者安装的唯一输入。
 - **消费者 smoke test**：在不含仓库源码和既有 `node_modules` 的临时目录安装该 tarball，加载最小 manifest 并执行 CLI 的端到端验证。
-- **scoped package**：npm package 名称为 `@xforce/milkie`，所有权和解析范围属于 `xforce` scope。
+- **scoped package**：npm package 名称为 `@freemanxu/milkie`，所有权和解析范围属于发布者 `freemanxu` 的个人 scope。
 
 ## 3. 设计目标与非目标
 
 - **目标**：
-  - 发布唯一且可被 npm 解析到本项目的 `@xforce/milkie`。
+  - 发布唯一且可被 npm 解析到本项目的 `@freemanxu/milkie`。
   - 每个发布工件均包含 `dist/cli/index.js`、运行时 `dist/` 和 `agents/`。
   - 使用精确 package version 的消费者可直接执行 `milkie` CLI，不依赖 Git clone 或 TypeScript 构建。
   - 发布前以生成 tarball 做消费者 smoke test；发布后以 registry 安装结果复验。
@@ -34,7 +34,7 @@ Milkie 的源码包名为 `milkie`，但 npm registry 中该非 scoped 名称已
 发布后，开发者在 Node.js 20+ 环境运行：
 
 ```bash
-npm install @xforce/milkie@0.1.0
+npm install @freemanxu/milkie@0.1.1
 ./node_modules/.bin/milkie --help
 ```
 
@@ -46,9 +46,9 @@ N/A — 无页面或交互界面变更；命令行输出和退出码保持兼容
 
 ## 5. 设计思路与折衷
 
-### 方案 A：发布 `@xforce/milkie` 的预构建 tarball
+### 方案 A：发布 `@freemanxu/milkie` 的预构建 tarball
 
-选择此方案。scope 消除与现有 `milkie` package 的歧义；预构建工件给消费者稳定、最小的安装输入。发布前和发布后均以 tarball 安装验证，直接覆盖实际消费路径。
+选择此方案。个人 scope 避免当前 `@xforce` organization scope 的发布控制面阻塞，并消除与现有 `milkie` package 的歧义；预构建工件给消费者稳定、最小的安装输入。发布前和发布后均以 tarball 安装验证，直接覆盖实际消费路径。
 
 ### 方案 B：DataSpace 等集成方固定 Git commit 并自行构建
 
@@ -67,7 +67,7 @@ flowchart LR
     Source[经审查的 Git commit] --> Build[TypeScript build]
     Build --> Pack[npm pack tarball]
     Pack --> Consumer[隔离消费者安装与 CLI smoke test]
-    Consumer -->|通过| Publish[npm registry @xforce/milkie@version]
+    Consumer -->|通过| Publish[npm registry @freemanxu/milkie@version]
     Publish --> RegistryCheck[隔离 registry 安装复验]
     RegistryCheck --> Consumer
 ```
@@ -79,7 +79,7 @@ flowchart LR
 1. 发布流程只接受明确 version 与对应 Git tag。
 2. 构建生成 `dist/` 后，pack 阶段只收集声明的运行时文件。
 3. 验证流程在全新目录安装 tarball，执行 `milkie --help`，写入最小 manifest/agent，并运行 `milkie agent list`。
-4. 仅验证成功的 tarball 可发布至 `@xforce` scope。
+4. 仅验证成功的 tarball 可发布至 `@freemanxu` scope。
 5. 发布后从 registry 在另一全新目录重做消费者验证；失败即报告发布物异常，不发布替代同版本工件。
 
 ## 7. 模块设计
@@ -93,7 +93,7 @@ flowchart LR
 
 ## 8. API / CLI 设计
 
-- Package：`@xforce/milkie`。
+- Package：`@freemanxu/milkie`。
 - Binary：安装后提供 `milkie`，入口保持 `dist/cli/index.js`。
 - 最低运行时：Node.js 20。
 - CLI 兼容：既有 `agent`、`trace`、`serve` 命令、标准输出和退出码不变。
@@ -110,8 +110,8 @@ flowchart LR
 
 ## 10. 迁移 / 兼容 / 回滚
 
-- 新 package 从 `@xforce/milkie@0.1.0` 开始；旧 `milkie` 名称从未指向本项目，不能视为可迁移版本。
-- README 与外部集成配置改为 scoped package；不提供指向无关 package 的兼容 alias。
+- `v0.1.0` tag 已指向 `@xforce/milkie` 的未发布工件，保留为不可变历史记录；首个 `@freemanxu/milkie` 发行版本为 `0.1.1`，对应新的 `v0.1.1` tag。
+- README 与外部集成配置改为个人 scoped package；不提供指向无关 package 或已失败 organization scope 的兼容 alias。
 - 已发布 npm version 不可回滚或覆盖；发现发行缺陷时发布更高修复版本，并撤销有风险版本的推荐使用。
 - DataSpace 在本 package 发布并完成 registry consumer test 前，保持不接入 Milkie。
 
@@ -128,8 +128,8 @@ flowchart LR
 
 ## 12. 开放问题 / 决策记录
 
-- D1：首个公开 package 名固定为 `@xforce/milkie`，不再使用冲突的非 scoped 名称。
-- D2：首个发行 version 为 `0.1.0`，与当前源码 package version 对齐。
+- D1：因 `@xforce/milkie` 的组织 scope 发布请求被 npm registry 拒绝，首个公开 package 改为发布者个人 scope `@freemanxu/milkie`；不再使用冲突的非 scoped 名称。
+- D2：`v0.1.0` 不重写且无对应 npm package；首个个人 scope 发行 version 为 `0.1.1`。
 - D3：发布后依赖 registry 安装验证，不把源码 build 成功视为发行成功。
 - D4：npm trusted publishing 是首选身份模式；当前人工 npm 登录仅用于受控发布，后续可迁移至 trusted publishing。
 - 开放问题：N/A。
