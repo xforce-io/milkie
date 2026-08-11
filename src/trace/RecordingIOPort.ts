@@ -1,6 +1,7 @@
 import type { ModelRequest, ModelResponse, ModelEvent } from '../types/model.js'
-import type { IIOPort, ToolInvocationOptions } from '../runtime/IOPort.js'
+import { assertToolInvocationAllowed, type IIOPort, type IOInvocationControl, type ToolInvocationOptions } from '../runtime/IOPort.js'
 import type { IEventStore } from './EventStore.js'
+
 import type {
   LlmRequestedPayload,
   LlmRespondedPayload,
@@ -17,6 +18,7 @@ import type {
 import { hashModelRequest, hashToolCall, canonicalize, contentAddressForCanonicalBytes } from './hash.js'
 import type { ITraceObjectStore } from './TraceObjectStore.js'
 import type { CausalCursor } from './CausalCursor.js'
+import { sanitizeModelRequestForTrace } from './imageSummary.js'
 
 function cacheStatsFrom(response: ModelResponse): {
   readTokens:       number
@@ -150,9 +152,16 @@ export class RecordingIOPort implements IIOPort {
     })
   }
 
-  async invokeLLM(request: ModelRequest, onEvent?: (e: ModelEvent) => void): Promise<ModelResponse> {
+  async invokeLLM(
+    request: ModelRequest,
+    onEvent?: (e: ModelEvent) => void,
+    control?: IOInvocationControl,
+  ): Promise<ModelResponse> {
     await this.flushPendingNondet()
+    // Hash the live request (including base64) so record/replay keys match.
+    // Persist a redacted copy that never stores inline media bytes or URL secrets.
     const requestHash = hashModelRequest(request)
+    const safeRequest = sanitizeModelRequestForTrace(request)
     const reqEventId  = this.inner.uuid()
     await this.store.append({
       id:        reqEventId,
@@ -162,11 +171,11 @@ export class RecordingIOPort implements IIOPort {
       // edge 2: this call was provoked by the previous turn terminator.
       ...(this.cursor?.lastTerminatorId ? { causedBy: this.cursor.lastTerminatorId } : {}),
       timestamp: this.inner.now(),
-      payload:   { request, requestHash } satisfies LlmRequestedPayload,
+      payload:   { request: safeRequest as ModelRequest, requestHash } satisfies LlmRequestedPayload,
     })
     if (this.cursor) this.cursor.lastIoEventId = reqEventId
 
-    const response = await this.inner.invokeLLM(request, onEvent)
+    const response = await this.inner.invokeLLM(request, onEvent, control)
 
     const respEventId = this.inner.uuid()
     await this.store.append({
@@ -229,6 +238,7 @@ export class RecordingIOPort implements IIOPort {
     input: unknown,
     execute: () => Promise<unknown>,
     opts?: ToolInvocationOptions,
+    control?: IOInvocationControl,
   ): Promise<unknown> {
     await this.flushPendingNondet()
     const requestHash = hashToolCall(toolName, input, opts?.invalidArguments)
@@ -249,7 +259,13 @@ export class RecordingIOPort implements IIOPort {
     if (this.cursor) this.cursor.lastIoEventId = reqEventId
 
     try {
-      const output = await this.inner.invokeTool(toolName, input, execute, opts)
+      // #237: re-check after async flush/trace write — deadline may have fired
+      // between runtime pre-gate and actual handler dispatch. Use nowSample()
+      // (inner clock, no clock.read) so the gate shares the IOPort timeline
+      // without recording an agent-observable nondet event.
+      assertToolInvocationAllowed(control, this.nowSample())
+      const output = await this.inner.invokeTool(toolName, input, execute, opts, control)
+
       const meta = await this.outputMetadata(output)
       // #37: the handler may have declared objects during execute; list their ids
       // on tool.responded (artifactRefs) and emit object.created/relation.created.
@@ -309,6 +325,14 @@ export class RecordingIOPort implements IIOPort {
     const value = this.inner.now()
     this.pendingNondet.push({ kind: 'clock', value })
     return value
+  }
+
+  /**
+   * Infrastructure clock for run-control gates/timers. Shares inner timeline
+   * without enqueueing clock.read (not agent-observable nondet).
+   */
+  nowSample(): number {
+    return this.inner.nowSample?.() ?? this.inner.now()
   }
 
   uuid(): string {

@@ -15,6 +15,11 @@ export interface ToolContext {
    * resolve "my last turn(s)" without the agent passing a runId. Unset on a
    * session's first turn. */
   previousRunId?: string
+  /**
+   * #237: run-level AbortSignal. Handlers MAY observe it for cooperative cancel;
+   * they MUST NOT clear, replace, or extend the run deadline.
+   */
+  readonly signal?: AbortSignal
   /** #200 C: sourceRunIds of the external projections delivered to this run (#146).
    * The capability-by-handle for selfOnly trace tools: a consumer may dereference
    * the execution / lineage / I/O of a run that was *delivered to it*, but not an

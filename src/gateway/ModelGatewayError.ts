@@ -11,12 +11,13 @@ export interface ModelErrorContext {
 }
 
 const SAFE_MESSAGES: Record<ModelErrorCode, string> = {
-  MODEL_CONNECTION_ERROR: 'Model provider connection failed.',
-  MODEL_TIMEOUT:          'Model provider request timed out.',
-  MODEL_RATE_LIMITED:     'Model provider rate limit exceeded.',
-  MODEL_AUTH_ERROR:       'Model provider authentication failed.',
-  MODEL_BAD_RESPONSE:     'Model provider rejected the request or returned an invalid response.',
-  MODEL_UNKNOWN_ERROR:    'Model provider request failed.',
+  MODEL_CONNECTION_ERROR:          'Model provider connection failed.',
+  MODEL_TIMEOUT:                   'Model provider request timed out.',
+  MODEL_RATE_LIMITED:              'Model provider rate limit exceeded.',
+  MODEL_AUTH_ERROR:                'Model provider authentication failed.',
+  MODEL_BAD_RESPONSE:              'Model provider rejected the request or returned an invalid response.',
+  MODEL_UNKNOWN_ERROR:             'Model provider request failed.',
+  MODEL_CAPABILITY_UNSUPPORTED:    'Model gateway does not support the requested capability.',
 }
 
 function statusOf(error: unknown): number | undefined {

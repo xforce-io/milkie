@@ -1,7 +1,7 @@
 import { v4 as uuidv4 } from 'uuid'
 import { createHash } from 'crypto'
-import type { AgentConfig, FSMState } from '../types/agent.js'
-import type { AgentResult, ContextProjection } from '../types/common.js'
+import type { AgentConfig, BuiltinToolName, FSMState } from '../types/agent.js'
+import type { AgentResult, ContextProjection, RunControlOptions } from '../types/common.js'
 import { MaxIterationsError } from '../types/common.js'
 import type { AgentErrorEnvelope } from '../types/model.js'
 import type { IStateStore, AgentCheckpoint, ChildAgentRecord } from '../types/store.js'
@@ -34,11 +34,13 @@ import type { ToolSchema, ModelRequest, ModelEvent } from '../types/model.js'
 import { ToolRegistry } from '../tools/ToolRegistry.js'
 import { WorkingMemory } from '../store/WorkingMemory.js'
 import { AgentFactory, type AgentSpawnOptions } from './AgentFactory.js'
-import type { IIOPort } from './IOPort.js'
-import { cognitiveTools } from '../tools/cognitive.js'
-import { systemTools } from '../tools/system.js'
-import { lineageTools } from '../tools/lineage.js'
-import { execTools } from '../tools/exec.js'
+import { assertToolInvocationAllowed, type IIOPort } from './IOPort.js'
+
+import {
+  resolveEffectiveBuiltinTools,
+  selectBuiltinToolDefinitions,
+} from '../tools/builtinTools.js'
+import { RunControl, runControlErrorEnvelope } from './RunControl.js'
 import type { InMemoryRecorder } from '../trajectory/InMemoryRecorder.js'
 import type { ITraceObjectStore } from '../trace/TraceObjectStore.js'
 import { canonicalize, contentAddressForCanonicalBytes } from '../trace/hash.js'
@@ -94,6 +96,18 @@ export interface AgentRuntimeOptions {
   subAgentConfigs?:  Map<string, AgentConfig>  // agentId → config, for spawning
   childRecorderFactory?: (config: AgentConfig, contextId: string, traceId: string) => ITrajectoryRecorder
   makeChildPort?: MakeChildPort
+  /**
+   * #235: parent run's effective built-in allowlist. Child runs intersect their
+   * own policy with this set and cannot widen it.
+   */
+  parentBuiltinTools?: readonly BuiltinToolName[]
+  /** #237: run-level deadline / cancel options from AgentInvokeRequest.control. */
+  control?: RunControlOptions
+  /**
+   * #237: parent RunControl. Child inherits cancel and the earlier deadline.
+   * Prefer over control.parent-less deadline when spawning.
+   */
+  parentRunControl?: RunControl
   /** #30: per-run causal cursor shared with this run's RecordingIOPort, so fsm.transition
    *  can stamp causedBy = the last llm/tool event id. Omit → no fsm.transition causedBy. */
   causalCursor?: CausalCursor
@@ -140,6 +154,12 @@ export class AgentRuntime {
   private readonly previousRunId?:  string
   private readonly maxToolCalls?: number
   private toolCallsUsed: number = 0
+  /** #235: effective built-in names after parent ∩ child policy. */
+  private readonly effectiveBuiltinTools: BuiltinToolName[]
+  /** #237: per-run cooperative cancel / deadline controller. */
+  private runControl: RunControl | undefined
+  private readonly controlOpts?: RunControlOptions
+  private readonly parentRunControl?: RunControl
 
   private readonly fsm:         FSMEngine
   // #175 切片 1.2a：下层运行生命周期状态机（per-run，run() 开头重置）。
@@ -191,6 +211,13 @@ export class AgentRuntime {
     this.extraTools      = opts.extraTools ?? []
     this.causalCursor    = opts.causalCursor
     this.maxToolCalls    = opts.config.fsm.max_tool_calls
+    this.controlOpts     = opts.control
+    this.parentRunControl = opts.parentRunControl
+    // #235: resolve effective allowlist before registerTools so schema+dispatch share one set.
+    this.effectiveBuiltinTools = resolveEffectiveBuiltinTools(
+      opts.config,
+      opts.parentBuiltinTools,
+    )
 
     this.fsm     = new FSMEngine(opts.config.fsm)
     this.memory  = new WorkingMemory()
@@ -208,6 +235,8 @@ export class AgentRuntime {
         childRecorderFactory: this.childRecorderFactory,
         eventStore:           this.eventStore,
         makeChildPort:        this.makeChildPort,
+        parentBuiltinTools:   this.effectiveBuiltinTools,
+        parentRunControl:     this.runControl,
       })
       return child.run(spawnOpts.input)
     })
@@ -216,14 +245,19 @@ export class AgentRuntime {
   }
 
   private registerTools(extraTools: ToolDefinition[]): void {
-    for (const tool of systemTools)    this.registry.register(tool)
-    for (const tool of cognitiveTools) this.registry.register(tool)
-    for (const tool of lineageTools)   this.registry.register(tool)  // #113 P3
-    for (const tool of execTools)      this.registry.register(tool)  // #134 shell/exec
+    // #235: only register built-ins present in the effective allowlist.
+    for (const tool of selectBuiltinToolDefinitions(this.effectiveBuiltinTools)) {
+      this.registry.register(tool)
+    }
     for (const tool of extraTools)     this.registry.register(tool)
     for (const [agentId] of Object.entries(this.config.subAgents ?? {})) {
       this.registry.register(this.makeSubAgentTool(agentId))
     }
+  }
+
+  /** #235: effective built-in names for this run (parent ∩ config). */
+  getEffectiveBuiltinTools(): readonly BuiltinToolName[] {
+    return this.effectiveBuiltinTools
   }
 
   private makeSubAgentTool(agentId: string): ToolDefinition {
@@ -264,8 +298,10 @@ export class AgentRuntime {
 
         try {
           if (this.makeChildPort) {
+            const childEffective = resolveEffectiveBuiltinTools(subConfig, this.effectiveBuiltinTools)
             const built = await this.makeChildPort(childRunId, subConfig, {
               agentId, goal, input: subInput, contextId: childContextId, parentId: this.agentRunId,
+              builtinTools: [...childEffective].sort(),
             })
             childPort   = built.port
             finish      = built.finish
@@ -284,6 +320,8 @@ export class AgentRuntime {
             extraTools:    this.extraTools,
             eventStore:    this.eventStore,
             makeChildPort: this.makeChildPort,
+            parentBuiltinTools: this.effectiveBuiltinTools,
+            parentRunControl:   this.runControl,
           })
           await finish?.({
             status: result.status,
@@ -342,6 +380,7 @@ export class AgentRuntime {
       requestSkill:  (name: string, scope?: 'turn' | 'session') => this.requestSkill(name, scope),
       currentTurn:   this.currentTurnRaw,
       previousRunId: this.previousRunId,
+      ...(this.runControl ? { signal: this.runControl.signal } : {}),
       // #200 C: the runIds delivered to this turn via projections — the allowlist
       // the selfOnly trace tools gate runId dereference on.
       ...(this.externalProjections?.length
@@ -948,7 +987,20 @@ export class AgentRuntime {
     this.lifecycle = new RunLifecycle()
     this.toolCallsUsed = 0
 
+    // #237: compose deadline + external/parent signal once per run.
+    // Start sample uses agent-observable now(); timer re-arms and final gates
+    // use nowSample when present so Recording does not log extra clock.read.
+    this.runControl?.dispose()
+    this.runControl = RunControl.create({
+      now: this.ioPort.now(),
+      clock: () => this.ioPort.nowSample?.() ?? this.ioPort.now(),
+      deadlineAt: this.controlOpts?.deadlineAt,
+      signal: this.controlOpts?.signal,
+      parent: this.parentRunControl,
+    })
+
     try {
+      this.runControl.throwIfStopped()
       await this.executeFSM()
       // Turn completed successfully — crystallize.
       this.lifecycle.signal('done')
@@ -990,22 +1042,35 @@ export class AgentRuntime {
       }
       this.lifecycle.signal('error')
       this.recorder.endSpan(this.rootSpan, 'error')
-      const structuredError: AgentErrorEnvelope | undefined = err instanceof MaxIterationsError
-        ? {
-            code:      'MAX_ITERATIONS_EXCEEDED',
-            message:   err.message,
-            phase:     'agent_loop',
-            retryable: false,
-          }
-        : modelErrorEnvelope(err)
+      // Prefer adjudicated run-stop envelope when control already tripped, even if
+      // the thrown error is a plain AbortError from in-flight I/O.
+      const stopEnvelope = runControlErrorEnvelope(err)
+        ?? (this.runControl?.stopped
+          ? (this.runControl.reason === 'deadline'
+            ? { code: 'RUN_DEADLINE_EXCEEDED' as const, message: 'Run deadline exceeded', phase: 'agent_loop' as const, retryable: true as const }
+            : { code: 'RUN_CANCELLED' as const, message: 'Run cancelled by caller', phase: 'agent_loop' as const, retryable: true as const })
+          : undefined)
+      const structuredError: AgentErrorEnvelope | undefined = stopEnvelope
+        ?? (err instanceof MaxIterationsError
+          ? {
+              code:      'MAX_ITERATIONS_EXCEEDED',
+              message:   err.message,
+              phase:     'agent_loop',
+              retryable: false,
+            }
+          : modelErrorEnvelope(err))
+      const output = structuredError?.message
+        ?? (err instanceof Error ? err.message : String(err))
       return {
         agentRunId: this.agentRunId,
         contextId:  this.contextId,
-        output:     err instanceof Error ? err.message : String(err),
+        output,
         status:     'error',
         ...(structuredError ? { error: structuredError } : {}),
       }
     } finally {
+      this.runControl?.dispose()
+      this.runControl = undefined
       await this.tryFlushTraceWrites()
       await this.recorder.flush()
     }
@@ -1032,6 +1097,7 @@ export class AgentRuntime {
   // lifecycle re-entry handled in checkEvents (interrupt→paused) and
   // executeSingleTool (retry via error_handling).
   async executeFSM(): Promise<void> {
+    this.runControl?.throwIfStopped()
     const state = this.fsm.currentState
     // A run can be resumed straight into a reserved terminal state (paused/failed)
     // — nothing to execute.
@@ -1052,6 +1118,7 @@ export class AgentRuntime {
 
     while (true) {
       await this.checkEvents()
+      this.runControl?.throwIfStopped()
 
       if (iterations >= maxIter) {
         throw new MaxIterationsError(state.name, maxIter)
@@ -1089,7 +1156,24 @@ export class AgentRuntime {
         contextEpoch: this.regions.getEpoch(),
       })
 
-      const response = await this.ioPort.invokeLLM(request, this.onModelEvent)
+      let response
+      try {
+        this.runControl?.throwIfStopped()
+        response = await this.ioPort.invokeLLM(
+          request,
+          this.onModelEvent,
+          this.runControl?.invocationControl(),
+        )
+        // #237: gateway may ignore AbortSignal and still resolve after stop.
+        // Gate before any success-path state transfer / completion.
+        this.runControl?.throwIfStopped()
+      } catch (err) {
+        // Only merge when RunControl already adjudicated a stop reason.
+        if (this.runControl?.stopped) {
+          this.runControl.mergeAbort(err)
+        }
+        throw err
+      }
 
       this.recorder.recordEvent(llmSpan, 'usage', {
         inputTokens:         response.usage?.inputTokens,
@@ -1113,12 +1197,14 @@ export class AgentRuntime {
       }
 
       await this.checkEvents()
+      this.runControl?.throwIfStopped()
 
       // --- Decide next step ---
 
       if (response.toolCalls.length > 0) {
         const results = await this.executeTools(response.toolCalls, state.tools)
         await this.checkEvents()
+        this.runControl?.throwIfStopped()
 
         // Append tool results to context. shapeToolResultForLlm may emit
         // tool.shaped events on llmSpan; InMemoryRecorder.recordEvent only
@@ -1146,6 +1232,7 @@ export class AgentRuntime {
 
   private async runActionState(state: FSMState): Promise<void> {
     await this.checkEvents()
+    this.runControl?.throwIfStopped()
 
     if (!state.handler) {
       // No handler — nothing to do; the run is done.
@@ -1182,7 +1269,9 @@ export class AgentRuntime {
       this.recorder.endSpan(span, 'error')
       throw error
     }
-
+    // #237: action-state must cross IIOPort.invokeTool so recording/replay and
+    // run-control share the same boundary as LLM-loop tools. Replay serves the
+    // cached tool.responded and never re-enters the live handler.
     const ctx = this.buildToolContext()
 
     const span = this.recorder.startSpan('tool.call', {
@@ -1192,12 +1281,53 @@ export class AgentRuntime {
     })
 
     try {
-      const output = await tool.handler(actionInput, ctx)
+      this.runControl?.throwIfStopped()
+      const output = await this.ioPort.invokeTool(
+        state.handler,
+        actionInput,
+        () => {
+          // #237: gate at thunk start so delayed / direct-custom IOPort wrappers
+          // cannot start the handler after deadline between runtime pre-gate and
+          // execute. Sample the run's IOPort clock (nowSample preferred) so
+          // virtual clocks adjudicate correctly without ambient Date.now or an
+          // extra recorded clock.read on RecordingIOPort. Replay never re-enters.
+          assertToolInvocationAllowed(
+            this.runControl?.invocationControl(),
+            this.ioPort.nowSample?.() ?? this.ioPort.now(),
+          )
+          return tool.handler(actionInput, ctx)
+        },
+        // Action states have no model tool_use id; keep metadata minimal and
+        // stable so record/replay hashes match across paths.
+        { toolCallId: `action:${state.name}:${state.handler}` },
+        this.runControl?.invocationControl(),
+
+      )
+
+      this.runControl?.throwIfStopped()
+      // Match LLM-tool path: capture WM mutations for replay (handler not re-run).
+      if (this.replayWmSnapshots) {
+        const snap = this.replayWmSnapshots.shift()
+        if (snap !== undefined) Object.assign(this.memory, WorkingMemory.fromJSON(snap))
+      } else if (this.eventStore) {
+        await this.eventStore.append({
+          id:        uuidv4(),
+          runId:     this.agentRunId,
+          type:      'wm.mutated',
+          actor:     this.config.agentId,
+          timestamp: Date.now(),
+          payload:   { snapshot: this.memory.toJSON() },
+        })
+      }
       span.attributes['output'] = output
       this.recorder.endSpan(span, 'ok')
       if (output && typeof output === 'string') this.lastTextOutput = output
     } catch (err) {
       this.recorder.endSpan(span, 'error')
+      // #237: preserve adjudicated RUN_* from the execute-boundary gate.
+      if (runControlErrorEnvelope(err) || this.runControl?.stopped) {
+        if (this.runControl) this.runControl.mergeAbort(err)
+      }
       // An action handler failing surfaces as a run error (the `error` signal),
       // not a business transition. Re-throw so run() catches it and signals failed.
       throw err instanceof Error ? err : new Error(String(err))
@@ -1210,6 +1340,7 @@ export class AgentRuntime {
     calls: ToolCall[],
     allowedTools?: string[],
   ): Promise<ToolResult[]> {
+    this.runControl?.throwIfStopped()
     const tools    = this.registry.getForState(allowedTools)
     const toolMap  = new Map(tools.map(t => [t.name, t]))
     const batchId  = this.ioPort.uuid()
@@ -1231,19 +1362,32 @@ export class AgentRuntime {
       const settled = await Promise.allSettled(
         parallel.map(c => this.executeSingleTool(c, batchId))
       )
+      // Parallel siblings already in-flight may finish; once control has stopped,
+      // do not accept their success as a path into further scheduling.
+      this.runControl?.throwIfStopped()
       for (const r of settled) {
-        results.push(
-          r.status === 'fulfilled'
-            ? r.value
-            : { toolCallId: '', toolName: '', output: null, error: String(r.reason), isError: true, duration: 0 }
-        )
+        if (r.status === 'fulfilled') {
+          results.push(r.value)
+          continue
+        }
+        // #237: run-stop must not be demoted into a per-tool error row.
+        if (runControlErrorEnvelope(r.reason) || this.runControl?.stopped) {
+          if (this.runControl) this.runControl.mergeAbort(r.reason)
+          throw r.reason
+        }
+        results.push({
+          toolCallId: '', toolName: '', output: null, error: String(r.reason), isError: true, duration: 0,
+        })
       }
     }
 
     for (const call of serial) {
+      // Gate every serial start: a prior long tool may have crossed the deadline.
+      this.runControl?.throwIfStopped()
       results.push(await this.executeSingleTool(call, null))
     }
 
+    this.runControl?.throwIfStopped()
     return results
   }
 
@@ -1281,6 +1425,8 @@ export class AgentRuntime {
     const maxRetries = 3
 
     for (let attempt = 0; attempt < maxRetries; attempt++) {
+      // Gate before every attempt, including post-backoff retries.
+      this.runControl?.throwIfStopped()
       const start = this.ioPort.now()
       const span  = this.recorder.startSpan('tool.call', {
         toolName:        call.name,
@@ -1321,6 +1467,14 @@ export class AgentRuntime {
           call.name,
           call.input,
           () => {
+            // #237: fail closed at actual handler start (covers delayed wrappers
+            // and custom ports that call execute() directly). Sample IOPort clock
+            // via nowSample when available — never ambient Date.now; never burn a
+            // Recording clock.read that replay would fail to consume.
+            assertToolInvocationAllowed(
+              this.runControl?.invocationControl(),
+              this.ioPort.nowSample?.() ?? this.ioPort.now(),
+            )
             if (call.invalidArguments) {
               return Promise.reject(Object.assign(new Error(call.invalidArguments.message), {
                 code: call.invalidArguments.code,
@@ -1329,7 +1483,12 @@ export class AgentRuntime {
             return this.registry.execute(call.name, call.input, ctx)
           },
           { toolCallId: call.id, lineage, invalidArguments: call.invalidArguments },  // #81 pairing id; #37/#38 lineage sink
+          this.runControl?.invocationControl(),
         )
+
+
+        // Tool may ignore AbortSignal and resolve after stop — do not transfer success.
+        this.runControl?.throwIfStopped()
         span.attributes['output'] = output
         // SPIKE(#73): event-source tool WM side-effects so replay reconstructs them.
         // Replay does NOT re-run the handler (ReplayingIOPort serves cached output),
@@ -1353,6 +1512,13 @@ export class AgentRuntime {
         this.recorder.endSpan(span, 'ok')
         return { toolCallId: call.id, toolName: call.name, output, isError: false, duration }
       } catch (err) {
+        // #237: run-stop from the actual execute boundary (or in-flight abort after
+        // RunControl tripped) must not be demoted into a per-tool error row.
+        if (runControlErrorEnvelope(err) || this.runControl?.stopped) {
+          this.recorder.endSpan(span, 'error')
+          if (this.runControl) this.runControl.mergeAbort(err)
+          throw err instanceof Error ? err : new Error(String(err))
+        }
         const retryable = (err as { retryable?: boolean }).retryable === true
         const isLastAttempt = attempt === maxRetries - 1
         const duration      = this.ioPort.now() - start
@@ -1380,6 +1546,8 @@ export class AgentRuntime {
         const retryFromState = this.fsm.currentState.name
         this.fsm.transitionTo('error_handling', { name: 'error' })
         await new Promise<void>(r => setTimeout(r, 500))
+        // Deadline may elapse during backoff — do not start another attempt.
+        this.runControl?.throwIfStopped()
         this.fsm.transitionTo(retryFromState, { name: 'RETRY' })
       }
     }

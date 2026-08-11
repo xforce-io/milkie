@@ -6,8 +6,11 @@ import type { ModelRequest, ModelResponse } from '../types/model'
 class StubInnerPort implements IIOPort {
   public clockCalls = 0
   public uuidCalls  = 0
+  public sampleCalls = 0
   private nextClock = 1000
   private nextUuid  = 1
+  /** Distinct infrastructure timeline; does not advance agent-observable now(). */
+  private sampleValue = 42_000
 
   async invokeLLM(_req: ModelRequest): Promise<ModelResponse> {
     return { content: [{ type: 'text', text: 'stub' }], toolCalls: [], finishReason: 'end_turn' }
@@ -16,6 +19,7 @@ class StubInnerPort implements IIOPort {
     return 'stub-output'
   }
   now():  number { this.clockCalls++; return this.nextClock++ }
+  nowSample(): number { this.sampleCalls++; return this.sampleValue }
   uuid(): string { this.uuidCalls++; return `uuid-${this.nextUuid++}` }
 }
 
@@ -115,5 +119,67 @@ describe('RecordingIOPort — non-determinism recording', () => {
     // sanity: inner WAS called (for event id/timestamp on attach + detach)
     expect(inner.clockCalls).toBeGreaterThan(0)
     expect(inner.uuidCalls).toBeGreaterThan(0)
+  })
+
+  it('nowSample shares inner clock without enqueueing clock.read or shifting pending nondet', async () => {
+    // #237: infrastructure samples (run-control gates / segmented timers) must
+    // share the IOPort timeline without becoming agent-observable nondet. If
+    // nowSample were implemented as this.now(), each sample would append a
+    // clock.read and desync replay FIFO.
+    const inner = new StubInnerPort()
+    const store = new MemoryEventStore()
+    const port  = new RecordingIOPort(inner, store, 'r1')
+
+    const observedA = port.now()
+    const sampleBefore = inner.sampleCalls
+    expect(port.nowSample()).toBe(42_000)
+    expect(port.nowSample()).toBe(42_000)
+    expect(inner.sampleCalls).toBe(sampleBefore + 2)
+
+    const observedB = port.now()
+    const uuidVal = port.uuid()
+    port.nowSample()
+
+    await port.detach({ status: 'completed' })
+
+    const events = await store.readByRunId('r1')
+    const nondet = events.filter(e => e.type === 'clock.read' || e.type === 'uuid.generated')
+    // Only the two agent-facing now() calls + one uuid() — samples must not appear.
+    expect(nondet.map(e => e.type)).toEqual(['clock.read', 'clock.read', 'uuid.generated'])
+    expect((nondet[0]!.payload as { value: number }).value).toBe(observedA)
+    expect((nondet[1]!.payload as { value: number }).value).toBe(observedB)
+    expect((nondet[2]!.payload as { value: string }).value).toBe(uuidVal)
+  })
+
+  it('nowSample fallback via inner.now still does not record clock.read', async () => {
+    // Inner without nowSample → Recording falls back to inner.now() for the
+    // sample value, but must still skip the pending-nondet / clock.read path.
+    class NoSampleInner implements IIOPort {
+      public nowCalls = 0
+      private t = 5_000
+      async invokeLLM(_req: ModelRequest): Promise<ModelResponse> {
+        return { content: [{ type: 'text', text: 'stub' }], toolCalls: [], finishReason: 'end_turn' }
+      }
+      async invokeTool(_n: string, _i: unknown, _e: () => Promise<unknown>): Promise<unknown> {
+        return 'ok'
+      }
+      now(): number { this.nowCalls++; return this.t++ }
+      uuid(): string { return 'u' }
+    }
+
+    const inner = new NoSampleInner()
+    const store = new MemoryEventStore()
+    const port  = new RecordingIOPort(inner, store, 'r1')
+
+    const sampled = port.nowSample()
+    expect(sampled).toBe(5_000)
+    const observed = port.now()
+    expect(observed).toBe(5_001)
+
+    await port.detach({ status: 'completed' })
+
+    const clockEvents = (await store.readByRunId('r1')).filter(e => e.type === 'clock.read')
+    expect(clockEvents).toHaveLength(1)
+    expect((clockEvents[0]!.payload as { value: number }).value).toBe(observed)
   })
 })

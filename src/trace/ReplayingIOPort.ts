@@ -1,4 +1,4 @@
-import type { IIOPort, ToolInvocationOptions } from '../runtime/IOPort.js'
+import type { IIOPort, IOInvocationControl, ToolInvocationOptions } from '../runtime/IOPort.js'
 import type { ModelRequest, ModelResponse, ModelEvent } from '../types/model.js'
 import { CacheIndex, CacheIndexEmptyError } from './CacheIndex.js'
 import { hashModelRequest, hashToolCall } from './hash.js'
@@ -10,6 +10,10 @@ import { ReplayDivergenceError } from './ReplayDivergenceError.js'
  * clock/uuid by FIFO position. Cache miss → ReplayDivergenceError.
  * `inner` is retained for type contract symmetry with RecordingIOPort but is
  * never called during replay; touching it from this class is a bug.
+ *
+ * #237: control is accepted for interface parity and intentionally ignored —
+ * replay serves recorded terminal I/O and does not re-adjudicate wall-clock
+ * deadlines or re-issue live provider calls.
  */
 export class ReplayingIOPort implements IIOPort {
   constructor(
@@ -17,7 +21,11 @@ export class ReplayingIOPort implements IIOPort {
     private readonly inner: IIOPort,
   ) {}
 
-  async invokeLLM(request: ModelRequest, _onEvent?: (e: ModelEvent) => void): Promise<ModelResponse> {
+  async invokeLLM(
+    request: ModelRequest,
+    _onEvent?: (e: ModelEvent) => void,
+    _control?: IOInvocationControl,
+  ): Promise<ModelResponse> {
     const hash = hashModelRequest(request)
     try {
       return this.cache.consumeLLM(hash)
@@ -40,6 +48,7 @@ export class ReplayingIOPort implements IIOPort {
     input: unknown,
     _execute: () => Promise<unknown>,
     opts?: ToolInvocationOptions,
+    _control?: IOInvocationControl,
   ): Promise<unknown> {
     // Replay serves cached output and never runs the handler, so no lineage is
     // declared and `opts.lineage` stays empty — object.created/relation.created
@@ -72,6 +81,15 @@ export class ReplayingIOPort implements IIOPort {
       }
       throw err
     }
+  }
+
+  /**
+   * Infrastructure sample for run-control final gates / timers. Replay does not
+   * re-adjudicate live deadlines; return 0 without consuming the clock queue so
+   * extra gate samples cannot desync recorded nondet.
+   */
+  nowSample(): number {
+    return 0
   }
 
   uuid(): string {

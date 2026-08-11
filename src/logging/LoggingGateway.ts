@@ -1,4 +1,11 @@
-import type { IModelGateway, ModelRequest, ModelResponse, ModelEvent } from '../types/model.js'
+import type {
+  IModelGateway,
+  ModelCapabilities,
+  ModelGatewayCallOptions,
+  ModelRequest,
+  ModelResponse,
+  ModelEvent,
+} from '../types/model.js'
 import type { ServiceLogger } from './logger.js'
 
 /**
@@ -11,10 +18,14 @@ export class LoggingGateway implements IModelGateway {
     private readonly log:   ServiceLogger,
   ) {}
 
-  async complete(request: ModelRequest): Promise<ModelResponse> {
+  get capabilities(): ModelCapabilities | undefined {
+    return this.inner.capabilities
+  }
+
+  async complete(request: ModelRequest, opts?: ModelGatewayCallOptions): Promise<ModelResponse> {
     const startedAt = Date.now()
     try {
-      const res = await this.inner.complete(request)
+      const res = await this.inner.complete(request, opts)
       this.log.info({
         model: request.model, durationMs: Date.now() - startedAt,
         inputTokens: res.usage?.inputTokens, outputTokens: res.usage?.outputTokens,
@@ -26,12 +37,12 @@ export class LoggingGateway implements IModelGateway {
     }
   }
 
-  async *stream(request: ModelRequest): AsyncIterable<ModelEvent> {
+  async *stream(request: ModelRequest, opts?: ModelGatewayCallOptions): AsyncIterable<ModelEvent> {
     const startedAt = Date.now()
     let inputTokens = 0
     let outputTokens = 0
     try {
-      for await (const e of this.inner.stream(request)) {
+      for await (const e of this.inner.stream(request, opts)) {
         if (e.type === 'usage') {
           inputTokens  += e.data.inputTokens
           outputTokens += e.data.outputTokens

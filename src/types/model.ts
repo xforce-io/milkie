@@ -9,6 +9,7 @@ export type ModelErrorCode =
   | 'MODEL_AUTH_ERROR'
   | 'MODEL_BAD_RESPONSE'
   | 'MODEL_UNKNOWN_ERROR'
+  | 'MODEL_CAPABILITY_UNSUPPORTED'
 
 export type ModelErrorPhase = 'request' | 'stream_open' | 'stream_read' | 'response_parse'
 
@@ -20,6 +21,8 @@ export interface ModelErrorEnvelope {
   model:      string
   retryable:  boolean
   status?:    number
+  /** #236: safe capability id when code is MODEL_CAPABILITY_UNSUPPORTED. */
+  capability?: 'imageInput'
 }
 
 export interface MaxIterationsErrorEnvelope {
@@ -40,9 +43,37 @@ export interface AbandonedRunErrorEnvelope {
   model?:     undefined
 }
 
-export type RuntimeErrorEnvelope = MaxIterationsErrorEnvelope | AbandonedRunErrorEnvelope
+/** #237: run hit its absolute deadline before completing. */
+export interface RunDeadlineExceededErrorEnvelope {
+  code:       'RUN_DEADLINE_EXCEEDED'
+  message:    string
+  phase:      'agent_loop'
+  retryable:  true
+  provider?:  undefined
+  model?:     undefined
+}
+
+/** #237: caller cancelled the run via AbortSignal. */
+export interface RunCancelledErrorEnvelope {
+  code:       'RUN_CANCELLED'
+  message:    string
+  phase:      'agent_loop'
+  retryable:  true
+  provider?:  undefined
+  model?:     undefined
+}
+
+export type RuntimeErrorEnvelope =
+  | MaxIterationsErrorEnvelope
+  | AbandonedRunErrorEnvelope
+  | RunDeadlineExceededErrorEnvelope
+  | RunCancelledErrorEnvelope
 export type AgentErrorEnvelope = ModelErrorEnvelope | RuntimeErrorEnvelope
 
+/** #236: gateway/model capability surface. Undeclared custom gateways → imageInput false. */
+export interface ModelCapabilities {
+  imageInput: boolean
+}
 export interface ToolSchema {
   name:        string
   description: string
@@ -97,7 +128,17 @@ export interface ReasoningOptions {
   budget?: number
 }
 
+/** #237: optional per-call options (cancel signal). Extra args stay optional for stubs. */
+export interface ModelGatewayCallOptions {
+  signal?: AbortSignal
+}
+
 export interface IModelGateway {
-  complete(request: ModelRequest): Promise<ModelResponse>
-  stream(request: ModelRequest): AsyncIterable<ModelEvent>
+  complete(request: ModelRequest, opts?: ModelGatewayCallOptions): Promise<ModelResponse>
+  stream(request: ModelRequest, opts?: ModelGatewayCallOptions): AsyncIterable<ModelEvent>
+  /**
+   * #236: optional capability declaration. Custom gateways that omit this are
+   * treated as imageInput:false when a request carries image parts.
+   */
+  readonly capabilities?: ModelCapabilities
 }
