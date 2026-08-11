@@ -2,7 +2,10 @@ export interface RegistryResponse {
   readonly status: number
 }
 
-export type RegistryRequest = (url: string) => Promise<RegistryResponse>
+export type RegistryRequest = (
+  url: string,
+  options: { readonly redirect: 'error' },
+) => Promise<RegistryResponse>
 
 export interface AssertUnpublishedVersionOptions {
   readonly packageName: string
@@ -20,7 +23,10 @@ export async function assertUnpublishedVersion({
   const baseUrl = registryUrl.replace(/\/$/, '')
   const packagePath = encodeURIComponent(packageName)
   const versionPath = encodeURIComponent(version)
-  const response = await request(`${baseUrl}/${packagePath}/${versionPath}`)
+  const response = await request(
+    `${baseUrl}/${packagePath}/${versionPath}`,
+    { redirect: 'error' },
+  )
 
   if (response.status === 404) return
   if (response.status === 200) {
@@ -39,8 +45,8 @@ async function main(): Promise<void> {
     packageName: process.env['PACKAGE_NAME'] ?? '@xforce/milkie',
     version,
     registryUrl: process.env['NPM_REGISTRY_URL'] ?? 'https://registry.npmjs.org',
-    request: async url => {
-      const response = await fetch(url)
+    request: async (url, options) => {
+      const response = await fetch(url, options)
       return { status: response.status }
     },
   })

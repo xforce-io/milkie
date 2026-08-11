@@ -7,19 +7,22 @@ describe('assertUnpublishedVersion', () => {
   const version = '0.1.0'
 
   it('permits a version only when the registry returns not found', async () => {
-    const requested: string[] = []
+    const requested: unknown[][] = []
 
     await expect(assertUnpublishedVersion({
       packageName,
       version,
       registryUrl: 'https://registry.example/',
-      request: async url => {
-        requested.push(url)
-        return { status: 404 } as Response
-      },
+      request: ((...args: unknown[]) => {
+        requested.push(args)
+        return Promise.resolve({ status: 404 } as Response)
+      }) as never,
     })).resolves.toBeUndefined()
 
-    expect(requested).toEqual(['https://registry.example/%40xforce%2Fmilkie/0.1.0'])
+    expect(requested).toEqual([[
+      'https://registry.example/%40xforce%2Fmilkie/0.1.0',
+      { redirect: 'error' },
+    ]])
   })
 
   it('rejects an already published version before publish', async () => {
