@@ -55,7 +55,7 @@ jobs:
           trap 'rm -rf "$consumer"' EXIT
           cd "$consumer"
           npm init --yes
-          npm install "@xforce/milkie@$PACKAGE_VERSION" --no-audit --no-fund
+          npm install "@freemanxu/milkie@$PACKAGE_VERSION" --no-audit --no-fund
           ./node_modules/.bin/milkie --help | grep -F 'Usage: milkie'
           mkdir -p .milkie agents
           printf '%s\n' '{"agents":[{"id":"release-check","file":"../agents/release-check.md"}]}' > .milkie/agents.json

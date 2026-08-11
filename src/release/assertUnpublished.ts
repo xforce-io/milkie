@@ -42,7 +42,7 @@ async function main(): Promise<void> {
   if (!version) throw new Error('PACKAGE_VERSION must be set')
 
   await assertUnpublishedVersion({
-    packageName: process.env['PACKAGE_NAME'] ?? '@xforce/milkie',
+    packageName: process.env['PACKAGE_NAME'] ?? '@freemanxu/milkie',
     version,
     registryUrl: process.env['NPM_REGISTRY_URL'] ?? 'https://registry.npmjs.org',
     request: async (url, options) => {

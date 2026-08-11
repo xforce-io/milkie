@@ -30,6 +30,14 @@ describe('npm package distribution', () => {
 
   it('builds a tarball that installs a runnable CLI consumer', () => {
     fs.rmSync(path.join(ROOT, 'dist'), { recursive: true, force: true })
+    const manifest = JSON.parse(
+      fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'),
+    ) as { name: string; version: string }
+    expect(manifest).toMatchObject({
+      name: '@freemanxu/milkie',
+      version: '0.1.1',
+    })
+
 
     const packJson = run('npm', ['pack', '--json', '--pack-destination', tempRoot], ROOT)
     const packed = (JSON.parse(packJson) as PackResult[])[0]
