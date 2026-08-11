@@ -110,8 +110,8 @@ flowchart LR
 
 ## 10. 迁移 / 兼容 / 回滚
 
-- `v0.1.0` tag 已指向 `@xforce/milkie` 的未发布工件，保留为不可变历史记录；首个 `@freemanxu/milkie` 发行版本为 `0.1.1`，对应新的 `v0.1.1` tag。
-- README 与外部集成配置改为个人 scoped package；不提供指向无关 package 或已失败 organization scope 的兼容 alias。
+- `@freemanxu/milkie@0.1.0` 已由 commit `262a046ef4a70f6d051890f8b948d7f02b85e336` 发布；`v0.1.0` tag 与该 package 的 `gitHead` 对齐。`0.1.1` 对应新的 `v0.1.1` tag。
+- README 与外部集成配置只使用个人 scoped package；不提供指向无关非 scoped package 或失败 organization scope 的兼容 alias。
 - 已发布 npm version 不可回滚或覆盖；发现发行缺陷时发布更高修复版本，并撤销有风险版本的推荐使用。
 - DataSpace 在本 package 发布并完成 registry consumer test 前，保持不接入 Milkie。
 
@@ -128,8 +128,8 @@ flowchart LR
 
 ## 12. 开放问题 / 决策记录
 
-- D1：因 `@xforce/milkie` 的组织 scope 发布请求被 npm registry 拒绝，首个公开 package 改为发布者个人 scope `@freemanxu/milkie`；不再使用冲突的非 scoped 名称。
-- D2：`v0.1.0` 不重写且无对应 npm package；首个个人 scope 发行 version 为 `0.1.1`。
+- D1：`@freemanxu/milkie@0.1.0` 已是公开 package；`@xforce/milkie` 的组织 scope 发布请求被 npm registry 拒绝，因此后续发行继续使用发布者个人 scope `@freemanxu/milkie`，不再使用冲突的非 scoped 名称。
+- D2：`v0.1.0` 与既有 npm 工件的 `gitHead` 对齐；新发行 version 为 `0.1.1`，并绑定新的 `v0.1.1` tag。
 - D3：发布后依赖 registry 安装验证，不把源码 build 成功视为发行成功。
 - D4：npm trusted publishing 是首选身份模式；当前人工 npm 登录仅用于受控发布，后续可迁移至 trusted publishing。
 - 开放问题：N/A。
