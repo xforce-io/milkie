@@ -89,7 +89,7 @@ type: llm 状态                      type: action 状态
 ### TypeScript 对象
 
 ```typescript
-import type { AgentConfig } from 'milkie'
+import type { AgentConfig } from '@xforce/milkie'
 
 const config: AgentConfig = {
   agentId:      'my-agent',
@@ -172,7 +172,7 @@ State Store 用于持久化 checkpoint，支持中断恢复和多轮对话历史
 进程内存储，无外部依赖，进程重启后状态丢失。
 
 ```typescript
-import { Milkie, MemoryStore } from 'milkie'
+import { Milkie, MemoryStore } from '@xforce/milkie'
 
 const milkie = new Milkie({ stateStore: new MemoryStore() })
 ```
@@ -182,7 +182,7 @@ const milkie = new Milkie({ stateStore: new MemoryStore() })
 本地持久化，无需外部服务。
 
 ```typescript
-import { Milkie, SQLiteStore } from 'milkie'
+import { Milkie, SQLiteStore } from '@xforce/milkie'
 
 const store = new SQLiteStore({ path: './data/state.db' })
 await store.init()   // 首次运行时自动建表
@@ -197,7 +197,7 @@ store.close()
 跨进程、跨 session。水平扩展部署时必选。
 
 ```typescript
-import { Milkie, RedisStore } from 'milkie'
+import { Milkie, RedisStore } from '@xforce/milkie'
 
 const store = new RedisStore({
   host: 'localhost',
@@ -280,7 +280,7 @@ export VOLCENGINE_API_BASE=https://your-endpoint/v1
 实现 `IModelGateway` 接口，通过 `gateway` 选项注入后覆盖所有 Agent 的模型调用。适合测试或接入自定义模型服务。
 
 ```typescript
-import type { IModelGateway, ModelRequest, ModelResponse } from 'milkie'
+import type { IModelGateway, ModelRequest, ModelResponse } from '@xforce/milkie'
 
 class MockGateway implements IModelGateway {
   async complete(req: ModelRequest): Promise<ModelResponse> {
@@ -360,7 +360,7 @@ const config: AgentConfig = {
 ### 自定义工具
 
 ```typescript
-import type { ToolDefinition } from 'milkie'
+import type { ToolDefinition } from '@xforce/milkie'
 
 const myTool: ToolDefinition = {
   name:        'query_database',
@@ -549,7 +549,7 @@ const turn2 = await milkie.invoke({
 ### 开启 Span 记录
 
 ```typescript
-import { Milkie, TrajectoryStore } from 'milkie'
+import { Milkie, TrajectoryStore } from '@xforce/milkie'
 
 const trajectoryStore = new TrajectoryStore({
   jsonlDir: './trajectories',   // 每次 run 写一个 JSONL 文件

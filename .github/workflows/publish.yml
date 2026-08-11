@@ -1,0 +1,74 @@
+name: Publish npm package
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Exact package version to publish from the selected release tag
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+
+      - name: Verify release tag and package version
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          PACKAGE_VERSION="$(node -p 'require("./package.json").version')"
+          test "$PACKAGE_VERSION" = "$REQUESTED_VERSION"
+          git tag --points-at HEAD | grep -Fx "v$PACKAGE_VERSION"
+
+      - run: npm ci
+      - run: npm run build
+
+      - name: Assert package version is unpublished
+        env:
+          PACKAGE_VERSION: ${{ inputs.version }}
+        run: node dist/release/assertUnpublished.js
+
+      - run: npm test
+      - run: npm run test:package
+      - run: npm publish --provenance
+
+      - name: Verify registry consumer
+        env:
+          PACKAGE_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          consumer="$(mktemp -d)"
+          trap 'rm -rf "$consumer"' EXIT
+          cd "$consumer"
+          npm init --yes
+          npm install "@xforce/milkie@$PACKAGE_VERSION" --no-audit --no-fund
+          ./node_modules/.bin/milkie --help | grep -F 'Usage: milkie'
+          mkdir -p .milkie agents
+          printf '%s\n' '{"agents":[{"id":"release-check","file":"../agents/release-check.md"}]}' > .milkie/agents.json
+          cat > agents/release-check.md <<'EOF'
+          ---
+          agentId: release-check
+          fsm:
+            states: []
+          model:
+            provider: stub
+            model: stub
+            adapter: stub
+          ---
+          release verification
+          EOF
+          ./node_modules/.bin/milkie agent list | grep -F '"id":"release-check"'
