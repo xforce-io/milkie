@@ -1,7 +1,7 @@
 # 【发布】提供可安装的 scoped Milkie CLI 包
 
 - Issue: #239
-- 状态: Draft
+- 状态: Approved
 - 最后更新: 2026-08-11
 
 ## 1. 背景
