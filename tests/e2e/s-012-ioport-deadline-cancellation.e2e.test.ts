@@ -70,14 +70,9 @@ describe('S1/S2: Milkie IOPort deadline and cancellation', () => {
     expect(gateway.signal?.aborted).toBe(true)
     expect(Date.now()).toBeLessThanOrEqual(deadlineAt + 100)
     expect(result).toMatchObject({
-      status: 'error',
-      error: {
-        code: 'IO_DEADLINE_EXCEEDED',
-        message: 'I/O invocation deadline exceeded.',
-        phase: 'io_control',
-        operation: 'llm',
-        retryable: false,
-      },
+      status: 'completed',
+      stopReason: 'deadline',
+      stopCode: 'IO_DEADLINE_EXCEEDED',
     })
   })
 
@@ -100,15 +95,11 @@ describe('S1/S2: Milkie IOPort deadline and cancellation', () => {
 
     expect(gateway.signal?.aborted).toBe(true)
     expect(result).toMatchObject({
-      status: 'error',
-      error: {
-        code: 'IO_CANCELLED',
-        phase: 'io_control',
-        operation: 'llm',
-        retryable: false,
-      },
+      status: 'interrupted',
+      stopReason: 'cancelled',
+      stopCode: 'IO_CANCELLED',
     })
-    expect(result.error?.code).not.toBe('MODEL_TIMEOUT')
+    expect(result.stopCode).not.toBe('MODEL_TIMEOUT')
   })
   it('S1 terminates an in-flight ordinary Tool by deadline and preserves operation=tool', async () => {
     const entered = deferred()
@@ -149,8 +140,9 @@ describe('S1/S2: Milkie IOPort deadline and cancellation', () => {
     expect(signal?.aborted).toBe(true)
     expect(Date.now()).toBeLessThanOrEqual(deadlineAt + 100)
     expect(result).toMatchObject({
-      status: 'error',
-      error: { code: 'IO_DEADLINE_EXCEEDED', operation: 'tool', retryable: false },
+      status: 'completed',
+      stopReason: 'deadline',
+      stopCode: 'IO_DEADLINE_EXCEEDED',
     })
   })
 
@@ -196,14 +188,11 @@ describe('S1/S2: Milkie IOPort deadline and cancellation', () => {
 
     expect(signal?.aborted).toBe(true)
     expect(result).toMatchObject({
-      status: 'error',
-      error: {
-        code: 'IO_CANCELLED',
-        operation: 'tool',
-        retryable: false,
-      },
+      status: 'interrupted',
+      stopReason: 'cancelled',
+      stopCode: 'IO_CANCELLED',
     })
-    expect(result.error?.code).not.toBe('MODEL_TIMEOUT')
+    expect(result.stopCode).not.toBe('MODEL_TIMEOUT')
     expect(gatewayCalls).toBe(1)
   })
 
@@ -240,12 +229,9 @@ describe('S1/S2: Milkie IOPort deadline and cancellation', () => {
 
     expect(signal?.aborted).toBe(true)
     expect(result).toMatchObject({
-      status: 'error',
-      error: {
-        code: 'IO_CANCELLED',
-        message: 'I/O invocation was cancelled.',
-        operation: 'tool',
-      },
+      status: 'interrupted',
+      stopReason: 'cancelled',
+      stopCode: 'IO_CANCELLED',
     })
   })
 

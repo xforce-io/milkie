@@ -57,6 +57,11 @@ export interface ToolContext {
    * — and underpins lazy-promote (P2). Present only when the runtime wired lineage.
    */
   resolveObject?:  (objectId: string) => { type: ObjectType; meta?: Record<string, unknown> } | undefined
+  /**
+   * #247: register a produced artifact for the run envelope.
+   * Does not scan the working directory.
+   */
+  recordArtifact?: (artifact: { name?: string; type: 'file' | 'object'; path?: string; objectId?: string; hash?: string }) => void
 }
 
 export interface ToolDefinition {
@@ -74,6 +79,11 @@ export interface ToolCall {
   name:              string
   input:             unknown
   invalidArguments?: InvalidToolArguments
+  /**
+   * #245: in-memory raw arguments for bounded repair only.
+   * Must not be persisted to trace.
+   */
+  rawArguments?: string
 }
 
 export interface ToolError {

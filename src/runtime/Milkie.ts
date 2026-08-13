@@ -44,6 +44,7 @@ import { ReplayingIOPort } from '../trace/ReplayingIOPort.js'
 import { ReplayError } from '../trace/ReplayError.js'
 import { ReplayDivergenceError } from '../trace/ReplayDivergenceError.js'
 import { extractRunSnapshot } from '../trace/RunSnapshot.js'
+import { summarizeRun, TraceInspectError, type RunSummary } from '../trace/summarizeRun.js'
 import type { Event, AgentRunStartedPayload, TaskOutcomeRecordedPayload, TrustedProviderFamily } from '../trace/types.js'
 import { makeTraceTools } from '../tools/trace.js'
 import type {
@@ -484,6 +485,10 @@ export class Milkie {
       causalCursor,
       ...(previousRunId ? { previousRunId } : {}),
       ...(request.onModelEvent ? { onModelEvent: request.onModelEvent } : {}),
+      invokeDeliverablesSpecified: Object.prototype.hasOwnProperty.call(request, 'deliverables'),
+      ...(Object.prototype.hasOwnProperty.call(request, 'deliverables')
+        ? { invokeDeliverables: request.deliverables }
+        : {}),
     })
 
     if (restoredCheckpoint) {
@@ -509,6 +514,11 @@ export class Milkie {
         status: result.status,
         lastTextOutput: result.output,
         ...(result.error ? { error: result.error } : {}),
+        stopReason: result.stopReason,
+        ...(result.stopCode ? { stopCode: result.stopCode } : {}),
+        partial: result.partial,
+        ...(result.checkpointId ? { checkpointId: result.checkpointId } : {}),
+        artifacts: result.artifacts,
       })
       invokeLog.info({ agentId: config.agentId, durationMs: Date.now() - invokeStartedAt, status: result.status }, 'invoke completed')
       return result
@@ -1093,6 +1103,20 @@ export class Milkie {
    * #217 / s-016: latest task outcome for `runId`, or `null` if the run exists
    * but no outcome was recorded. Unknown runId → TaskOutcomeRunNotFoundError.
    */
+  /**
+   * #246: machine-readable run summary. Does not replace JSONL as source of truth.
+   */
+  async getRunSummary(runId: string): Promise<RunSummary> {
+    if (!this.eventStore) {
+      throw new TraceInspectError('getRunSummary requires eventStore')
+    }
+    const id = runId?.trim()
+    if (!id) throw new TraceInspectError('getRunSummary requires a non-empty runId')
+    const events = await this.eventStore.readByRunId(id)
+    if (events.length === 0) throw new TraceInspectError(`run not found: ${id}`)
+    return summarizeRun(events, id)
+  }
+
   async getTaskOutcome(runId: string): Promise<TaskOutcome | null> {
     if (!this.eventStore) {
       throw new TaskOutcomeError(
