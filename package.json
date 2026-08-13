@@ -1,6 +1,9 @@
 {
-  "name": "milkie",
-  "version": "0.1.0",
+  "name": "@freemanxu/milkie",
+  "version": "0.1.1",
+  "publishConfig": {
+    "access": "public"
+  },
   "files": [
     "dist",
     "agents"
@@ -13,9 +16,10 @@
   },
   "scripts": {
     "build": "tsc",
+    "prepack": "npm run build",
     "dev": "tsc --watch",
     "test": "npm run test:unit && npm run test:e2e:deterministic",
-    "test:unit": "jest src/__tests__/AgentRuntime.test.ts src/__tests__/FSMEngine.test.ts src/__tests__/MemoryStore.test.ts src/__tests__/WorkingMemory.test.ts src/__tests__/SQLiteStore.abiMismatch.test.ts src/__tests__/skillListManifest.test.ts --runInBand",
+    "test:unit": "jest src/__tests__/AgentRuntime.test.ts src/__tests__/FSMEngine.test.ts src/__tests__/MemoryStore.test.ts src/__tests__/WorkingMemory.test.ts src/__tests__/SQLiteStore.abiMismatch.test.ts src/__tests__/skillListManifest.test.ts src/__tests__/assertUnpublished.test.ts --runInBand",
     "test:all": "jest",
     "test:smoke": "jest src/__tests__/volcengine.smoke.test.ts --runInBand",
     "test:watch": "jest --watch",
@@ -25,7 +29,8 @@
     "test:e2e:live": "jest tests/e2e/s-001-react-with-intra-agent-parallel-tools.e2e.test.ts tests/e2e/s-005-deterministic-replay.e2e.test.ts tests/e2e/s-007-inter-agent-parallel-code-review.e2e.test.ts tests/e2e/s-008-long-task-interrupt-and-resume.e2e.test.ts tests/e2e/s-009-multi-turn-with-tool-error-recovery.e2e.test.ts tests/e2e/s-010-skill-versioned-load-and-ab-experiment.e2e.test.ts tests/e2e/s-011-multi-state-fsm-intent-routing-and-slot-filling.e2e.test.ts --runInBand && npm run eval:repair",
     "eval:repair": "tsx examples/repair-ticketing/eval/run-eval.ts",
     "test:e2e:redis": "sh tests/e2e/run-redis-e2e.sh",
-    "lint": "eslint src --ext .ts"
+    "lint": "eslint src --ext .ts",
+    "test:package": "jest tests/e2e/package-distribution.test.ts --runInBand"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.52.0",

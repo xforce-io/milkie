@@ -6,8 +6,8 @@ function llmRequested(id: string, hash: string, messages: unknown[] = [{ role: '
   return { id, runId: 'r', type: 'llm.requested', actor: 'a', timestamp: 1,
     payload: { request: { model: 'm', messages }, requestHash: hash } }
 }
-function llmResponded(id: string, hash: string, cacheStats?: unknown): Event {
-  return { id, runId: 'r', type: 'llm.responded', actor: 'a', timestamp: 2, causedBy: hash,
+function llmResponded(id: string, requestId: string, hash: string, cacheStats?: unknown): Event {
+  return { id, runId: 'r', type: 'llm.responded', actor: 'a', timestamp: 2, causedBy: requestId,
     payload: { response: { content: [], toolCalls: [], finishReason: 'end_turn' }, requestHash: hash,
       ...(cacheStats ? { cacheStats } : {}) } }
 }
@@ -29,7 +29,7 @@ describe('buildExecutionProjection', () => {
   it('classifies a high-hit-rate llm call as a hot cache tier', () => {
     const events: Event[] = [
       llmRequested('llm-req', 'h1'),
-      llmResponded('llm-resp', 'h1', { readTokens: 90, creationTokens: 0, totalInputTokens: 100, hitRate: 0.9 }),
+      llmResponded('llm-resp', 'llm-req', 'h1', { readTokens: 90, creationTokens: 0, totalInputTokens: 100, hitRate: 0.9 }),
     ]
     const proj = buildExecutionProjection(events)
     expect(proj.steps).toHaveLength(1)
@@ -40,13 +40,13 @@ describe('buildExecutionProjection', () => {
   it('classifies partial reuse or a fresh cache write as warm', () => {
     const partialRead = buildExecutionProjection([
       llmRequested('q1', 'h1'),
-      llmResponded('r1', 'h1', { readTokens: 40, creationTokens: 0, totalInputTokens: 100, hitRate: 0.4 }),
+      llmResponded('r1', 'q1', 'h1', { readTokens: 40, creationTokens: 0, totalInputTokens: 100, hitRate: 0.4 }),
     ])
     expect(partialRead.steps[0]!.cacheHealth?.tier).toBe('warm')
 
     const freshWrite = buildExecutionProjection([
       llmRequested('q2', 'h2'),
-      llmResponded('r2', 'h2', { readTokens: 0, creationTokens: 80, totalInputTokens: 100, hitRate: 0 }),
+      llmResponded('r2', 'q2', 'h2', { readTokens: 0, creationTokens: 80, totalInputTokens: 100, hitRate: 0 }),
     ])
     expect(freshWrite.steps[0]!.cacheHealth?.tier).toBe('warm')
   })
@@ -54,13 +54,13 @@ describe('buildExecutionProjection', () => {
   it('classifies no-read no-write as cold', () => {
     const proj = buildExecutionProjection([
       llmRequested('q', 'h'),
-      llmResponded('r', 'h', { readTokens: 0, creationTokens: 0, totalInputTokens: 100, hitRate: 0 }),
+      llmResponded('r', 'q', 'h', { readTokens: 0, creationTokens: 0, totalInputTokens: 100, hitRate: 0 }),
     ])
     expect(proj.steps[0]!.cacheHealth?.tier).toBe('cold')
   })
 
   it('reports null cacheHealth when the response carries no cacheStats', () => {
-    const proj = buildExecutionProjection([llmRequested('q', 'h'), llmResponded('r', 'h')])
+    const proj = buildExecutionProjection([llmRequested('q', 'h'), llmResponded('r', 'q', 'h')])
     expect(proj.steps[0]!.cacheHealth).toBeNull()
   })
 
@@ -70,7 +70,7 @@ describe('buildExecutionProjection', () => {
       regionAdded('scratch', 'volatile'),
       regionAdded('skill', 'session-stable'),
       llmRequested('llm-req', 'h1'),
-      llmResponded('llm-resp', 'h1'),
+      llmResponded('llm-resp', 'llm-req', 'h1'),
     ]
     const groups = buildExecutionProjection(events).steps[0]!.regionGroups!
     // immutable → session-stable → turn-stable → volatile; turn-stable absent → omitted
@@ -97,11 +97,11 @@ describe('buildExecutionProjection', () => {
   it('preserves event order across interleaved llm and tool steps', () => {
     const events: Event[] = [
       llmRequested('q1', 'h1'),
-      llmResponded('r1', 'h1'),
+      llmResponded('r1', 'q1', 'h1'),
       toolRequested('t1', 'ha', 'search'),
       toolResponded('t1r', 'ha', 'search', { output: {} }),
       llmRequested('q2', 'h2'),
-      llmResponded('r2', 'h2'),
+      llmResponded('r2', 'q2', 'h2'),
     ]
     expect(buildExecutionProjection(events).steps.map(s => s.kind)).toEqual(['llm', 'tool', 'llm'])
   })
@@ -110,8 +110,8 @@ describe('buildExecutionProjection', () => {
     const events: Event[] = [
       regionAdded('header', 'immutable', 'ch1'),
       regionAdded('scratch', 'volatile'),  // no contentHash → no content
-      llmRequested('q', 'h1'),
-      llmResponded('r', 'h1'),
+      llmRequested('req', 'h1'),
+      llmResponded('r', 'req', 'h1'),
     ]
     const proj = buildExecutionProjection(events, { regionContent: new Map([['ch1', 'SYSTEM PROMPT TEXT']]) })
     const regions = proj.steps[0]!.regionGroups!.flatMap(g => g.regions)
@@ -127,12 +127,39 @@ describe('buildExecutionProjection', () => {
     const events: Event[] = [
       { id: 'q', runId: 'r', type: 'llm.requested', actor: 'a', timestamp: 1,
         payload: { request: { model: 'm', system: 'SYS', messages, tools: [{ name: 'search' }] }, requestHash: 'h1' } },
-      { id: 'resp', runId: 'r', type: 'llm.responded', actor: 'a', timestamp: 2, causedBy: 'h1',
+      { id: 'resp', runId: 'r', type: 'llm.responded', actor: 'a', timestamp: 2, causedBy: 'q',
         payload: { response: { content: [{ type: 'text', text: 'hello' }], toolCalls: [], finishReason: 'end_turn' }, requestHash: 'h1' } },
     ]
     const step = buildExecutionProjection(events).steps[0]!
     expect(step.messageCount).toBe(2)
     expect(step.prompt).toMatchObject({ system: 'SYS', messages, tools: [{ name: 'search' }] })
     expect(step.response).toMatchObject({ content: [{ type: 'text', text: 'hello' }] })
+    expect(step.status).toBe('ok')
+  })
+
+  it('pairs failure terminal by causedBy and labels LLM failure · code', () => {
+    const events: Event[] = [
+      llmRequested('q-fail', 'hf'),
+      {
+        id: 'r-fail', runId: 'r', type: 'llm.responded', actor: 'a', timestamp: 2, causedBy: 'q-fail',
+        payload: {
+          status: 'error',
+          requestHash: 'hf',
+          error: {
+            code: 'MODEL_TIMEOUT',
+            message: 'Model provider request timed out.',
+            phase: 'request',
+            provider: 'anthropic',
+            model: 'm',
+            retryable: true,
+          },
+        },
+      },
+    ]
+    const step = buildExecutionProjection(events).steps[0]!
+    expect(step.status).toBe('error')
+    expect(step.label).toBe('LLM failure · MODEL_TIMEOUT')
+    expect(step.error).toMatchObject({ code: 'MODEL_TIMEOUT', phase: 'request' })
+    expect(step.response).toBeUndefined()
   })
 })

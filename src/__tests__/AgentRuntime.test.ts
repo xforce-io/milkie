@@ -934,17 +934,17 @@ describe('#148 run_command output is citable end-to-end', () => {
       })
 
       expect(result).toMatchObject({
-        status: 'error',
-        error: {
-          code: 'MAX_ITERATIONS_EXCEEDED',
-          phase: 'agent_loop',
-          retryable: false,
-          message: 'State "react" exceeded max_iterations (0)',
-        },
+        status: 'completed',
+        stopReason: 'budget_exhausted',
+        stopCode: 'MAX_ITERATIONS_EXCEEDED',
+        partial: true,
       })
       const terminal = (await eventStore.readByRunId(result.agentRunId))
         .find(event => event.type === 'agent.run.completed')
-      expect(terminal?.payload).toMatchObject({ status: 'error', error: result.error })
+      expect(terminal?.payload).toMatchObject({
+        status: 'completed',
+        stopReason: 'budget_exhausted',
+      })
     })
 
     it('exposes lifecycle "completed" after a successful run', async () => {

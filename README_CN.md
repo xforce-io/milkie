@@ -36,7 +36,7 @@ Evolution 实验子系统。当前实现 vs. target 架构的对账详见
 ## 安装
 
 ```bash
-npm install milkie
+npm install @freemanxu/milkie@0.1.1
 ```
 
 需要 Node.js ≥ 20。
@@ -46,8 +46,8 @@ npm install milkie
 ## 快速开始
 
 ```typescript
-import { Milkie, MemoryStore } from 'milkie'
-import type { AgentConfig, ToolDefinition } from 'milkie'
+import { Milkie, MemoryStore } from '@freemanxu/milkie'
+import type { AgentConfig, ToolDefinition } from '@freemanxu/milkie'
 
 // 1. 定义工具
 const webSearch: ToolDefinition = {

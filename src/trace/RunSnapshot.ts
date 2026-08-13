@@ -12,6 +12,8 @@ export interface RunSnapshot {
   /** Structured terminal error from agent.run.completed, when present. */
   terminalError?: AgentErrorEnvelope | string
   lastTextOutput?: string
+  stopReason?: AgentRunCompletedPayload['stopReason']
+  stopCode?: string
 }
 
 /**
@@ -45,5 +47,7 @@ export function extractRunSnapshot(events: Event[]): RunSnapshot {
     ...(completedPayload?.lastTextOutput !== undefined
       ? { lastTextOutput: completedPayload.lastTextOutput }
       : {}),
+    ...(completedPayload?.stopReason ? { stopReason: completedPayload.stopReason } : {}),
+    ...(completedPayload?.stopCode ? { stopCode: completedPayload.stopCode } : {}),
   }
 }

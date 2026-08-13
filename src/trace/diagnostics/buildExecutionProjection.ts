@@ -1,5 +1,12 @@
-import type { Event, LlmRequestedPayload, LlmRespondedPayload, ToolRequestedPayload, ToolRespondedPayload } from '../types.js'
+import type { Event, LlmRequestedPayload, ToolRequestedPayload, ToolRespondedPayload } from '../types.js'
 import { contextRefsAt, type RegionContentRef } from '../RegionContextView.js'
+import {
+  decodeLlmOutcome,
+  failureViewOf,
+  type LlmFailureView,
+  type LlmOutcome,
+} from '../LlmOutcome.js'
+import { TraceIntegrityError } from '../TraceIntegrityError.js'
 
 export interface CacheHealth {
   tier:             'hot' | 'warm' | 'cold'
@@ -25,11 +32,16 @@ export interface ToolStep {
 export interface ExecutionStep {
   kind:          'llm' | 'tool'
   label:         string
+  /** LLM step lifecycle: pending (no terminal yet), ok, or error. */
+  status?:       'pending' | 'ok' | 'error'
   messageCount?: number
   cacheHealth?:  CacheHealth | null
   regionGroups?: RegionGroup[]
   prompt?:       { system?: unknown; messages: unknown[]; tools: unknown[] } | null
+  /** Present only on status:'ok'. */
   response?:     unknown
+  /** Present only on status:'error'. */
+  error?:        LlmFailureView
   tool?:         ToolStep
 }
 
@@ -69,18 +81,31 @@ function classifyCacheTier(c: { hitRate?: number; creationTokens?: number }): Ca
  * Pure event-log projection of a run's execution timeline: one step per
  * llm.requested / tool.requested, carrying the cache-health tier and (later)
  * region composition the frontend used to recompute itself. No I/O.
+ *
+ * LLM terminals are paired by causedBy (not hash overwrite) so concurrent same-hash
+ * invocations and failure terminals stay distinct.
  */
 export function buildExecutionProjection(
   events: Event[],
   opts: { regionContent?: Map<string, string> } = {},
 ): ExecutionProjection {
   const regionContent = opts.regionContent
-  const llmResponses = new Map<string, Event>()
+  // Pair terminals by causedBy → requestEventId (precise).
+  const llmTerminalByRequestId = new Map<string, { event: Event; outcome: LlmOutcome }>()
   const toolResponses = new Map<string, Event>()
+
   for (const e of events) {
     if (e.type === 'llm.responded') {
-      const p = e.payload as LlmRespondedPayload
-      if (p.requestHash) llmResponses.set(p.requestHash, e)
+      let outcome: LlmOutcome
+      try {
+        outcome = decodeLlmOutcome(e)
+      } catch (err) {
+        if (err instanceof TraceIntegrityError) continue
+        throw err
+      }
+      if (typeof e.causedBy === 'string' && e.causedBy.length > 0) {
+        llmTerminalByRequestId.set(e.causedBy, { event: e, outcome })
+      }
     } else if (e.type === 'tool.responded') {
       const p = e.payload as ToolRespondedPayload
       if (p.requestHash) toolResponses.set(p.requestHash, e)
@@ -91,8 +116,9 @@ export function buildExecutionProjection(
   for (const e of events) {
     if (e.type === 'llm.requested') {
       const p = e.payload as LlmRequestedPayload
-      const resp = p.requestHash ? llmResponses.get(p.requestHash) : undefined
-      const cacheStats = resp && (resp.payload as LlmRespondedPayload).cacheStats
+      const paired = llmTerminalByRequestId.get(e.id)
+      const outcome = paired?.outcome
+      const cacheStats = outcome?.status === 'ok' ? outcome.cacheStats : undefined
       const refs = Array.from(contextRefsAt(events, e.id, 'at').values()).map(r =>
         r.contentHash && regionContent?.has(r.contentHash)
           ? { ...r, content: regionContent.get(r.contentHash) }
@@ -100,16 +126,24 @@ export function buildExecutionProjection(
       )
       const req = (p.request ?? {}) as { system?: unknown; messages?: unknown[]; tools?: unknown[] }
       const messages = Array.isArray(req.messages) ? req.messages : []
+      const status: ExecutionStep['status'] = !outcome
+        ? 'pending'
+        : outcome.status === 'ok' ? 'ok' : 'error'
+      const label = status === 'error' && outcome && outcome.status === 'error'
+        ? `LLM failure · ${outcome.error.code}`
+        : 'LLM call'
       steps.push({
         kind:         'llm',
-        label:        'LLM call',
+        label,
+        status,
         messageCount: messages.length,
         cacheHealth:  cacheStats
           ? { tier: classifyCacheTier(cacheStats), ...cacheStats }
           : null,
         regionGroups: groupRegionsByStability(refs),
         prompt:       { ...(req.system !== undefined ? { system: req.system } : {}), messages, tools: Array.isArray(req.tools) ? req.tools : [] },
-        response:     (resp?.payload as LlmRespondedPayload | undefined)?.response,
+        ...(outcome?.status === 'ok' ? { response: outcome.response } : {}),
+        ...(outcome?.status === 'error' ? { error: failureViewOf(outcome.error) } : {}),
       })
     } else if (e.type === 'tool.requested') {
       const p = e.payload as ToolRequestedPayload

@@ -29,3 +29,26 @@ export interface IEventStore {
    */
   readRange(runId: string, fromIndex: number, count?: number): Promise<Event[]>
 }
+
+/**
+ * Optional crash-safe durability capability for evidence used by
+ * task outcome finalization (#227 / s-017). Memory stores do not implement this.
+ */
+export interface ICrashSafeEventStore extends IEventStore {
+  readonly durability: 'crash-safe'
+  /**
+   * Confirm the run's event file (and parent directory) are durable on stable
+   * storage. Must only be called after the run's events are already readable.
+   */
+  confirmRunDurable(runId: string): Promise<void>
+}
+
+export function isCrashSafeEventStore(store: IEventStore): store is ICrashSafeEventStore {
+  const candidate = store as ICrashSafeEventStore
+  return (
+    candidate !== null &&
+    typeof candidate === 'object' &&
+    candidate.durability === 'crash-safe' &&
+    typeof candidate.confirmRunDurable === 'function'
+  )
+}

@@ -38,6 +38,11 @@ function llmResponded(events: { type: string; payload: unknown }[]): LlmResponde
   return events.filter(e => e.type === 'llm.responded').map(e => e.payload as LlmRespondedPayload)
 }
 
+function okResponse(p: LlmRespondedPayload) {
+  if (p.status !== 'ok') throw new Error(`expected ok terminal, got ${p.status}`)
+  return p.response
+}
+
 describe('RecordingIOPort — onEvent 透传 + 录制不变', () => {
   it('透传 onEvent，且录完整聚合后的 llm.responded', async () => {
     const inner = new DefaultIOPort(new StreamGateway())
@@ -45,7 +50,7 @@ describe('RecordingIOPort — onEvent 透传 + 录制不变', () => {
     const port  = new RecordingIOPort(inner, store, 'r1')
 
     const seen: ModelEvent[] = []
-    const response = await port.invokeLLM(REQ, e => seen.push(e))
+    const response = await port.invokeLLM(REQ, { onEvent: e => seen.push(e) })
 
     // onEvent 收到 2 个 delta（流式透传到 inner 的证据）
     expect(seen).toEqual([
@@ -61,7 +66,7 @@ describe('RecordingIOPort — onEvent 透传 + 录制不变', () => {
     const events = await store.readByRunId('r1')
     const responded = llmResponded(events)
     expect(responded).toHaveLength(1)
-    expect(responded[0]!.response.content).toEqual([{ type: 'text', text: 'hello' }])
+    expect(okResponse(responded[0]!).content).toEqual([{ type: 'text', text: 'hello' }])
     // delta 不进 EventStore：没有任何 message_delta 类型的事件
     expect(events.some(e => (e.type as string) === 'message_delta')).toBe(false)
   })
@@ -83,7 +88,7 @@ describe('RecordingIOPort — onEvent 透传 + 录制不变', () => {
     const events = await store.readByRunId('r2')
     const responded = llmResponded(events)
     expect(responded).toHaveLength(1)
-    expect(responded[0]!.response.content).toEqual([{ type: 'text', text: 'X' }])
+    expect(okResponse(responded[0]!).content).toEqual([{ type: 'text', text: 'X' }])
   })
 
   it('tool_call 流经 Recording 时录制的是聚合后完整 toolCalls', async () => {
@@ -92,7 +97,7 @@ describe('RecordingIOPort — onEvent 透传 + 录制不变', () => {
     const port  = new RecordingIOPort(inner, store, 'r3')
 
     const seen: ModelEvent[] = []
-    const response = await port.invokeLLM(REQ, e => seen.push(e))
+    const response = await port.invokeLLM(REQ, { onEvent: e => seen.push(e) })
 
     // 流式事件透传（4 个 tool_call 事件）
     expect(seen.map(e => e.type)).toEqual([
@@ -106,10 +111,10 @@ describe('RecordingIOPort — onEvent 透传 + 录制不变', () => {
     const events = await store.readByRunId('r3')
     const responded = llmResponded(events)
     expect(responded).toHaveLength(1)
-    expect(responded[0]!.response.toolCalls).toEqual([
+    expect(okResponse(responded[0]!).toolCalls).toEqual([
       { id: 't1', name: 'search', input: { q: 'hi' } },
     ])
-    expect(responded[0]!.response.content).toEqual([
+    expect(okResponse(responded[0]!).content).toEqual([
       { type: 'tool_use', id: 't1', name: 'search', input: { q: 'hi' } },
     ])
   })
@@ -119,7 +124,7 @@ describe('RecordingIOPort — onEvent 透传 + 录制不变', () => {
     const store = new MemoryEventStore()
     const port  = new RecordingIOPort(inner, store, 'r4')
 
-    await port.invokeLLM(REQ, () => {})
+    await port.invokeLLM(REQ, { onEvent: () => {} })
 
     const events = await store.readByRunId('r4')
     const requested = events.filter(e => e.type === 'llm.requested')

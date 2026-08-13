@@ -1,5 +1,11 @@
-import type { IIOPort, IOInvocationControl, ToolInvocationOptions } from '../runtime/IOPort.js'
-import type { ModelRequest, ModelResponse, ModelEvent } from '../types/model.js'
+import {
+  assertIOInvocationControl,
+  resolveIOInvocationControl,
+  type IIOPort,
+  type LLMInvocationOptions,
+  type ToolInvocationOptions,
+} from '../runtime/IOPort.js'
+import type { ModelRequest, ModelResponse } from '../types/model.js'
 import { CacheIndex, CacheIndexEmptyError } from './CacheIndex.js'
 import { hashModelRequest, hashToolCall } from './hash.js'
 import { ReplayDivergenceError } from './ReplayDivergenceError.js'
@@ -11,9 +17,10 @@ import { ReplayDivergenceError } from './ReplayDivergenceError.js'
  * `inner` is retained for type contract symmetry with RecordingIOPort but is
  * never called during replay; touching it from this class is a bug.
  *
- * #237: control is accepted for interface parity and intentionally ignored —
- * replay serves recorded terminal I/O and does not re-adjudicate wall-clock
- * deadlines or re-issue live provider calls.
+ * #237: control is accepted for interface parity. Replay still serves recorded
+ * terminal I/O and does not re-issue live provider calls; assertIO only rejects
+ * already-tripped cancel/deadline snapshots before cache lookup for contract
+ * parity with live ports.
  */
 export class ReplayingIOPort implements IIOPort {
   constructor(
@@ -21,11 +28,9 @@ export class ReplayingIOPort implements IIOPort {
     private readonly inner: IIOPort,
   ) {}
 
-  async invokeLLM(
-    request: ModelRequest,
-    _onEvent?: (e: ModelEvent) => void,
-    _control?: IOInvocationControl,
-  ): Promise<ModelResponse> {
+  async invokeLLM(request: ModelRequest, options?: LLMInvocationOptions): Promise<ModelResponse> {
+    const control = resolveIOInvocationControl(options?.control)
+    assertIOInvocationControl(control, 'llm')
     const hash = hashModelRequest(request)
     try {
       return this.cache.consumeLLM(hash)
@@ -46,10 +51,11 @@ export class ReplayingIOPort implements IIOPort {
   async invokeTool(
     toolName: string,
     input: unknown,
-    _execute: () => Promise<unknown>,
+    _execute: (signal: AbortSignal) => Promise<unknown>,
     opts?: ToolInvocationOptions,
-    _control?: IOInvocationControl,
   ): Promise<unknown> {
+    const control = resolveIOInvocationControl(opts?.control)
+    assertIOInvocationControl(control, 'tool')
     // Replay serves cached output and never runs the handler, so no lineage is
     // declared and `opts.lineage` stays empty — object.created/relation.created
     // are not re-emitted (the original run's log already has them).

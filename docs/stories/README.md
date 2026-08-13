@@ -83,16 +83,15 @@ deprecated_reason: ""           # required iff status == deprecated
 ---
 ```
 
-**`requires` lists the target capabilities a story exercises.** Each entry
-should map to an entry in `ARCHITECTURE.md`'s `## Implementation Status`
-section (use that vocabulary verbatim). A story is **ready** to move from
-`draft` to `active` only when every entry in its `requires` list appears in
-the "Implemented today" section of `ARCHITECTURE.md`. Until then it is
-**partial** (some implemented, some target) or **blocked** (none yet).
-
-This is enforced by convention, not by tooling — the `requires` field is
-the source of truth for readiness, and `INDEX.md` derives the readiness
-view from it.
+**`requires` lists the target capabilities a story exercises.** Use stable
+architecture or module vocabulary rather than implementation symbol names.
+The `requires` field is the source of truth for readiness; `INDEX.md` derives
+its readiness view by cross-referencing each entry with current
+`ARCHITECTURE.md` claims and repository implementation evidence cited in that
+view. A story is **ready** to move from `draft` to `active` only when every
+requirement is implemented and its matching E2E exists and is green. Until
+then it is **partial** (some implemented, some target) or **blocked** (none
+yet).
 
 **`capability` is the primary classification axis.** One tag per story.
 Use short kebab-case slugs that describe the user-visible capability

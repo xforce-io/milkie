@@ -8,6 +8,8 @@ export interface ToolContext {
   workingMemory: WorkingMemory
   agentFactory:  AgentFactory
   stateStore:    IStateStore
+  /** Effective per-effect cancellation signal supplied by IOPort. */
+  readonly signal: AbortSignal
   requestSkill?: (name: string, scope?: 'turn' | 'session') => { requested: string; status: string; version?: string; scope?: 'turn' | 'session' }
   /** #164: raw user input for the current turn, stable across all tool-loop iterations. */
   currentTurn?:  string
@@ -15,11 +17,6 @@ export interface ToolContext {
    * resolve "my last turn(s)" without the agent passing a runId. Unset on a
    * session's first turn. */
   previousRunId?: string
-  /**
-   * #237: run-level AbortSignal. Handlers MAY observe it for cooperative cancel;
-   * they MUST NOT clear, replace, or extend the run deadline.
-   */
-  readonly signal?: AbortSignal
   /** #200 C: sourceRunIds of the external projections delivered to this run (#146).
    * The capability-by-handle for selfOnly trace tools: a consumer may dereference
    * the execution / lineage / I/O of a run that was *delivered to it*, but not an
@@ -60,6 +57,11 @@ export interface ToolContext {
    * — and underpins lazy-promote (P2). Present only when the runtime wired lineage.
    */
   resolveObject?:  (objectId: string) => { type: ObjectType; meta?: Record<string, unknown> } | undefined
+  /**
+   * #247: register a produced artifact for the run envelope.
+   * Does not scan the working directory.
+   */
+  recordArtifact?: (artifact: { name?: string; type: 'file' | 'object'; path?: string; objectId?: string; hash?: string }) => void
 }
 
 export interface ToolDefinition {
@@ -77,6 +79,11 @@ export interface ToolCall {
   name:              string
   input:             unknown
   invalidArguments?: InvalidToolArguments
+  /**
+   * #245: in-memory raw arguments for bounded repair only.
+   * Must not be persisted to trace.
+   */
+  rawArguments?: string
 }
 
 export interface ToolError {

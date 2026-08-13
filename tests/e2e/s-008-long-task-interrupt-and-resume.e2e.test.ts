@@ -2,7 +2,7 @@
  * Case 3: 长任务中断与恢复
  *
  * 验证：Interrupt / yield point、Checkpoint 写入与恢复、Resume 语义、
- * Tool 幂等键、TaskResult.interrupted、pendingEvents 保存与恢复
+ * Tool 幂等键、TaskResult.interrupted、v2 lifecycle checkpoint（#175/#181）
  */
 
 import type { AgentConfig } from '../../src/types/agent.js'
@@ -196,17 +196,20 @@ describe('Case 3: 长任务中断与恢复', () => {
     expect(count).toBeGreaterThanOrEqual(3)
   })
 
-  live('Phase 1: checkpoint 保存到 stateStore', () => {
+  live('Phase 1: checkpoint 保存到 event log', () => {
     expect(checkpoint).toBeDefined()
     expect(checkpoint.goal).toBe('处理 dataset-42 的 10 个 chunk')
-    expect(checkpoint.pendingEvents).toBeDefined()
+    // #181: pendingEvents queue 已 decore，v2 checkpoint 不再写入该字段
+    expect(checkpoint.pendingEvents).toBeUndefined()
   })
 
-  live('Phase 1: checkpoint 包含 FSM 状态', () => {
+  live('Phase 1: checkpoint 包含 v2 lifecycle 状态', () => {
     expect(checkpoint).toBeDefined()
-    expect(checkpoint.fsm).toBeDefined()
-    expect(checkpoint.fsm.currentState).toBe('paused')
-    expect(checkpoint.fsm.resumeState).toBe('react')
+    // #175 §8: v2 checkpoint — lifecycle, no fsm
+    expect(checkpoint.schemaVersion).toBe(2)
+    expect(checkpoint.fsm).toBeUndefined()
+    expect(checkpoint.lifecycle?.status).toBe('interrupted')
+    expect(checkpoint.lifecycle?.resumeKind).toBe('loop')
   })
 
   live('Phase 2: Resume 后执行完成', () => {
@@ -293,7 +296,9 @@ describe('Case 3 子流：Supervisor Tree 中断传播', () => {
       const parentCp = checkpointFromEvents(await eventStore.readByRunId(result.agentRunId)) as AgentCheckpoint
 
       expect(result.status).toBe('interrupted')
-      expect(parentCp.fsm.currentState).toBe('paused')
+      // #175 §8: parent interrupt checkpoint 以 lifecycle 为准，不再写 fsm
+      expect(parentCp.lifecycle?.status).toBe('interrupted')
+      expect(parentCp.fsm).toBeUndefined()
       expect(parentCp.children).toHaveLength(2)
       expect(parentCp.children.every(c => c.status === 'interrupted')).toBe(true)
       expect(parentCp.children.every(c => c.checkpointId != null)).toBe(true)

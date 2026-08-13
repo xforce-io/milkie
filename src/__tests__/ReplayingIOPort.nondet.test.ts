@@ -9,32 +9,32 @@ class ExplodingInnerPort implements IIOPort {
   async invokeLLM(_req: ModelRequest): Promise<ModelResponse> {
     throw new Error('inner.invokeLLM must not be called during replay')
   }
-  async invokeTool(_n: string, _i: unknown, _e: () => Promise<unknown>): Promise<unknown> {
+  async invokeTool(_n: string, _i: unknown, _e: (signal: AbortSignal) => Promise<unknown>): Promise<unknown> {
     throw new Error('inner.invokeTool must not be called during replay')
   }
   now(): number { throw new Error('inner.now must not be called during nondet replay') }
   uuid(): string { throw new Error('inner.uuid must not be called during nondet replay') }
 }
 
-const clockEvent = (value: number): Event => ({
-  id: 'c', runId: 'r', type: 'clock.read', actor: 'runtime', timestamp: 0,
+const clockEvent = (value: number, id: string): Event => ({
+  id, runId: 'r', type: 'clock.read', actor: 'runtime', timestamp: 0,
   payload: { value },
 })
-const uuidEvent = (value: string): Event => ({
-  id: 'u', runId: 'r', type: 'uuid.generated', actor: 'runtime', timestamp: 0,
+const uuidEvent = (value: string, id: string): Event => ({
+  id, runId: 'r', type: 'uuid.generated', actor: 'runtime', timestamp: 0,
   payload: { value },
 })
 
 describe('ReplayingIOPort — nondet consumption', () => {
   it('now() returns cached value in FIFO order without touching inner', () => {
-    const cache = CacheIndex.fromEvents([clockEvent(111), clockEvent(222)])
+    const cache = CacheIndex.fromEvents([clockEvent(111, 'c1'), clockEvent(222, 'c2')])
     const port  = new ReplayingIOPort(cache, new ExplodingInnerPort())
     expect(port.now()).toBe(111)
     expect(port.now()).toBe(222)
   })
 
   it('uuid() returns cached value in FIFO order without touching inner', () => {
-    const cache = CacheIndex.fromEvents([uuidEvent('a'), uuidEvent('b')])
+    const cache = CacheIndex.fromEvents([uuidEvent('a', 'u1'), uuidEvent('b', 'u2')])
     const port  = new ReplayingIOPort(cache, new ExplodingInnerPort())
     expect(port.uuid()).toBe('a')
     expect(port.uuid()).toBe('b')
@@ -65,7 +65,7 @@ describe('ReplayingIOPort — nondet consumption', () => {
   it('nowSample does not consume the clock FIFO', () => {
     // #237: infrastructure samples must not dequeue recorded clock.read values.
     // Consuming here would desync agent-observable now() and fail P-wide replay.
-    const cache = CacheIndex.fromEvents([clockEvent(111), clockEvent(222)])
+    const cache = CacheIndex.fromEvents([clockEvent(111, 'c3'), clockEvent(222, 'c4')])
     const port  = new ReplayingIOPort(cache, new ExplodingInnerPort())
 
     expect(port.nowSample()).toBe(0)

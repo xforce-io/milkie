@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk'
 import type {
+  GatewayInvocationOptions,
   IModelGateway,
   ModelCapabilities,
   ModelGatewayCallOptions,
@@ -50,7 +51,7 @@ export class AnthropicAdapter implements IModelGateway {
     })
   }
 
-  async complete(request: ModelRequest, opts?: ModelGatewayCallOptions): Promise<ModelResponse> {
+  async complete(request: ModelRequest, opts?: ModelGatewayCallOptions | GatewayInvocationOptions): Promise<ModelResponse> {
     this.guardImageRequest(request)
     const params = this.buildParams(request)
     try {
@@ -66,7 +67,7 @@ export class AnthropicAdapter implements IModelGateway {
     }
   }
 
-  async *stream(request: ModelRequest, opts?: ModelGatewayCallOptions): AsyncIterable<ModelEvent> {
+  async *stream(request: ModelRequest, opts?: ModelGatewayCallOptions | GatewayInvocationOptions): AsyncIterable<ModelEvent> {
     this.guardImageRequest(request)
     const params = this.buildParams(request)
     this.streamTools.clear()

@@ -239,15 +239,15 @@ describe('Milkie.replay — Phase 4 tail check (P-wide)', () => {
     let divergenceError: ReplayDivergenceError | undefined
     // Keep this wrapper shape aligned with Milkie.replay's proxyPort.
     const proxyPort: IIOPort = {
-      async invokeLLM(req, onEvent, control) {
-        try { return await ioPort.invokeLLM(req, onEvent, control) }
+      async invokeLLM(req, options) {
+        try { return await ioPort.invokeLLM(req, options) }
         catch (err) {
           if (err instanceof ReplayDivergenceError) divergenceError = err
           throw err
         }
       },
-      async invokeTool(name, input, execute, opts, control) {
-        try { return await ioPort.invokeTool(name, input, execute, opts, control) }
+      async invokeTool(name, input, execute, opts) {
+        try { return await ioPort.invokeTool(name, input, execute, opts) }
         catch (err) {
           if (err instanceof ReplayDivergenceError) divergenceError = err
           throw err

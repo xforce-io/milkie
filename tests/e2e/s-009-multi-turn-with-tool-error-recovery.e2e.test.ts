@@ -2,7 +2,8 @@
  * Case 4: 多轮对话与错误恢复
  *
  * 验证：多轮对话（type: llm，无 on.DONE → 等待用户）、contextId 复用
- * （history 跨 invoke 保留）、Goal 不变性、Error handling FSM 转移（retryable 错误自动重试）
+ * （history 跨 invoke 保留）、Goal 不变性、retryable tool 错误的可观察重试
+ * （query_orders 至少一次 error + 一次 success；attempt 属性可用时校验 0/1）
  */
 
 import type { AgentConfig } from '../../src/types/agent.js'
@@ -153,8 +154,9 @@ describe('Case 4: 多轮对话与错误恢复', () => {
     const regions = run2Cp?.context?.regions?.regions ?? []
     const historyRegions = regions.filter((r: { section: string }) => r.section === 'history')
     expect(historyRegions.length).toBeGreaterThan(0)
-    // Sanity: the history pair content should be non-trivial
+    // Must retain first-turn stable markers, not only the current turn pair.
     const historyStr = JSON.stringify(historyRegions)
+    expect(historyStr).toContain('订单 #12345 金额超出阈值 3 倍')
     expect(historyStr.length).toBeGreaterThan(100)
   })
 
@@ -162,12 +164,29 @@ describe('Case 4: 多轮对话与错误恢复', () => {
     expect(getCallCount()).toBeGreaterThanOrEqual(2)
   })
 
-  live('error_handling FSM 转移 span 存在（retryable 错误重试）', () => {
-    const fsmSpans = trajectory.spans.filter(s => s.name === 'fsm.transition')
-    const toError   = fsmSpans.find(s => s.attributes['toState'] === 'error_handling')
-    const fromError = fsmSpans.find(s => s.attributes['fromState'] === 'error_handling')
-    expect(toError).toBeDefined()
-    expect(fromError).toBeDefined()
+  live('query_orders tool.call 含至少一次 error 与一次 success（retryable 重试）', () => {
+    const querySpans = trajectory.spans.filter(
+      s => s.name === 'tool.call' && s.attributes['toolName'] === 'query_orders',
+    )
+    expect(querySpans.length).toBeGreaterThanOrEqual(2)
+
+    const hasError = querySpans.some(s =>
+      s.status === 'error'
+      || s.events.some(e => e.name === 'tool.result' && e.attributes['error'] != null),
+    )
+    const hasSuccess = querySpans.some(s =>
+      s.status === 'ok'
+      || s.events.some(e => e.name === 'tool.result' && e.attributes['output'] != null && e.attributes['error'] == null),
+    )
+    expect(hasError).toBe(true)
+    expect(hasSuccess).toBe(true)
+
+    const attempts = querySpans
+      .map(s => s.attributes['attempt'])
+      .filter((a): a is number => typeof a === 'number')
+    if (attempts.length >= 2) {
+      expect(attempts).toEqual(expect.arrayContaining([0, 1]))
+    }
   })
 
   live('run2 output 包含综合判断', () => {

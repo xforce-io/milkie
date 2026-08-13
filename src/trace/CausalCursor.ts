@@ -16,8 +16,17 @@
 export class CausalCursor {
   /** Most recent llm/tool event id emitted by RecordingIOPort. fsm.transition reads this. */
   lastIoEventId?: string
-  /** Most recent llm.responded event id. tool.requested reads this (the frame that decided the call). */
+  /**
+   * Most recent *successful* llm.responded event id. tool.requested and
+   * agent.run.completed (detach) read this — only success terminals produce
+   * tool decisions / final text.
+   */
   lastLlmRespondedId?: string
+  /**
+   * Most recent llm.responded terminal id (success or error). Runtime error
+   * completion causedBy uses this so failure terminals stay reachable.
+   */
+  lastLlmTerminalId?: string
   /** Most recent turn-terminating event id (tool.responded, or agent.run.started seed). llm.requested reads this. */
   lastTerminatorId?: string
 }

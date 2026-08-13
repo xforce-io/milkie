@@ -13,6 +13,68 @@ export type ModelErrorCode =
 
 export type ModelErrorPhase = 'request' | 'stream_open' | 'stream_read' | 'response_parse'
 
+export interface IOInvocationControl {
+  readonly signal?: AbortSignal
+  readonly deadlineAt?: number
+  /**
+   * #237: adjudicated stop reason when RunControl has already tripped.
+   * Lets final gates rethrow the correct terminal without a fresh clock sample.
+   */
+  readonly reason?: 'deadline' | 'cancelled'
+}
+
+export interface GatewayInvocationOptions {
+  readonly signal?: AbortSignal
+}
+
+export type IOControlOperation = 'llm' | 'tool'
+export type IOControlErrorCode = 'IO_CANCELLED' | 'IO_DEADLINE_EXCEEDED'
+
+export interface IOControlErrorEnvelope {
+  code:      IOControlErrorCode
+  message:   'I/O invocation was cancelled.' | 'I/O invocation deadline exceeded.'
+  phase:     'io_control'
+  operation: IOControlOperation
+  retryable: false
+  provider?: undefined
+  model?:    undefined
+}
+
+export class IOInvocationValidationError extends Error {
+  readonly code = 'IO_INVALID_DEADLINE' as const
+  readonly retryable = false as const
+
+  constructor() {
+    super('I/O invocation deadline must be a finite non-negative Unix epoch millisecond.')
+    this.name = 'IOInvocationValidationError'
+  }
+}
+
+export class IOControlError extends Error {
+  readonly code: IOControlErrorCode
+  readonly phase = 'io_control' as const
+  readonly operation: IOControlOperation
+  readonly retryable = false as const
+  readonly envelope: IOControlErrorEnvelope
+
+  constructor(code: IOControlErrorCode, operation: IOControlOperation) {
+    const message = code === 'IO_CANCELLED'
+      ? 'I/O invocation was cancelled.' as const
+      : 'I/O invocation deadline exceeded.' as const
+    super(message)
+    this.name = 'IOControlError'
+    this.code = code
+    this.operation = operation
+    this.envelope = {
+      code,
+      message,
+      phase: 'io_control',
+      operation,
+      retryable: false,
+    }
+  }
+}
+
 export interface ModelErrorEnvelope {
   code:       ModelErrorCode
   message:    string
@@ -63,12 +125,45 @@ export interface RunCancelledErrorEnvelope {
   model?:     undefined
 }
 
+export interface LlmInvocationFailureEnvelope {
+  code:       'LLM_INVOCATION_FAILED'
+  message:    'LLM invocation failed.'
+  phase:      'ioport'
+  model:      string
+  retryable:  false
+  provider?:  undefined
+}
+
+export class LlmInvocationError extends Error {
+  readonly code = 'LLM_INVOCATION_FAILED' as const
+  readonly phase = 'ioport' as const
+  readonly retryable = false as const
+  readonly envelope: LlmInvocationFailureEnvelope
+
+  constructor(model: string) {
+    const envelope: LlmInvocationFailureEnvelope = {
+      code: 'LLM_INVOCATION_FAILED',
+      message: 'LLM invocation failed.',
+      phase: 'ioport',
+      model,
+      retryable: false,
+    }
+    super(envelope.message)
+    this.name = 'LlmInvocationError'
+    this.envelope = { ...envelope }
+  }
+}
+
 export type RuntimeErrorEnvelope =
   | MaxIterationsErrorEnvelope
   | AbandonedRunErrorEnvelope
   | RunDeadlineExceededErrorEnvelope
   | RunCancelledErrorEnvelope
-export type AgentErrorEnvelope = ModelErrorEnvelope | RuntimeErrorEnvelope
+export type AgentErrorEnvelope =
+  | ModelErrorEnvelope
+  | RuntimeErrorEnvelope
+  | IOControlErrorEnvelope
+  | LlmInvocationFailureEnvelope
 
 /** #236: gateway/model capability surface. Undeclared custom gateways → imageInput false. */
 export interface ModelCapabilities {
@@ -134,8 +229,8 @@ export interface ModelGatewayCallOptions {
 }
 
 export interface IModelGateway {
-  complete(request: ModelRequest, opts?: ModelGatewayCallOptions): Promise<ModelResponse>
-  stream(request: ModelRequest, opts?: ModelGatewayCallOptions): AsyncIterable<ModelEvent>
+  complete(request: ModelRequest, options?: GatewayInvocationOptions | ModelGatewayCallOptions): Promise<ModelResponse>
+  stream(request: ModelRequest, options?: GatewayInvocationOptions | ModelGatewayCallOptions): AsyncIterable<ModelEvent>
   /**
    * #236: optional capability declaration. Custom gateways that omit this are
    * treated as imageInput:false when a request carries image parts.

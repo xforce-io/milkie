@@ -88,7 +88,7 @@ Each agent's LLM context is organized into five ordered buckets:
 ### TypeScript Object
 
 ```typescript
-import type { AgentConfig } from 'milkie'
+import type { AgentConfig } from '@freemanxu/milkie'
 
 const config: AgentConfig = {
   agentId:      'my-agent',
@@ -169,7 +169,7 @@ State stores persist checkpoints for interrupt/resume and multi-turn conversatio
 In-process, no dependencies. State is lost when the process restarts.
 
 ```typescript
-import { Milkie, MemoryStore } from 'milkie'
+import { Milkie, MemoryStore } from '@freemanxu/milkie'
 
 const milkie = new Milkie({ stateStore: new MemoryStore() })
 ```
@@ -179,7 +179,7 @@ const milkie = new Milkie({ stateStore: new MemoryStore() })
 Local persistent storage. No external service required.
 
 ```typescript
-import { Milkie, SQLiteStore } from 'milkie'
+import { Milkie, SQLiteStore } from '@freemanxu/milkie'
 
 const store = new SQLiteStore({ path: './data/state.db' })
 await store.init()   // creates the table if it does not exist
@@ -194,7 +194,7 @@ store.close()        // call when done
 Cross-process, cross-session. Required for horizontally scaled deployments.
 
 ```typescript
-import { Milkie, RedisStore } from 'milkie'
+import { Milkie, RedisStore } from '@freemanxu/milkie'
 
 const store = new RedisStore({
   host: 'localhost',
@@ -276,7 +276,7 @@ export VOLCENGINE_API_BASE=https://your-endpoint/v1
 Inject any gateway that implements `IModelGateway` to override all agents:
 
 ```typescript
-import type { IModelGateway, ModelRequest, ModelResponse } from 'milkie'
+import type { IModelGateway, ModelRequest, ModelResponse } from '@freemanxu/milkie'
 
 class MockGateway implements IModelGateway {
   async complete(req: ModelRequest): Promise<ModelResponse> {
@@ -358,7 +358,7 @@ Search for information and summarize findings with citations.`,
 ### Defining Custom Tools
 
 ```typescript
-import type { ToolDefinition } from 'milkie'
+import type { ToolDefinition } from '@freemanxu/milkie'
 
 const myTool: ToolDefinition = {
   name:        'query_database',
@@ -547,7 +547,7 @@ const turn2 = await milkie.invoke({
 ### Recording Spans
 
 ```typescript
-import { Milkie, TrajectoryStore } from 'milkie'
+import { Milkie, TrajectoryStore } from '@freemanxu/milkie'
 
 const trajectoryStore = new TrajectoryStore({
   jsonlDir: './trajectories',   // writes one JSONL file per run

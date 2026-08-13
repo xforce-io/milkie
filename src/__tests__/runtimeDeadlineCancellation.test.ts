@@ -1,6 +1,7 @@
 // #237: run-level deadline + cancellation propagation and terminal envelopes.
 import { AgentRuntime } from '../runtime/AgentRuntime'
-import { DefaultIOPort, type IIOPort, type IOInvocationControl } from '../runtime/IOPort'
+import { DefaultIOPort, type IIOPort, type LLMInvocationOptions } from '../runtime/IOPort'
+import type { IOInvocationControl } from '../types/model'
 import { RunControl, RunControlError } from '../runtime/RunControl'
 import { Milkie } from '../runtime/Milkie'
 import { MemoryStore } from '../store/MemoryStore'
@@ -13,6 +14,7 @@ import type { Event } from '../trace/types'
 import type { AgentConfig } from '../types/agent'
 import type { AgentResult } from '../types/common'
 import type { IModelGateway, ModelRequest, ModelResponse, ModelEvent } from '../types/model'
+import { IOControlError } from '../types/model'
 import type { ToolDefinition } from '../types/tool'
 
 function makeConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
@@ -62,21 +64,20 @@ class TrackingPort implements IIOPort {
   lastLlmControl: IOInvocationControl | undefined
   lastToolControl: IOInvocationControl | undefined
   constructor(private readonly inner: IIOPort) {}
-  async invokeLLM(req: ModelRequest, onEvent?: (e: ModelEvent) => void, control?: IOInvocationControl) {
+  async invokeLLM(req: ModelRequest, options?: LLMInvocationOptions) {
     this.llmCalls++
-    this.lastLlmControl = control
-    return this.inner.invokeLLM(req, onEvent, control)
+    this.lastLlmControl = options?.control
+    return this.inner.invokeLLM(req, options)
   }
   async invokeTool(
     name: string,
     input: unknown,
-    execute: () => Promise<unknown>,
+    execute: (signal: AbortSignal) => Promise<unknown>,
     opts?: Parameters<IIOPort['invokeTool']>[3],
-    control?: IOInvocationControl,
   ) {
     this.toolCalls++
-    this.lastToolControl = control
-    return this.inner.invokeTool(name, input, execute, opts, control)
+    this.lastToolControl = opts?.control
+    return this.inner.invokeTool(name, input, execute, opts)
   }
   now() { return this.inner.now() }
   uuid() { return this.inner.uuid() }
@@ -94,6 +95,15 @@ describe('#237 runtime deadline / cancellation', () => {
       expect(rc.stopped).toBe(true)
       expect(rc.reason).toBe('deadline')
       expect(() => rc.throwIfStopped()).toThrow(RunControlError)
+      rc.dispose()
+    })
+
+    it('assertInvocationAllowed trips deadline from a later clock sample', () => {
+      const rc = RunControl.create({ now: 0, deadlineAt: 1000 })
+      expect(rc.stopped).toBe(false)
+      expect(() => rc.assertInvocationAllowed(999)).not.toThrow()
+      expect(() => rc.assertInvocationAllowed(1000)).toThrow(RunControlError)
+      expect(rc.reason).toBe('deadline')
       rc.dispose()
     })
 
@@ -166,12 +176,9 @@ describe('#237 runtime deadline / cancellation', () => {
     blockedResolve?.()
 
     expect(result).toMatchObject({
-      status: 'error',
-      error: {
-        code: 'RUN_DEADLINE_EXCEEDED',
-        phase: 'agent_loop',
-        retryable: true,
-      },
+      status: 'completed',
+      stopReason: 'deadline',
+      stopCode: 'RUN_DEADLINE_EXCEEDED',
     })
     // No second model call after deadline.
     expect(gw.requests).toBe(1)
@@ -179,8 +186,8 @@ describe('#237 runtime deadline / cancellation', () => {
     const terminal = (await eventStore.readByRunId(result.agentRunId))
       .find(e => e.type === 'agent.run.completed')
     expect(terminal?.payload).toMatchObject({
-      status: 'error',
-      error: { code: 'RUN_DEADLINE_EXCEEDED' },
+      status: 'completed',
+      stopReason: 'deadline',
     })
   })
 
@@ -216,22 +223,18 @@ describe('#237 runtime deadline / cancellation', () => {
     const result = await resultP
 
     expect(result).toMatchObject({
-      status: 'error',
-      error: {
-        code: 'RUN_CANCELLED',
-        phase: 'agent_loop',
-        retryable: true,
-        message: 'Run cancelled by caller',
-      },
+      status: 'interrupted',
+      stopReason: 'cancelled',
+      stopCode: 'RUN_CANCELLED',
     })
     // Must not look like a provider/model failure.
-    expect(result.error).not.toMatchObject({ code: expect.stringMatching(/^MODEL_/) })
+    expect(result.error).toBeUndefined()
 
     const terminal = (await eventStore.readByRunId(result.agentRunId))
       .find(e => e.type === 'agent.run.completed')
     expect(terminal?.payload).toMatchObject({
-      status: 'error',
-      error: { code: 'RUN_CANCELLED' },
+      status: 'interrupted',
+      stopReason: 'cancelled',
     })
   })
 
@@ -284,12 +287,9 @@ describe('#237 runtime deadline / cancellation', () => {
     expect(seenSignals[0]).toBeInstanceOf(AbortSignal)
     expect(seenSignals[0]!.aborted).toBe(true)
     expect(result).toMatchObject({
-      status: 'error',
-      error: {
-        code: 'RUN_DEADLINE_EXCEEDED',
-        phase: 'agent_loop',
-        retryable: true,
-      },
+      status: 'completed',
+      stopReason: 'deadline',
+      stopCode: 'RUN_DEADLINE_EXCEEDED',
     })
     // First LLM scheduled the tool; second LLM must not start after deadline.
     expect(gw.requests).toBe(1)
@@ -297,8 +297,8 @@ describe('#237 runtime deadline / cancellation', () => {
     const terminal = (await eventStore.readByRunId(result.agentRunId))
       .find(e => e.type === 'agent.run.completed')
     expect(terminal?.payload).toMatchObject({
-      status: 'error',
-      error: { code: 'RUN_DEADLINE_EXCEEDED' },
+      status: 'completed',
+      stopReason: 'deadline',
     })
   })
 
@@ -356,7 +356,7 @@ describe('#237 runtime deadline / cancellation', () => {
       input: 'i',
       control: { deadlineAt: Date.now() - 1 },
     })
-    expect(result.error?.code).toBe('RUN_DEADLINE_EXCEEDED')
+    expect(result.stopCode).toBe('RUN_DEADLINE_EXCEEDED')
     expect(gw.requests).toBe(0)
   })
 
@@ -425,11 +425,12 @@ describe('#237 runtime deadline / cancellation', () => {
     const ac = new AbortController()
     ac.abort()
 
-    const resp = await port.invokeLLM(req, undefined, {
-      signal: ac.signal,
-      deadlineAt: Date.now() - 1,
-    })
-    expect(resp).toEqual(cached)
+    await expect(port.invokeLLM(req, {
+      control: {
+        signal: ac.signal,
+        deadlineAt: Date.now() - 1,
+      },
+    })).rejects.toMatchObject({ code: 'IO_CANCELLED' })
     expect(gw.calls).toBe(0)
   })
 
@@ -461,7 +462,7 @@ describe('#237 runtime deadline / cancellation', () => {
     await new Promise(r => setTimeout(r, 10))
     ac.abort()
     const original = await resultP
-    expect(original.error?.code).toBe('RUN_CANCELLED')
+    expect(original.stopCode).toBe('RUN_CANCELLED')
 
     class LiveProbeGateway implements IModelGateway {
       calls = 0
@@ -484,8 +485,8 @@ describe('#237 runtime deadline / cancellation', () => {
     const replayed: AgentResult = await replayMilkie.replay(original.agentRunId)
     expect(live.calls).toBe(0)
     expect(replayed).toMatchObject({
-      status: 'error',
-      error: { code: 'RUN_CANCELLED' },
+      status: 'interrupted',
+      stopReason: 'cancelled',
     })
   })
 
@@ -513,15 +514,16 @@ describe('#237 runtime deadline / cancellation', () => {
       control: { deadlineAt: started + 25 },
     })
     expect(result).toMatchObject({
-      status: 'error',
-      error: { code: 'RUN_DEADLINE_EXCEEDED', phase: 'agent_loop' },
+      status: 'completed',
+      stopReason: 'deadline',
+      stopCode: 'RUN_DEADLINE_EXCEEDED',
     })
     expect(result.output).not.toBe('late-success-must-not-win')
     const terminal = (await eventStore.readByRunId(result.agentRunId))
       .find(e => e.type === 'agent.run.completed')
     expect(terminal?.payload).toMatchObject({
-      status: 'error',
-      error: { code: 'RUN_DEADLINE_EXCEEDED' },
+      status: 'completed',
+      stopReason: 'deadline',
     })
   })
 
@@ -589,8 +591,9 @@ describe('#237 runtime deadline / cancellation', () => {
     })
     expect(started).toEqual(['serial_a'])
     expect(result).toMatchObject({
-      status: 'error',
-      error: { code: 'RUN_DEADLINE_EXCEEDED', phase: 'agent_loop' },
+      status: 'completed',
+      stopReason: 'deadline',
+      stopCode: 'RUN_DEADLINE_EXCEEDED',
     })
     expect(gw.requests).toBe(1)
   })
@@ -630,8 +633,9 @@ describe('#237 runtime deadline / cancellation', () => {
     })
     expect(attempts).toBe(1)
     expect(result).toMatchObject({
-      status: 'error',
-      error: { code: 'RUN_DEADLINE_EXCEEDED', phase: 'agent_loop' },
+      status: 'completed',
+      stopReason: 'deadline',
+      stopCode: 'RUN_DEADLINE_EXCEEDED',
     })
   })
 
@@ -805,23 +809,21 @@ describe('#237 runtime deadline / cancellation', () => {
       constructor(private readonly inner: IIOPort) {}
       async invokeLLM(
         req: ModelRequest,
-        onEvent?: (e: ModelEvent) => void,
-        control?: IOInvocationControl,
+        options?: LLMInvocationOptions,
       ) {
-        return this.inner.invokeLLM(req, onEvent, control)
+        return this.inner.invokeLLM(req, options)
       }
       async invokeTool(
         name: string,
         input: unknown,
-        execute: () => Promise<unknown>,
+        execute: (signal: AbortSignal) => Promise<unknown>,
         opts?: Parameters<IIOPort['invokeTool']>[3],
-        control?: IOInvocationControl,
       ) {
         // Simulate RecordingIOPort/trace await between runtime pre-gate and
         // actual handler start (DefaultIOPort previously ran execute unconditionally).
         markEntered()
         await hold
-        return this.inner.invokeTool(name, input, execute, opts, control)
+        return this.inner.invokeTool(name, input, execute, opts)
       }
       now() { return Date.now() }
       uuid() { return this.inner.uuid() }
@@ -858,12 +860,9 @@ describe('#237 runtime deadline / cancellation', () => {
 
       expect(handlerEntered).toBe(false)
       expect(result).toMatchObject({
-        status: 'error',
-        error: {
-          code: 'RUN_DEADLINE_EXCEEDED',
-          phase: 'agent_loop',
-          retryable: true,
-        },
+        status: 'completed',
+        stopReason: 'deadline',
+        stopCode: 'RUN_DEADLINE_EXCEEDED',
       })
       const events = await eventStore.readByRunId(result.agentRunId)
       const toolRespondedOk = events.some(e => {
@@ -905,21 +904,19 @@ describe('#237 runtime deadline / cancellation', () => {
       constructor(private readonly inner: IIOPort) {}
       async invokeLLM(
         req: ModelRequest,
-        onEvent?: (e: ModelEvent) => void,
-        control?: IOInvocationControl,
+        options?: LLMInvocationOptions,
       ) {
-        return this.inner.invokeLLM(req, onEvent, control)
+        return this.inner.invokeLLM(req, options)
       }
       async invokeTool(
         name: string,
         input: unknown,
-        execute: () => Promise<unknown>,
+        execute: (signal: AbortSignal) => Promise<unknown>,
         opts?: Parameters<IIOPort['invokeTool']>[3],
-        control?: IOInvocationControl,
       ) {
         markEntered()
         await hold
-        return this.inner.invokeTool(name, input, execute, opts, control)
+        return this.inner.invokeTool(name, input, execute, opts)
       }
       now() { return Date.now() }
       uuid() { return this.inner.uuid() }
@@ -952,12 +949,9 @@ describe('#237 runtime deadline / cancellation', () => {
 
       expect(handlerEntered).toBe(false)
       expect(result).toMatchObject({
-        status: 'error',
-        error: {
-          code: 'RUN_DEADLINE_EXCEEDED',
-          phase: 'agent_loop',
-          retryable: true,
-        },
+        status: 'completed',
+        stopReason: 'deadline',
+        stopCode: 'RUN_DEADLINE_EXCEEDED',
       })
       expect(gw.requests).toBe(0)
     } finally {
@@ -978,9 +972,8 @@ describe('#237 runtime deadline / cancellation', () => {
         executed = true
         return 'nope'
       },
-      undefined,
-      { signal: ac.signal, deadlineAt: port.now() - 1 },
-    )).rejects.toBeInstanceOf(RunControlError)
+      { control: { signal: ac.signal, deadlineAt: port.now() - 1 } },
+    )).rejects.toBeInstanceOf(IOControlError)
     expect(executed).toBe(false)
   })
 
@@ -1009,8 +1002,7 @@ describe('#237 runtime deadline / cancellation', () => {
         't',
         {},
         async () => { ran = true; return 'ok' },
-        undefined,
-        { deadlineAt: 1000 },
+        { control: { deadlineAt: 1000 } },
       )).resolves.toBe('ok')
       expect(ran).toBe(true)
 
@@ -1020,9 +1012,8 @@ describe('#237 runtime deadline / cancellation', () => {
         't',
         {},
         async () => { ran = true; return 'nope' },
-        undefined,
-        { deadlineAt: 1000 },
-      )).rejects.toMatchObject({ reason: 'deadline' })
+        { control: { deadlineAt: 1000 } },
+      )).rejects.toMatchObject({ code: 'IO_DEADLINE_EXCEEDED' })
       expect(ran).toBe(false)
     }
 
@@ -1077,23 +1068,21 @@ describe('#237 runtime deadline / cancellation', () => {
       constructor(private readonly inner: IIOPort) {}
       async invokeLLM(
         req: ModelRequest,
-        onEvent?: (e: ModelEvent) => void,
-        control?: IOInvocationControl,
+        options?: LLMInvocationOptions,
       ) {
-        return this.inner.invokeLLM(req, onEvent, control)
+        return this.inner.invokeLLM(req, options)
       }
       async invokeTool(
         name: string,
         input: unknown,
-        execute: () => Promise<unknown>,
+        execute: (signal: AbortSignal) => Promise<unknown>,
         opts?: Parameters<IIOPort['invokeTool']>[3],
-        control?: IOInvocationControl,
       ) {
         markEntered()
         await hold
         // Virtual clock reaches deadline while invokeTool is mid-flight.
         virtualNow = 1000
-        return this.inner.invokeTool(name, input, execute, opts, control)
+        return this.inner.invokeTool(name, input, execute, opts)
       }
       now() { return virtualNow }
       uuid() { return this.inner.uuid() }
@@ -1126,12 +1115,9 @@ describe('#237 runtime deadline / cancellation', () => {
 
     expect(handlerEntered).toBe(false)
     expect(result2).toMatchObject({
-      status: 'error',
-      error: {
-        code: 'RUN_DEADLINE_EXCEEDED',
-        phase: 'agent_loop',
-        retryable: true,
-      },
+      status: 'completed',
+      stopReason: 'deadline',
+      stopCode: 'RUN_DEADLINE_EXCEEDED',
     })
     expect(gw2.requests).toBe(1)
   })
@@ -1163,22 +1149,21 @@ describe('#237 runtime deadline / cancellation', () => {
       constructor(private readonly inner: IIOPort) {}
       async invokeLLM(
         req: ModelRequest,
-        onEvent?: (e: ModelEvent) => void,
-        control?: IOInvocationControl,
+        options?: LLMInvocationOptions,
       ) {
-        return this.inner.invokeLLM(req, onEvent, control)
+        return this.inner.invokeLLM(req, options)
       }
       async invokeTool(
         _name: string,
         _input: unknown,
-        execute: () => Promise<unknown>,
+        execute: (signal: AbortSignal) => Promise<unknown>,
         _opts?: Parameters<IIOPort['invokeTool']>[3],
         _control?: IOInvocationControl,
       ) {
         markEntered()
         await hold
         // Intentionally bypass DefaultIOPort — call the runtime thunk directly.
-        return execute()
+        return execute(new AbortController().signal)
       }
       now() { return Date.now() }
       uuid() { return this.inner.uuid() }
@@ -1214,12 +1199,9 @@ describe('#237 runtime deadline / cancellation', () => {
 
       expect(handlerEntered).toBe(false)
       expect(result).toMatchObject({
-        status: 'error',
-        error: {
-          code: 'RUN_DEADLINE_EXCEEDED',
-          phase: 'agent_loop',
-          retryable: true,
-        },
+        status: 'completed',
+        stopReason: 'deadline',
+        stopCode: 'RUN_DEADLINE_EXCEEDED',
       })
       expect(gw.requests).toBe(1)
     } finally {
@@ -1253,20 +1235,19 @@ describe('#237 runtime deadline / cancellation', () => {
         constructor(private readonly inner: IIOPort) {}
         async invokeLLM(
           req: ModelRequest,
-          onEvent?: (e: ModelEvent) => void,
-          control?: IOInvocationControl,
+          options?: LLMInvocationOptions,
         ) {
-          return this.inner.invokeLLM(req, onEvent, control)
+          return this.inner.invokeLLM(req, options)
         }
         async invokeTool(
           _name: string,
           _input: unknown,
-          execute: () => Promise<unknown>,
+          execute: (signal: AbortSignal) => Promise<unknown>,
           _opts?: Parameters<IIOPort['invokeTool']>[3],
           _control?: IOInvocationControl,
         ) {
           // Bypass DefaultIOPort — runtime thunk is the only remaining gate.
-          return execute()
+          return execute(new AbortController().signal)
         }
         now() { return virtualNow }
         nowSample() { return virtualNow }
@@ -1309,23 +1290,21 @@ describe('#237 runtime deadline / cancellation', () => {
         constructor(private readonly inner: IIOPort) {}
         async invokeLLM(
           req: ModelRequest,
-          onEvent?: (e: ModelEvent) => void,
-          control?: IOInvocationControl,
+          options?: LLMInvocationOptions,
         ) {
-          return this.inner.invokeLLM(req, onEvent, control)
+          return this.inner.invokeLLM(req, options)
         }
         async invokeTool(
           _name: string,
           _input: unknown,
-          execute: () => Promise<unknown>,
+          execute: (signal: AbortSignal) => Promise<unknown>,
           _opts?: Parameters<IIOPort['invokeTool']>[3],
-          _control?: IOInvocationControl,
         ) {
           markEntered()
           await hold
           // Virtual clock at deadline; native timer may still be armed far away.
           // Direct execute must still fail closed via runtime thunk + IOPort clock.
-          return execute()
+          return execute(new AbortController().signal)
         }
         now() { return virtualNow }
         nowSample() { return virtualNow }
@@ -1361,12 +1340,9 @@ describe('#237 runtime deadline / cancellation', () => {
 
       expect(handlerEntered).toBe(false)
       expect(result).toMatchObject({
-        status: 'error',
-        error: {
-          code: 'RUN_DEADLINE_EXCEEDED',
-          phase: 'agent_loop',
-          retryable: true,
-        },
+        status: 'completed',
+        stopReason: 'deadline',
+        stopCode: 'RUN_DEADLINE_EXCEEDED',
       })
       expect(gw.requests).toBe(1)
     }

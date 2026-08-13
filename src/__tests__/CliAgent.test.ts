@@ -113,9 +113,9 @@ sys`
 agentId: ${agentId}
 fsm:
   states:
-    - name: react
-      type: llm
-      max_iterations: 0
+    - name: act
+      type: action
+      handler: missing_tool
 model:
   provider: stub
   model: stub

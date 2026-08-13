@@ -3,6 +3,7 @@ import { buildTimelineTree, type TimelineEntry, type TimelineNode } from './tree
 import { STYLES, SCRIPT } from './template.js'
 import { explainLlmCall, type LlmCallExplanation } from '../diagnostics/explainLlmCall.js'
 import { contextRefsAt, regionReuseCounts, type RegionContentRef } from '../RegionContextView.js'
+import { llmTerminalRenderView, sanitizeEventForRender } from '../LlmOutcome.js'
 
 interface RegionCtx {
   events:        Event[]
@@ -22,8 +23,19 @@ function esc(s: string): string {
 // visible as escaped text — just not as an attribute injection vector.
 const BADGE_STATUS_CLASSES = new Set(['interrupted', 'error', 'in-flight'])
 
-function summaryFor(entry: TimelineEntry): string {
-  if (entry.kind === 'llm')       return 'LLM call' + (entry.respondedId ? '' : ' (no response)')
+function summaryFor(entry: TimelineEntry, eventById?: Map<string, Event>): string {
+  if (entry.kind === 'llm') {
+    if (!entry.respondedId) return 'LLM call (no response)'
+    const resp = eventById?.get(entry.respondedId)
+    if (resp) {
+      const view = llmTerminalRenderView(resp)
+      if (view.status === 'error') return `LLM failure · ${esc(view.error.code)}`
+      if (view.status === 'malformed') {
+        return `LLM integrity · ${esc(view.kind)} · ${esc(view.eventId)}`
+      }
+    }
+    return 'LLM call'
+  }
   if (entry.kind === 'tool')      return 'tool: ' + esc(entry.toolName) + (entry.respondedId ? '' : ' (no response)')
   if (entry.kind === 'region')    return esc(entry.summary)
   return entry.eventType === 'agent.run.started' ? 'run started' : 'run completed'
@@ -40,7 +52,14 @@ function payloadFor(entry: TimelineEntry, eventById: Map<string, Event>): string
     const req = eventById.get(entry.requestedId)
     if (req) sections.push('request:\n' + JSON.stringify(req.payload, null, 2))
     const resp = entry.respondedId ? eventById.get(entry.respondedId) : undefined
-    if (resp) sections.push('response:\n' + JSON.stringify(resp.payload, null, 2))
+    if (resp) {
+      if (entry.kind === 'llm' && resp.type === 'llm.responded') {
+        // Decoder-backed view only — never stringify raw llm.responded payload.
+        sections.push('response:\n' + JSON.stringify(llmTerminalRenderView(resp), null, 2))
+      } else {
+        sections.push('response:\n' + JSON.stringify(resp.payload, null, 2))
+      }
+    }
   }
   return sections.length > 0 ? esc(sections.join('\n\n')) : ''
 }
@@ -102,7 +121,7 @@ function renderEntry(
        + extraAnchors
        + `<div class="entry-head">`
        + `<span class="icon">${icon}</span>`
-       + `<span class="summary">${summaryFor(entry)}</span>`
+       + `<span class="summary">${summaryFor(entry, eventById)}</span>`
        + `<span class="ts">${entry.timestamp}</span>`
        + `</div>`
        + assembled
@@ -149,7 +168,8 @@ export function renderTimelineSections(events: Event[], opts: { regionContent?: 
 
   const registryJson = JSON.stringify(Object.fromEntries(regionContent))
     .replace(/<\/script/gi, '<\\/script')
-  const dataJson = JSON.stringify(events)
+  // Embed decoder-safe LLM terminals so raw timeline archive never leaks secrets.
+  const dataJson = JSON.stringify(events.map(sanitizeEventForRender))
     // close-tag-safe inlining: prevent the JSON from ending the script element.
     .replace(/<\/script/gi, '<\\/script')
   return `<div class="filters">

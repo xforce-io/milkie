@@ -1,5 +1,6 @@
 import OpenAI from 'openai'
 import type {
+  GatewayInvocationOptions,
   IModelGateway,
   ModelCapabilities,
   ModelGatewayCallOptions,
@@ -49,7 +50,7 @@ export class OpenAICompatibleAdapter implements IModelGateway {
     })
   }
 
-  async complete(request: ModelRequest, opts?: ModelGatewayCallOptions): Promise<ModelResponse> {
+  async complete(request: ModelRequest, opts?: ModelGatewayCallOptions | GatewayInvocationOptions): Promise<ModelResponse> {
     this.guardImageRequest(request)
     let raw: OpenAI.ChatCompletion
     try {
@@ -83,7 +84,7 @@ export class OpenAICompatibleAdapter implements IModelGateway {
     }
   }
 
-  async *stream(request: ModelRequest, opts?: ModelGatewayCallOptions): AsyncIterable<ModelEvent> {
+  async *stream(request: ModelRequest, opts?: ModelGatewayCallOptions | GatewayInvocationOptions): AsyncIterable<ModelEvent> {
     this.guardImageRequest(request)
     let stream: AsyncIterable<OpenAI.ChatCompletionChunk>
     try {
@@ -350,6 +351,7 @@ export class OpenAICompatibleAdapter implements IModelGateway {
         name: tc.function.name,
         input,
         ...(invalidArguments !== undefined ? { invalidArguments } : {}),
+        ...(invalidArguments && typeof argumentsText === 'string' ? { rawArguments: argumentsText } : {}),
       })
     }
 

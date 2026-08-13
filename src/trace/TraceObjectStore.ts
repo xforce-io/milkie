@@ -1,11 +1,41 @@
 import { promises as fs } from 'fs'
 import path from 'path'
 import { contentAddressForCanonicalBytes } from './hash.js'
+import {
+  fsyncDirectory,
+  fsyncStoreHierarchy,
+  mkdirDurable,
+} from './durableFs.js'
 
 export interface ITraceObjectStore {
   putCanonical(bytes: string): Promise<string>
   getCanonical(hash: string): Promise<string | undefined>
   has(hash: string): Promise<boolean>
+}
+
+/**
+ * Optional crash-safe durability capability for object evidence used by
+ * task outcome finalization (#227 / s-017). Memory stores do not implement this.
+ */
+export interface ICrashSafeTraceObjectStore extends ITraceObjectStore {
+  readonly durability: 'crash-safe'
+  /**
+   * Confirm each object's inode and the directory chain from the leaf up to
+   * the configured durable root are fsync'd. Hashes must already be readable.
+   */
+  confirmObjectsDurable(hashes: readonly `sha256:${string}`[]): Promise<void>
+}
+
+export function isCrashSafeTraceObjectStore(
+  store: ITraceObjectStore,
+): store is ICrashSafeTraceObjectStore {
+  const candidate = store as ICrashSafeTraceObjectStore
+  return (
+    candidate !== null &&
+    typeof candidate === 'object' &&
+    candidate.durability === 'crash-safe' &&
+    typeof candidate.confirmObjectsDurable === 'function'
+  )
 }
 
 function assertSupportedHash(hash: string): string {
@@ -28,6 +58,8 @@ function assertHashMatches(hash: string, bytes: string): void {
 }
 
 export class MemoryTraceObjectStore implements ITraceObjectStore {
+  /** Process-lifetime only; does not implement crash-safe durability. */
+  readonly durability = 'process' as const
   private readonly objects = new Map<string, string>()
 
   async putCanonical(bytes: string): Promise<string> {
@@ -53,7 +85,10 @@ export class MemoryTraceObjectStore implements ITraceObjectStore {
   }
 }
 
-export class FileTraceObjectStore implements ITraceObjectStore {
+export class FileTraceObjectStore implements ICrashSafeTraceObjectStore {
+  readonly durability = 'crash-safe' as const
+  private baseReady = false
+
   constructor(private readonly baseDir: string) {}
 
   private fileFor(hash: string): string {
@@ -61,15 +96,30 @@ export class FileTraceObjectStore implements ITraceObjectStore {
     return path.join(this.baseDir, 'sha256', hex.slice(0, 2), hex.slice(2))
   }
 
+  private async ensureBase(): Promise<void> {
+    if (this.baseReady) return
+    await mkdirDurable(this.baseDir)
+    this.baseReady = true
+  }
+
   async putCanonical(bytes: string): Promise<string> {
     const hash = contentAddressForCanonicalBytes(bytes)
     const file = this.fileFor(hash)
     if (await this.has(hash)) return hash
 
-    await fs.mkdir(path.dirname(file), { recursive: true })
+    await this.ensureBase()
+    await mkdirDurable(path.dirname(file))
     const tmp = `${file}.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`
     try {
       await fs.writeFile(tmp, bytes, { encoding: 'utf-8', flag: 'wx' })
+      // Object bytes themselves are not crash-safe until confirmObjectsDurable;
+      // still fsync the temp inode so a later confirm has durable file content.
+      const tmpFh = await fs.open(tmp, 'r')
+      try {
+        await tmpFh.sync()
+      } finally {
+        await tmpFh.close()
+      }
       await fs.link(tmp, file)
       await fs.rm(tmp, { force: true })
     } catch (err) {
@@ -97,5 +147,39 @@ export class FileTraceObjectStore implements ITraceObjectStore {
 
   async has(hash: string): Promise<boolean> {
     return (await this.getCanonical(hash)) !== undefined
+  }
+
+  /**
+   * #227: fsync each object inode and the directory chain from the leaf up to
+   * `baseDir` and its parent so crash-safe finalization can treat object
+   * evidence as durable across process takeover.
+   */
+  async confirmObjectsDurable(hashes: readonly `sha256:${string}`[]): Promise<void> {
+    await this.ensureBase()
+
+    // De-dupe while preserving order of first occurrence.
+    const unique: string[] = []
+    const seen = new Set<string>()
+    for (const h of hashes) {
+      if (seen.has(h)) continue
+      seen.add(h)
+      unique.push(h)
+    }
+
+    for (const hash of unique) {
+      const file = this.fileFor(hash)
+      // Must already be readable; getCanonical validates hash match.
+      const bytes = await this.getCanonical(hash)
+      if (bytes === undefined) {
+        throw new Error(`confirmObjectsDurable: object not found for ${hash}`)
+      }
+      await fsyncDirectory(file)
+
+      await fsyncStoreHierarchy({
+        leafDir: path.dirname(file),
+        baseDir: this.baseDir,
+        syncDirectory: fsyncDirectory,
+      })
+    }
   }
 }

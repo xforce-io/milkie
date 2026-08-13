@@ -39,8 +39,8 @@ class ReplayInnerPort implements IIOPort {
     return { content: [], toolCalls: [], finishReason: 'end_turn' }
   }
 
-  async invokeTool(_name: string, _input: unknown, execute: () => Promise<unknown>): Promise<unknown> {
-    return execute()
+  async invokeTool(_name: string, _input: unknown, execute: (signal: AbortSignal) => Promise<unknown>): Promise<unknown> {
+    return execute(new AbortController().signal)
   }
 
   now(): number { return this.clock++ }

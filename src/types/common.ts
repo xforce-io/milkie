@@ -53,6 +53,45 @@ export interface AgentInvokeRequest {
   onModelEvent?: (e: ModelEvent) => void
   /** #237: run-level deadline / cancellation control. */
   control?: RunControlOptions
+  /**
+   * #247: this-run deliverable contract. Key present (including `[]`) replaces
+   * the agent default wholesale. Key omitted → agent default, or no contract.
+   */
+  deliverables?: DeliverableSpec[]
+}
+
+/** #244: why the run loop stopped. Independent of task outcome. */
+export type StopReason =
+  | 'model_stop'
+  | 'budget_exhausted'
+  | 'deadline'
+  | 'cancelled'
+  | 'interrupted'
+  | 'runtime_error'
+
+export type ArtifactType = 'file' | 'object'
+
+/** #247: declared target deliverable. */
+export interface DeliverableSpec {
+  name: string
+  type: ArtifactType
+  path?: string
+  required?: boolean
+}
+
+/** #247 / #244: one item in the returned artifacts list. */
+export interface ArtifactRef {
+  name: string
+  type: ArtifactType
+  path?: string
+  objectId?: string
+  state: 'produced' | 'missing'
+  hash?: string
+}
+
+/** #244: optional finalize hook after budget/deadline stop. */
+export interface BudgetFinalizeContext {
+  recordArtifact: (artifact: Omit<ArtifactRef, 'state'> & { state?: 'produced' }) => void
 }
 
 export interface ProjectionBound {
@@ -85,7 +124,15 @@ export interface AgentResult {
   contextId:   string
   output:      string
   status:      'completed' | 'interrupted' | 'error'
+  /** #244: why the loop stopped. Never `goal_completed`. */
+  stopReason:  StopReason
+  /** Diagnostic code (MAX_ITERATIONS_EXCEEDED, RUN_DEADLINE_EXCEEDED, IO_*, …). */
+  stopCode?:   string
+  /** #244/#247: incomplete delivery or non-natural stop. */
+  partial:     boolean
   checkpointId?: string
+  /** #247: declared/produced artifacts. Never a directory listing. */
+  artifacts:   ArtifactRef[]
   error?:      AgentErrorEnvelope
 }
 

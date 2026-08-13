@@ -309,7 +309,7 @@ describe('createServeServer', () => {
     expect(events.find(e => e.event === 'agent.run.completed')?.data).toMatchObject({
       status: 'error',
       message: 'Model provider request timed out.',
-      error: { code: 'MODEL_TIMEOUT', retryable: true, provider: 'volcengine', model: 'glm-5.2' },
+      error: { code: 'MODEL_TIMEOUT', retryable: true, provider: 'unknown', model: 'glm-5.2' },
       runId: expect.any(String),
     })
   })

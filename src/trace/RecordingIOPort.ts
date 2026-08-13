@@ -1,7 +1,12 @@
-import type { ModelRequest, ModelResponse, ModelEvent } from '../types/model.js'
-import { assertToolInvocationAllowed, type IIOPort, type IOInvocationControl, type ToolInvocationOptions } from '../runtime/IOPort.js'
+import type { ModelRequest, ModelResponse } from '../types/model.js'
+import {
+  assertToolInvocationAllowed,
+  resolveIOInvocationControl,
+  type IIOPort,
+  type LLMInvocationOptions,
+  type ToolInvocationOptions,
+} from '../runtime/IOPort.js'
 import type { IEventStore } from './EventStore.js'
-
 import type {
   LlmRequestedPayload,
   LlmRespondedPayload,
@@ -14,11 +19,21 @@ import type {
   ObjectCreatedPayload,
   RelationCreatedPayload,
   LineageBuffer,
+  TrustedProviderFamily,
 } from './types.js'
+import { LLM_OUTCOME_SCHEMA_VERSION } from './types.js'
 import { hashModelRequest, hashToolCall, canonicalize, contentAddressForCanonicalBytes } from './hash.js'
 import type { ITraceObjectStore } from './TraceObjectStore.js'
 import type { CausalCursor } from './CausalCursor.js'
 import { sanitizeModelRequestForTrace } from './imageSummary.js'
+import {
+  buildFailureTerminalPayload,
+  buildSuccessTerminalPayload,
+  normalizeLlmFailure,
+  reconstructLlmError,
+  type TrustedProviderContext,
+} from './LlmOutcome.js'
+import { TraceWriteError } from './TraceWriteError.js'
 
 function cacheStatsFrom(response: ModelResponse): {
   readTokens:       number
@@ -68,6 +83,7 @@ export class RecordingIOPort implements IIOPort {
     private readonly actor: string = 'runtime',
     private readonly objectStore?: ITraceObjectStore,
     private readonly cursor?: CausalCursor,
+    private readonly trustedProvider?: TrustedProviderFamily | 'unknown',
   ) {}
 
   private async outputMetadata(output: unknown): Promise<{ outputHash?: string; outputBytes?: number }> {
@@ -138,65 +154,106 @@ export class RecordingIOPort implements IIOPort {
 
   async detach(payload: AgentRunCompletedPayload): Promise<void> {
     await this.flushPendingNondet()
+    // Prefer lastLlmTerminalId so error completions link to the failure terminal;
+    // fall back to lastLlmRespondedId for older cursors / success-only paths.
+    const completionCause =
+      this.cursor?.lastLlmTerminalId ?? this.cursor?.lastLlmRespondedId
     await this.store.append({
       id:        this.inner.uuid(),
       runId:     this.runId,
       type:      'agent.run.completed',
       actor:     this.actor,
-      // The final output is produced by the last LLM response; link to it so the
-      // output node can drill to the final decision (nearest-decision-ancestor).
+      // The final output / error terminal; link so the output node can drill to it.
       // causedBy is trace metadata (a bare uuid) — replay never compares it.
-      ...(this.cursor?.lastLlmRespondedId ? { causedBy: this.cursor.lastLlmRespondedId } : {}),
+      ...(completionCause ? { causedBy: completionCause } : {}),
       timestamp: this.inner.now(),
       payload,
     })
   }
 
-  async invokeLLM(
-    request: ModelRequest,
-    onEvent?: (e: ModelEvent) => void,
-    control?: IOInvocationControl,
-  ): Promise<ModelResponse> {
+  async invokeLLM(request: ModelRequest, options?: LLMInvocationOptions): Promise<ModelResponse> {
+    // 0. Shared #228 control resolve first — invalid rejects before any request/inner.
+    const control = resolveIOInvocationControl(options?.control)
+    const resolvedOptions = control ? { ...options, control } : options
     await this.flushPendingNondet()
+
     // Hash the live request (including base64) so record/replay keys match.
     // Persist a redacted copy that never stores inline media bytes or URL secrets.
     const requestHash = hashModelRequest(request)
     const safeRequest = sanitizeModelRequestForTrace(request)
     const reqEventId  = this.inner.uuid()
-    await this.store.append({
-      id:        reqEventId,
-      runId:     this.runId,
-      type:      'llm.requested',
-      actor:     this.actor,
-      // edge 2: this call was provoked by the previous turn terminator.
-      ...(this.cursor?.lastTerminatorId ? { causedBy: this.cursor.lastTerminatorId } : {}),
-      timestamp: this.inner.now(),
-      payload:   { request: safeRequest as ModelRequest, requestHash } satisfies LlmRequestedPayload,
-    })
+    const trustedContext: TrustedProviderContext | undefined =
+      this.trustedProvider !== undefined
+        ? { providerFamily: this.trustedProvider }
+        : undefined
+
+    // 1. v2 request append — fail closed (no inner call on rejection).
+    try {
+      await this.store.append({
+        id:        reqEventId,
+        runId:     this.runId,
+        type:      'llm.requested',
+        actor:     this.actor,
+        // edge 2: this call was provoked by the previous turn terminator.
+        ...(this.cursor?.lastTerminatorId ? { causedBy: this.cursor.lastTerminatorId } : {}),
+        timestamp: this.inner.now(),
+        payload:   {
+          request: safeRequest as ModelRequest,
+          requestHash,
+          outcomeSchemaVersion: LLM_OUTCOME_SCHEMA_VERSION,
+        } satisfies LlmRequestedPayload,
+      })
+    } catch (err) {
+      throw new TraceWriteError({ stage: 'request', operation: 'llm', eventId: reqEventId }, err)
+    }
     if (this.cursor) this.cursor.lastIoEventId = reqEventId
 
-    const response = await this.inner.invokeLLM(request, onEvent, control)
-
-    const respEventId = this.inner.uuid()
-    await this.store.append({
-      id:        respEventId,
-      runId:     this.runId,
-      type:      'llm.responded',
-      actor:     this.actor,
-      causedBy:  reqEventId,
-      timestamp: this.inner.now(),
-      payload:   {
+    // 2. Capture inner outcome in memory (never rethrow original untrusted error).
+    let terminalPayload: LlmRespondedPayload
+    let successResponse: ModelResponse | undefined
+    try {
+      const response = await this.inner.invokeLLM(request, resolvedOptions)
+      successResponse = response
+      terminalPayload = buildSuccessTerminalPayload(
         response,
         requestHash,
-        ...(cacheStatsFrom(response) ? { cacheStats: cacheStatsFrom(response) } : {}),
-      } satisfies LlmRespondedPayload,
-    })
-    if (this.cursor) {
-      this.cursor.lastLlmRespondedId = respEventId
-      this.cursor.lastIoEventId      = respEventId
+        cacheStatsFrom(response),
+      )
+    } catch (err) {
+      const envelope = normalizeLlmFailure(err, request, trustedContext)
+      terminalPayload = buildFailureTerminalPayload(envelope, requestHash)
     }
 
-    return response
+    // 3. Exactly one terminal append. Rejection → TraceWriteError; no second append.
+    const respEventId = this.inner.uuid()
+    try {
+      await this.store.append({
+        id:        respEventId,
+        runId:     this.runId,
+        type:      'llm.responded',
+        actor:     this.actor,
+        causedBy:  reqEventId,
+        timestamp: this.inner.now(),
+        payload:   terminalPayload,
+      })
+    } catch (err) {
+      throw new TraceWriteError({ stage: 'terminal', operation: 'llm', eventId: respEventId }, err)
+    }
+
+    // 4. Cursor update from the written terminal, then return/rebuild.
+    if (this.cursor) {
+      this.cursor.lastLlmTerminalId = respEventId
+      this.cursor.lastIoEventId = respEventId
+      if (terminalPayload.status === 'ok') {
+        this.cursor.lastLlmRespondedId = respEventId
+      }
+    }
+
+    if (terminalPayload.status === 'ok') {
+      return successResponse!
+    }
+    // Rebuild typed error from the written envelope so live/Trace/Replay share identity.
+    throw reconstructLlmError(terminalPayload.error)
   }
 
   /**
@@ -236,10 +293,11 @@ export class RecordingIOPort implements IIOPort {
   async invokeTool(
     toolName: string,
     input: unknown,
-    execute: () => Promise<unknown>,
+    execute: (signal: AbortSignal) => Promise<unknown>,
     opts?: ToolInvocationOptions,
-    control?: IOInvocationControl,
   ): Promise<unknown> {
+    const control = resolveIOInvocationControl(opts?.control)
+    const resolvedOptions = control ? { ...opts, control } : opts
     await this.flushPendingNondet()
     const requestHash = hashToolCall(toolName, input, opts?.invalidArguments)
     // #81: only stamp toolCallId when supplied, so id-less callers stay clean and
@@ -259,12 +317,16 @@ export class RecordingIOPort implements IIOPort {
     if (this.cursor) this.cursor.lastIoEventId = reqEventId
 
     try {
-      // #237: re-check after async flush/trace write — deadline may have fired
-      // between runtime pre-gate and actual handler dispatch. Use nowSample()
-      // (inner clock, no clock.read) so the gate shares the IOPort timeline
-      // without recording an agent-observable nondet event.
-      assertToolInvocationAllowed(control, this.nowSample())
-      const output = await this.inner.invokeTool(toolName, input, execute, opts, control)
+      // #237: only fail-closed with RUN_* when control already carries an
+      // adjudicated reason. Runtime passes a stable signal-only snapshot for
+      // effect abort propagation; pure signal/deadline effect control stays
+      // #228 IO_* on the inner port, and AgentRuntime maps in-flight
+      // IOControlError → RUN_* when RunControl has stopped. Calling the RUN
+      // gate on a bare aborted signal would mis-label deadline as cancelled.
+      if (control?.reason === 'deadline' || control?.reason === 'cancelled') {
+        assertToolInvocationAllowed(control, this.nowSample())
+      }
+      const output = await this.inner.invokeTool(toolName, input, execute, resolvedOptions)
 
       const meta = await this.outputMetadata(output)
       // #37: the handler may have declared objects during execute; list their ids

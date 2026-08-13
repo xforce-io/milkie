@@ -15,7 +15,7 @@ class StubInnerPort implements IIOPort {
   async invokeLLM(_req: ModelRequest): Promise<ModelResponse> {
     return { content: [{ type: 'text', text: 'stub' }], toolCalls: [], finishReason: 'end_turn' }
   }
-  async invokeTool(_n: string, _i: unknown, _e: () => Promise<unknown>): Promise<unknown> {
+  async invokeTool(_n: string, _i: unknown, _e: (signal: AbortSignal) => Promise<unknown>): Promise<unknown> {
     return 'stub-output'
   }
   now():  number { this.clockCalls++; return this.nextClock++ }
@@ -160,7 +160,7 @@ describe('RecordingIOPort — non-determinism recording', () => {
       async invokeLLM(_req: ModelRequest): Promise<ModelResponse> {
         return { content: [{ type: 'text', text: 'stub' }], toolCalls: [], finishReason: 'end_turn' }
       }
-      async invokeTool(_n: string, _i: unknown, _e: () => Promise<unknown>): Promise<unknown> {
+      async invokeTool(_n: string, _i: unknown, _e: (signal: AbortSignal) => Promise<unknown>): Promise<unknown> {
         return 'ok'
       }
       now(): number { this.nowCalls++; return this.t++ }

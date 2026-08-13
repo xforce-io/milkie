@@ -161,7 +161,13 @@ describe('s-003 explain a decision with context', () => {
     const resp = events.find(e =>
       e.type === 'llm.responded' && e.causedBy === firstLlmReq.id
     )!
-    const response = (resp.payload as LlmRespondedPayload).response
+    const payload = resp.payload as LlmRespondedPayload | { response?: { toolCalls: Array<{ name: string; input?: unknown }> } }
+    const response = 'status' in payload && payload.status === 'ok'
+      ? payload.response
+      : 'response' in payload
+        ? payload.response
+        : undefined
+    if (!response) throw new Error('expected success LLM terminal with response')
 
     expect(response.toolCalls.length).toBeGreaterThan(0)
     expect(response.toolCalls[0]!.name).toBe('web_search')

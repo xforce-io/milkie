@@ -1,3 +1,5 @@
+import type { BudgetFinalizeContext, DeliverableSpec } from './common.js'
+
 export interface FSMState {
   name:            string
   type:            'llm' | 'action'
@@ -65,4 +67,11 @@ export interface AgentConfig {
    * - empty allow: zero built-in tools (custom/extra tools still register).
    */
   builtinTools?: BuiltinToolPolicy
+  /** #247: default deliverable contract when invoke omits `deliverables`. */
+  deliverables?: DeliverableSpec[]
+  /**
+   * #244: optional hook after budget/deadline stop. Must not start LLM calls.
+   * Failure is recorded as FINALIZE_FAILED and does not rewrite stopReason.
+   */
+  onBudgetFinalize?: (ctx: BudgetFinalizeContext) => Promise<void>
 }

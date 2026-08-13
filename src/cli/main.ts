@@ -11,12 +11,17 @@ import { checkpointFromEvents } from '../trace/diagnostics/checkpointFromEvents.
 import { serveMain } from './serve.js'
 import type { AgentResult } from '../types/common.js'
 
-function toTerminalResult(result: AgentResult, contextId = result.contextId): { runId: string, contextId: string, status: AgentResult['status'], lastOutput: string } {
+function toTerminalResult(result: AgentResult, contextId = result.contextId) {
   return {
-    runId:      result.agentRunId,
+    runId:         result.agentRunId,
     contextId,
-    status:     result.status,
-    lastOutput: result.output,
+    status:        result.status,
+    lastOutput:    result.output,
+    stopReason:    result.stopReason,
+    ...(result.stopCode ? { stopCode: result.stopCode } : {}),
+    partial:       result.partial,
+    ...(result.checkpointId ? { checkpointId: result.checkpointId } : {}),
+    artifacts:     result.artifacts,
   }
 }
 
@@ -197,10 +202,52 @@ export async function main(argv: string[]): Promise<MainResult> {
         const { findDescendantRuns } = await import('../trace/render/children.js')
         runIds.push(...(await findDescendantRuns(runsDir, runId)))
       }
-      for (const id of runIds) {
-        for (const event of await eventStore.readByRunId(id)) {
-          stdout.push(JSON.stringify(event) + '\n')
+      try {
+        const { parseJsonlEvents, TraceInspectError } = await import('../trace/summarizeRun.js')
+        const fsP = await import('fs/promises')
+        for (const id of runIds) {
+          const file = path.join(runsDir, `${id}.jsonl`)
+          let content: string
+          try {
+            content = await fsP.readFile(file, 'utf-8')
+          } catch {
+            throw new TraceInspectError(`run JSONL is empty or missing: ${id}`)
+          }
+          const events = parseJsonlEvents(content)
+          for (const event of events) stdout.push(JSON.stringify(event) + '\n')
         }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        const code = err && typeof err === 'object' && 'code' in err ? err.code : 'TRACE_INSPECT_INCOMPLETE'
+        stderr.push(JSON.stringify({ error: { code, message } }) + '\n')
+        exitCode = 1
+      }
+    })
+
+  trace
+    .command('summary <runId>')
+    .description('Print a machine-readable summary of a recorded run as one JSON object')
+    .option('--data-dir <path>', 'read trace from <path>/runs (e.g. a serve --data-dir); else find .milkie/ upward from cwd')
+    .action(async (runId: string, opts: { dataDir?: string }) => {
+      const milkieDir = resolveTraceDir(opts.dataDir)
+      const runsDir = path.join(milkieDir, 'runs')
+      try {
+        const { parseJsonlEvents, summarizeRun, TraceInspectError } = await import('../trace/summarizeRun.js')
+        const fsP = await import('fs/promises')
+        const file = path.join(runsDir, `${runId}.jsonl`)
+        let content: string
+        try {
+          content = await fsP.readFile(file, 'utf-8')
+        } catch {
+          throw new TraceInspectError(`run JSONL is empty or missing: ${runId}`)
+        }
+        const events = parseJsonlEvents(content)
+        stdout.push(JSON.stringify(summarizeRun(events, runId)) + '\n')
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        const code = err && typeof err === 'object' && 'code' in err ? err.code : 'TRACE_INSPECT_INCOMPLETE'
+        stderr.push(JSON.stringify({ error: { code, message } }) + '\n')
+        exitCode = 1
       }
     })
 

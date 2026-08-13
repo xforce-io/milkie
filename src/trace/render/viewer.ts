@@ -6,7 +6,7 @@ import { renderTimelineSections } from './html.js'
 import { renderMarkdown } from './markdown.js'
 import { VIEWER_STYLES, VIEWER_SCRIPT } from './viewer-template.js'
 import type { ModelErrorEnvelope } from '../../types/model.js'
-
+import { llmTerminalRenderView } from '../LlmOutcome.js'
 function esc(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;')
 }
@@ -23,10 +23,14 @@ interface PanelRecord {
 function panelRecord(events: Event[], node: DecisionNode, eventById: Map<string, Event>, regionContent: Map<string, string>, spineIds: Set<string>): PanelRecord {
   const trim = (chain: Array<{ eventId: string; type: string; summary: string }>) =>
     chain.filter(c => spineIds.has(c.eventId))
+  const nodeEvent = eventById.get(node.eventId)
+  const rawJson = node.kind === 'llm' && nodeEvent?.type === 'llm.responded'
+    ? JSON.stringify(llmTerminalRenderView(nodeEvent), null, 2)
+    : JSON.stringify(nodeEvent?.payload ?? {}, null, 2)
   const base = {
     causeDecisionId: node.causeDecisionId,
     chain: [] as Array<{ eventId: string; type: string; summary: string }>,
-    rawJson: JSON.stringify(eventById.get(node.eventId)?.payload ?? {}, null, 2),
+    rawJson,
   }
   if (node.kind === 'llm') {
     const x = explainDecision(events, node.eventId)
@@ -41,8 +45,12 @@ function panelRecord(events: Event[], node: DecisionNode, eventById: Map<string,
         ? `<details class="rdetail"><summary>${meta}</summary><pre class="rpre">${esc(content)}</pre></details>`
         : `<div class="rdetail">${meta} <span class="ar-na">(内容不可用)</span></div>`
     }).join('')
-    return { ...base, chain: trim(x.causalChain), title: `为什么这次 LLM 调用?`,
-      bodyHtml: `触发: ${esc(x.trigger.causedBySummary ?? '(无上游)')}`
+    const failure = x.chose.status === 'error' && x.chose.error
+      ? `<div class="error-meta"><strong>${esc(x.chose.error.code)}</strong> · ${esc(x.chose.error.phase)}`
+        + ` · ${esc(x.chose.error.message)}</div>`
+      : ''
+    return { ...base, chain: trim(x.causalChain), title: x.chose.status === 'error' ? `LLM failure · ${esc(x.chose.error?.code ?? '')}` : `为什么这次 LLM 调用?`,
+      bodyHtml: `触发: ${esc(x.trigger.causedBySummary ?? '(无上游)')}${failure}`
         + `<div style="margin-top:8px;font-weight:600">Assembled by ${refs.length} regions</div>${comp}` }
   }
   if (node.kind === 'tool') {

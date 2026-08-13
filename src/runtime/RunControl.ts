@@ -151,6 +151,24 @@ export class RunControl {
   }
 
   /**
+   * Last-chance gate at handler start. `now` is the run's IOPort clock
+   * (nowSample/now) so a virtual clock that has crossed deadlineAt trips
+   * this run as deadline even when the native timer has not fired.
+   */
+  assertInvocationAllowed(now?: number): void {
+    if (this.stopReason) throw new RunControlError(this.stopReason)
+    if (
+      this.deadlineAt !== undefined
+      && now !== undefined
+      && Number.isFinite(this.deadlineAt)
+      && now >= this.deadlineAt
+    ) {
+      this.trip('deadline')
+      throw new RunControlError('deadline')
+    }
+  }
+
+  /**
    * Map an abort-shaped failure from in-flight I/O onto the adjudicated run stop.
    * Only rewrites when this RunControl has already stopped; idle control leaves
    * the original error intact so provider/tool AbortError is not misattributed.

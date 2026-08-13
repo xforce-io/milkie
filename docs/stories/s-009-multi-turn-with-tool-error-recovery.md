@@ -11,7 +11,7 @@ requires:
   - FSM Core
   - working context
   - State stores
-  - Error handling FSM transition
+  - Retryable tool error recovery
   - Trajectory observability
 owner: "@xupeng"
 created: 2026-05-23
@@ -33,8 +33,8 @@ related:
 关联键。State store 用 Redis。
 
 第 1 次 invoke 中，`query_orders` 工具首次调用模拟超时并标记
-`retryable: true`，FSM 自动从 `analyze` 转移到 `error_handling`，重
-试 `query_orders`，成功后再转回 `analyze`，LLM 给出初步分析。
+`retryable: true`；Runtime 在同一 authored state 内做 lifecycle 重试
+（非业务 `error_handling` transition span），成功后 LLM 给出初步分析。
 
 第 2 次 invoke 用同一 `contextId`、同一 goal、新 input；agent 拿到
 含第 1 轮对话的 history，结合新信息给出最终判断。
@@ -56,9 +56,7 @@ milkie.invoke({
 
   → analyze state
   → LLM: query_orders('12345') → 超时（retryable）
-  → error_handling state（FSM 自动转移）
-  → 重试 query_orders → 成功
-  → analyze state（FSM 转回）
+  → lifecycle 重试 query_orders → 成功（tool.call attempt 0 error / 1 ok）
   → LLM 输出初步分析 → DONE
   → 无 on.DONE → 等待下一条用户消息
 
@@ -77,10 +75,9 @@ milkie.invoke({
 
 - [ ] `goal` 在两次 invoke 的 checkpoint 中字符相等
 - [ ] 两次 invoke 使用同一 `contextId`
-- [ ] 第 2 次 invoke 的 `context.history` 包含第 1 轮的 `query_orders` 痕迹
-- [ ] trajectory 里存在 `fsm.transition` 进入 `error_handling`
-      与从 `error_handling` 转出
-- [ ] `query_orders` 共被调用 2 次（首次超时、第二次成功）
+- [ ] 第 2 次 invoke 的 checkpoint `context.regions` 中存在 `section === 'history'` 的 region，且其序列化内容包含第 1 轮用户输入稳定标识（如「订单 #12345 金额超出阈值 3 倍」）；tool 重试本身由独立 tool.call error/success 断言覆盖
+- [ ] trajectory 里 `query_orders` 的 `tool.call` span ≥ 2，且至少 1 次 error + 1 次 success（优先校验 `attributes.attempt` 0/1）
+- [ ] `query_orders` 共被调用 ≥ 2 次（首次超时、后续成功）
 - [ ] 第 2 次 invoke 的 output 含最终判断（"正常 / 异常 / 判断 / 结论"等关键词）
 
 ## 不在此 story 范围
@@ -88,5 +85,5 @@ milkie.invoke({
 - **中断与恢复**（Interrupt / Resume）→ s-008
 - **不可重试错误的终止行为**（非 retryable） → 未来的 error story
 - **多 contextId 之间的隔离** → 未来的 context-isolation story
-- **Fork / 当前任务决策修复** → 见 [s-006](./s-006-fork-at-event-for-what-if.md)。本 story 是 **Retry**（`retryable` 工具 + `error_handling`），不是 Fork
+- **Fork / 当前任务决策修复** → 见 [s-006](./s-006-fork-at-event-for-what-if.md)。本 story 是 **Retry**（`retryable` 工具 + lifecycle 重试），不是 Fork
 - **Task outcome（业务/任务成败）** → 见 [s-016](./s-016-record-and-query-task-outcome.md)；工具重试成功只影响 execution 路径，不自动等于 task success

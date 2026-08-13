@@ -12,19 +12,30 @@ import type {
   ContextProjection,
   JSONValue,
   Message,
+  RunControlOptions,
 } from '../types/common.js'
 import type { ChildAgentRecord, IStateStore, AgentCheckpoint } from '../types/store.js'
 import type { ToolDefinition } from '../types/tool.js'
-import type { IModelGateway, ModelEvent, ModelRequest, ModelResponse } from '../types/model.js'
+import type {
+  IModelGateway,
+  IOInvocationControl,
+  ModelEvent,
+  ModelRequest,
+  ModelResponse,
+} from '../types/model.js'
 import { aggregateStream } from '../gateway/StreamAggregator.js'
 import type { ResolvedManifest } from '../types/trajectory.js'
 import { MemoryStore } from '../store/MemoryStore.js'
 import { InMemoryRecorder } from '../trajectory/InMemoryRecorder.js'
 import { TrajectoryStore } from '../trajectory/TrajectoryStore.js'
 import { createGateway } from '../gateway/GatewayFactory.js'
-import { AgentRuntime } from './AgentRuntime.js'
+import { AgentRuntime, type MakeChildPort } from './AgentRuntime.js'
 import { readCheckpointLifecycle } from './checkpointSchema.js'
-import { DefaultIOPort, type IIOPort } from './IOPort.js'
+import {
+  DefaultIOPort,
+  resolveIOInvocationControl,
+  type IIOPort,
+} from './IOPort.js'
 import type { IEventStore } from '../trace/EventStore.js'
 import { RecordingIOPort } from '../trace/RecordingIOPort.js'
 import { CausalCursor } from '../trace/CausalCursor.js'
@@ -34,13 +45,37 @@ import { ReplayingIOPort } from '../trace/ReplayingIOPort.js'
 import { ReplayError } from '../trace/ReplayError.js'
 import { ReplayDivergenceError } from '../trace/ReplayDivergenceError.js'
 import { extractRunSnapshot } from '../trace/RunSnapshot.js'
-import type { Event, AgentRunStartedPayload, TaskOutcomeRecordedPayload } from '../trace/types.js'
+import { summarizeRun, TraceInspectError, type RunSummary } from '../trace/summarizeRun.js'
+import type { Event, AgentRunStartedPayload, TaskOutcomeRecordedPayload, TrustedProviderFamily } from '../trace/types.js'
 import { makeTraceTools } from '../tools/trace.js'
-import type { RecordTaskOutcomeInput, TaskOutcome } from '../types/outcome.js'
+import type {
+  FinalizationAttemptResult,
+  FinalizeTaskOutcomeInput,
+  RecordTaskOutcomeInput,
+  TaskOutcome,
+  TaskOutcomeFinalization,
+} from '../types/outcome.js'
 import {
   TaskOutcomeError,
+  TaskOutcomeFinalizationConfigurationError,
+  TaskOutcomeFinalizationValidationError,
   TaskOutcomeRunNotFoundError,
 } from '../types/outcome.js'
+import type { ITaskOutcomeFinalizationStore } from '../outcome/TaskOutcomeFinalizationStore.js'
+import {
+  assertFinalizationId,
+  assembleFinalization,
+  buildRecordWithoutHash,
+  normalizeFinalizationIntent,
+  snapshotFinalization,
+} from '../outcome/finalizationHash.js'
+import {
+  assertDurabilityCompatibility,
+  buildEvidenceContext,
+  confirmEvidenceDurable,
+  resolveAgainstExisting,
+  validateEvidenceRefs,
+} from '../outcome/validateEvidence.js'
 import {
   type PortableSession,
   PORTABLE_SESSION_SCHEMA_VERSION,
@@ -97,6 +132,11 @@ export interface MilkieOptions {
    */
   eventStore?:      IEventStore
   traceObjectStore?: ITraceObjectStore
+  /**
+   * #227 / s-017: immutable task outcome finalization store.
+   * Must be configured explicitly — no silent Memory fallback.
+   */
+  outcomeFinalizationStore?: ITaskOutcomeFinalizationStore
   /** #79：服务日志 logger；缺省用进程级 getLogger()。测试注入内存 sink。 */
   logger?:          ServiceLogger
 }
@@ -109,6 +149,7 @@ export class Milkie {
   private readonly trajectoryStore: TrajectoryStore | null
   private readonly eventStore:      IEventStore | null
   private readonly traceObjectStore: ITraceObjectStore | null
+  private readonly outcomeFinalizationStore: ITaskOutcomeFinalizationStore | null
   private readonly log:             ServiceLogger
 
   private readonly agents:   Map<string, AgentConfig> = new Map()
@@ -127,6 +168,7 @@ export class Milkie {
     this.trajectoryStore = opts.trajectoryStore  ?? null
     this.eventStore      = opts.eventStore       ?? null
     this.traceObjectStore = opts.traceObjectStore ?? null
+    this.outcomeFinalizationStore = opts.outcomeFinalizationStore ?? null
     this.log             = opts.logger           ?? getLogger()
 
     // #196: self-explain read-trace tools (get_execution/get_lineage) are generic
@@ -166,21 +208,59 @@ export class Milkie {
     return createGateway(model, this.log.child({ mod: 'gateway' }))
   }
 
-  private wrapIOPort(gateway: IModelGateway, runId: string, cursor?: CausalCursor): IIOPort {
+  /**
+   * Closed provider family for LLM failure sanitizer. Only GatewayFactory paths
+   * produce a trusted family; injected/custom gateways are `unknown`.
+   */
+  private trustedProviderFamily(config: AgentConfig, tier?: string): TrustedProviderFamily | 'unknown' {
+    if (this.gatewayOverride) return 'unknown'
+    const model = this.resolveModel(config, tier)
+    if (!model) return 'unknown'
+    const adapter = model.adapter.toLowerCase()
+    if (adapter === 'anthropic') return 'anthropic'
+    if (adapter === 'openai-compatible' || adapter === 'openai' || adapter === 'volcengine') {
+      return 'openai-compatible'
+    }
+    return 'unknown'
+  }
+
+  private wrapIOPort(
+    gateway: IModelGateway,
+    runId: string,
+    cursor?: CausalCursor,
+    trustedProvider?: TrustedProviderFamily | 'unknown',
+  ): IIOPort {
     const base = new DefaultIOPort(gateway)
     return this.eventStore
-      ? new RecordingIOPort(base, this.eventStore, runId, undefined, this.traceObjectStore ?? undefined, cursor)
+      ? new RecordingIOPort(
+          base,
+          this.eventStore,
+          runId,
+          undefined,
+          this.traceObjectStore ?? undefined,
+          cursor,
+          trustedProvider,
+        )
       : base
   }
 
-  private buildMakeChildPort(): import('./AgentRuntime.js').MakeChildPort | undefined {
+  private buildMakeChildPort(): MakeChildPort | undefined {
     if (!this.eventStore) return undefined
     const eventStore = this.eventStore
     const objectStore = this.traceObjectStore ?? undefined
     return async (childRunId, childConfig, start) => {
       const gw     = this.resolveGateway(childConfig)
       const cursor = new CausalCursor()
-      const port   = new RecordingIOPort(new DefaultIOPort(gw), eventStore, childRunId, undefined, objectStore, cursor)
+      const trusted = this.trustedProviderFamily(childConfig)
+      const port   = new RecordingIOPort(
+        new DefaultIOPort(gw),
+        eventStore,
+        childRunId,
+        undefined,
+        objectStore,
+        cursor,
+        trusted,
+      )
       await port.attach(start)
       return { port, finish: (c) => port.detach(c), cursor }
     }
@@ -254,7 +334,7 @@ export class Milkie {
       temperature: request.temperature,
     }
     // #236: public model entry shares DefaultIOPort capability fail-closed gate.
-    return new DefaultIOPort(gateway).invokeLLM(req, onEvent)
+    return new DefaultIOPort(gateway).invokeLLM(req, onEvent ? { onEvent } : undefined)
   }
 
   /**
@@ -325,6 +405,7 @@ export class Milkie {
   }
 
   async invoke(request: AgentInvokeRequest): Promise<AgentResult> {
+    const control = resolveIOInvocationControl(request.control)
     const config = this.agents.get(request.agentId)
     if (!config) {
       throw new Error(`Agent not found: "${request.agentId}". Call registerAgent() or loadAgentFile() first.`)
@@ -373,7 +454,7 @@ export class Milkie {
       : new InMemoryRecorder(undefined, config.agentId)
 
     const causalCursor = new CausalCursor()
-    const ioPort = this.wrapIOPort(gateway, agentRunId, causalCursor)
+    const ioPort = this.wrapIOPort(gateway, agentRunId, causalCursor, this.trustedProviderFamily(config))
     const makeChildPort = this.buildMakeChildPort()
 
     // #83: snapshot this context's persistent vars at invoke entry (next-invoke visibility).
@@ -404,6 +485,10 @@ export class Milkie {
       ...(previousRunId ? { previousRunId } : {}),
       ...(request.onModelEvent ? { onModelEvent: request.onModelEvent } : {}),
       ...(request.control ? { control: request.control } : {}),
+      invokeDeliverablesSpecified: Object.prototype.hasOwnProperty.call(request, 'deliverables'),
+      ...(Object.prototype.hasOwnProperty.call(request, 'deliverables')
+        ? { invokeDeliverables: request.deliverables }
+        : {}),
     })
 
     if (restoredCheckpoint) {
@@ -431,6 +516,11 @@ export class Milkie {
         status: result.status,
         lastTextOutput: result.output,
         ...(result.error ? { error: result.error } : {}),
+        stopReason: result.stopReason,
+        ...(result.stopCode ? { stopCode: result.stopCode } : {}),
+        partial: result.partial,
+        ...(result.checkpointId ? { checkpointId: result.checkpointId } : {}),
+        artifacts: result.artifacts,
       })
       invokeLog.info({ agentId: config.agentId, durationMs: Date.now() - invokeStartedAt, status: result.status }, 'invoke completed')
       return result
@@ -444,7 +534,14 @@ export class Milkie {
   /**
    * Resume execution from a saved checkpoint.
    */
-  async resume(checkpointId: string, agentId: string, goal: string, input: string, opts?: { onModelEvent?: (e: ModelEvent) => void }): Promise<AgentResult> {
+  async resume(
+    checkpointId: string,
+    agentId: string,
+    goal: string,
+    input: string,
+    opts?: { onModelEvent?: (e: ModelEvent) => void; control?: RunControlOptions },
+  ): Promise<AgentResult> {
+    if (opts?.control) resolveIOInvocationControl(opts.control)
     const config = this.agents.get(agentId)
     if (!config) {
       throw new Error(`Agent not found: "${agentId}". Call registerAgent() or loadAgentFile() first.`)
@@ -495,7 +592,8 @@ export class Milkie {
       contextId,
       stateStore: this.stateStore,
       recorder,
-      ioPort:          this.wrapIOPort(gateway, agentRunId, causalCursor),
+      ioPort:          this.wrapIOPort(gateway, agentRunId, causalCursor, this.trustedProviderFamily(config)),
+      ...(opts?.control ? { control: opts.control } : {}),
       eventStore:      this.eventStore ?? undefined,
       traceObjectStore: this.traceObjectStore ?? undefined,
       extraTools:      this.extraTools,
@@ -569,39 +667,39 @@ export class Milkie {
 
     // #237: recorded cancel/deadline terminals are lifecycle outcomes, not live
     // control. Project them without re-arming wall-clock deadline or live I/O.
+    const recordedStop = snapshot.stopReason === 'deadline' || snapshot.stopReason === 'cancelled'
+      || snapshot.stopCode === 'RUN_DEADLINE_EXCEEDED' || snapshot.stopCode === 'RUN_CANCELLED'
     const recordedTerminalError = snapshot.terminalError
-    if (
-      snapshot.terminalStatus === 'error'
-      && recordedTerminalError
+    const recordedErrorCode =
+      recordedTerminalError
       && typeof recordedTerminalError === 'object'
       && 'code' in recordedTerminalError
-      && (recordedTerminalError.code === 'RUN_CANCELLED'
-        || recordedTerminalError.code === 'RUN_DEADLINE_EXCEEDED')
+        ? recordedTerminalError.code
+        : undefined
+    if (
+      recordedStop
+      || recordedErrorCode === 'RUN_CANCELLED'
+      || recordedErrorCode === 'RUN_DEADLINE_EXCEEDED'
     ) {
-      const message = typeof recordedTerminalError.message === 'string'
-        ? recordedTerminalError.message
-        : recordedTerminalError.code === 'RUN_DEADLINE_EXCEEDED'
+      const code = snapshot.stopCode
+        ?? (recordedErrorCode === 'RUN_DEADLINE_EXCEEDED' || recordedErrorCode === 'RUN_CANCELLED'
+          ? recordedErrorCode
+          : snapshot.stopReason === 'deadline' ? 'RUN_DEADLINE_EXCEEDED' : 'RUN_CANCELLED')
+      const message = typeof recordedTerminalError === 'object' && recordedTerminalError && 'message' in recordedTerminalError
+        ? String(recordedTerminalError.message)
+        : code === 'RUN_DEADLINE_EXCEEDED'
           ? 'Run deadline exceeded'
           : 'Run cancelled by caller'
-      const error = recordedTerminalError.code === 'RUN_DEADLINE_EXCEEDED'
-        ? {
-            code: 'RUN_DEADLINE_EXCEEDED' as const,
-            message,
-            phase: 'agent_loop' as const,
-            retryable: true as const,
-          }
-        : {
-            code: 'RUN_CANCELLED' as const,
-            message,
-            phase: 'agent_loop' as const,
-            retryable: true as const,
-          }
+      const cancelled = code === 'RUN_CANCELLED' || code === 'IO_CANCELLED'
       return {
         agentRunId: runId,
         contextId:  snapshot.contextId,
         output:     snapshot.lastTextOutput ?? message,
-        status:     'error',
-        error,
+        status:     cancelled ? 'interrupted' : 'completed',
+        stopReason: cancelled ? 'cancelled' : 'deadline',
+        stopCode:   code,
+        partial:    true,
+        artifacts:  [],
       }
     }
 
@@ -617,17 +715,21 @@ export class Milkie {
     let divergenceError: ReplayDivergenceError | undefined
 
     const proxyPort: IIOPort = {
-      async invokeLLM(req, onEvent, control) {
+      async invokeLLM(req, options) {
+        const control = resolveIOInvocationControl(options?.control)
+        const resolvedOptions = control ? { ...options, control } : options
         try {
-          return await ioPort.invokeLLM(req, onEvent, control)
+          return await ioPort.invokeLLM(req, resolvedOptions)
         } catch (err) {
           if (err instanceof ReplayDivergenceError) divergenceError = err
           throw err
         }
       },
-      async invokeTool(name, input, execute, opts, control) {
+      async invokeTool(name, input, execute, opts) {
+        const control = resolveIOInvocationControl(opts?.control)
+        const resolvedOptions = control ? { ...opts, control } : opts
         try {
-          return await ioPort.invokeTool(name, input, execute, opts, control)
+          return await ioPort.invokeTool(name, input, execute, resolvedOptions)
         } catch (err) {
           if (err instanceof ReplayDivergenceError) divergenceError = err
           throw err
@@ -1048,6 +1150,20 @@ export class Milkie {
    * #217 / s-016: latest task outcome for `runId`, or `null` if the run exists
    * but no outcome was recorded. Unknown runId → TaskOutcomeRunNotFoundError.
    */
+  /**
+   * #246: machine-readable run summary. Does not replace JSONL as source of truth.
+   */
+  async getRunSummary(runId: string): Promise<RunSummary> {
+    if (!this.eventStore) {
+      throw new TraceInspectError('getRunSummary requires eventStore')
+    }
+    const id = runId?.trim()
+    if (!id) throw new TraceInspectError('getRunSummary requires a non-empty runId')
+    const events = await this.eventStore.readByRunId(id)
+    if (events.length === 0) throw new TraceInspectError(`run not found: ${id}`)
+    return summarizeRun(events, id)
+  }
+
   async getTaskOutcome(runId: string): Promise<TaskOutcome | null> {
     if (!this.eventStore) {
       throw new TaskOutcomeError(
@@ -1079,6 +1195,124 @@ export class Milkie {
       ...(p.note !== undefined ? { note: p.note } : {}),
       ...(p.scores !== undefined ? { scores: p.scores } : {}),
     }
+  }
+
+  /**
+   * #227 / s-017: finalize an immutable, evidence-bound task outcome for a run.
+   * create-if-absent on the finalization store; never dual-writes into EventStore.
+   * Observation API (`recordTaskOutcome` / `getTaskOutcome`) remains independent LWW.
+   */
+  async finalizeTaskOutcome(input: FinalizeTaskOutcomeInput): Promise<FinalizationAttemptResult> {
+    if (!this.eventStore) {
+      throw new TaskOutcomeFinalizationConfigurationError(
+        'finalizeTaskOutcome requires eventStore (pass eventStore when constructing Milkie)',
+      )
+    }
+    if (!this.outcomeFinalizationStore) {
+      throw new TaskOutcomeFinalizationConfigurationError(
+        'finalizeTaskOutcome requires outcomeFinalizationStore (pass outcomeFinalizationStore when constructing Milkie)',
+      )
+    }
+    if (!input || typeof input !== 'object') {
+      throw new TaskOutcomeFinalizationValidationError('finalizeTaskOutcome input must be an object')
+    }
+    if (input.expectedState !== 'unfinalized') {
+      throw new TaskOutcomeFinalizationValidationError(
+        'expectedState must be the literal "unfinalized"',
+      )
+    }
+
+    const finalizationId = assertFinalizationId(input.finalizationId)
+    const { intent, intentHash } = normalizeFinalizationIntent({
+      runId: input.runId,
+      value: input.value,
+      verifierClaim: input.verifierClaim,
+      evidence: input.evidence,
+      note: input.note,
+      scores: input.scores,
+    })
+
+    const hasObjectEvidence = intent.evidence.some(e => e.kind === 'object')
+    const durable = assertDurabilityCompatibility({
+      finalDurability: this.outcomeFinalizationStore.durability,
+      eventStore: this.eventStore,
+      objectStore: this.traceObjectStore,
+      hasObjectEvidence,
+    })
+
+    const events = await this.eventStore.readByRunId(intent.runId)
+    if (events.length === 0) {
+      throw new TaskOutcomeRunNotFoundError(intent.runId)
+    }
+
+    // Fast path: already finalized → resolve without re-validating evidence.
+    const preexisting = await this.outcomeFinalizationStore.get(intent.runId)
+    if (preexisting) {
+      return resolveAgainstExisting(preexisting, {
+        finalizationId,
+        value: intent.value,
+        intentHash,
+      })
+    }
+
+    // New finalization: validate run lifecycle + evidence, then durable-confirm.
+    const evidenceCtx = buildEvidenceContext(events)
+    await validateEvidenceRefs(intent.evidence, evidenceCtx, this.traceObjectStore)
+    await confirmEvidenceDurable({
+      runId: intent.runId,
+      evidence: intent.evidence,
+      crashSafeEvent: durable.crashSafeEvent,
+      crashSafeObject: durable.crashSafeObject,
+    })
+
+    const finalizedAt = Date.now()
+    const withoutHash = buildRecordWithoutHash({
+      intent,
+      finalizationId,
+      intentHash,
+      finalizedAt,
+    })
+    const record = assembleFinalization(withoutHash)
+
+    const createResult = await this.outcomeFinalizationStore.create(record)
+    if (createResult.created) {
+      return { status: 'finalized', final: createResult.record }
+    }
+    return resolveAgainstExisting(createResult.existing, {
+      finalizationId,
+      value: intent.value,
+      intentHash,
+    })
+  }
+
+  /**
+   * #227 / s-017: query the immutable final task outcome for a run, or null if
+   * the known run is unfinalized. Unknown runId → TaskOutcomeRunNotFoundError.
+   * Independent of observation LWW (`getTaskOutcome`).
+   */
+  async getFinalTaskOutcome(runId: string): Promise<TaskOutcomeFinalization | null> {
+    if (!this.eventStore) {
+      throw new TaskOutcomeFinalizationConfigurationError(
+        'getFinalTaskOutcome requires eventStore (pass eventStore when constructing Milkie)',
+      )
+    }
+    if (!this.outcomeFinalizationStore) {
+      throw new TaskOutcomeFinalizationConfigurationError(
+        'getFinalTaskOutcome requires outcomeFinalizationStore (pass outcomeFinalizationStore when constructing Milkie)',
+      )
+    }
+    const id = typeof runId === 'string' ? runId.trim() : ''
+    if (!id) {
+      throw new TaskOutcomeFinalizationValidationError('getFinalTaskOutcome requires a non-empty runId')
+    }
+
+    const events = await this.eventStore.readByRunId(id)
+    if (events.length === 0) {
+      throw new TaskOutcomeRunNotFoundError(id)
+    }
+
+    const final = await this.outcomeFinalizationStore.get(id)
+    return final ? snapshotFinalization(final) : null
   }
 
   private parseConfig(data: Record<string, unknown>, systemPrompt: string): AgentConfig {

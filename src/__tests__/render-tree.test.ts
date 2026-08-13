@@ -21,7 +21,7 @@ describe('buildTimelineTree', () => {
       e({ id: 'q', runId: 'r1', type: 'llm.requested',  timestamp: 2,
           payload: { request: {}, requestHash: 'h' } }),
       e({ id: 'a', runId: 'r1', type: 'llm.responded',  timestamp: 3, causedBy: 'q',
-          payload: { response: {}, requestHash: 'h' } }),
+          payload: { response: { content: [], toolCalls: [] }, requestHash: 'h' } }),
     ]
     const tree = buildTimelineTree(events)
     expect(tree).toHaveLength(1)

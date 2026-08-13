@@ -1,9 +1,26 @@
 import { v4 as uuidv4 } from 'uuid'
 import { createHash } from 'crypto'
 import type { AgentConfig, BuiltinToolName, FSMState } from '../types/agent.js'
-import type { AgentResult, ContextProjection, RunControlOptions } from '../types/common.js'
+import type {
+  AgentResult,
+  ArtifactRef,
+  ContextProjection,
+  DeliverableSpec,
+  RunControlOptions,
+  StopReason,
+} from '../types/common.js'
 import { MaxIterationsError } from '../types/common.js'
-import type { AgentErrorEnvelope } from '../types/model.js'
+import {
+  computePartial,
+  matchArtifacts,
+  resolveEffectiveDeliverables,
+  type ProducedRecord,
+} from './deliverables.js'
+import {
+  CONTROL_TOOL_NAMES,
+  resolveControlToolCall,
+  TOOL_EXECUTION_ERROR,
+} from './toolProtocol.js'
 import type { IStateStore, AgentCheckpoint, ChildAgentRecord } from '../types/store.js'
 import type { ITrajectoryRecorder, Span } from '../types/trajectory.js'
 import type { ToolDefinition, ToolContext, ToolCall, ToolResult, ToolResultStrategy } from '../types/tool.js'
@@ -30,12 +47,23 @@ import {
   runInterTurnEngine,
   rehydrateSnapshot,
 } from '../context/lifecycleEngine.js'
-import type { ToolSchema, ModelRequest, ModelEvent } from '../types/model.js'
+import {
+  IOControlError,
+  LlmInvocationError,
+  type AgentErrorEnvelope,
+  type ModelEvent,
+  type ModelRequest,
+  type ToolSchema,
+} from '../types/model.js'
 import { ToolRegistry } from '../tools/ToolRegistry.js'
 import { WorkingMemory } from '../store/WorkingMemory.js'
 import { AgentFactory, type AgentSpawnOptions } from './AgentFactory.js'
-import { assertToolInvocationAllowed, type IIOPort } from './IOPort.js'
-
+import {
+  resolveIOInvocationControl,
+  waitWithIOInvocationControl,
+  type IIOPort,
+  type ResolvedIOInvocationControl,
+} from './IOPort.js'
 import {
   resolveEffectiveBuiltinTools,
   selectBuiltinToolDefinitions,
@@ -103,6 +131,9 @@ export interface AgentRuntimeOptions {
   parentBuiltinTools?: readonly BuiltinToolName[]
   /** #237: run-level deadline / cancel options from AgentInvokeRequest.control. */
   control?: RunControlOptions
+  /** #247: true when invoke included the `deliverables` key (even if []). */
+  invokeDeliverablesSpecified?: boolean
+  invokeDeliverables?: DeliverableSpec[]
   /**
    * #237: parent RunControl. Child inherits cancel and the earlier deadline.
    * Prefer over control.parent-less deadline when spawning.
@@ -158,6 +189,12 @@ export class AgentRuntime {
   private readonly effectiveBuiltinTools: BuiltinToolName[]
   /** #237: per-run cooperative cancel / deadline controller. */
   private runControl: RunControl | undefined
+  /**
+   * #228/#237: stable resolved IO control snapshot for this run (signal+deadline).
+   * Object identity is preserved across parent LLM/tool calls within the run.
+   * Adjudicated `reason` is NOT stored here — final gates read it from RunControl.
+   */
+  private ioControl: ResolvedIOInvocationControl | undefined
   private readonly controlOpts?: RunControlOptions
   private readonly parentRunControl?: RunControl
 
@@ -181,6 +218,10 @@ export class AgentRuntime {
   private rootSpan!:     Span
   private turnNumber:    number = 0
   private lastTextOutput: string = ''
+  private lastCheckpointId?: string
+  private readonly producedRecords: ProducedRecord[] = []
+  private extraStopCodes: string[] = []
+  private readonly effectiveContract: DeliverableSpec[] | null
   /** #30: id of the in-flight context.boundary.applied event; region.added emitted inside
    *  crystallization reads it for causedBy. Unset outside the crystallization window so
    *  agent-set region deltas (e.g. header) get no causedBy. */
@@ -218,6 +259,11 @@ export class AgentRuntime {
       opts.config,
       opts.parentBuiltinTools,
     )
+    this.effectiveContract = resolveEffectiveDeliverables(
+      opts.config.deliverables,
+      opts.invokeDeliverablesSpecified === true,
+      opts.invokeDeliverables,
+    )
 
     this.fsm     = new FSMEngine(opts.config.fsm)
     this.memory  = new WorkingMemory()
@@ -237,6 +283,11 @@ export class AgentRuntime {
         makeChildPort:        this.makeChildPort,
         parentBuiltinTools:   this.effectiveBuiltinTools,
         parentRunControl:     this.runControl,
+        // Child RunControlOptions (deadline/signal) inherit caller/parent opts;
+        // never pass the resolved IO snapshot here — that is signal-only and
+        // would drop deadlineAt from the child's RunControl.create input.
+        // parentRunControl still enforces the earlier parent boundary.
+        control:              spawnOpts.control ?? this.controlOpts,
       })
       return child.run(spawnOpts.input)
     })
@@ -322,6 +373,7 @@ export class AgentRuntime {
             makeChildPort: this.makeChildPort,
             parentBuiltinTools: this.effectiveBuiltinTools,
             parentRunControl:   this.runControl,
+            control:            this.controlOpts,
           })
           await finish?.({
             status: result.status,
@@ -371,16 +423,17 @@ export class AgentRuntime {
   }
 
   private buildToolContext(
+    signal: AbortSignal,
     lineage?: LineageBuffer,
   ): ToolContext {
     const ctx: ToolContext = {
       workingMemory: this.memory,
       agentFactory:  this.factory,
       stateStore:    this.stateStore,
+      signal,
       requestSkill:  (name: string, scope?: 'turn' | 'session') => this.requestSkill(name, scope),
       currentTurn:   this.currentTurnRaw,
       previousRunId: this.previousRunId,
-      ...(this.runControl ? { signal: this.runControl.signal } : {}),
       // #200 C: the runIds delivered to this turn via projections — the allowlist
       // the selfOnly trace tools gate runId dereference on.
       ...(this.externalProjections?.length
@@ -439,6 +492,15 @@ export class AgentRuntime {
         lineage.relations.push({ relationId, type: spec.type, fromObjectId: spec.fromObjectId, toObjectId: spec.toObjectId, ...(spec.meta ? { meta: spec.meta } : {}) })
         return { relationId }
       }
+    }
+    ctx.recordArtifact = spec => {
+      this.producedRecords.push({
+        type: spec.type,
+        ...(spec.path ? { path: spec.path } : {}),
+        ...(spec.objectId ? { objectId: spec.objectId } : {}),
+        ...(spec.name ? { name: spec.name } : {}),
+        ...(spec.hash ? { hash: spec.hash } : {}),
+      })
     }
     return ctx
   }
@@ -919,11 +981,71 @@ export class AgentRuntime {
     }
   }
 
+  private mergeStopCode(primary: string): string {
+    if (this.extraStopCodes.length === 0) return primary
+    return [primary, ...this.extraStopCodes].join(',')
+  }
+
+  private async ensureTerminalCheckpoint(): Promise<void> {
+    if (this.lastCheckpointId || this.fsm.isReservedTerminal()) return
+    const checkpoint = this.buildCheckpoint()
+    await this.tryFlushTraceWrites()
+    await this.persistCheckpoint(checkpoint)
+  }
+
+  private async runBudgetFinalize(): Promise<void> {
+    const hook = this.config.onBudgetFinalize
+    if (!hook) return
+    try {
+      await hook({
+        recordArtifact: artifact => {
+          this.producedRecords.push({
+            type: artifact.type,
+            ...(artifact.path ? { path: artifact.path } : {}),
+            ...(artifact.objectId ? { objectId: artifact.objectId } : {}),
+            ...(artifact.name ? { name: artifact.name } : {}),
+            ...(artifact.hash ? { hash: artifact.hash } : {}),
+          })
+        },
+      })
+    } catch {
+      this.extraStopCodes.push('FINALIZE_FAILED')
+    }
+  }
+
+  private buildAgentResult(base: {
+    status: AgentResult['status']
+    stopReason: StopReason
+    stopCode?: string
+    output: string
+    error?: AgentErrorEnvelope
+  }): AgentResult {
+    const artifacts: ArtifactRef[] = matchArtifacts(this.effectiveContract, this.producedRecords)
+    const partial = computePartial({
+      contract: this.effectiveContract,
+      artifacts,
+      stopReason: base.stopReason,
+    })
+    return {
+      agentRunId: this.agentRunId,
+      contextId: this.contextId,
+      output: base.output,
+      status: base.status,
+      stopReason: base.stopReason,
+      ...(base.stopCode ? { stopCode: base.stopCode } : {}),
+      partial,
+      ...(this.lastCheckpointId ? { checkpointId: this.lastCheckpointId } : {}),
+      artifacts,
+      ...(base.error ? { error: base.error } : {}),
+    }
+  }
+
   // #73: persist resume state to the event log (single source of truth) as an
   // agent.checkpoint event, plus a tiny context->runId routing pointer (an index,
   // not state). No stateStore checkpoint blob is written. Requires an eventStore:
   // without one the run cannot be resumed (events are the sole resume substrate).
   private async persistCheckpoint(checkpoint: AgentCheckpoint): Promise<void> {
+    this.lastCheckpointId = checkpoint.checkpointId
     if (!this.eventStore) return
     await this.eventStore.append({
       id:        uuidv4(),
@@ -998,6 +1120,19 @@ export class AgentRuntime {
       signal: this.controlOpts?.signal,
       parent: this.parentRunControl,
     })
+    // One resolved IO snapshot per run, bound only to this run's live
+    // RunControl signal. Never forward deadlineAt into IOPort effect control:
+    // run-level deadline is owned by RunControl (timer + final gates + IOPort
+    // clock). Putting deadlineAt on ioControl lets DefaultIOPort pre-expire via
+    // wall-clock Date.now() and leak IO_DEADLINE_EXCEEDED into AgentResult.
+    // When RunControl trips it aborts this signal; catch maps in-flight
+    // IOControlError to the unique RUN_* terminal. Fresh binding each run also
+    // keeps child IO on the child RunControl signal (parent-linked), so child
+    // deadlines abort in-flight child I/O without sharing a parent snapshot
+    // that may omit the child's adjudicated boundary.
+    this.ioControl = resolveIOInvocationControl({
+      signal: this.runControl.signal,
+    })
 
     try {
       this.runControl.throwIfStopped()
@@ -1020,57 +1155,115 @@ export class AgentRuntime {
         await this.persistCheckpoint(checkpoint)
       }
       this.recorder.endSpan(this.rootSpan, 'ok')
-      return {
-        agentRunId: this.agentRunId,
-        contextId:  this.contextId,
-        output:     this.lastTextOutput,
-        status:     'completed',
-      }
+      return this.buildAgentResult({
+        status: 'completed',
+        stopReason: 'model_stop',
+        output: this.lastTextOutput,
+      })
     } catch (err: unknown) {
       const isInterrupt = err instanceof Error && err.name === 'InterruptSignal'
       if (isInterrupt) {
-        // checkEvents() already signaled 'interrupt' at the interrupt point;
-        // guard so we don't double-signal a non-running lifecycle.
         if (this.lifecycle.state === 'running') this.lifecycle.signal('interrupt')
         this.recorder.endSpan(this.rootSpan, 'ok')
-        return {
-          agentRunId: this.agentRunId,
-          contextId:  this.contextId,
-          output:     this.lastTextOutput,
-          status:     'interrupted',
-        }
+        return this.buildAgentResult({
+          status: 'interrupted',
+          stopReason: 'interrupted',
+          output: this.lastTextOutput,
+        })
       }
-      this.lifecycle.signal('error')
-      this.recorder.endSpan(this.rootSpan, 'error')
-      // Prefer adjudicated run-stop envelope when control already tripped, even if
-      // the thrown error is a plain AbortError from in-flight I/O.
+
       const stopEnvelope = runControlErrorEnvelope(err)
         ?? (this.runControl?.stopped
           ? (this.runControl.reason === 'deadline'
             ? { code: 'RUN_DEADLINE_EXCEEDED' as const, message: 'Run deadline exceeded', phase: 'agent_loop' as const, retryable: true as const }
             : { code: 'RUN_CANCELLED' as const, message: 'Run cancelled by caller', phase: 'agent_loop' as const, retryable: true as const })
           : undefined)
+
+      if (err instanceof MaxIterationsError) {
+        if (this.lifecycle.state === 'running') this.lifecycle.signal('done')
+        await this.ensureTerminalCheckpoint()
+        await this.runBudgetFinalize()
+        this.recorder.endSpan(this.rootSpan, 'ok')
+        return this.buildAgentResult({
+          status: 'completed',
+          stopReason: 'budget_exhausted',
+          stopCode: this.mergeStopCode('MAX_ITERATIONS_EXCEEDED'),
+          output: this.lastTextOutput || err.message,
+        })
+      }
+
+      if (stopEnvelope?.code === 'RUN_DEADLINE_EXCEEDED') {
+        if (this.lifecycle.state === 'running') this.lifecycle.signal('done')
+        await this.ensureTerminalCheckpoint()
+        await this.runBudgetFinalize()
+        this.recorder.endSpan(this.rootSpan, 'ok')
+        return this.buildAgentResult({
+          status: 'completed',
+          stopReason: 'deadline',
+          stopCode: this.mergeStopCode('RUN_DEADLINE_EXCEEDED'),
+          output: this.lastTextOutput || stopEnvelope.message,
+        })
+      }
+
+      if (stopEnvelope?.code === 'RUN_CANCELLED') {
+        if (this.lifecycle.state === 'running') this.lifecycle.signal('interrupt')
+        await this.ensureTerminalCheckpoint()
+        this.recorder.endSpan(this.rootSpan, 'ok')
+        return this.buildAgentResult({
+          status: 'interrupted',
+          stopReason: 'cancelled',
+          stopCode: 'RUN_CANCELLED',
+          output: this.lastTextOutput || stopEnvelope.message,
+        })
+      }
+
+      if (err instanceof IOControlError && err.code === 'IO_DEADLINE_EXCEEDED') {
+        if (this.lifecycle.state === 'running') this.lifecycle.signal('done')
+        await this.ensureTerminalCheckpoint()
+        await this.runBudgetFinalize()
+        this.recorder.endSpan(this.rootSpan, 'ok')
+        return this.buildAgentResult({
+          status: 'completed',
+          stopReason: 'deadline',
+          stopCode: this.mergeStopCode('IO_DEADLINE_EXCEEDED'),
+          output: this.lastTextOutput || err.message,
+        })
+      }
+
+      if (err instanceof IOControlError && err.code === 'IO_CANCELLED') {
+        if (this.lifecycle.state === 'running') this.lifecycle.signal('interrupt')
+        await this.ensureTerminalCheckpoint()
+        this.recorder.endSpan(this.rootSpan, 'ok')
+        return this.buildAgentResult({
+          status: 'interrupted',
+          stopReason: 'cancelled',
+          stopCode: 'IO_CANCELLED',
+          output: this.lastTextOutput || err.message,
+        })
+      }
+
+      this.lifecycle.signal('error')
+      this.recorder.endSpan(this.rootSpan, 'error')
+      await this.ensureTerminalCheckpoint()
       const structuredError: AgentErrorEnvelope | undefined = stopEnvelope
-        ?? (err instanceof MaxIterationsError
-          ? {
-              code:      'MAX_ITERATIONS_EXCEEDED',
-              message:   err.message,
-              phase:     'agent_loop',
-              retryable: false,
-            }
-          : modelErrorEnvelope(err))
+        ?? (err instanceof IOControlError
+          ? err.envelope
+          : err instanceof LlmInvocationError
+            ? err.envelope
+            : modelErrorEnvelope(err))
       const output = structuredError?.message
         ?? (err instanceof Error ? err.message : String(err))
-      return {
-        agentRunId: this.agentRunId,
-        contextId:  this.contextId,
+      return this.buildAgentResult({
+        status: 'error',
+        stopReason: 'runtime_error',
+        stopCode: structuredError?.code,
         output,
-        status:     'error',
-        ...(structuredError ? { error: structuredError } : {}),
-      }
+        error: structuredError,
+      })
     } finally {
       this.runControl?.dispose()
       this.runControl = undefined
+      this.ioControl = undefined
       await this.tryFlushTraceWrites()
       await this.recorder.flush()
     }
@@ -1159,11 +1352,10 @@ export class AgentRuntime {
       let response
       try {
         this.runControl?.throwIfStopped()
-        response = await this.ioPort.invokeLLM(
-          request,
-          this.onModelEvent,
-          this.runControl?.invocationControl(),
-        )
+        response = await this.ioPort.invokeLLM(request, {
+          onEvent: this.onModelEvent,
+          control: this.ioControl,
+        })
         // #237: gateway may ignore AbortSignal and still resolve after stop.
         // Gate before any success-path state transfer / completion.
         this.runControl?.throwIfStopped()
@@ -1261,8 +1453,13 @@ export class AgentRuntime {
           state.handler,
           actionInput,
           async () => { throw error },
+          { control: this.ioControl },
         )
-      } catch {
+      } catch (caught) {
+        if (caught instanceof IOControlError) {
+          this.recorder.endSpan(span, 'error')
+          throw caught
+        }
         // The synthetic rejection is recorded by RecordingIOPort before this action fails.
       }
       this.recorder.recordEvent(span, 'tool.result', { error: error.message, code: error.code })
@@ -1272,8 +1469,6 @@ export class AgentRuntime {
     // #237: action-state must cross IIOPort.invokeTool so recording/replay and
     // run-control share the same boundary as LLM-loop tools. Replay serves the
     // cached tool.responded and never re-enters the live handler.
-    const ctx = this.buildToolContext()
-
     const span = this.recorder.startSpan('tool.call', {
       toolName: state.handler,
       turn:     this.turnNumber,
@@ -1285,23 +1480,23 @@ export class AgentRuntime {
       const output = await this.ioPort.invokeTool(
         state.handler,
         actionInput,
-        () => {
+        signal => {
           // #237: gate at thunk start so delayed / direct-custom IOPort wrappers
           // cannot start the handler after deadline between runtime pre-gate and
           // execute. Sample the run's IOPort clock (nowSample preferred) so
-          // virtual clocks adjudicate correctly without ambient Date.now or an
-          // extra recorded clock.read on RecordingIOPort. Replay never re-enters.
-          assertToolInvocationAllowed(
-            this.runControl?.invocationControl(),
+          // virtual clocks trip RunControl as RUN_* — never leak IO_* from a
+          // run-level deadline. Replay never re-enters.
+          this.runControl?.assertInvocationAllowed(
             this.ioPort.nowSample?.() ?? this.ioPort.now(),
           )
-          return tool.handler(actionInput, ctx)
+          return tool.handler(actionInput, this.buildToolContext(signal))
         },
         // Action states have no model tool_use id; keep metadata minimal and
         // stable so record/replay hashes match across paths.
-        { toolCallId: `action:${state.name}:${state.handler}` },
-        this.runControl?.invocationControl(),
-
+        {
+          toolCallId: `action:${state.name}:${state.handler}`,
+          control: this.ioControl,
+        },
       )
 
       this.runControl?.throwIfStopped()
@@ -1365,6 +1560,11 @@ export class AgentRuntime {
       // Parallel siblings already in-flight may finish; once control has stopped,
       // do not accept their success as a path into further scheduling.
       this.runControl?.throwIfStopped()
+      const controlFailure = settled.find(
+        (result): result is PromiseRejectedResult =>
+          result.status === 'rejected' && result.reason instanceof IOControlError,
+      )
+      if (controlFailure) throw controlFailure.reason
       for (const r of settled) {
         if (r.status === 'fulfilled') {
           results.push(r.value)
@@ -1420,7 +1620,6 @@ export class AgentRuntime {
         if (o && !o.producerEventId) o.producerEventId = respEventId
       }
     }
-    const ctx = this.buildToolContext(lineage)
 
     const maxRetries = 3
 
@@ -1443,9 +1642,13 @@ export class AgentRuntime {
             call.name,
             call.input,
             async () => { throw error },
-            { toolCallId: call.id },
+            { toolCallId: call.id, control: this.ioControl },
           )
-        } catch {
+        } catch (caught) {
+          if (caught instanceof IOControlError) {
+            this.recorder.endSpan(span, 'error')
+            throw caught
+          }
           // The synthetic rejection is recorded by RecordingIOPort and becomes the ToolResult below.
         }
         const duration = this.ioPort.now() - start
@@ -1463,27 +1666,49 @@ export class AgentRuntime {
 
 
       try {
+        const controlResolved = CONTROL_TOOL_NAMES.has(call.name)
+          ? resolveControlToolCall(call)
+          : undefined
+        const protocolReject = controlResolved && !controlResolved.ok ? controlResolved : undefined
+        const effectiveInput = controlResolved?.ok ? controlResolved.input : call.input
+        const invalidArgs = protocolReject
+          ? { code: protocolReject.code, message: protocolReject.message }
+          : call.invalidArguments
+
         const output   = await this.ioPort.invokeTool(
           call.name,
-          call.input,
-          () => {
+          effectiveInput,
+          signal => {
             // #237: fail closed at actual handler start (covers delayed wrappers
-            // and custom ports that call execute() directly). Sample IOPort clock
-            // via nowSample when available — never ambient Date.now; never burn a
-            // Recording clock.read that replay would fail to consume.
-            assertToolInvocationAllowed(
-              this.runControl?.invocationControl(),
+            // and custom ports that call execute() directly). Re-sample the
+            // live IOPort clock so a virtual deadline trips RunControl as
+            // RUN_* — never ambient Date.now; never burn a Recording
+            // clock.read that replay would fail to consume.
+            this.runControl?.assertInvocationAllowed(
               this.ioPort.nowSample?.() ?? this.ioPort.now(),
             )
-            if (call.invalidArguments) {
-              return Promise.reject(Object.assign(new Error(call.invalidArguments.message), {
-                code: call.invalidArguments.code,
+            if (invalidArgs) {
+              return Promise.reject(Object.assign(new Error(invalidArgs.message), {
+                code: invalidArgs.code,
               }))
             }
-            return this.registry.execute(call.name, call.input, ctx)
+            return this.registry.execute(call.name, effectiveInput, this.buildToolContext(signal, lineage))
+              .catch(handlerErr => {
+                if (CONTROL_TOOL_NAMES.has(call.name)) {
+                  const message = handlerErr instanceof Error ? handlerErr.message : String(handlerErr)
+                  throw Object.assign(new Error(message), { code: TOOL_EXECUTION_ERROR })
+                }
+                throw handlerErr
+              })
           },
-          { toolCallId: call.id, lineage, invalidArguments: call.invalidArguments },  // #81 pairing id; #37/#38 lineage sink
-          this.runControl?.invocationControl(),
+          {
+            toolCallId: call.id,
+            lineage,
+            invalidArguments: protocolReject
+              ? undefined
+              : call.invalidArguments,
+            control: this.ioControl,
+          },
         )
 
 
@@ -1519,20 +1744,35 @@ export class AgentRuntime {
           if (this.runControl) this.runControl.mergeAbort(err)
           throw err instanceof Error ? err : new Error(String(err))
         }
+        if (err instanceof IOControlError) {
+          this.recorder.endSpan(span, 'error')
+          throw err
+        }
         const retryable = (err as { retryable?: boolean }).retryable === true
         const isLastAttempt = attempt === maxRetries - 1
         const duration      = this.ioPort.now() - start
 
         if (!retryable || isLastAttempt) {
           const error = err instanceof Error ? err.message : String(err)
+          const errCode = typeof (err as { code?: unknown }).code === 'string'
+            ? (err as { code: string }).code
+            : undefined
+          const structured =
+            call.invalidArguments
+              ? { code: call.invalidArguments.code, message: call.invalidArguments.message }
+              : errCode === 'TOOL_ARGUMENTS_SCHEMA_INVALID'
+                || errCode === 'TOOL_ARGUMENTS_INVALID_JSON'
+                || errCode === TOOL_EXECUTION_ERROR
+                ? { code: errCode, message: error }
+                : CONTROL_TOOL_NAMES.has(call.name)
+                  ? { code: TOOL_EXECUTION_ERROR, message: error }
+                  : error
           this.recorder.endSpan(span, 'error')
           return {
             toolCallId: call.id,
             toolName:   call.name,
             output:     null,
-            error:      call.invalidArguments
-              ? { code: call.invalidArguments.code, message: call.invalidArguments.message }
-              : error,
+            error:      structured,
             isError:    true,
             duration,
           }
@@ -1545,7 +1785,7 @@ export class AgentRuntime {
         // state, not business transitions.
         const retryFromState = this.fsm.currentState.name
         this.fsm.transitionTo('error_handling', { name: 'error' })
-        await new Promise<void>(r => setTimeout(r, 500))
+        await waitWithIOInvocationControl(500, this.ioControl, 'tool')
         // Deadline may elapse during backoff — do not start another attempt.
         this.runControl?.throwIfStopped()
         this.fsm.transitionTo(retryFromState, { name: 'RETRY' })
