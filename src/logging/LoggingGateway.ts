@@ -1,9 +1,11 @@
 import type {
   GatewayInvocationOptions,
   IModelGateway,
-  ModelEvent,
+  ModelCapabilities,
+  ModelGatewayCallOptions,
   ModelRequest,
   ModelResponse,
+  ModelEvent,
 } from '../types/model.js'
 import type { ServiceLogger } from './logger.js'
 
@@ -17,7 +19,11 @@ export class LoggingGateway implements IModelGateway {
     private readonly log:   ServiceLogger,
   ) {}
 
-  async complete(request: ModelRequest, options?: GatewayInvocationOptions): Promise<ModelResponse> {
+  get capabilities(): ModelCapabilities | undefined {
+    return this.inner.capabilities
+  }
+
+  async complete(request: ModelRequest, options?: GatewayInvocationOptions | ModelGatewayCallOptions): Promise<ModelResponse> {
     const startedAt = Date.now()
     try {
       const res = await this.inner.complete(request, options)
@@ -32,7 +38,7 @@ export class LoggingGateway implements IModelGateway {
     }
   }
 
-  async *stream(request: ModelRequest, options?: GatewayInvocationOptions): AsyncIterable<ModelEvent> {
+  async *stream(request: ModelRequest, options?: GatewayInvocationOptions | ModelGatewayCallOptions): AsyncIterable<ModelEvent> {
     const startedAt = Date.now()
     let inputTokens = 0
     let outputTokens = 0

@@ -2,36 +2,56 @@ import OpenAI from 'openai'
 import type {
   GatewayInvocationOptions,
   IModelGateway,
-  ModelEvent,
+  ModelCapabilities,
+  ModelGatewayCallOptions,
   ModelRequest,
   ModelResponse,
+  ModelEvent,
   ModelUsage,
 } from '../types/model.js'
 import type { MessageContent } from '../types/common.js'
 import type { ToolCall } from '../types/tool.js'
 import { normalizeModelGatewayError } from './ModelGatewayError.js'
+import { assertImageRequestSupported } from './imageContent.js'
 
 export interface OpenAICompatibleAdapterOptions {
   apiKey?:  string
   baseUrl?: string
   provider?: string
+  /**
+   * #236: explicit capabilities. Never inferred from endpoint/provider.
+   * Default imageInput:false — set true only when the deployed model accepts vision.
+   */
+  capabilities?: ModelCapabilities
 }
 
 export class OpenAICompatibleAdapter implements IModelGateway {
   private readonly client: OpenAI
   private readonly provider: string
+  readonly capabilities: ModelCapabilities
   /** Default completion budget — long tool-arg payloads (e.g. JSON writes) need headroom above common 4k gateway defaults. */
   static readonly DEFAULT_MAX_TOKENS = 8192
 
   constructor(options: OpenAICompatibleAdapterOptions = {}) {
     this.provider = options.provider ?? 'openai-compatible'
+    this.capabilities = {
+      imageInput: options.capabilities?.imageInput === true,
+    }
     this.client = new OpenAI({
       apiKey:  options.apiKey  ?? process.env['VOLCENGINE_TOKEN'] ?? process.env['OPENAI_API_KEY'] ?? '',
       baseURL: options.baseUrl ?? process.env['VOLCENGINE_API_BASE'],
     })
   }
 
-  async complete(request: ModelRequest, options?: GatewayInvocationOptions): Promise<ModelResponse> {
+  private guardImageRequest(request: ModelRequest): void {
+    assertImageRequestSupported(request, this.capabilities, {
+      provider: this.provider,
+      model: request.model,
+    })
+  }
+
+  async complete(request: ModelRequest, opts?: ModelGatewayCallOptions | GatewayInvocationOptions): Promise<ModelResponse> {
+    this.guardImageRequest(request)
     let raw: OpenAI.ChatCompletion
     try {
       raw = await this.client.chat.completions.create({
@@ -48,7 +68,7 @@ export class OpenAICompatibleAdapter implements IModelGateway {
         tool_choice: request.tools?.length ? 'auto' : undefined,
         temperature: request.temperature,
         max_tokens:  request.maxTokens ?? OpenAICompatibleAdapter.DEFAULT_MAX_TOKENS,
-      }, options?.signal ? { signal: options.signal } : undefined)
+      }, opts?.signal ? { signal: opts.signal } : undefined)
     } catch (error) {
       throw normalizeModelGatewayError(error, {
         provider: this.provider, model: request.model, phase: 'request',
@@ -64,7 +84,8 @@ export class OpenAICompatibleAdapter implements IModelGateway {
     }
   }
 
-  async *stream(request: ModelRequest, options?: GatewayInvocationOptions): AsyncIterable<ModelEvent> {
+  async *stream(request: ModelRequest, opts?: ModelGatewayCallOptions | GatewayInvocationOptions): AsyncIterable<ModelEvent> {
+    this.guardImageRequest(request)
     let stream: AsyncIterable<OpenAI.ChatCompletionChunk>
     try {
       stream = await this.client.chat.completions.create({
@@ -83,7 +104,7 @@ export class OpenAICompatibleAdapter implements IModelGateway {
         max_tokens:     request.maxTokens ?? OpenAICompatibleAdapter.DEFAULT_MAX_TOKENS,
         stream:         true,
         stream_options: { include_usage: true },
-      }, options?.signal ? { signal: options.signal } : undefined)
+      }, opts?.signal ? { signal: opts.signal } : undefined)
     } catch (error) {
       throw normalizeModelGatewayError(error, {
         provider: this.provider, model: request.model, phase: 'stream_open',
@@ -205,12 +226,21 @@ export class OpenAICompatibleAdapter implements IModelGateway {
       }
 
       if (msg.role === 'assistant') {
-        const textParts: string[] = []
+        // #236: preserve text/image order for assistant multimodal history.
+        // Never silently drop image parts. tool_use still maps to tool_calls.
+        const contentParts: OpenAI.ChatCompletionContentPart[] = []
         const toolCalls: OpenAI.ChatCompletionMessageToolCall[] = []
+        let hasImage = false
 
         for (const c of msg.content) {
           if (c.type === 'text') {
-            textParts.push(c.text)
+            contentParts.push({ type: 'text', text: c.text })
+          } else if (c.type === 'image') {
+            hasImage = true
+            const url = c.source.kind === 'url'
+              ? c.source.url
+              : `data:${c.mediaType};base64,${c.source.data}`
+            contentParts.push({ type: 'image_url', image_url: { url } })
           } else if (c.type === 'tool_use') {
             toolCalls.push({
               id:       c.id,
@@ -220,20 +250,43 @@ export class OpenAICompatibleAdapter implements IModelGateway {
           }
         }
 
-        result.push({
-          role:       'assistant',
-          content:    textParts.join('') || null,
-          tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
-        })
+        if (hasImage) {
+          result.push({
+            role:       'assistant',
+            content:    contentParts,
+            tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
+          } as OpenAI.ChatCompletionMessageParam)
+        } else {
+          const textJoined = contentParts
+            .filter((p): p is OpenAI.ChatCompletionContentPartText => p.type === 'text')
+            .map(p => p.text)
+            .join('')
+          result.push({
+            role:       'assistant',
+            content:    textJoined || null,
+            tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
+          })
+        }
         continue
       }
 
-      // user message
-      const text = msg.content
-        .filter(c => c.type === 'text')
-        .map(c => (c as { type: 'text'; text: string }).text)
-        .join('')
-      result.push({ role: 'user', content: text })
+      // user message — preserve text/image order for vision models (#236)
+      const parts: OpenAI.ChatCompletionContentPart[] = []
+      for (const c of msg.content) {
+        if (c.type === 'text') {
+          parts.push({ type: 'text', text: c.text })
+        } else if (c.type === 'image') {
+          const url = c.source.kind === 'url'
+            ? c.source.url
+            : `data:${c.mediaType};base64,${c.source.data}`
+          parts.push({ type: 'image_url', image_url: { url } })
+        }
+      }
+      if (parts.length === 1 && parts[0]!.type === 'text') {
+        result.push({ role: 'user', content: parts[0]!.text })
+      } else {
+        result.push({ role: 'user', content: parts })
+      }
     }
 
     return result

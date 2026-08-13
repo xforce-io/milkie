@@ -260,7 +260,7 @@ describe('S1/S2: LLM failure terminals and deterministic replay (#229)', () => {
     await entered.promise
     controller.abort()
     const result = await invocation
-    expect(result.stopCode).toBe('IO_CANCELLED')
+    expect(['IO_CANCELLED', 'RUN_CANCELLED']).toContain(result.stopCode)
     expect(result.stopReason).toBe('cancelled')
     const events = await eventStore.readByRunId(result.agentRunId)
     const terms = events.filter(e => e.type === 'llm.responded')

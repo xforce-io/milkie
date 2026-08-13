@@ -1,4 +1,4 @@
-import type { AgentErrorEnvelope, IOInvocationControl, ModelEvent } from './model.js'
+import type { AgentErrorEnvelope, ModelEvent } from './model.js'
 
 export type JSONValue = string | number | boolean | null | JSONValue[] | { [k: string]: JSONValue }
 export type JSONObject = Record<string, JSONValue>
@@ -11,6 +11,12 @@ export interface InvalidToolArguments {
 }
 
 
+export type ImageMediaType = 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif'
+
+export type ImageSource =
+  | { kind: 'url'; url: string }
+  | { kind: 'base64'; data: string }
+
 export interface Message {
   role: 'user' | 'assistant' | 'tool'
   content: MessageContent[]
@@ -18,6 +24,7 @@ export interface Message {
 
 export type MessageContent =
   | { type: 'text'; text: string }
+  | { type: 'image'; mediaType: ImageMediaType; source: ImageSource }
   | { type: 'tool_use'; id: string; name: string; input: unknown; invalidArguments?: InvalidToolArguments }
   | { type: 'tool_result'; tool_use_id: string; content: string; is_error?: boolean }
 
@@ -25,6 +32,14 @@ export type TaskResult =
   | { status: 'success'; result: string }
   | { status: 'error'; reason: string; retryable?: boolean }
   | { status: 'interrupted'; checkpointId: string }
+
+/** #237: absolute deadline + caller AbortSignal for one invoke(). */
+export interface RunControlOptions {
+  /** Epoch milliseconds; must be greater than run-start time. */
+  deadlineAt?: number
+  /** Caller-initiated cancel; not serialized into trace. */
+  signal?: AbortSignal
+}
 
 export interface AgentInvokeRequest {
   agentId: string
@@ -36,8 +51,8 @@ export interface AgentInvokeRequest {
   variables?: Record<string, JSONValue>
   /** When provided, the run streams token-level ModelEvents to this callback. */
   onModelEvent?: (e: ModelEvent) => void
-  /** Absolute deadline and caller cancellation signal for this invocation. */
-  control?: IOInvocationControl
+  /** #237: run-level deadline / cancellation control. */
+  control?: RunControlOptions
   /**
    * #247: this-run deliverable contract. Key present (including `[]`) replaces
    * the agent default wholesale. Key omitted → agent default, or no contract.

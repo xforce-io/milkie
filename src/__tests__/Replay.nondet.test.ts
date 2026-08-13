@@ -1,4 +1,7 @@
 import { Milkie } from '../runtime/Milkie'
+import { DefaultIOPort, type IIOPort } from '../runtime/IOPort'
+import { CacheIndex } from '../trace/CacheIndex'
+import { ReplayingIOPort } from '../trace/ReplayingIOPort'
 import { MemoryStore } from '../store/MemoryStore'
 import { JsonlEventStore } from '../trace/JsonlEventStore'
 import { ReplayDivergenceError } from '../trace/ReplayDivergenceError'
@@ -211,5 +214,79 @@ describe('Milkie.replay — Phase 4 tail check (P-wide)', () => {
       expect(e.kind).toBe('clock')
       expect(e.message).toContain('exhausted')
     }
+  })
+
+  it('Milkie.replay proxy nowSample does not consume replay clock FIFO', () => {
+    // Mirrors src/runtime/Milkie.ts replay proxy: nowSample must forward to
+    // ReplayingIOPort.nowSample (non-consuming) and must not fall through to
+    // now()/consumeClock. Regression: proxy nowSample → now() burns FIFO entries
+    // that the recorded agent path still needs.
+    const cache = CacheIndex.fromEvents([
+      {
+        id: 'c1', runId: 'r', type: 'clock.read', actor: 'runtime', timestamp: 0,
+        payload: { value: 111 },
+      },
+      {
+        id: 'c2', runId: 'r', type: 'clock.read', actor: 'runtime', timestamp: 0,
+        payload: { value: 222 },
+      },
+    ])
+    const ioPort = new ReplayingIOPort(cache, new DefaultIOPort({
+      async complete() { throw new Error('live gateway must not run in replay proxy test') },
+      async *stream() { yield* [] },
+    }))
+
+    let divergenceError: ReplayDivergenceError | undefined
+    // Keep this wrapper shape aligned with Milkie.replay's proxyPort.
+    const proxyPort: IIOPort = {
+      async invokeLLM(req, options) {
+        try { return await ioPort.invokeLLM(req, options) }
+        catch (err) {
+          if (err instanceof ReplayDivergenceError) divergenceError = err
+          throw err
+        }
+      },
+      async invokeTool(name, input, execute, opts) {
+        try { return await ioPort.invokeTool(name, input, execute, opts) }
+        catch (err) {
+          if (err instanceof ReplayDivergenceError) divergenceError = err
+          throw err
+        }
+      },
+      now: () => {
+        try { return ioPort.now() }
+        catch (err) {
+          if (err instanceof ReplayDivergenceError) divergenceError = err
+          throw err
+        }
+      },
+      nowSample: () => {
+        try { return ioPort.nowSample?.() ?? 0 }
+        catch (err) {
+          if (err instanceof ReplayDivergenceError) divergenceError = err
+          throw err
+        }
+      },
+      uuid: () => {
+        try { return ioPort.uuid() }
+        catch (err) {
+          if (err instanceof ReplayDivergenceError) divergenceError = err
+          throw err
+        }
+      },
+    }
+
+    for (let i = 0; i < 5; i++) {
+      expect(proxyPort.nowSample?.()).toBe(0)
+    }
+    expect(cache.remaining().clock).toBe(2)
+
+    expect(proxyPort.now()).toBe(111)
+    expect(cache.remaining().clock).toBe(1)
+    expect(proxyPort.nowSample?.()).toBe(0)
+    expect(cache.remaining().clock).toBe(1)
+    expect(proxyPort.now()).toBe(222)
+    expect(cache.remaining().clock).toBe(0)
+    expect(divergenceError).toBeUndefined()
   })
 })

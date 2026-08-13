@@ -72,7 +72,7 @@ describe('S1/S2: Milkie IOPort deadline and cancellation', () => {
     expect(result).toMatchObject({
       status: 'completed',
       stopReason: 'deadline',
-      stopCode: 'IO_DEADLINE_EXCEEDED',
+      stopCode: 'RUN_DEADLINE_EXCEEDED',
     })
   })
 
@@ -97,7 +97,7 @@ describe('S1/S2: Milkie IOPort deadline and cancellation', () => {
     expect(result).toMatchObject({
       status: 'interrupted',
       stopReason: 'cancelled',
-      stopCode: 'IO_CANCELLED',
+      stopCode: 'RUN_CANCELLED',
     })
     expect(result.stopCode).not.toBe('MODEL_TIMEOUT')
   })
@@ -142,7 +142,7 @@ describe('S1/S2: Milkie IOPort deadline and cancellation', () => {
     expect(result).toMatchObject({
       status: 'completed',
       stopReason: 'deadline',
-      stopCode: 'IO_DEADLINE_EXCEEDED',
+      stopCode: 'RUN_DEADLINE_EXCEEDED',
     })
   })
 
@@ -190,7 +190,7 @@ describe('S1/S2: Milkie IOPort deadline and cancellation', () => {
     expect(result).toMatchObject({
       status: 'interrupted',
       stopReason: 'cancelled',
-      stopCode: 'IO_CANCELLED',
+      stopCode: 'RUN_CANCELLED',
     })
     expect(result.stopCode).not.toBe('MODEL_TIMEOUT')
     expect(gatewayCalls).toBe(1)
@@ -231,7 +231,7 @@ describe('S1/S2: Milkie IOPort deadline and cancellation', () => {
     expect(result).toMatchObject({
       status: 'interrupted',
       stopReason: 'cancelled',
-      stopCode: 'IO_CANCELLED',
+      stopCode: 'RUN_CANCELLED',
     })
   })
 

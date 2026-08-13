@@ -65,10 +65,14 @@ export type {
 // Built-in tools
 export { cognitiveTools } from './tools/cognitive.js'
 export { systemTools } from './tools/system.js'
+export { BUILTIN_TOOL_NAMES, resolveEffectiveBuiltinTools } from './tools/builtinTools.js'
+export { RunControl, RunControlError } from './runtime/RunControl.js'
 
 // Types
 export type {
   AgentConfig,
+  BuiltinToolName,
+  BuiltinToolPolicy,
   FSMDefinition,
   FSMState,
   ModelConfig,
@@ -90,6 +94,9 @@ export type {
   TaskResult,
   Message,
   MessageContent,
+  ImageMediaType,
+  ImageSource,
+  RunControlOptions,
   JSONSchema,
 } from './types/common.js'
 
@@ -140,6 +147,8 @@ export type {
   ModelErrorCode,
   ModelErrorEnvelope,
   ModelErrorPhase,
+  ModelCapabilities,
+  ModelGatewayCallOptions,
   AgentErrorEnvelope,
   GatewayInvocationOptions,
   IOControlErrorCode,
@@ -148,6 +157,8 @@ export type {
   IOInvocationControl,
   LlmInvocationFailureEnvelope,
   ToolSchema,
+  RunDeadlineExceededErrorEnvelope,
+  RunCancelledErrorEnvelope,
 } from './types/model.js'
 
 // #229: LLM failure replay public errors

@@ -2,21 +2,31 @@ import Anthropic from '@anthropic-ai/sdk'
 import type {
   GatewayInvocationOptions,
   IModelGateway,
-  ModelEvent,
+  ModelCapabilities,
+  ModelGatewayCallOptions,
   ModelRequest,
   ModelResponse,
+  ModelEvent,
   ModelUsage,
 } from '../types/model.js'
 import type { Message, MessageContent } from '../types/common.js'
 import type { ToolCall } from '../types/tool.js'
+import { assertImageRequestSupported } from './imageContent.js'
+import { normalizeModelGatewayError } from './ModelGatewayError.js'
 
 export interface AnthropicAdapterOptions {
   apiKey?:  string
   baseUrl?: string
+  /**
+   * #236: explicit capabilities. imageInput is fail-closed — only `true` enables
+   * vision; omitted/undefined/false reject image parts (same as DefaultIOPort).
+   */
+  capabilities?: ModelCapabilities
 }
 
 export class AnthropicAdapter implements IModelGateway {
   private readonly client: Anthropic
+  readonly capabilities: ModelCapabilities
 
   // Cross-event state for streaming tool_use: maps a content block `index` to
   // its tool call id and accumulating partial_json buffer (Anthropic splits
@@ -24,36 +34,55 @@ export class AnthropicAdapter implements IModelGateway {
   private streamTools: Map<number, { id: string; buf: string }> = new Map()
 
   constructor(options: AnthropicAdapterOptions = {}) {
+    this.capabilities = {
+      // Fail closed: require explicit imageInput:true (never infer from provider).
+      imageInput: options.capabilities?.imageInput === true,
+    }
     this.client = new Anthropic({
       apiKey:  options.apiKey ?? process.env['ANTHROPIC_API_KEY'],
       baseURL: options.baseUrl,
     })
   }
 
-  async complete(request: ModelRequest, options?: GatewayInvocationOptions): Promise<ModelResponse> {
-    const params = this.buildParams(request)
-    const raw = await (this.client.messages.create as (
-      p: unknown,
-      options?: GatewayInvocationOptions,
-    ) => Promise<Anthropic.Message>)({
-      ...params,
-      stream: false,
-    }, options?.signal ? { signal: options.signal } : undefined)
-
-    return this.parseResponse(raw as Anthropic.Message)
+  private guardImageRequest(request: ModelRequest): void {
+    assertImageRequestSupported(request, this.capabilities, {
+      provider: 'anthropic',
+      model: request.model,
+    })
   }
 
-  async *stream(request: ModelRequest, options?: GatewayInvocationOptions): AsyncIterable<ModelEvent> {
+  async complete(request: ModelRequest, opts?: ModelGatewayCallOptions | GatewayInvocationOptions): Promise<ModelResponse> {
+    this.guardImageRequest(request)
     const params = this.buildParams(request)
-    const stream = (this.client.messages.stream as (
-      p: unknown,
-      options?: GatewayInvocationOptions,
-    ) => AsyncIterable<unknown>)(params, options?.signal ? { signal: options.signal } : undefined)
+    try {
+      const raw = await (this.client.messages.create as (p: unknown, o?: { signal?: AbortSignal }) => Promise<Anthropic.Message>)(
+        { ...params, stream: false },
+        opts?.signal ? { signal: opts.signal } : undefined,
+      )
+      return this.parseResponse(raw as Anthropic.Message)
+    } catch (error) {
+      throw normalizeModelGatewayError(error, {
+        provider: 'anthropic', model: request.model, phase: 'request',
+      })
+    }
+  }
+
+  async *stream(request: ModelRequest, opts?: ModelGatewayCallOptions | GatewayInvocationOptions): AsyncIterable<ModelEvent> {
+    this.guardImageRequest(request)
+    const params = this.buildParams(request)
     this.streamTools.clear()
     try {
+      const stream = (this.client.messages.stream as (p: unknown, o?: { signal?: AbortSignal }) => AsyncIterable<unknown>)(
+        params,
+        opts?.signal ? { signal: opts.signal } : undefined,
+      )
       for await (const event of stream) {
         yield* this.parseStreamEvent(event)
       }
+    } catch (error) {
+      throw normalizeModelGatewayError(error, {
+        provider: 'anthropic', model: request.model, phase: 'stream_open',
+      })
     } finally {
       this.streamTools.clear()
     }
@@ -124,6 +153,22 @@ export class AnthropicAdapter implements IModelGateway {
         }
         if (c.type === 'text') {
           return { type: 'text', text: c.text }
+        }
+        if (c.type === 'image') {
+          if (c.source.kind === 'url') {
+            return {
+              type: 'image',
+              source: { type: 'url', url: c.source.url },
+            }
+          }
+          return {
+            type: 'image',
+            source: {
+              type: 'base64',
+              media_type: c.mediaType,
+              data: c.source.data,
+            },
+          }
         }
         return c
       })

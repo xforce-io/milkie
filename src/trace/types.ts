@@ -177,6 +177,11 @@ export interface AgentRunStartedPayload {
    * from the event log alone — no separate, non-atomic by-context index.
    */
   previousRunId?: string
+  /**
+   * #235: sorted effective built-in tool names for this run (audit summary only;
+   * never the execution authority — ToolRegistry is).
+   */
+  builtinTools?: string[]
 }
 
 export interface AgentRunCompletedPayload {

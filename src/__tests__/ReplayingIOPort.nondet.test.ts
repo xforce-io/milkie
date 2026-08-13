@@ -61,4 +61,23 @@ describe('ReplayingIOPort — nondet consumption', () => {
       expect(e.kind).toBe('uuid')
     }
   })
+
+  it('nowSample does not consume the clock FIFO', () => {
+    // #237: infrastructure samples must not dequeue recorded clock.read values.
+    // Consuming here would desync agent-observable now() and fail P-wide replay.
+    const cache = CacheIndex.fromEvents([clockEvent(111, 'c3'), clockEvent(222, 'c4')])
+    const port  = new ReplayingIOPort(cache, new ExplodingInnerPort())
+
+    expect(port.nowSample()).toBe(0)
+    expect(port.nowSample()).toBe(0)
+    expect(cache.remaining().clock).toBe(2)
+
+    expect(port.now()).toBe(111)
+    expect(cache.remaining().clock).toBe(1)
+    expect(port.nowSample()).toBe(0)
+    expect(cache.remaining().clock).toBe(1)
+
+    expect(port.now()).toBe(222)
+    expect(cache.remaining().clock).toBe(0)
+  })
 })

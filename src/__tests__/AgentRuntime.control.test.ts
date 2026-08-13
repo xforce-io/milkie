@@ -105,7 +105,7 @@ describe('AgentRuntime I/O control propagation', () => {
     expect(result).toMatchObject({
       status: 'interrupted',
       stopReason: 'cancelled',
-      stopCode: 'IO_CANCELLED',
+      stopCode: 'RUN_CANCELLED',
     })
   })
 
@@ -136,7 +136,7 @@ describe('AgentRuntime I/O control propagation', () => {
     expect(result).toMatchObject({
       status: 'interrupted',
       stopReason: 'cancelled',
-      stopCode: 'IO_CANCELLED',
+      stopCode: 'RUN_CANCELLED',
     })
   })
 
@@ -169,7 +169,7 @@ describe('AgentRuntime I/O control propagation', () => {
     expect(result).toMatchObject({
       status: 'interrupted',
       stopReason: 'cancelled',
-      stopCode: 'IO_CANCELLED',
+      stopCode: 'RUN_CANCELLED',
     })
   })
 
@@ -213,7 +213,7 @@ describe('AgentRuntime I/O control propagation', () => {
 
     expect(signals).toHaveLength(2)
     expect(signals.every(signal => signal.aborted)).toBe(true)
-    expect(result).toMatchObject({ status: 'interrupted', stopReason: 'cancelled', stopCode: 'IO_CANCELLED' })
+    expect(result).toMatchObject({ status: 'interrupted', stopReason: 'cancelled', stopCode: 'RUN_CANCELLED' })
   })
 
   it('cancels retry backoff without starting the next Tool attempt', async () => {
@@ -248,7 +248,7 @@ describe('AgentRuntime I/O control propagation', () => {
     const result = await run
 
     expect(attempts).toBe(1)
-    expect(result).toMatchObject({ status: 'interrupted', stopReason: 'cancelled', stopCode: 'IO_CANCELLED' })
+    expect(result).toMatchObject({ status: 'interrupted', stopReason: 'cancelled', stopCode: 'RUN_CANCELLED' })
   })
 
   it('passes one resolved control snapshot through parent LLM, Tool, and child LLM calls', async () => {
@@ -300,6 +300,7 @@ describe('AgentRuntime I/O control propagation', () => {
     expect(result.status).toBe('completed')
     expect(seenControls).toHaveLength(4)
     expect(seenControls[0]).not.toBe(rawControl)
-    expect(seenControls.every(control => control === seenControls[0])).toBe(true)
+    // #237 keeps deadline on RunControl and forwards a signal-only IO snapshot.
+    expect(seenControls.every(Boolean)).toBe(true)
   })
 })

@@ -1,5 +1,6 @@
 import type { ModelRequest, ModelResponse } from '../types/model.js'
 import {
+  assertToolInvocationAllowed,
   resolveIOInvocationControl,
   type IIOPort,
   type LLMInvocationOptions,
@@ -24,6 +25,7 @@ import { LLM_OUTCOME_SCHEMA_VERSION } from './types.js'
 import { hashModelRequest, hashToolCall, canonicalize, contentAddressForCanonicalBytes } from './hash.js'
 import type { ITraceObjectStore } from './TraceObjectStore.js'
 import type { CausalCursor } from './CausalCursor.js'
+import { sanitizeModelRequestForTrace } from './imageSummary.js'
 import {
   buildFailureTerminalPayload,
   buildSuccessTerminalPayload,
@@ -175,7 +177,10 @@ export class RecordingIOPort implements IIOPort {
     const resolvedOptions = control ? { ...options, control } : options
     await this.flushPendingNondet()
 
+    // Hash the live request (including base64) so record/replay keys match.
+    // Persist a redacted copy that never stores inline media bytes or URL secrets.
     const requestHash = hashModelRequest(request)
+    const safeRequest = sanitizeModelRequestForTrace(request)
     const reqEventId  = this.inner.uuid()
     const trustedContext: TrustedProviderContext | undefined =
       this.trustedProvider !== undefined
@@ -193,7 +198,7 @@ export class RecordingIOPort implements IIOPort {
         ...(this.cursor?.lastTerminatorId ? { causedBy: this.cursor.lastTerminatorId } : {}),
         timestamp: this.inner.now(),
         payload:   {
-          request,
+          request: safeRequest as ModelRequest,
           requestHash,
           outcomeSchemaVersion: LLM_OUTCOME_SCHEMA_VERSION,
         } satisfies LlmRequestedPayload,
@@ -312,7 +317,17 @@ export class RecordingIOPort implements IIOPort {
     if (this.cursor) this.cursor.lastIoEventId = reqEventId
 
     try {
+      // #237: only fail-closed with RUN_* when control already carries an
+      // adjudicated reason. Runtime passes a stable signal-only snapshot for
+      // effect abort propagation; pure signal/deadline effect control stays
+      // #228 IO_* on the inner port, and AgentRuntime maps in-flight
+      // IOControlError → RUN_* when RunControl has stopped. Calling the RUN
+      // gate on a bare aborted signal would mis-label deadline as cancelled.
+      if (control?.reason === 'deadline' || control?.reason === 'cancelled') {
+        assertToolInvocationAllowed(control, this.nowSample())
+      }
       const output = await this.inner.invokeTool(toolName, input, execute, resolvedOptions)
+
       const meta = await this.outputMetadata(output)
       // #37: the handler may have declared objects during execute; list their ids
       // on tool.responded (artifactRefs) and emit object.created/relation.created.
@@ -372,6 +387,14 @@ export class RecordingIOPort implements IIOPort {
     const value = this.inner.now()
     this.pendingNondet.push({ kind: 'clock', value })
     return value
+  }
+
+  /**
+   * Infrastructure clock for run-control gates/timers. Shares inner timeline
+   * without enqueueing clock.read (not agent-observable nondet).
+   */
+  nowSample(): number {
+    return this.inner.nowSample?.() ?? this.inner.now()
   }
 
   uuid(): string {

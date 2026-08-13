@@ -1,4 +1,5 @@
 import type { Event, AgentRunStartedPayload, AgentRunCompletedPayload } from './types.js'
+import type { AgentErrorEnvelope } from '../types/model.js'
 import { ReplayError } from './ReplayError.js'
 
 export interface RunSnapshot {
@@ -8,6 +9,11 @@ export interface RunSnapshot {
   contextId:      string
   parentId?:      string
   terminalStatus?: AgentRunCompletedPayload['status']
+  /** Structured terminal error from agent.run.completed, when present. */
+  terminalError?: AgentErrorEnvelope | string
+  lastTextOutput?: string
+  stopReason?: AgentRunCompletedPayload['stopReason']
+  stopCode?: string
 }
 
 /**
@@ -25,9 +31,10 @@ export function extractRunSnapshot(events: Event[]): RunSnapshot {
   const startPayload = started.payload as AgentRunStartedPayload
 
   const completed = events.find(e => e.type === 'agent.run.completed')
-  const terminalStatus = completed
-    ? (completed.payload as AgentRunCompletedPayload).status
+  const completedPayload = completed
+    ? (completed.payload as AgentRunCompletedPayload)
     : undefined
+  const terminalStatus = completedPayload?.status
 
   return {
     agentId:        startPayload.agentId,
@@ -36,5 +43,11 @@ export function extractRunSnapshot(events: Event[]): RunSnapshot {
     contextId:      startPayload.contextId,
     parentId:       startPayload.parentId,
     terminalStatus,
+    ...(completedPayload?.error !== undefined ? { terminalError: completedPayload.error } : {}),
+    ...(completedPayload?.lastTextOutput !== undefined
+      ? { lastTextOutput: completedPayload.lastTextOutput }
+      : {}),
+    ...(completedPayload?.stopReason ? { stopReason: completedPayload.stopReason } : {}),
+    ...(completedPayload?.stopCode ? { stopCode: completedPayload.stopCode } : {}),
   }
 }

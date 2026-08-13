@@ -12,6 +12,9 @@ import {
 import type { InvalidToolArguments } from '../types/common.js'
 import type { LineageBuffer } from '../trace/types.js'
 import { aggregateStream } from '../gateway/StreamAggregator.js'
+import { assertImageRequestSupported } from '../gateway/imageContent.js'
+import { RunControlError } from './RunControl.js'
+
 
 /**
  * IOPort — the Agent Runtime's declared boundary for non-deterministic
@@ -61,6 +64,9 @@ export interface ToolInvocationOptions {
  * Validate and snapshot public invocation control before any asynchronous or
  * effectful work. Passing an already-resolved snapshot is intentionally
  * idempotent so decorators preserve one object across the whole call graph.
+ *
+ * #237: `reason` is preserved so final tool gates can rethrow the adjudicated
+ * RunControl stop without a fresh clock sample.
  */
 export function resolveIOInvocationControl(
   control?: IOInvocationControl,
@@ -75,6 +81,7 @@ export function resolveIOInvocationControl(
   return Object.freeze({
     ...(control.signal ? { signal: control.signal } : {}),
     ...(control.deadlineAt !== undefined ? { deadlineAt: control.deadlineAt } : {}),
+    ...(control.reason !== undefined ? { reason: control.reason } : {}),
     [RESOLVED_IO_CONTROL]: true as const,
   })
 }
@@ -84,6 +91,9 @@ export function assertIOInvocationControl(
   operation: IOControlOperation,
   now = Date.now(),
 ): void {
+  if (control?.reason === 'deadline' || control?.reason === 'cancelled') {
+    throw new RunControlError(control.reason)
+  }
   if (control?.signal?.aborted) {
     throw new IOControlError('IO_CANCELLED', operation)
   }
@@ -92,12 +102,12 @@ export function assertIOInvocationControl(
   }
 }
 
-function scheduleDeadline(deadlineAt: number, onDeadline: () => void): () => void {
+function scheduleDeadline(deadlineAt: number, onDeadline: () => void, nowFn: () => number = Date.now): () => void {
   let timer: ReturnType<typeof setTimeout> | undefined
   let cancelled = false
   const schedule = () => {
     if (cancelled) return
-    const remaining = deadlineAt - Date.now()
+    const remaining = deadlineAt - nowFn()
     if (remaining <= 0) {
       onDeadline()
       return
@@ -120,8 +130,9 @@ function invokeControlled<T>(
   operation: IOControlOperation,
   control: ResolvedIOInvocationControl | undefined,
   execute: ControlledExecution<T>,
+  nowFn: () => number = Date.now,
 ): Promise<T> {
-  assertIOInvocationControl(control, operation)
+  assertIOInvocationControl(control, operation, nowFn())
   if (!control?.signal && control?.deadlineAt === undefined) {
     return execute(NEVER_ABORTED_SIGNAL, () => false)
   }
@@ -143,6 +154,10 @@ function invokeControlled<T>(
       latched = true
       cleanup()
       effectiveController.abort()
+      if (control.reason === 'deadline' || control.reason === 'cancelled') {
+        reject(new RunControlError(control.reason))
+        return
+      }
       reject(new IOControlError(code, operation))
     }
     const settleSuccess = (value: T) => {
@@ -166,6 +181,7 @@ function invokeControlled<T>(
       cancelDeadline = scheduleDeadline(
         control.deadlineAt,
         () => settleControl('IO_DEADLINE_EXCEEDED'),
+        nowFn,
       )
     }
     if (latched) return
@@ -197,20 +213,32 @@ export function waitWithIOInvocationControl(
       cancelDeadline?.()
       control.signal?.removeEventListener('abort', onCallerAbort)
     }
-    const settle = (error?: IOControlError) => {
+    const settle = (error?: IOControlError | RunControlError) => {
       if (settled) return
       settled = true
       cleanup()
       if (error) reject(error)
       else resolve()
     }
-    const onCallerAbort = () => settle(new IOControlError('IO_CANCELLED', operation))
+    const onCallerAbort = () => {
+      if (control.reason === 'deadline' || control.reason === 'cancelled') {
+        settle(new RunControlError(control.reason))
+        return
+      }
+      settle(new IOControlError('IO_CANCELLED', operation))
+    }
 
     control.signal?.addEventListener('abort', onCallerAbort, { once: true })
     if (control.deadlineAt !== undefined) {
       cancelDeadline = scheduleDeadline(
         control.deadlineAt,
-        () => settle(new IOControlError('IO_DEADLINE_EXCEEDED', operation)),
+        () => {
+          if (control.reason === 'deadline' || control.reason === 'cancelled') {
+            settle(new RunControlError(control.reason))
+            return
+          }
+          settle(new IOControlError('IO_DEADLINE_EXCEEDED', operation))
+        },
       )
     }
     if (settled) return
@@ -231,7 +259,19 @@ export interface IIOPort {
     options?: ToolInvocationOptions,
   ): Promise<unknown>
 
+  /** Current epoch milliseconds. Replacement for direct `Date.now()`. */
   now(): number
+
+  /**
+   * Infrastructure clock sample sharing now()'s timeline without agent-observable
+   * nondet side effects. Recording ports must not emit clock.read; replay ports
+   * must not consume the recorded clock queue. Used by run-control final gates
+   * and segmented deadline timers. Optional for backward-compatible custom ports
+   * — callers may fall back to now() when absent.
+   */
+  nowSample?(): number
+
+  /** A new UUID. Replacement for direct `uuid()`. */
   uuid(): string
 }
 
@@ -242,6 +282,12 @@ export class DefaultIOPort implements IIOPort {
     request: ModelRequest,
     options?: LLMInvocationOptions,
   ): Promise<ModelResponse> {
+    // #236: fail-closed for custom / undeclared gateways. Adapters also guard,
+    // but every live LLM call must pass this I/O boundary before complete/stream.
+    assertImageRequestSupported(request, this.gateway.capabilities, {
+      provider: 'gateway',
+      model: request.model,
+    })
     const control = resolveIOInvocationControl(options?.control)
     return invokeControlled('llm', control, async (signal, isLatched) => {
       const gatewayOptions = signal === NEVER_ABORTED_SIGNAL ? undefined : { signal }
@@ -263,14 +309,62 @@ export class DefaultIOPort implements IIOPort {
     options?: ToolInvocationOptions,
   ): Promise<unknown> {
     const control = resolveIOInvocationControl(options?.control)
-    return invokeControlled('tool', control, async signal => execute(signal))
+    const now = this.nowSample()
+    assertToolInvocationAllowed(control, now)
+    return invokeControlled('tool', control, async signal => execute(signal), () => this.nowSample())
   }
+
 
   now(): number {
     return Date.now()
   }
 
+  nowSample(): number {
+    return this.now()
+  }
+
   uuid(): string {
     return uuidv4()
+  }
+}
+
+/**
+ * #237: last-chance gate immediately before a tool handler thunk starts.
+ * Uses the invocation control snapshot (signal + absolute deadlineAt + optional
+ * adjudicated reason) and an optional IOPort clock sample for deadline
+ * comparison — never ambient Date.now() — so virtual/custom clocks stay
+ * consistent with RunControl.
+ *
+ * Precedence:
+ *   1. control.reason when RunControl already tripped
+ *   2. deadlineAt vs `now` when a clock sample is provided
+ *   3. signal.aborted → cancelled
+ *
+ * Ports that own a clock (DefaultIOPort / RecordingIOPort) MUST pass `now` via
+ * nowSample()/inner clock. Runtime execute thunks MUST also pass a sample from
+ * the run's IOPort clock (prefer nowSample so Recording does not log clock.read;
+ * replay never re-enters execute). Omitting `now` only checks reason/signal and
+ * is insufficient against virtual-clock deadline bypass.
+ *
+ * @param control run-level cancel/deadline snapshot (optional)
+ * @param now     epoch ms from IIOPort.nowSample()/now() at the gate instant (optional)
+ */
+export function assertToolInvocationAllowed(
+  control?: IOInvocationControl,
+  now?: number,
+): void {
+  if (!control) return
+  if (control.reason === 'deadline' || control.reason === 'cancelled') {
+    throw new RunControlError(control.reason)
+  }
+  if (control.signal?.aborted) {
+    throw new IOControlError('IO_CANCELLED', 'tool')
+  }
+  const pastDeadline = control.deadlineAt !== undefined
+    && Number.isFinite(control.deadlineAt)
+    && now !== undefined
+    && now >= control.deadlineAt
+  if (pastDeadline) {
+    throw new IOControlError('IO_DEADLINE_EXCEEDED', 'tool')
   }
 }

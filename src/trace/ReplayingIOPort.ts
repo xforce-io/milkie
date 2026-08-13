@@ -16,6 +16,11 @@ import { ReplayDivergenceError } from './ReplayDivergenceError.js'
  * clock/uuid by FIFO position. Cache miss → ReplayDivergenceError.
  * `inner` is retained for type contract symmetry with RecordingIOPort but is
  * never called during replay; touching it from this class is a bug.
+ *
+ * #237: control is accepted for interface parity. Replay still serves recorded
+ * terminal I/O and does not re-issue live provider calls; assertIO only rejects
+ * already-tripped cancel/deadline snapshots before cache lookup for contract
+ * parity with live ports.
  */
 export class ReplayingIOPort implements IIOPort {
   constructor(
@@ -82,6 +87,15 @@ export class ReplayingIOPort implements IIOPort {
       }
       throw err
     }
+  }
+
+  /**
+   * Infrastructure sample for run-control final gates / timers. Replay does not
+   * re-adjudicate live deadlines; return 0 without consuming the clock queue so
+   * extra gate samples cannot desync recorded nondet.
+   */
+  nowSample(): number {
+    return 0
   }
 
   uuid(): string {

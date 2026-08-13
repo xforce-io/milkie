@@ -12,6 +12,7 @@ import type {
   ContextProjection,
   JSONValue,
   Message,
+  RunControlOptions,
 } from '../types/common.js'
 import type { ChildAgentRecord, IStateStore, AgentCheckpoint } from '../types/store.js'
 import type { ToolDefinition } from '../types/tool.js'
@@ -332,9 +333,8 @@ export class Milkie {
       messages:    request.messages,
       temperature: request.temperature,
     }
-    return onEvent
-      ? aggregateStream(gateway.stream(req), onEvent)
-      : gateway.complete(req)
+    // #236: public model entry shares DefaultIOPort capability fail-closed gate.
+    return new DefaultIOPort(gateway).invokeLLM(req, onEvent ? { onEvent } : undefined)
   }
 
   /**
@@ -475,7 +475,6 @@ export class Milkie {
       stateStore:      this.stateStore,
       recorder,
       ioPort,
-      control,
       eventStore:      this.eventStore ?? undefined,
       traceObjectStore: this.traceObjectStore ?? undefined,
       extraTools:      this.extraTools,
@@ -485,6 +484,7 @@ export class Milkie {
       causalCursor,
       ...(previousRunId ? { previousRunId } : {}),
       ...(request.onModelEvent ? { onModelEvent: request.onModelEvent } : {}),
+      ...(request.control ? { control: request.control } : {}),
       invokeDeliverablesSpecified: Object.prototype.hasOwnProperty.call(request, 'deliverables'),
       ...(Object.prototype.hasOwnProperty.call(request, 'deliverables')
         ? { invokeDeliverables: request.deliverables }
@@ -502,6 +502,8 @@ export class Milkie {
       input:     request.input,
       contextId,
       ...(previousRunId ? { previousRunId } : {}),
+      // #235: audit-only summary of the effective built-in set for this run.
+      builtinTools: [...runtime.getEffectiveBuiltinTools()].sort(),
     })
 
     // #79：每 invoke 一条服务日志 wide event（边界汇总，设计 §5）。
@@ -537,9 +539,9 @@ export class Milkie {
     agentId: string,
     goal: string,
     input: string,
-    opts?: { onModelEvent?: (e: ModelEvent) => void; control?: IOInvocationControl },
+    opts?: { onModelEvent?: (e: ModelEvent) => void; control?: RunControlOptions },
   ): Promise<AgentResult> {
-    const control = resolveIOInvocationControl(opts?.control)
+    if (opts?.control) resolveIOInvocationControl(opts.control)
     const config = this.agents.get(agentId)
     if (!config) {
       throw new Error(`Agent not found: "${agentId}". Call registerAgent() or loadAgentFile() first.`)
@@ -591,7 +593,7 @@ export class Milkie {
       stateStore: this.stateStore,
       recorder,
       ioPort:          this.wrapIOPort(gateway, agentRunId, causalCursor, this.trustedProviderFamily(config)),
-      control,
+      ...(opts?.control ? { control: opts.control } : {}),
       eventStore:      this.eventStore ?? undefined,
       traceObjectStore: this.traceObjectStore ?? undefined,
       extraTools:      this.extraTools,
@@ -663,6 +665,44 @@ export class Milkie {
       throw new ReplayError(`agentId "${snapshot.agentId}" not registered on this Milkie instance`)
     }
 
+    // #237: recorded cancel/deadline terminals are lifecycle outcomes, not live
+    // control. Project them without re-arming wall-clock deadline or live I/O.
+    const recordedStop = snapshot.stopReason === 'deadline' || snapshot.stopReason === 'cancelled'
+      || snapshot.stopCode === 'RUN_DEADLINE_EXCEEDED' || snapshot.stopCode === 'RUN_CANCELLED'
+    const recordedTerminalError = snapshot.terminalError
+    const recordedErrorCode =
+      recordedTerminalError
+      && typeof recordedTerminalError === 'object'
+      && 'code' in recordedTerminalError
+        ? recordedTerminalError.code
+        : undefined
+    if (
+      recordedStop
+      || recordedErrorCode === 'RUN_CANCELLED'
+      || recordedErrorCode === 'RUN_DEADLINE_EXCEEDED'
+    ) {
+      const code = snapshot.stopCode
+        ?? (recordedErrorCode === 'RUN_DEADLINE_EXCEEDED' || recordedErrorCode === 'RUN_CANCELLED'
+          ? recordedErrorCode
+          : snapshot.stopReason === 'deadline' ? 'RUN_DEADLINE_EXCEEDED' : 'RUN_CANCELLED')
+      const message = typeof recordedTerminalError === 'object' && recordedTerminalError && 'message' in recordedTerminalError
+        ? String(recordedTerminalError.message)
+        : code === 'RUN_DEADLINE_EXCEEDED'
+          ? 'Run deadline exceeded'
+          : 'Run cancelled by caller'
+      const cancelled = code === 'RUN_CANCELLED' || code === 'IO_CANCELLED'
+      return {
+        agentRunId: runId,
+        contextId:  snapshot.contextId,
+        output:     snapshot.lastTextOutput ?? message,
+        status:     cancelled ? 'interrupted' : 'completed',
+        stopReason: cancelled ? 'cancelled' : 'deadline',
+        stopCode:   code,
+        partial:    true,
+        artifacts:  [],
+      }
+    }
+
     const cache  = CacheIndex.fromEvents(events)
     const inner  = new DefaultIOPort(this.resolveGateway(config))
     const ioPort = new ReplayingIOPort(cache, inner)
@@ -697,6 +737,13 @@ export class Milkie {
       },
       now: () => {
         try { return ioPort.now() }
+        catch (err) {
+          if (err instanceof ReplayDivergenceError) divergenceError = err
+          throw err
+        }
+      },
+      nowSample: () => {
+        try { return ioPort.nowSample?.() ?? 0 }
         catch (err) {
           if (err instanceof ReplayDivergenceError) divergenceError = err
           throw err
@@ -1282,24 +1329,40 @@ export class Milkie {
       throw new Error('Agent config fsm.max_tool_calls must be a non-negative integer')
     }
 
-    const model = data['model'] as Record<string, string> | undefined
-    if (model && (!model.provider || !model.model || !model.adapter)) {
-      throw new Error('Agent config model must have provider, model, adapter')
+    const parseModelConfig = (m: Record<string, unknown>, label: string) => {
+      if (!m || typeof m['provider'] !== 'string' || typeof m['model'] !== 'string' || typeof m['adapter'] !== 'string') {
+        throw new Error(`${label} must have provider, model, adapter`)
+      }
+      const capsRaw = m['capabilities']
+      let capabilities: { imageInput?: boolean } | undefined
+      if (capsRaw !== undefined) {
+        if (!capsRaw || typeof capsRaw !== 'object' || Array.isArray(capsRaw)) {
+          throw new Error(`${label}.capabilities must be an object`)
+        }
+        const img = (capsRaw as Record<string, unknown>)['imageInput']
+        if (img !== undefined && typeof img !== 'boolean') {
+          throw new Error(`${label}.capabilities.imageInput must be a boolean`)
+        }
+        capabilities = img === undefined ? {} : { imageInput: img }
+      }
+      return {
+        provider: m['provider'] as string,
+        model:    m['model'] as string,
+        adapter:  m['adapter'] as string,
+        baseUrl:  m['baseUrl'] as string | undefined,
+        options:  m['options'] as Record<string, unknown> | undefined,
+        ...(capabilities ? { capabilities } : {}),
+      }
     }
 
+    const modelRaw = data['model'] as Record<string, unknown> | undefined
+    const model = modelRaw ? parseModelConfig(modelRaw, 'Agent config model') : undefined
+
     // #126: open named model tiers. Each tier is validated like the default model.
-    const rawModels = data['models'] as Record<string, Record<string, string>> | undefined
+    const rawModels = data['models'] as Record<string, Record<string, unknown>> | undefined
     const models = rawModels
       ? Object.fromEntries(Object.entries(rawModels).map(([tier, m]) => {
-          if (!m || !m.provider || !m.model || !m.adapter) {
-            throw new Error(`Agent config models.${tier} must have provider, model, adapter`)
-          }
-          return [tier, {
-            provider: m['provider']!,
-            model:    m['model']!,
-            adapter:  m['adapter']!,
-            baseUrl:  m['baseUrl'] as string | undefined,
-          }]
+          return [tier, parseModelConfig(m, `Agent config models.${tier}`)]
         }))
       : undefined
 
@@ -1308,23 +1371,37 @@ export class Milkie {
       (data['id']      as string | undefined)
     if (!agentId) throw new Error('Agent config must have agentId or id')
 
+    // #235: optional built-in tool allowlist from frontmatter.
+    const rawBuiltin = data['builtinTools'] as { allow?: unknown } | undefined
+    let builtinTools: { allow: string[] } | undefined
+    if (rawBuiltin !== undefined) {
+      if (!rawBuiltin || typeof rawBuiltin !== 'object' || !Array.isArray(rawBuiltin.allow)) {
+        throw new Error('AgentConfig.builtinTools.allow must be an array of built-in tool names')
+      }
+      // Full unknown/duplicate validation happens at runtime resolve; keep names here.
+      builtinTools = {
+        allow: rawBuiltin.allow.map((n, i) => {
+          if (typeof n !== 'string' || n.length === 0) {
+            throw new Error(`AgentConfig.builtinTools.allow[${i}] must be a non-empty string`)
+          }
+          return n
+        }),
+      }
+    }
+
     return {
       agentId,
       version:      (data['version'] as string | undefined) ?? '0.0.0',
       systemPrompt,
       fsm:          fsm as FSMDefinition,
-      model: model ? {
-        provider: model['provider']!,
-        model:    model['model']!,
-        adapter:  model['adapter']!,
-        baseUrl:  model['baseUrl'] as string | undefined,
-      } : undefined,
+      model,
       models,
       toolboxes:  data['toolboxes']  as Record<string, string> | undefined,
       skills:     data['skills']     as Record<string, string> | undefined,
       skillInstructions: data['skillInstructions'] as Record<string, string> | undefined,
       subAgents:  (data['sub_agents'] ?? data['subAgents']) as Record<string, string> | undefined,
       dispatch:   data['dispatch']   as 'local' | 'queue' | undefined,
+      ...(builtinTools ? { builtinTools } : {}),
     }
   }
 }

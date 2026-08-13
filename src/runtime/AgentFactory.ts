@@ -1,10 +1,10 @@
-import type { AgentConfig } from '../types/agent.js'
-import type { AgentInvokeRequest, AgentResult } from '../types/common.js'
+import type { AgentConfig, BuiltinToolName } from '../types/agent.js'
+import type { AgentInvokeRequest, AgentResult, RunControlOptions } from '../types/common.js'
 import type { IStateStore } from '../types/store.js'
 import type { ITrajectoryRecorder } from '../types/trajectory.js'
 import type { ToolDefinition } from '../types/tool.js'
 import type { IIOPort } from './IOPort.js'
-import type { IOInvocationControl } from '../types/model.js'
+import type { RunControl } from './RunControl.js'
 
 export interface AgentSpawnOptions {
   config:      AgentConfig
@@ -16,11 +16,16 @@ export interface AgentSpawnOptions {
   stateStore:  IStateStore
   recorder:    ITrajectoryRecorder
   ioPort:      IIOPort
-  control?:     IOInvocationControl
   causalCursor?:  import('../trace/CausalCursor.js').CausalCursor
   extraTools?:    ToolDefinition[]
   eventStore?:    import('../trace/EventStore.js').IEventStore
   makeChildPort?: import('./AgentRuntime.js').MakeChildPort
+  /** #235: parent effective built-in allowlist; child can only narrow. */
+  parentBuiltinTools?: readonly BuiltinToolName[]
+  /** #237: child-local control options (still bounded by parentRunControl). */
+  control?: RunControlOptions
+  /** #237: parent run control inheritance. */
+  parentRunControl?: RunControl
 }
 
 // Forward declaration to avoid circular import — resolved at runtime

@@ -24,6 +24,25 @@ describe('extractRunSnapshot', () => {
     }
     const snap = extractRunSnapshot([startedEvent(), completed])
     expect(snap.terminalStatus).toBe('completed')
+    expect(snap.lastTextOutput).toBe('done')
+  })
+
+  it('reads structured terminalError for RUN_CANCELLED completed payload', () => {
+    const completed: Event = {
+      id: 'e2', runId: 'r1', type: 'agent.run.completed', actor: 'runtime', timestamp: 2,
+      payload: {
+        status: 'error',
+        error: {
+          code: 'RUN_CANCELLED',
+          message: 'Run cancelled by caller',
+          phase: 'agent_loop',
+          retryable: true,
+        },
+      },
+    }
+    const snap = extractRunSnapshot([startedEvent(), completed])
+    expect(snap.terminalStatus).toBe('error')
+    expect(snap.terminalError).toMatchObject({ code: 'RUN_CANCELLED' })
   })
 
   it('throws ReplayError on empty events', () => {

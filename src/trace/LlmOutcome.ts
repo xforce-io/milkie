@@ -29,6 +29,7 @@ const MODEL_ERROR_CODES: Record<ModelErrorCode, true> = {
   MODEL_AUTH_ERROR: true,
   MODEL_BAD_RESPONSE: true,
   MODEL_UNKNOWN_ERROR: true,
+  MODEL_CAPABILITY_UNSUPPORTED: true,
 }
 const MODEL_ERROR_PHASES: Record<ModelErrorPhase, true> = {
   request: true,
