@@ -298,6 +298,7 @@ export class OpenAICompatibleAdapter implements IModelGateway {
         name: tc.function.name,
         input,
         ...(invalidArguments !== undefined ? { invalidArguments } : {}),
+        ...(invalidArguments && typeof argumentsText === 'string' ? { rawArguments: argumentsText } : {}),
       })
     }
 

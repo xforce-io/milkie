@@ -1,8 +1,25 @@
 import { v4 as uuidv4 } from 'uuid'
 import { createHash } from 'crypto'
 import type { AgentConfig, FSMState } from '../types/agent.js'
-import type { AgentResult, ContextProjection } from '../types/common.js'
+import type {
+  AgentResult,
+  ArtifactRef,
+  ContextProjection,
+  DeliverableSpec,
+  StopReason,
+} from '../types/common.js'
 import { MaxIterationsError } from '../types/common.js'
+import {
+  computePartial,
+  matchArtifacts,
+  resolveEffectiveDeliverables,
+  type ProducedRecord,
+} from './deliverables.js'
+import {
+  CONTROL_TOOL_NAMES,
+  resolveControlToolCall,
+  TOOL_EXECUTION_ERROR,
+} from './toolProtocol.js'
 import {
   IOControlError,
   LlmInvocationError,
@@ -87,6 +104,9 @@ export interface AgentRuntimeOptions {
   recorder:          ITrajectoryRecorder
   ioPort:            IIOPort
   control?:           IOInvocationControl
+  /** #247: true when invoke included the `deliverables` key (even if []). */
+  invokeDeliverablesSpecified?: boolean
+  invokeDeliverables?: DeliverableSpec[]
   /**
    * #80: optional sink for streamed `ModelEvent`s from the main LLM call.
    * When provided, the main conversation loop's invokeLLM streams and forwards
@@ -175,6 +195,10 @@ export class AgentRuntime {
   private rootSpan!:     Span
   private turnNumber:    number = 0
   private lastTextOutput: string = ''
+  private lastCheckpointId?: string
+  private readonly producedRecords: ProducedRecord[] = []
+  private extraStopCodes: string[] = []
+  private readonly effectiveContract: DeliverableSpec[] | null
   /** #30: id of the in-flight context.boundary.applied event; region.added emitted inside
    *  crystallization reads it for causedBy. Unset outside the crystallization window so
    *  agent-set region deltas (e.g. header) get no causedBy. */
@@ -206,6 +230,11 @@ export class AgentRuntime {
     this.extraTools      = opts.extraTools ?? []
     this.causalCursor    = opts.causalCursor
     this.maxToolCalls    = opts.config.fsm.max_tool_calls
+    this.effectiveContract = resolveEffectiveDeliverables(
+      opts.config.deliverables,
+      opts.invokeDeliverablesSpecified === true,
+      opts.invokeDeliverables,
+    )
 
     this.fsm     = new FSMEngine(opts.config.fsm)
     this.memory  = new WorkingMemory()
@@ -419,6 +448,15 @@ export class AgentRuntime {
         lineage.relations.push({ relationId, type: spec.type, fromObjectId: spec.fromObjectId, toObjectId: spec.toObjectId, ...(spec.meta ? { meta: spec.meta } : {}) })
         return { relationId }
       }
+    }
+    ctx.recordArtifact = spec => {
+      this.producedRecords.push({
+        type: spec.type,
+        ...(spec.path ? { path: spec.path } : {}),
+        ...(spec.objectId ? { objectId: spec.objectId } : {}),
+        ...(spec.name ? { name: spec.name } : {}),
+        ...(spec.hash ? { hash: spec.hash } : {}),
+      })
     }
     return ctx
   }
@@ -903,7 +941,67 @@ export class AgentRuntime {
   // agent.checkpoint event, plus a tiny context->runId routing pointer (an index,
   // not state). No stateStore checkpoint blob is written. Requires an eventStore:
   // without one the run cannot be resumed (events are the sole resume substrate).
+  private mergeStopCode(primary: string): string {
+    if (this.extraStopCodes.length === 0) return primary
+    return [primary, ...this.extraStopCodes].join(',')
+  }
+
+  private async ensureTerminalCheckpoint(): Promise<void> {
+    if (this.lastCheckpointId || this.fsm.isReservedTerminal()) return
+    const checkpoint = this.buildCheckpoint()
+    await this.tryFlushTraceWrites()
+    await this.persistCheckpoint(checkpoint)
+  }
+
+  private async runBudgetFinalize(): Promise<void> {
+    const hook = this.config.onBudgetFinalize
+    if (!hook) return
+    try {
+      await hook({
+        recordArtifact: artifact => {
+          this.producedRecords.push({
+            type: artifact.type,
+            ...(artifact.path ? { path: artifact.path } : {}),
+            ...(artifact.objectId ? { objectId: artifact.objectId } : {}),
+            ...(artifact.name ? { name: artifact.name } : {}),
+            ...(artifact.hash ? { hash: artifact.hash } : {}),
+          })
+        },
+      })
+    } catch {
+      this.extraStopCodes.push('FINALIZE_FAILED')
+    }
+  }
+
+  private buildAgentResult(base: {
+    status: AgentResult['status']
+    stopReason: StopReason
+    stopCode?: string
+    output: string
+    error?: AgentErrorEnvelope
+  }): AgentResult {
+    const artifacts: ArtifactRef[] = matchArtifacts(this.effectiveContract, this.producedRecords)
+    const partial = computePartial({
+      contract: this.effectiveContract,
+      artifacts,
+      stopReason: base.stopReason,
+    })
+    return {
+      agentRunId: this.agentRunId,
+      contextId: this.contextId,
+      output: base.output,
+      status: base.status,
+      stopReason: base.stopReason,
+      ...(base.stopCode ? { stopCode: base.stopCode } : {}),
+      partial,
+      ...(this.lastCheckpointId ? { checkpointId: this.lastCheckpointId } : {}),
+      artifacts,
+      ...(base.error ? { error: base.error } : {}),
+    }
+  }
+
   private async persistCheckpoint(checkpoint: AgentCheckpoint): Promise<void> {
+    this.lastCheckpointId = checkpoint.checkpointId
     if (!this.eventStore) return
     await this.eventStore.append({
       id:        uuidv4(),
@@ -987,47 +1085,78 @@ export class AgentRuntime {
         await this.persistCheckpoint(checkpoint)
       }
       this.recorder.endSpan(this.rootSpan, 'ok')
-      return {
-        agentRunId: this.agentRunId,
-        contextId:  this.contextId,
-        output:     this.lastTextOutput,
-        status:     'completed',
-      }
+      return this.buildAgentResult({
+        status: 'completed',
+        stopReason: 'model_stop',
+        output: this.lastTextOutput,
+      })
     } catch (err: unknown) {
       const isInterrupt = err instanceof Error && err.name === 'InterruptSignal'
       if (isInterrupt) {
-        // checkEvents() already signaled 'interrupt' at the interrupt point;
-        // guard so we don't double-signal a non-running lifecycle.
         if (this.lifecycle.state === 'running') this.lifecycle.signal('interrupt')
         this.recorder.endSpan(this.rootSpan, 'ok')
-        return {
-          agentRunId: this.agentRunId,
-          contextId:  this.contextId,
-          output:     this.lastTextOutput,
-          status:     'interrupted',
-        }
+        return this.buildAgentResult({
+          status: 'interrupted',
+          stopReason: 'interrupted',
+          output: this.lastTextOutput,
+        })
       }
+
+      if (err instanceof MaxIterationsError) {
+        if (this.lifecycle.state === 'running') this.lifecycle.signal('done')
+        await this.ensureTerminalCheckpoint()
+        await this.runBudgetFinalize()
+        this.recorder.endSpan(this.rootSpan, 'ok')
+        return this.buildAgentResult({
+          status: 'completed',
+          stopReason: 'budget_exhausted',
+          stopCode: this.mergeStopCode('MAX_ITERATIONS_EXCEEDED'),
+          output: this.lastTextOutput || err.message,
+        })
+      }
+
+      if (err instanceof IOControlError && err.code === 'IO_DEADLINE_EXCEEDED') {
+        if (this.lifecycle.state === 'running') this.lifecycle.signal('done')
+        await this.ensureTerminalCheckpoint()
+        await this.runBudgetFinalize()
+        this.recorder.endSpan(this.rootSpan, 'ok')
+        return this.buildAgentResult({
+          status: 'completed',
+          stopReason: 'deadline',
+          stopCode: this.mergeStopCode('IO_DEADLINE_EXCEEDED'),
+          output: this.lastTextOutput || err.message,
+        })
+      }
+
+      if (err instanceof IOControlError && err.code === 'IO_CANCELLED') {
+        if (this.lifecycle.state === 'running') this.lifecycle.signal('interrupt')
+        await this.ensureTerminalCheckpoint()
+        this.recorder.endSpan(this.rootSpan, 'ok')
+        return this.buildAgentResult({
+          status: 'interrupted',
+          stopReason: 'cancelled',
+          stopCode: 'IO_CANCELLED',
+          output: this.lastTextOutput || err.message,
+        })
+      }
+
       this.lifecycle.signal('error')
       this.recorder.endSpan(this.rootSpan, 'error')
+      await this.ensureTerminalCheckpoint()
       const structuredError: AgentErrorEnvelope | undefined = err instanceof IOControlError
         ? err.envelope
         : err instanceof LlmInvocationError
           ? err.envelope
-        : err instanceof MaxIterationsError
-          ? {
-              code:      'MAX_ITERATIONS_EXCEEDED',
-              message:   err.message,
-              phase:     'agent_loop',
-              retryable: false,
-            }
           : modelErrorEnvelope(err)
-      return {
-        agentRunId: this.agentRunId,
-        contextId:  this.contextId,
-        output:     err instanceof Error ? err.message : String(err),
-        status:     'error',
-        ...(structuredError ? { error: structuredError } : {}),
-      }
+      const output = structuredError?.message
+        ?? (err instanceof Error ? err.message : String(err))
+      return this.buildAgentResult({
+        status: 'error',
+        stopReason: 'runtime_error',
+        stopCode: structuredError?.code,
+        output,
+        error: structuredError,
+      })
     } finally {
       await this.tryFlushTraceWrites()
       await this.recorder.flush()
@@ -1361,21 +1490,37 @@ export class AgentRuntime {
 
 
       try {
+        const controlResolved = CONTROL_TOOL_NAMES.has(call.name)
+          ? resolveControlToolCall(call)
+          : undefined
+        const protocolReject = controlResolved && !controlResolved.ok ? controlResolved : undefined
+        const effectiveInput = controlResolved?.ok ? controlResolved.input : call.input
+        const invalidArgs = protocolReject
+          ? { code: protocolReject.code, message: protocolReject.message }
+          : call.invalidArguments
+
         const output   = await this.ioPort.invokeTool(
           call.name,
-          call.input,
+          effectiveInput,
           signal => {
-            if (call.invalidArguments) {
-              return Promise.reject(Object.assign(new Error(call.invalidArguments.message), {
-                code: call.invalidArguments.code,
+            if (invalidArgs) {
+              return Promise.reject(Object.assign(new Error(invalidArgs.message), {
+                code: invalidArgs.code,
               }))
             }
-            return this.registry.execute(call.name, call.input, this.buildToolContext(signal, lineage))
+            return this.registry.execute(call.name, effectiveInput, this.buildToolContext(signal, lineage))
+              .catch(handlerErr => {
+                if (CONTROL_TOOL_NAMES.has(call.name)) {
+                  const message = handlerErr instanceof Error ? handlerErr.message : String(handlerErr)
+                  throw Object.assign(new Error(message), { code: TOOL_EXECUTION_ERROR })
+                }
+                throw handlerErr
+              })
           },
           {
             toolCallId: call.id,
             lineage,
-            invalidArguments: call.invalidArguments,
+            invalidArguments: protocolReject ? undefined : call.invalidArguments,
             control: this.control,
           },
         )
@@ -1412,14 +1557,25 @@ export class AgentRuntime {
 
         if (!retryable || isLastAttempt) {
           const error = err instanceof Error ? err.message : String(err)
+          const errCode = typeof (err as { code?: unknown }).code === 'string'
+            ? (err as { code: string }).code
+            : undefined
+          const structured =
+            call.invalidArguments
+              ? { code: call.invalidArguments.code, message: call.invalidArguments.message }
+              : errCode === 'TOOL_ARGUMENTS_SCHEMA_INVALID'
+                || errCode === 'TOOL_ARGUMENTS_INVALID_JSON'
+                || errCode === TOOL_EXECUTION_ERROR
+                ? { code: errCode, message: error }
+                : CONTROL_TOOL_NAMES.has(call.name)
+                  ? { code: TOOL_EXECUTION_ERROR, message: error }
+                  : error
           this.recorder.endSpan(span, 'error')
           return {
             toolCallId: call.id,
             toolName:   call.name,
             output:     null,
-            error:      call.invalidArguments
-              ? { code: call.invalidArguments.code, message: call.invalidArguments.message }
-              : error,
+            error:      structured,
             isError:    true,
             duration,
           }

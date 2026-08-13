@@ -103,13 +103,9 @@ describe('AgentRuntime I/O control propagation', () => {
     expect(gateway.signals).toHaveLength(1)
     expect(gateway.signals[0]?.aborted).toBe(true)
     expect(result).toMatchObject({
-      status: 'error',
-      error: {
-        code: 'IO_CANCELLED',
-        phase: 'io_control',
-        operation: 'llm',
-        retryable: false,
-      },
+      status: 'interrupted',
+      stopReason: 'cancelled',
+      stopCode: 'IO_CANCELLED',
     })
   })
 
@@ -138,8 +134,9 @@ describe('AgentRuntime I/O control propagation', () => {
 
     expect(toolSignal?.aborted).toBe(true)
     expect(result).toMatchObject({
-      status: 'error',
-      error: { code: 'IO_CANCELLED', operation: 'tool' },
+      status: 'interrupted',
+      stopReason: 'cancelled',
+      stopCode: 'IO_CANCELLED',
     })
   })
 
@@ -170,8 +167,9 @@ describe('AgentRuntime I/O control propagation', () => {
 
     expect(toolSignal?.aborted).toBe(true)
     expect(result).toMatchObject({
-      status: 'error',
-      error: { code: 'IO_CANCELLED', operation: 'tool' },
+      status: 'interrupted',
+      stopReason: 'cancelled',
+      stopCode: 'IO_CANCELLED',
     })
   })
 
@@ -215,7 +213,7 @@ describe('AgentRuntime I/O control propagation', () => {
 
     expect(signals).toHaveLength(2)
     expect(signals.every(signal => signal.aborted)).toBe(true)
-    expect(result).toMatchObject({ status: 'error', error: { code: 'IO_CANCELLED', operation: 'tool' } })
+    expect(result).toMatchObject({ status: 'interrupted', stopReason: 'cancelled', stopCode: 'IO_CANCELLED' })
   })
 
   it('cancels retry backoff without starting the next Tool attempt', async () => {
@@ -250,7 +248,7 @@ describe('AgentRuntime I/O control propagation', () => {
     const result = await run
 
     expect(attempts).toBe(1)
-    expect(result).toMatchObject({ status: 'error', error: { code: 'IO_CANCELLED', operation: 'tool' } })
+    expect(result).toMatchObject({ status: 'interrupted', stopReason: 'cancelled', stopCode: 'IO_CANCELLED' })
   })
 
   it('passes one resolved control snapshot through parent LLM, Tool, and child LLM calls', async () => {

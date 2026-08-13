@@ -145,12 +145,13 @@ sys`
     }
   })
 
-  it('inspect outputs empty stdout for a runId with no events', async () => {
+  it('inspect fail-closes for a runId with no events', async () => {
     const cwdSpy = jest.spyOn(process, 'cwd').mockReturnValue(tmpDir)
     try {
       const result = await main(['trace', 'inspect', 'nonexistent'])
-      expect(result.exitCode).toBe(0)
+      expect(result.exitCode).not.toBe(0)
       expect(result.stdout).toBe('')
+      expect(JSON.parse(result.stderr).error.code).toBe('TRACE_INSPECT_INCOMPLETE')
     } finally {
       cwdSpy.mockRestore()
     }

@@ -170,6 +170,7 @@ export async function aggregateStream(
       name: acc.name,
       input,
       ...(invalidArguments !== undefined ? { invalidArguments } : {}),
+      ...(invalidArguments && acc.argsBuf ? { rawArguments: acc.argsBuf } : {}),
     })
   }
 

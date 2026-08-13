@@ -482,10 +482,19 @@ export function buildSuccessTerminalPayload(
 ): LlmRespondedPayload {
   return {
     status: 'ok',
-    response,
+    response: stripInMemoryToolFields(response),
     requestHash,
     ...(cacheStats ? { cacheStats } : {}),
   }
+}
+
+function stripInMemoryToolFields(response: ModelResponse): ModelResponse {
+  const toolCalls = response.toolCalls?.map(call => {
+    if (!('rawArguments' in call) || call.rawArguments === undefined) return call
+    const { rawArguments: _raw, ...rest } = call
+    return rest
+  })
+  return { ...response, ...(toolCalls ? { toolCalls } : {}) }
 }
 
 /** Build a v2 failure terminal payload. */

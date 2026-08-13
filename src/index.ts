@@ -74,12 +74,19 @@ export type {
   ModelConfig,
 } from './types/agent.js'
 
+export { summarizeRun, parseJsonlEvents, TraceInspectError } from './trace/summarizeRun.js'
+export type { RunSummary } from './trace/summarizeRun.js'
+
 export type {
   AgentInvokeRequest,
   AgentResult,
+  ArtifactRef,
   AttachProjectionRequest,
+  BudgetFinalizeContext,
   ContextProjection,
+  DeliverableSpec,
   ProjectionBound,
+  StopReason,
   TaskResult,
   Message,
   MessageContent,

@@ -183,6 +183,11 @@ export interface AgentRunCompletedPayload {
   status:           'completed' | 'interrupted' | 'error'
   lastTextOutput?:  string
   error?:           string | AgentErrorEnvelope
+  stopReason?:      import('../types/common.js').StopReason
+  stopCode?:        string
+  partial?:         boolean
+  checkpointId?:    string
+  artifacts?:       import('../types/common.js').ArtifactRef[]
 }
 
 export interface AgentSpawnedPayload {

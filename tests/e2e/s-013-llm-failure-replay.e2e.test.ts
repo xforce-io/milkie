@@ -120,9 +120,15 @@ describe('S1/S2: LLM failure terminals and deterministic replay (#229)', () => {
         input: c.name,
       })
 
-      expect(result.status).toBe('error')
-      expect(result.error?.code).toBe(c.code)
-      assertNoSecrets(result.error)
+      if (c.code === 'IO_CANCELLED' || c.code === 'IO_DEADLINE_EXCEEDED') {
+        expect(result.status).not.toBe('error')
+        expect(result.stopCode).toBe(c.code)
+        expect(result.stopReason).toBe(c.code === 'IO_CANCELLED' ? 'cancelled' : 'deadline')
+      } else {
+        expect(result.status).toBe('error')
+        expect(result.error?.code).toBe(c.code)
+        assertNoSecrets(result.error)
+      }
 
       const events = await eventStore.readByRunId(result.agentRunId)
       const reqs = events.filter(e => e.type === 'llm.requested')
@@ -135,8 +141,9 @@ describe('S1/S2: LLM failure terminals and deterministic replay (#229)', () => {
         status: 'error',
         error: { code: c.code },
       })
-      // live AgentResult.error matches terminal envelope
-      expect(result.error).toEqual((terms[0]!.payload as { error: unknown }).error)
+      if (result.status === 'error') {
+        expect(result.error).toEqual((terms[0]!.payload as { error: unknown }).error)
+      }
       assertNoSecrets(terms[0]!.payload)
 
       // consumers
@@ -187,9 +194,9 @@ describe('S1/S2: LLM failure terminals and deterministic replay (#229)', () => {
       live.push({ runId: result.agentRunId, error: result.error, status: result.status })
     }
     expect(gateway.calls).toBe(4)
-    expect(live.map(l => l.status)).toEqual(['completed', 'error', 'error', 'error'])
+    expect(live.map(l => l.status)).toEqual(['completed', 'error', 'interrupted', 'error'])
     expect(live[1]!.error).toMatchObject({ code: 'MODEL_AUTH_ERROR' })
-    expect(live[2]!.error).toMatchObject({ code: 'IO_CANCELLED' })
+    expect(live[2]!.error).toBeUndefined()
     expect(live[3]!.error).toMatchObject({ code: 'LLM_INVOCATION_FAILED' })
 
     // Replay each run with a counting gateway that must never be called.
@@ -214,8 +221,9 @@ describe('S1/S2: LLM failure terminals and deterministic replay (#229)', () => {
     expect(r1.error).toEqual(live[1]!.error)
 
     const r2 = await replayMilkie.replay(live[2]!.runId)
-    expect(r2.status).toBe('error')
-    expect(r2.error).toEqual(live[2]!.error)
+    expect(r2.status).toBe('interrupted')
+    expect(r2.stopReason).toBe('cancelled')
+    expect(r2.stopCode).toBe('IO_CANCELLED')
 
     const r3 = await replayMilkie.replay(live[3]!.runId)
     expect(r3.status).toBe('error')
@@ -252,7 +260,8 @@ describe('S1/S2: LLM failure terminals and deterministic replay (#229)', () => {
     await entered.promise
     controller.abort()
     const result = await invocation
-    expect(result.error?.code).toBe('IO_CANCELLED')
+    expect(result.stopCode).toBe('IO_CANCELLED')
+    expect(result.stopReason).toBe('cancelled')
     const events = await eventStore.readByRunId(result.agentRunId)
     const terms = events.filter(e => e.type === 'llm.responded')
     expect(terms).toHaveLength(1)
