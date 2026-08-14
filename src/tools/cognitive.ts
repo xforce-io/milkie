@@ -38,10 +38,12 @@ export const cognitiveTools: ToolDefinition[] = [
         steps: {
           type:  'array',
           items: { type: 'string' },
+          minItems: 1,
           description: 'Ordered list of steps to complete',
         },
       },
       required: ['steps'],
+      additionalProperties: false,
     },
     handler: async (input: unknown, ctx) => {
       const { steps } = input as { steps: string[] }
@@ -67,6 +69,7 @@ export const cognitiveTools: ToolDefinition[] = [
         status: { type: 'string', enum: ['done', 'failed'] },
       },
       required: ['stepId', 'status'],
+      additionalProperties: false,
     },
     handler: async (input: unknown, ctx) => {
       const { stepId, status } = input as { stepId: number; status: 'done' | 'failed' }
