@@ -1,0 +1,15 @@
+{
+  "kind": "conflict",
+  "input": {
+    "contractVersion": 2,
+    "fields": {
+      "transport": "agent-cli",
+      "runtime": "grok-cli",
+      "protocol": "openai-chat-completions"
+    }
+  },
+  "expect": {
+    "code": "CONNECTION_CONFIG_CONFLICT",
+    "fields": ["protocol"]
+  }
+}

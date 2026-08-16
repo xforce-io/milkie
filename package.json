@@ -6,7 +6,8 @@
   },
   "files": [
     "dist",
-    "agents"
+    "agents",
+    "contracts"
   ],
   "description": "TypeScript Agent framework — Agent = FSM",
   "main": "dist/index.js",

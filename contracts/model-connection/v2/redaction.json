@@ -1,0 +1,22 @@
+{
+  "kind": "redaction",
+  "input": {
+    "contractVersion": 2,
+    "fields": {
+      "transport": "api",
+      "protocol": "anthropic-messages",
+      "model": "claude-x",
+      "apiKey": "sk-test",
+      "baseUrl": "https://example.invalid/v1"
+    }
+  },
+  "expect": {
+    "contractVersion": 2,
+    "transport": "api",
+    "protocol": "anthropic-messages",
+    "model": "claude-x",
+    "hasApiKey": true,
+    "hasBaseUrl": true,
+    "source": "canonical"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "kind": "missing",
+  "input": {
+    "contractVersion": 2,
+    "fields": {
+      "transport": "api",
+      "model": "claude-x",
+      "apiKey": "sk-test"
+    }
+  },
+  "expect": {
+    "code": "CONNECTION_CONFIG_MISSING_FIELD",
+    "fields": ["protocol"]
+  }
+}

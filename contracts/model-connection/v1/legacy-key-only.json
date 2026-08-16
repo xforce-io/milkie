@@ -1,0 +1,12 @@
+{
+  "kind": "missing",
+  "input": {
+    "contractVersion": 1,
+    "fields": {},
+    "legacyEnv": { "ANTHROPIC_API_KEY": "sk-test" }
+  },
+  "expect": {
+    "code": "CONNECTION_CONFIG_MISSING_FIELD",
+    "fields": ["transport"]
+  }
+}

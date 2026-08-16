@@ -1,0 +1,23 @@
+{
+  "kind": "success",
+  "input": {
+    "contractVersion": 1,
+    "prefix": "HELIX_LLM_",
+    "env": {
+      "HELIX_LLM_TRANSPORT": "api",
+      "HELIX_LLM_PROTOCOL": "anthropic-messages",
+      "HELIX_LLM_MODEL": "claude-x",
+      "HELIX_LLM_API_KEY": "sk-test",
+      "HELIX_LLM_BASE_URL": "https://example.invalid/v1"
+    }
+  },
+  "expect": {
+    "contractVersion": 1,
+    "transport": "api",
+    "protocol": "anthropic-messages",
+    "model": "claude-x",
+    "hasApiKey": true,
+    "hasBaseUrl": true,
+    "source": "canonical"
+  }
+}

@@ -23,6 +23,8 @@ export interface OpenAICompatibleAdapterOptions {
    * Default imageInput:false — set true only when the deployed model accepts vision.
    */
   capabilities?: ModelCapabilities
+  /** #251: new connection path must not fall back to process.env. Default true. */
+  readEnv?: boolean
 }
 
 export class OpenAICompatibleAdapter implements IModelGateway {
@@ -37,9 +39,10 @@ export class OpenAICompatibleAdapter implements IModelGateway {
     this.capabilities = {
       imageInput: options.capabilities?.imageInput === true,
     }
+    const readEnv = options.readEnv !== false
     this.client = new OpenAI({
-      apiKey:  options.apiKey  ?? process.env['VOLCENGINE_TOKEN'] ?? process.env['OPENAI_API_KEY'] ?? '',
-      baseURL: options.baseUrl ?? process.env['VOLCENGINE_API_BASE'],
+      apiKey:  options.apiKey  ?? (readEnv ? process.env['VOLCENGINE_TOKEN'] ?? process.env['OPENAI_API_KEY'] ?? '' : ''),
+      baseURL: options.baseUrl ?? (readEnv ? process.env['VOLCENGINE_API_BASE'] : undefined),
     })
   }
 

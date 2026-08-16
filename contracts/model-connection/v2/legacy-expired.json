@@ -1,0 +1,13 @@
+{
+  "kind": "conflict",
+  "input": {
+    "contractVersion": 2,
+    "fields": {},
+    "legacyModelConfig": { "adapter": "anthropic", "model": "claude-x" },
+    "legacyEnv": { "ANTHROPIC_API_KEY": "sk-test" }
+  },
+  "expect": {
+    "code": "CONNECTION_CONFIG_LEGACY_EXPIRED",
+    "fields": ["ANTHROPIC_API_KEY", "legacyModelConfig"]
+  }
+}

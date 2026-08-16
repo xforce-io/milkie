@@ -22,6 +22,8 @@ export interface AnthropicAdapterOptions {
    * vision; omitted/undefined/false reject image parts (same as DefaultIOPort).
    */
   capabilities?: ModelCapabilities
+  /** #251: new connection path must not fall back to process.env. Default true. */
+  readEnv?: boolean
 }
 
 export class AnthropicAdapter implements IModelGateway {
@@ -39,7 +41,7 @@ export class AnthropicAdapter implements IModelGateway {
       imageInput: options.capabilities?.imageInput === true,
     }
     this.client = new Anthropic({
-      apiKey:  options.apiKey ?? process.env['ANTHROPIC_API_KEY'],
+      apiKey:  options.apiKey ?? (options.readEnv === false ? undefined : process.env['ANTHROPIC_API_KEY']),
       baseURL: options.baseUrl,
     })
   }

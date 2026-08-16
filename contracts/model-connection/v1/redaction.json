@@ -1,0 +1,24 @@
+{
+  "kind": "redaction",
+  "input": {
+    "contractVersion": 1,
+    "fields": {
+      "transport": "api",
+      "protocol": "openai-chat-completions",
+      "model": "gpt-x",
+      "apiKey": "sk-test",
+      "baseUrl": "https://example.invalid/v1",
+      "provider": "volcengine"
+    }
+  },
+  "expect": {
+    "contractVersion": 1,
+    "transport": "api",
+    "protocol": "openai-chat-completions",
+    "model": "gpt-x",
+    "provider": "volcengine",
+    "hasApiKey": true,
+    "hasBaseUrl": true,
+    "source": "canonical"
+  }
+}

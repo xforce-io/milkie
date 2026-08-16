@@ -1,0 +1,20 @@
+{
+  "kind": "success",
+  "input": {
+    "contractVersion": 2,
+    "fields": {
+      "transport": "agent-cli",
+      "runtime": "codex",
+      "model": "gpt-x"
+    }
+  },
+  "expect": {
+    "contractVersion": 2,
+    "transport": "agent-cli",
+    "runtime": "codex",
+    "model": "gpt-x",
+    "hasApiKey": false,
+    "hasBaseUrl": false,
+    "source": "canonical"
+  }
+}

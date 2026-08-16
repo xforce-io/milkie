@@ -1,0 +1,15 @@
+{
+  "kind": "conflict",
+  "input": {
+    "contractVersion": 1,
+    "prefix": "HELIX_LLM_",
+    "env": {
+      "HELIX_LLM_API_KEY": "  ",
+      "ANTHROPIC_API_KEY": "sk-test"
+    }
+  },
+  "expect": {
+    "code": "CONNECTION_CONFIG_LEGACY_AND_CANONICAL",
+    "fields": ["ANTHROPIC_API_KEY", "apiKey"]
+  }
+}
