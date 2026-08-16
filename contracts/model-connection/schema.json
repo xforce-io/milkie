@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/xforce-io/milkie/contracts/model-connection/schema.json",
+  "title": "Model Connection Input",
+  "oneOf": [
+    { "$ref": "#/$defs/entryA" },
+    { "$ref": "#/$defs/entryB" }
+  ],
+  "$defs": {
+    "canonicalFields": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "transport": { "type": "string" },
+        "protocol": { "type": "string" },
+        "runtime": { "type": "string" },
+        "model": { "type": "string" },
+        "baseUrl": { "type": "string" },
+        "apiKey": { "type": "string" },
+        "provider": { "type": "string" }
+      }
+    },
+    "legacyModelConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "adapter": { "type": "string" },
+        "model": { "type": "string" },
+        "provider": { "type": "string" },
+        "baseUrl": { "type": "string" }
+      }
+    },
+    "legacyEnv": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ANTHROPIC_API_KEY": { "type": "string" },
+        "OPENAI_API_KEY": { "type": "string" },
+        "VOLCENGINE_TOKEN": { "type": "string" },
+        "VOLCENGINE_API_BASE": { "type": "string" }
+      }
+    },
+    "entryA": {
+      "type": "object",
+      "required": ["contractVersion", "prefix", "env"],
+      "additionalProperties": false,
+      "properties": {
+        "contractVersion": { "type": "integer", "minimum": 1 },
+        "prefix": { "type": "string" },
+        "env": { "type": "object", "additionalProperties": { "type": "string" } },
+        "legacyModelConfig": { "$ref": "#/$defs/legacyModelConfig" }
+      }
+    },
+    "entryB": {
+      "type": "object",
+      "required": ["contractVersion", "fields"],
+      "additionalProperties": false,
+      "properties": {
+        "contractVersion": { "type": "integer", "minimum": 1 },
+        "fields": { "$ref": "#/$defs/canonicalFields" },
+        "legacyModelConfig": { "$ref": "#/$defs/legacyModelConfig" },
+        "legacyEnv": { "$ref": "#/$defs/legacyEnv" }
+      }
+    }
+  }
+}

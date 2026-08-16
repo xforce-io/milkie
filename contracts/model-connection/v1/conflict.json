@@ -1,0 +1,17 @@
+{
+  "kind": "conflict",
+  "input": {
+    "contractVersion": 1,
+    "fields": {
+      "transport": "api",
+      "protocol": "anthropic-messages",
+      "model": "claude-x",
+      "apiKey": "sk-test",
+      "runtime": "claude-code"
+    }
+  },
+  "expect": {
+    "code": "CONNECTION_CONFIG_CONFLICT",
+    "fields": ["runtime"]
+  }
+}

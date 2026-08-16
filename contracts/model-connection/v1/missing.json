@@ -1,0 +1,15 @@
+{
+  "kind": "missing",
+  "input": {
+    "contractVersion": 1,
+    "fields": {
+      "transport": "api",
+      "protocol": "anthropic-messages",
+      "apiKey": "sk-test"
+    }
+  },
+  "expect": {
+    "code": "CONNECTION_CONFIG_MISSING_FIELD",
+    "fields": ["model"]
+  }
+}

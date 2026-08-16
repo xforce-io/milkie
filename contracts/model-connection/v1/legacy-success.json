@@ -1,0 +1,21 @@
+{
+  "kind": "success",
+  "input": {
+    "contractVersion": 1,
+    "fields": {},
+    "legacyModelConfig": { "adapter": "anthropic", "model": "claude-x" },
+    "legacyEnv": {
+      "ANTHROPIC_API_KEY": "sk-test",
+      "VOLCENGINE_API_BASE": "https://example.invalid/v1"
+    }
+  },
+  "expect": {
+    "contractVersion": 1,
+    "transport": "api",
+    "protocol": "anthropic-messages",
+    "model": "claude-x",
+    "hasApiKey": true,
+    "hasBaseUrl": true,
+    "source": "legacy"
+  }
+}

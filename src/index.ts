@@ -36,6 +36,27 @@ export { OpenAICompatibleAdapter }  from './gateway/OpenAICompatibleAdapter.js'
 export { ModelGatewayError, normalizeModelGatewayError } from './gateway/ModelGatewayError.js'
 export { createGateway }            from './gateway/GatewayFactory.js'
 
+// #251: versioned model connection contract
+export {
+  collectFromPrefix,
+  resolveAndParseConnection,
+  assembleApiGateway,
+  ConnectionConfigError,
+} from './connection/index.js'
+export type {
+  AdapterFamily,
+  AssembledApiGateway,
+  CanonicalFields,
+  ConnectionConfigCode,
+  ConnectionInput,
+  ConnectionParseResult,
+  ConnectionProjection,
+  ConnectionSource,
+  LegacyModelConfig,
+  Protocol,
+  Runtime,
+  Transport,
+} from './connection/index.js'
 // #84: portable session export/import
 export { PORTABLE_SESSION_SCHEMA_VERSION } from './runtime/PortableSession.js'
 export type { PortableSession } from './runtime/PortableSession.js'

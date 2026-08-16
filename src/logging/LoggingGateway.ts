@@ -14,26 +14,29 @@ import type { ServiceLogger } from './logger.js'
  * 两个 adapter 一处覆盖。只记元数据，不携带 prompt/completion 正文（脱敏，设计 §6）。
  */
 export class LoggingGateway implements IModelGateway {
-  constructor(
-    private readonly inner: IModelGateway,
-    private readonly log:   ServiceLogger,
-  ) {}
+  readonly #inner: IModelGateway
+  readonly #log: ServiceLogger
+
+  constructor(inner: IModelGateway, log: ServiceLogger) {
+    this.#inner = inner
+    this.#log = log
+  }
 
   get capabilities(): ModelCapabilities | undefined {
-    return this.inner.capabilities
+    return this.#inner.capabilities
   }
 
   async complete(request: ModelRequest, options?: GatewayInvocationOptions | ModelGatewayCallOptions): Promise<ModelResponse> {
     const startedAt = Date.now()
     try {
-      const res = await this.inner.complete(request, options)
-      this.log.info({
+      const res = await this.#inner.complete(request, options)
+      this.#log.info({
         model: request.model, durationMs: Date.now() - startedAt,
         inputTokens: res.usage?.inputTokens, outputTokens: res.usage?.outputTokens,
       }, 'llm call')
       return res
     } catch (err) {
-      this.log.error({ model: request.model, durationMs: Date.now() - startedAt, err }, 'llm call failed')
+      this.#log.error({ model: request.model, durationMs: Date.now() - startedAt, err }, 'llm call failed')
       throw err
     }
   }
@@ -43,16 +46,16 @@ export class LoggingGateway implements IModelGateway {
     let inputTokens = 0
     let outputTokens = 0
     try {
-      for await (const e of this.inner.stream(request, options)) {
+      for await (const e of this.#inner.stream(request, options)) {
         if (e.type === 'usage') {
           inputTokens  += e.data.inputTokens
           outputTokens += e.data.outputTokens
         }
         yield e
       }
-      this.log.info({ model: request.model, durationMs: Date.now() - startedAt, inputTokens, outputTokens }, 'llm stream')
+      this.#log.info({ model: request.model, durationMs: Date.now() - startedAt, inputTokens, outputTokens }, 'llm stream')
     } catch (err) {
-      this.log.error({ model: request.model, durationMs: Date.now() - startedAt, err }, 'llm stream failed')
+      this.#log.error({ model: request.model, durationMs: Date.now() - startedAt, err }, 'llm stream failed')
       throw err
     }
   }
