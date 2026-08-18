@@ -141,6 +141,46 @@ describe('CacheIndex', () => {
     }
   })
 
+  it.each([
+    ['IO_CANCELLED', 'I/O invocation was cancelled.'],
+    ['IO_DEADLINE_EXCEEDED', 'I/O invocation deadline exceeded.'],
+  ] as const)('consumeTool reconstructs the recorded %s control terminal', (code, message) => {
+    const idx = CacheIndex.fromEvents([
+      mkToolResponded('th', undefined, {
+        message,
+        retryable: false,
+        code,
+        name: 'IOControlError',
+      }),
+    ])
+    try {
+      idx.consumeTool('th')
+      throw new Error('expected throw')
+    } catch (err) {
+      expect(err).toBeInstanceOf(IOControlError)
+      expect((err as IOControlError).code).toBe(code)
+      expect((err as IOControlError).operation).toBe('tool')
+    }
+  })
+
+  it('consumeTool does not classify a partial control-shaped error as IO control', () => {
+    const idx = CacheIndex.fromEvents([
+      mkToolResponded('th', undefined, {
+        message: 'I/O invocation deadline exceeded.',
+        retryable: false,
+        code: 'IO_DEADLINE_EXCEEDED',
+      }),
+    ])
+    try {
+      idx.consumeTool('th')
+      throw new Error('expected throw')
+    } catch (err) {
+      expect(err).not.toBeInstanceOf(IOControlError)
+      expect((err as Error).name).toBe('Error')
+      expect((err as Error & { code?: string }).code).toBe('IO_DEADLINE_EXCEEDED')
+    }
+  })
+
   it('remaining tracks unconsumed counts', () => {
     const idx = CacheIndex.fromEvents([
       mkLegacyLlmResponded('h', 'a', 'l1'),

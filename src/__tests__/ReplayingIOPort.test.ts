@@ -4,7 +4,7 @@ import { DefaultIOPort } from '../runtime/IOPort'
 import { ReplayDivergenceError } from '../trace/ReplayDivergenceError'
 import { hashModelRequest, hashToolCall } from '../trace/hash'
 import type { IIOPort } from '../runtime/IOPort'
-import type { IModelGateway, ModelRequest, ModelResponse } from '../types/model'
+import { IOControlError, type IModelGateway, type ModelRequest, type ModelResponse } from '../types/model'
 import type { Event, ToolRespondedPayload } from '../trace/types'
 
 class FailingGateway implements IModelGateway {
@@ -82,6 +82,37 @@ describe('ReplayingIOPort', () => {
       expect(e.message).toBe('boom')
       expect(e.retryable).toBe(true)
     }
+  })
+
+  it('replays a recorded tool deadline as IOControlError without running the handler', async () => {
+    const input = { x: 1 }
+    const h = hashToolCall('t', input)
+    const ev: Event<ToolRespondedPayload> = {
+      id: 'e1', runId: 'r1', type: 'tool.responded', actor: 'runtime', timestamp: 1,
+      payload: {
+        toolName: 't',
+        error: {
+          message: 'I/O invocation deadline exceeded.',
+          retryable: false,
+          code: 'IO_DEADLINE_EXCEEDED',
+          name: 'IOControlError',
+        },
+        requestHash: h,
+      },
+    }
+    const port = new ReplayingIOPort(CacheIndex.fromEvents([ev]), innerNeverCalled())
+    let executeCalled = false
+    const failure = await port.invokeTool('t', input, async () => {
+      executeCalled = true
+      return 'must not run'
+    }).then(
+      () => new Error('expected replay to throw'),
+      error => error,
+    )
+    expect(failure).toBeInstanceOf(IOControlError)
+    expect((failure as IOControlError).code).toBe('IO_DEADLINE_EXCEEDED')
+    expect((failure as IOControlError).operation).toBe('tool')
+    expect(executeCalled).toBe(false)
   })
 
   it('throws ReplayDivergenceError on tool cache miss', async () => {
