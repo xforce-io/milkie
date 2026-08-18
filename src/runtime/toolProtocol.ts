@@ -23,7 +23,7 @@ export interface ProtocolAccept {
  */
 export function tryRepairJson(raw: string): unknown | undefined {
   if (typeof raw !== 'string' || raw.trim() === '') return undefined
-  const stripped = raw.replace(/,\s*([}\]])/g, '$1')
+  
   const unique = new Map<string, unknown>()
   const consider = (text: string) => {
     try {
@@ -31,14 +31,27 @@ export function tryRepairJson(raw: string): unknown | undefined {
       unique.set(JSON.stringify(value), value)
     } catch { /* not a unique parse */ }
   }
+  
+  // Try original
   consider(raw)
-  consider(stripped)
   if (unique.size === 1) return unique.values().next().value
+  
+  // Try stripping trailing commas before closers
+  const stripped = raw.replace(/,(\s*[}\]])/g, '$1')
+  if (stripped !== raw) {
+    consider(stripped)
+    if (unique.size === 1) return unique.values().next().value
+  }
+  
+  // Try appending closers (only if original and stripped failed)
   unique.clear()
-  for (const suffix of ['}', ']', ']}', '"}']) {
+  for (const suffix of ['}', ']', '"]', '"}', ']}']) {
     consider(stripped + suffix)
   }
+  
+  // Only accept if exactly one suffix worked
   if (unique.size === 1) return unique.values().next().value
+  
   return undefined
 }
 
