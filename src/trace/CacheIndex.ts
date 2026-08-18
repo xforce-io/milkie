@@ -6,6 +6,7 @@ import type {
 } from './types.js'
 import { LLM_OUTCOME_SCHEMA_VERSION } from './types.js'
 import type { ModelResponse } from '../types/model.js'
+import { IOControlError, type IOControlErrorCode } from '../types/model.js'
 import {
   decodeLlmOutcome,
   reconstructLlmError,
@@ -22,6 +23,34 @@ interface IndexedOutcome {
 interface ToolOutcome {
   output?: unknown
   error?:  ToolRespondedPayload['error']
+}
+
+const TOOL_CONTROL_MESSAGES: Record<IOControlErrorCode, string> = {
+  IO_CANCELLED: 'I/O invocation was cancelled.',
+  IO_DEADLINE_EXCEEDED: 'I/O invocation deadline exceeded.',
+}
+
+/**
+ * Tool terminals predate the typed LLM failure envelope, so reconstruct a
+ * control error only from the complete, closed shape written by
+ * RecordingIOPort.  A coincidental `code` on an ordinary tool error must not
+ * change replay control flow.
+ */
+function reconstructToolError(error: NonNullable<ToolRespondedPayload['error']>): Error {
+  const code = error.code as IOControlErrorCode | undefined
+  if (
+    error.name === 'IOControlError' &&
+    error.retryable === false &&
+    code !== undefined &&
+    TOOL_CONTROL_MESSAGES[code] === error.message
+  ) {
+    return new IOControlError(code, 'tool')
+  }
+  const err = new Error(error.message) as Error & { retryable?: boolean; code?: string }
+  if (error.retryable !== undefined) err.retryable = error.retryable
+  if (error.code !== undefined)      err.code      = error.code
+  if (error.name !== undefined)      err.name      = error.name
+  return err
 }
 
 /**
@@ -331,11 +360,7 @@ export class CacheIndex {
     if (!q || q.length === 0) throw new CacheIndexEmptyError(`CacheIndex: tool queue empty for hash ${hash}`)
     const outcome = q.shift()!
     if (outcome.error) {
-      const err = new Error(outcome.error.message) as Error & { retryable?: boolean; code?: string }
-      if (outcome.error.retryable !== undefined) err.retryable = outcome.error.retryable
-      if (outcome.error.code !== undefined)      err.code      = outcome.error.code
-      if (outcome.error.name !== undefined)      err.name      = outcome.error.name
-      throw err
+      throw reconstructToolError(outcome.error)
     }
     return outcome.output
   }
