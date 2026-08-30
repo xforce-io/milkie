@@ -99,7 +99,7 @@ describe('Milkie context projections (#146)', () => {
     })).rejects.toThrow(/maxCount/)
   })
 
-  it('merges delivered projections into the current-turn user message (input first), never as a standalone turn between history and the reply (#192)', async () => {
+  it('merges delivered projections into the current-turn user message (context then utterance), never as a standalone turn between history and the reply (#192/#255)', async () => {
     const gateway = new CapturingGateway(['first answer', 'second answer'])
     const milkie = new Milkie({
       stateStore: new MemoryStore(),
@@ -142,8 +142,8 @@ describe('Milkie context projections (#146)', () => {
     expect(messages).toHaveLength(3)
     expect(secondRequest.messages[2]!.role).toBe('user')
 
-    // C2/C3: projection is merged into the current-turn message; the user's real
-    // input comes first, the delivered-context block follows, clearly labeled.
+    // C2/C3: projection is merged into the current-turn message; delivered
+    // context comes first, the live utterance is last (#255 recency).
     const cur = messages[2]!
     expect(cur).toContain('what did the report say?')
     expect(cur).toContain('External Delivered Context')
@@ -151,8 +151,12 @@ describe('Milkie context projections (#146)', () => {
     expect(cur).toContain('Nightly report: all systems green.')
     expect(cur).toContain('job-run-1')
     expect(cur).toContain('job-context')
-    expect(cur.indexOf('what did the report say?'))
-      .toBeLessThan(cur.indexOf('Nightly report: all systems green.'))
+    expect(cur).toContain('--- Current user message ---')
+    expect(cur.indexOf('Nightly report: all systems green.'))
+      .toBeLessThan(cur.indexOf('what did the report say?'))
+    expect(cur.indexOf('External Delivered Context'))
+      .toBeLessThan(cur.indexOf('what did the report say?'))
+    expect(cur.trimEnd().endsWith('what did the report say?')).toBe(true)
 
     // projection never appears as its own message — only the current-turn carries it
     const carrying = messages.filter((t) => t.includes('Nightly report: all systems green.'))
@@ -160,6 +164,39 @@ describe('Milkie context projections (#146)', () => {
 
     // system block stays free of projection content
     expect(secondRequest.system).not.toContain('Nightly report')
+  })
+
+  it('leaves the current-turn user text as the raw input when no projections are attached', async () => {
+    const gateway = new CapturingGateway(['first answer', 'second answer'])
+    const milkie = new Milkie({
+      stateStore: new MemoryStore(),
+      eventStore: new MemoryEventStore(),
+      gateway,
+    })
+    milkie.registerAgent(makeConfig())
+
+    await milkie.invoke({
+      agentId:   'projection-agent',
+      goal:      'remember first turn',
+      input:     'first question',
+      contextId: 'channel-c1',
+    })
+    await milkie.invoke({
+      agentId:   'projection-agent',
+      goal:      'answer followup',
+      input:     'plain followup',
+      contextId: 'channel-c1',
+    })
+
+    const secondRequest = gateway.requests[1]!
+    const last = secondRequest.messages[secondRequest.messages.length - 1]!
+    expect(last.role).toBe('user')
+    const first = last.content[0]
+    const text = first?.type === 'text' ? first.text : ''
+    expect(text).toContain('plain followup')
+    expect(text.trimEnd().endsWith('plain followup')).toBe(true)
+    expect(text).not.toContain('External Delivered Context')
+    expect(text).not.toContain('--- Current user message ---')
   })
 
   it('does not materialize projections into the target context session history', async () => {

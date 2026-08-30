@@ -153,6 +153,9 @@ export function renderDeliveredContextBlock(projections: ContextProjection[]): s
   ].join('\n')
 }
 
+/** Delimits the live user utterance after any delivered-context block. */
+export const CURRENT_USER_MESSAGE_MARKER = '--- Current user message ---'
+
 export function makeExternalContextRegion(projections: ContextProjection[]): RegionInput {
   return {
     target:    'message',
@@ -203,15 +206,14 @@ export function makeCurrentTurnRegion(
     interTurn: 'turn-local',
     stability: 'volatile',
     content:   { input, projections },
-    // #192: deliver projections as a labeled background block appended AFTER the
-    // user's real input, within this single user message — never as a standalone
-    // role=user turn between history and the reply. Input-first keeps the previous
-    // assistant question adjacent to the user's reply (the #192 adjacency bug).
+    // #192: one user message — never a standalone role=user turn between history
+    // and the reply. #255: delivered context first, current utterance last
+    // (RAG recency on the live input).
     format:    (c): Message => {
       const input       = currentTurnInput(c)
       const projections = typeof c === 'string' ? [] : (c as CurrentTurnContent).projections ?? []
       const text = projections.length > 0
-        ? `${input}\n\n${renderDeliveredContextBlock(projections)}`
+        ? `${renderDeliveredContextBlock(projections)}\n\n${CURRENT_USER_MESSAGE_MARKER}\n${input}`
         : input
       return { role: 'user', content: [{ type: 'text', text }] }
     },
