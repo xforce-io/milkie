@@ -1665,15 +1665,15 @@ export class AgentRuntime {
       }
 
 
+      // #245: resolve control-tool protocol before try block so controlResolved
+      // / protocolReject are available in catch for error reporting.
+      const controlResolved = CONTROL_TOOL_NAMES.has(call.name)
+        ? resolveControlToolCall(call)
+        : undefined
+      const protocolReject = controlResolved && !controlResolved.ok ? controlResolved : undefined
+      const effectiveInput = controlResolved?.ok ? controlResolved.input : call.input
+
       try {
-        const controlResolved = CONTROL_TOOL_NAMES.has(call.name)
-          ? resolveControlToolCall(call)
-          : undefined
-        const protocolReject = controlResolved && !controlResolved.ok ? controlResolved : undefined
-        const effectiveInput = controlResolved?.ok ? controlResolved.input : call.input
-        const invalidArgs = protocolReject
-          ? { code: protocolReject.code, message: protocolReject.message }
-          : call.invalidArguments
 
         const output   = await this.ioPort.invokeTool(
           call.name,
@@ -1687,9 +1687,17 @@ export class AgentRuntime {
             this.runControl?.assertInvocationAllowed(
               this.ioPort.nowSample?.() ?? this.ioPort.now(),
             )
-            if (invalidArgs) {
-              return Promise.reject(Object.assign(new Error(invalidArgs.message), {
-                code: invalidArgs.code,
+            // #245: only reject when protocolReject is present (repair failed or
+            // schema invalid). Non-control tools with invalidArguments from #219
+            // are rejected here; control tools with successful repair proceed.
+            if (protocolReject) {
+              return Promise.reject(Object.assign(new Error(protocolReject.message), {
+                code: protocolReject.code,
+              }))
+            }
+            if (!CONTROL_TOOL_NAMES.has(call.name) && call.invalidArguments) {
+              return Promise.reject(Object.assign(new Error(call.invalidArguments.message), {
+                code: call.invalidArguments.code,
               }))
             }
             return this.registry.execute(call.name, effectiveInput, this.buildToolContext(signal, lineage))
@@ -1757,16 +1765,21 @@ export class AgentRuntime {
           const errCode = typeof (err as { code?: unknown }).code === 'string'
             ? (err as { code: string }).code
             : undefined
+          // #245: prefer protocol error codes (from repair/schema validation) over
+          // the original #219 invalidArguments, so schema failures after successful
+          // repair report the correct code.
           const structured =
-            call.invalidArguments
-              ? { code: call.invalidArguments.code, message: call.invalidArguments.message }
-              : errCode === 'TOOL_ARGUMENTS_SCHEMA_INVALID'
-                || errCode === 'TOOL_ARGUMENTS_INVALID_JSON'
-                || errCode === TOOL_EXECUTION_ERROR
-                ? { code: errCode, message: error }
-                : CONTROL_TOOL_NAMES.has(call.name)
-                  ? { code: TOOL_EXECUTION_ERROR, message: error }
-                  : error
+            errCode === 'TOOL_ARGUMENTS_SCHEMA_INVALID'
+              || errCode === 'TOOL_ARGUMENTS_INVALID_JSON'
+              || errCode === TOOL_EXECUTION_ERROR
+              ? { code: errCode, message: error }
+              : protocolReject
+                ? { code: protocolReject.code, message: protocolReject.message }
+                : call.invalidArguments
+                  ? { code: call.invalidArguments.code, message: call.invalidArguments.message }
+                  : CONTROL_TOOL_NAMES.has(call.name)
+                    ? { code: TOOL_EXECUTION_ERROR, message: error }
+                    : error
           this.recorder.endSpan(span, 'error')
           return {
             toolCallId: call.id,
