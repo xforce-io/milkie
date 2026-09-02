@@ -157,6 +157,52 @@ describe('Milkie.replay', () => {
     expect(replayGateway.callCount).toBe(0)
   })
 
+  it('replays I/O before a later context-budget rejection and still detects divergence', async () => {
+    const store = new MemoryEventStore()
+    const tool: ToolDefinition = {
+      name: 'lookup',
+      description: 'returns a compact result',
+      parallelSafe: false,
+      inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+      handler: async () => 'tool-output',
+    }
+    const config: AgentConfig = {
+      ...oneShotAgent('budget-after-tool'),
+      fsm: {
+        states: [{ name: 'react', type: 'llm', instructions: 'use lookup', tools: ['lookup'] }],
+      },
+      contextBudget: { maxInputTokens: 4096, regionCaps: { scratchpad: 1 } },
+    }
+    const recordMilkie = new Milkie({
+      stateStore: new MemoryStore(),
+      gateway: new SequentialGateway([toolCallResponse('lookup-1', 'lookup', {})]),
+      eventStore: store,
+      tools: [tool],
+    })
+    recordMilkie.registerAgent(config)
+    const original = await recordMilkie.invoke({ agentId: 'budget-after-tool', goal: 'g', input: 'i' })
+    expect(original).toMatchObject({ status: 'error', stopCode: 'CONTEXT_BUDGET_REQUIRED_REGION_EXCEEDED' })
+    const events = await store.readByRunId(original.agentRunId)
+    expect(events.filter(event => event.type === 'llm.responded')).toHaveLength(1)
+    expect(events.some(event => event.type === 'context.budget.rejected')).toBe(true)
+
+    const replayMilkie = new Milkie({
+      stateStore: new MemoryStore(), gateway: new SequentialGateway([]), eventStore: store, tools: [tool],
+    })
+    replayMilkie.registerAgent(config)
+    await expect(replayMilkie.replay(original.agentRunId)).resolves.toMatchObject({
+      status: 'error', stopCode: 'CONTEXT_BUDGET_REQUIRED_REGION_EXCEEDED',
+    })
+
+    const divergent = structuredClone(config)
+    ;(divergent.fsm.states[0] as { instructions?: string }).instructions = 'use a different lookup plan'
+    const divergentReplay = new Milkie({
+      stateStore: new MemoryStore(), gateway: new SequentialGateway([]), eventStore: store, tools: [tool],
+    })
+    divergentReplay.registerAgent(divergent)
+    await expect(divergentReplay.replay(original.agentRunId)).rejects.toBeInstanceOf(ReplayDivergenceError)
+  })
+
   it('throws ReplayError when runId has no events', async () => {
     const milkie = new Milkie({
       stateStore: new MemoryStore(),

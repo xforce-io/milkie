@@ -29,7 +29,7 @@ import { MemoryStore } from '../store/MemoryStore.js'
 import { InMemoryRecorder } from '../trajectory/InMemoryRecorder.js'
 import { TrajectoryStore } from '../trajectory/TrajectoryStore.js'
 import { createGateway } from '../gateway/GatewayFactory.js'
-import { AgentRuntime, type MakeChildPort } from './AgentRuntime.js'
+import { AgentRuntime, type ContextBudgetReplayDecision, type MakeChildPort } from './AgentRuntime.js'
 import type { ContextBudgetReport } from '../context/budget.js'
 import type { ContextBudgetErrorEnvelope } from '../types/model.js'
 import { readCheckpointLifecycle } from './checkpointSchema.js'
@@ -705,25 +705,6 @@ export class Milkie {
       }
     }
 
-    // A rejected budget is a terminal before any LLM request.  Reconstructing
-    // it through AgentRuntime would omit the original rejection event and
-    // incorrectly attempt a live request during replay.
-    const budgetRejected = events.find(event => event.type === 'context.budget.rejected')
-    if (budgetRejected) {
-      const error = budgetRejected.payload as ContextBudgetErrorEnvelope
-      return {
-        agentRunId: runId,
-        contextId:  snapshot.contextId,
-        output:     snapshot.lastTextOutput ?? error.message,
-        status:     'error',
-        stopReason: 'runtime_error',
-        stopCode:   error.code,
-        partial:    true,
-        artifacts:  [],
-        error,
-      }
-    }
-
     const cache  = CacheIndex.fromEvents(events)
     const inner  = new DefaultIOPort(this.resolveGateway(config))
     const ioPort = new ReplayingIOPort(cache, inner)
@@ -798,12 +779,18 @@ export class Milkie {
       replayWmSnapshots: events
         .filter(e => e.type === 'wm.mutated')
         .map(e => (e.payload as { snapshot: unknown }).snapshot),
-      // #257: a replay must reconstruct the recorded request projection, not
-      // apply this process's current budget configuration. Legacy traces have
-      // no events and therefore keep their original unbudgeted request shape.
-      replayContextBudgetReports: events
-        .filter(e => e.type === 'context.budget.applied')
-        .map(e => e.payload as ContextBudgetReport),
+      // #257: consume applied/rejected budget decisions in trace order. This
+      // preserves strict I/O replay before a later pre-request rejection.
+      // Legacy traces have no decisions and keep their original request shape.
+      replayContextBudgetDecisions: events.flatMap<ContextBudgetReplayDecision>(event => {
+        if (event.type === 'context.budget.applied') {
+          return [{ kind: 'applied' as const, report: event.payload as ContextBudgetReport }]
+        }
+        if (event.type === 'context.budget.rejected') {
+          return [{ kind: 'rejected' as const, error: event.payload as ContextBudgetErrorEnvelope }]
+        }
+        return []
+      }),
     })
 
     const result = await runtime.run(snapshot.input)

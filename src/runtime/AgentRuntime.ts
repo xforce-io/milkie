@@ -148,9 +148,13 @@ export interface AgentRuntimeOptions {
    *  Present → replay-restore mode: after each tool call, restore WM from the next
    *  snapshot instead of trusting the (non-re-run) handler. Absent → record mode. */
   replayWmSnapshots?: unknown[]
-  /** #257: recorded budget reports replay the original request projection. */
-  replayContextBudgetReports?: ContextBudgetReport[]
+  /** #257: recorded budget decisions replay request projection and pre-I/O rejection in order. */
+  replayContextBudgetDecisions?: ContextBudgetReplayDecision[]
 }
+
+export type ContextBudgetReplayDecision =
+  | { readonly kind: 'applied'; readonly report: ContextBudgetReport }
+  | { readonly kind: 'rejected'; readonly error: ContextBudgetErrorEnvelope }
 
 type SkillLoadRequest = {
   name:         string
@@ -175,7 +179,7 @@ export class AgentRuntime {
   private readonly eventStore?:      import('../trace/EventStore.js').IEventStore
   private readonly traceObjectStore?: ITraceObjectStore
   private readonly replayWmSnapshots?: unknown[]  // SPIKE(#73)
-  private readonly replayContextBudgetReports?: ContextBudgetReport[]
+  private readonly replayContextBudgetDecisions?: ContextBudgetReplayDecision[]
   /** #113 P1/P2: per-run registry of objectIds. `promoted=true` once an
    *  object.created event has been emitted for it (eager createObject, or a
    *  cite that promoted a lazily-registered grep candidate). Lets cite fail-fast
@@ -250,7 +254,7 @@ export class AgentRuntime {
     this.recorder        = opts.recorder
     this.eventStore      = opts.eventStore
     this.replayWmSnapshots = opts.replayWmSnapshots
-    this.replayContextBudgetReports = opts.replayContextBudgetReports
+    this.replayContextBudgetDecisions = opts.replayContextBudgetDecisions
     this.traceObjectStore = opts.traceObjectStore
     this.subAgentConfigs = opts.subAgentConfigs
     this.childRecorderFactory = opts.childRecorderFactory
@@ -1383,10 +1387,19 @@ export class AgentRuntime {
         model: this.config.model?.model ?? '',
         ...(assembled.cacheBreakpoint ? { cacheBreakpoint: assembled.cacheBreakpoint } : {}),
       }
-      const recordedBudget = this.replayContextBudgetReports?.shift()
+      const recordedDecision = this.replayContextBudgetDecisions?.shift()
+      if (recordedDecision?.kind === 'rejected') {
+        throw new ContextBudgetError(
+          recordedDecision.error.code,
+          recordedDecision.error.region as import('../context/budget.js').ContextBudgetRegion | undefined,
+          recordedDecision.error.limit,
+          recordedDecision.error.estimated,
+        )
+      }
+      const recordedBudget = recordedDecision?.kind === 'applied' ? recordedDecision.report : undefined
       let budgeted
       try {
-        budgeted = recordedBudget || this.replayContextBudgetReports === undefined
+        budgeted = recordedBudget || this.replayContextBudgetDecisions === undefined
           ? applyContextBudget(
             assembled.budgetItems,
             recordedBudget
