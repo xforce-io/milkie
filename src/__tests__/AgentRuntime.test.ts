@@ -196,6 +196,67 @@ describe('AgentRuntime', () => {
       expect(toolSpans).toHaveLength(1)
       expect(toolSpans[0]?.attributes['toolName']).toBe('search')
     })
+
+    it('bounds an undeclared large tool result and records request-budget telemetry', async () => {
+      const toolDef: ToolDefinition = {
+        name:        'large-output',
+        description: 'returns a large payload',
+        inputSchema: { type: 'object', properties: {} },
+        parallelSafe: true,
+        handler:     async () => 'x'.repeat(12000),
+      }
+      const gateway = new SequentialGateway([
+        toolCallResponse('tc-large', 'large-output', {}),
+        textResponse('done'),
+      ])
+      const recorder = new InMemoryRecorder()
+      const runtime = new AgentRuntime({
+        config:     makeConfig(),
+        goal:       'bound the payload',
+        input:      'run tool',
+        stateStore: new MemoryStore(),
+        recorder,
+        ioPort:     new DefaultIOPort(gateway),
+        extraTools: [toolDef],
+      })
+
+      await runtime.run('run tool')
+
+      const toolResult = gateway.requests[1]!.messages
+        .flatMap(message => message.content)
+        .find((part): part is { type: 'tool_result'; tool_use_id: string; content: string; is_error?: boolean } => part.type === 'tool_result')!
+      expect(toolResult.content).toContain('[...truncated')
+      expect(toolResult.content.length).toBeLessThanOrEqual(4200)
+      const root = recorder.getSpans().find(span => span.name === 'agent.run')!
+      expect(root.events.filter(event => event.name === 'context.budget.applied')).toHaveLength(2)
+    })
+
+    it('drops oversized delivered projection without dropping the live user input', async () => {
+      const gateway = new SequentialGateway([textResponse('done')])
+      const runtime = new AgentRuntime({
+        config: makeConfig({
+          contextBudget: { maxInputTokens: 12000, regionCaps: { externalProjection: 512 } },
+        }),
+        goal:       'use only the live input',
+        input:      'live input survives',
+        stateStore: new MemoryStore(),
+        recorder:   new InMemoryRecorder(),
+        ioPort:     new DefaultIOPort(gateway),
+        externalProjections: [{
+          sourceRunId: 'external-run',
+          displayText: 'x'.repeat(6000),
+          deliveredAt: 1,
+          attachedAt: 1,
+        }],
+      })
+
+      await runtime.run('live input survives')
+
+      const liveMessage = gateway.requests[0]!.messages.at(-1)!
+      const text = liveMessage.content.find((part): part is { type: 'text'; text: string } => part.type === 'text')!.text
+      expect(text).toContain('live input survives')
+      expect(text).not.toContain('x'.repeat(200))
+    })
   })
 
   describe('error handling', () => {

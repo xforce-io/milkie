@@ -1,4 +1,5 @@
 import type { BudgetFinalizeContext, DeliverableSpec } from './common.js'
+import type { ContextBudgetConfig } from '../context/budget.js'
 
 export interface FSMState {
   name:            string
@@ -74,4 +75,6 @@ export interface AgentConfig {
    * Failure is recorded as FINALIZE_FAILED and does not rewrite stopReason.
    */
   onBudgetFinalize?: (ctx: BudgetFinalizeContext) => Promise<void>
+  /** #257: deterministic request-boundary budget for model-visible context. */
+  contextBudget?: ContextBudgetConfig
 }

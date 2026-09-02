@@ -26,6 +26,8 @@ export type EventKind =
   | 'region.added'
   | 'region.removed'
   | 'context.boundary.applied'
+  | 'context.budget.applied'
+  | 'context.budget.rejected'
   | 'fsm.transition'
   | 'skill.loaded'
   | 'skill.unloaded'

@@ -32,6 +32,7 @@ import type { RunLifecycleState } from './RunLifecycle.js'
 import { CHECKPOINT_SCHEMA_VERSION, readCheckpointLifecycle } from './checkpointSchema.js'
 import { ContextRegions } from '../context/ContextRegions.js'
 import { assemble, type AssembleScope } from '../context/assemble.js'
+import { applyContextBudget, ContextBudgetError, type ContextBudgetReport } from '../context/budget.js'
 import {
   makeHeaderRegion,
   makeSkillRegion,
@@ -51,6 +52,7 @@ import {
   IOControlError,
   LlmInvocationError,
   type AgentErrorEnvelope,
+  type ContextBudgetErrorEnvelope,
   type ModelEvent,
   type ModelRequest,
   type ToolSchema,
@@ -146,7 +148,13 @@ export interface AgentRuntimeOptions {
    *  Present → replay-restore mode: after each tool call, restore WM from the next
    *  snapshot instead of trusting the (non-re-run) handler. Absent → record mode. */
   replayWmSnapshots?: unknown[]
+  /** #257: recorded budget decisions replay request projection and pre-I/O rejection in order. */
+  replayContextBudgetDecisions?: ContextBudgetReplayDecision[]
 }
+
+export type ContextBudgetReplayDecision =
+  | { readonly kind: 'applied'; readonly report: ContextBudgetReport }
+  | { readonly kind: 'rejected'; readonly error: ContextBudgetErrorEnvelope }
 
 type SkillLoadRequest = {
   name:         string
@@ -171,6 +179,7 @@ export class AgentRuntime {
   private readonly eventStore?:      import('../trace/EventStore.js').IEventStore
   private readonly traceObjectStore?: ITraceObjectStore
   private readonly replayWmSnapshots?: unknown[]  // SPIKE(#73)
+  private readonly replayContextBudgetDecisions?: ContextBudgetReplayDecision[]
   /** #113 P1/P2: per-run registry of objectIds. `promoted=true` once an
    *  object.created event has been emitted for it (eager createObject, or a
    *  cite that promoted a lazily-registered grep candidate). Lets cite fail-fast
@@ -245,6 +254,7 @@ export class AgentRuntime {
     this.recorder        = opts.recorder
     this.eventStore      = opts.eventStore
     this.replayWmSnapshots = opts.replayWmSnapshots
+    this.replayContextBudgetDecisions = opts.replayContextBudgetDecisions
     this.traceObjectStore = opts.traceObjectStore
     this.subAgentConfigs = opts.subAgentConfigs
     this.childRecorderFactory = opts.childRecorderFactory
@@ -620,7 +630,10 @@ export class AgentRuntime {
    */
   private shapeToolResultForLlm(r: ToolResult, llmSpan: Span): string {
     const strategy = this.toolStrategyFor(r.toolName)
-    const shape = r.isError ? (strategy?.onError ?? 'verbatim') : (strategy?.shape ?? 'verbatim')
+    const defaultShape = { kind: 'truncate', maxChars: 4096, tailHint: true } as const
+    const shape = strategy
+      ? (r.isError ? (strategy.onError ?? 'verbatim') : (strategy.shape ?? 'verbatim'))
+      : defaultShape
     const raw = r.isError ? r.error : r.output
     const rawString = serializeOutput(raw)
     const shaped = applyShape(raw, shape)
@@ -850,6 +863,45 @@ export class AgentRuntime {
         })
       })
     }
+  }
+
+  private emitContextBudgetApplied(report: ContextBudgetReport): void {
+    this.recorder.recordEvent(this.rootSpan, 'context.budget.applied', {
+      totalLimit:     report.totalLimit,
+      totalEstimated: report.totalEstimated,
+      contextEpoch:   report.contextEpoch,
+      regions:        JSON.stringify(report.regions),
+      notices:        JSON.stringify(report.notices),
+    })
+    if (!this.eventStore) return
+    this.enqueueTraceWrite(async () => {
+      await this.eventStore!.append({
+        id:        uuidv4(),
+        runId:     this.agentRunId,
+        type:      'context.budget.applied',
+        actor:     this.config.agentId,
+        timestamp: Date.now(),
+        payload:   report,
+      })
+    })
+  }
+
+  /** Persist a pre-I/O budget terminal so replay can reproduce it without
+   * trying to construct an LLM request that never existed. */
+  private emitContextBudgetRejected(error: ContextBudgetError): void {
+    const payload = contextBudgetErrorEnvelope(error)
+    this.recorder.recordEvent(this.rootSpan, 'context.budget.rejected', { ...payload })
+    if (!this.eventStore) return
+    this.enqueueTraceWrite(async () => {
+      await this.eventStore!.append({
+        id:        uuidv4(),
+        runId:     this.agentRunId,
+        type:      'context.budget.rejected',
+        actor:     this.config.agentId,
+        timestamp: Date.now(),
+        payload,
+      })
+    })
   }
 
   private emitInitialRegionAdds(): void {
@@ -1250,7 +1302,9 @@ export class AgentRuntime {
           ? err.envelope
           : err instanceof LlmInvocationError
             ? err.envelope
-            : modelErrorEnvelope(err))
+            : err instanceof ContextBudgetError
+              ? contextBudgetErrorEnvelope(err)
+              : modelErrorEnvelope(err))
       const output = structuredError?.message
         ?? (err instanceof Error ? err.message : String(err))
       return this.buildAgentResult({
@@ -1329,11 +1383,47 @@ export class AgentRuntime {
         currentEpoch:  this.regions.getEpoch(),
       }
       const assembled = assemble(this.regions, scope)
+      const requestFields = {
+        model: this.config.model?.model ?? '',
+        ...(assembled.cacheBreakpoint ? { cacheBreakpoint: assembled.cacheBreakpoint } : {}),
+      }
+      const recordedDecision = this.replayContextBudgetDecisions?.shift()
+      if (recordedDecision?.kind === 'rejected') {
+        throw new ContextBudgetError(
+          recordedDecision.error.code,
+          recordedDecision.error.region as import('../context/budget.js').ContextBudgetRegion | undefined,
+          recordedDecision.error.limit,
+          recordedDecision.error.estimated,
+        )
+      }
+      const recordedBudget = recordedDecision?.kind === 'applied' ? recordedDecision.report : undefined
+      let budgeted
+      try {
+        budgeted = recordedBudget || this.replayContextBudgetDecisions === undefined
+          ? applyContextBudget(
+            assembled.budgetItems,
+            recordedBudget
+              ? { maxInputTokens: recordedBudget.totalLimit, regionCaps: recordedBudget.regionCaps }
+              : this.config.contextBudget,
+            this.regions.getEpoch(),
+            requestFields,
+          )
+          : {
+            system:   assembled.system,
+            messages: assembled.messages,
+            ...(assembled.tools ? { tools: assembled.tools } : {}),
+            report: undefined,
+          }
+      } catch (error) {
+        if (error instanceof ContextBudgetError) this.emitContextBudgetRejected(error)
+        throw error
+      }
+      if (budgeted.report) this.emitContextBudgetApplied(budgeted.report)
       const request: ModelRequest = {
-        model:    this.config.model?.model ?? '',
-        system:   assembled.system,
-        messages: assembled.messages,
-        ...(assembled.tools ? { tools: assembled.tools } : {}),
+        model:    requestFields.model,
+        system:   budgeted.system,
+        messages: budgeted.messages,
+        ...(budgeted.tools ? { tools: budgeted.tools } : {}),
         ...(assembled.cacheBreakpoint ? { cacheBreakpoint: assembled.cacheBreakpoint } : {}),
       }
       await this.tryFlushTraceWrites()
@@ -1794,5 +1884,17 @@ export class AgentRuntime {
 
     // Should never reach here — TypeScript requires explicit return
     return { toolCallId: call.id, toolName: call.name, output: null, error: 'Unexpected retry exhaustion', isError: true, duration: 0 }
+  }
+}
+
+function contextBudgetErrorEnvelope(error: ContextBudgetError): ContextBudgetErrorEnvelope {
+  return {
+    code:      error.code,
+    message:   error.message as ContextBudgetErrorEnvelope['message'],
+    phase:     'context_budget',
+    retryable: false,
+    ...(error.region ? { region: error.region } : {}),
+    limit:     error.limit,
+    estimated: error.estimated,
   }
 }
