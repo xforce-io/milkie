@@ -31,6 +31,7 @@ import { TrajectoryStore } from '../trajectory/TrajectoryStore.js'
 import { createGateway } from '../gateway/GatewayFactory.js'
 import { AgentRuntime, type MakeChildPort } from './AgentRuntime.js'
 import type { ContextBudgetReport } from '../context/budget.js'
+import type { ContextBudgetErrorEnvelope } from '../types/model.js'
 import { readCheckpointLifecycle } from './checkpointSchema.js'
 import {
   DefaultIOPort,
@@ -701,6 +702,25 @@ export class Milkie {
         stopCode:   code,
         partial:    true,
         artifacts:  [],
+      }
+    }
+
+    // A rejected budget is a terminal before any LLM request.  Reconstructing
+    // it through AgentRuntime would omit the original rejection event and
+    // incorrectly attempt a live request during replay.
+    const budgetRejected = events.find(event => event.type === 'context.budget.rejected')
+    if (budgetRejected) {
+      const error = budgetRejected.payload as ContextBudgetErrorEnvelope
+      return {
+        agentRunId: runId,
+        contextId:  snapshot.contextId,
+        output:     snapshot.lastTextOutput ?? error.message,
+        status:     'error',
+        stopReason: 'runtime_error',
+        stopCode:   error.code,
+        partial:    true,
+        artifacts:  [],
+        error,
       }
     }
 

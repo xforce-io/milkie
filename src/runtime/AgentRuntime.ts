@@ -882,6 +882,24 @@ export class AgentRuntime {
     })
   }
 
+  /** Persist a pre-I/O budget terminal so replay can reproduce it without
+   * trying to construct an LLM request that never existed. */
+  private emitContextBudgetRejected(error: ContextBudgetError): void {
+    const payload = contextBudgetErrorEnvelope(error)
+    this.recorder.recordEvent(this.rootSpan, 'context.budget.rejected', { ...payload })
+    if (!this.eventStore) return
+    this.enqueueTraceWrite(async () => {
+      await this.eventStore!.append({
+        id:        uuidv4(),
+        runId:     this.agentRunId,
+        type:      'context.budget.rejected',
+        actor:     this.config.agentId,
+        timestamp: Date.now(),
+        payload,
+      })
+    })
+  }
+
   private emitInitialRegionAdds(): void {
     if (this.initialRegionsEmitted) return
     this.initialRegionsEmitted = true
@@ -1366,21 +1384,27 @@ export class AgentRuntime {
         ...(assembled.cacheBreakpoint ? { cacheBreakpoint: assembled.cacheBreakpoint } : {}),
       }
       const recordedBudget = this.replayContextBudgetReports?.shift()
-      const budgeted = recordedBudget || this.replayContextBudgetReports === undefined
-        ? applyContextBudget(
-          assembled.budgetItems,
-          recordedBudget
-            ? { maxInputTokens: recordedBudget.totalLimit, regionCaps: recordedBudget.regionCaps }
-            : this.config.contextBudget,
-          this.regions.getEpoch(),
-          requestFields,
-        )
-        : {
-          system:   assembled.system,
-          messages: assembled.messages,
-          ...(assembled.tools ? { tools: assembled.tools } : {}),
-          report: undefined,
-        }
+      let budgeted
+      try {
+        budgeted = recordedBudget || this.replayContextBudgetReports === undefined
+          ? applyContextBudget(
+            assembled.budgetItems,
+            recordedBudget
+              ? { maxInputTokens: recordedBudget.totalLimit, regionCaps: recordedBudget.regionCaps }
+              : this.config.contextBudget,
+            this.regions.getEpoch(),
+            requestFields,
+          )
+          : {
+            system:   assembled.system,
+            messages: assembled.messages,
+            ...(assembled.tools ? { tools: assembled.tools } : {}),
+            report: undefined,
+          }
+      } catch (error) {
+        if (error instanceof ContextBudgetError) this.emitContextBudgetRejected(error)
+        throw error
+      }
       if (budgeted.report) this.emitContextBudgetApplied(budgeted.report)
       const request: ModelRequest = {
         model:    requestFields.model,

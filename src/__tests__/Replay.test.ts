@@ -104,7 +104,7 @@ describe('Milkie.replay', () => {
     const store = new MemoryEventStore()
     const originalConfig = {
       ...oneShotAgent('budget-agent'),
-      contextBudget: { maxInputTokens: 8192, regionCaps: { history: 1024 } },
+      contextBudget: { maxInputTokens: 4096, regionCaps: { history: 1024 } },
     }
     const recordMilkie = new Milkie({
       stateStore: new MemoryStore(),
@@ -128,6 +128,33 @@ describe('Milkie.replay', () => {
     await expect(replayMilkie.replay(original.agentRunId)).resolves.toMatchObject({
       status: 'completed', output: 'budgeted',
     })
+  })
+
+  it('replays a recorded context-budget rejection without invoking a gateway', async () => {
+    const store = new MemoryEventStore()
+    const config = {
+      ...oneShotAgent('budget-rejected'),
+      contextBudget: { maxInputTokens: 256, regionCaps: { control: 1 } },
+    }
+    const recordGateway = new SequentialGateway([])
+    const recordMilkie = new Milkie({ stateStore: new MemoryStore(), gateway: recordGateway, eventStore: store })
+    recordMilkie.registerAgent(config)
+
+    const original = await recordMilkie.invoke({ agentId: 'budget-rejected', goal: 'g', input: 'i' })
+    expect(original).toMatchObject({
+      status: 'error', stopCode: 'CONTEXT_BUDGET_REQUIRED_REGION_EXCEEDED',
+    })
+    expect(recordGateway.callCount).toBe(0)
+    expect((await store.readByRunId(original.agentRunId)).some(event => event.type === 'context.budget.rejected')).toBe(true)
+
+    const replayGateway = new SequentialGateway([])
+    const replayMilkie = new Milkie({ stateStore: new MemoryStore(), gateway: replayGateway, eventStore: store })
+    replayMilkie.registerAgent({ ...config, contextBudget: { maxInputTokens: 1 } })
+
+    await expect(replayMilkie.replay(original.agentRunId)).resolves.toMatchObject({
+      status: 'error', stopCode: 'CONTEXT_BUDGET_REQUIRED_REGION_EXCEEDED',
+    })
+    expect(replayGateway.callCount).toBe(0)
   })
 
   it('throws ReplayError when runId has no events', async () => {

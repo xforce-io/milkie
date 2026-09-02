@@ -233,7 +233,12 @@ function resolveContextBudget(config: ContextBudgetConfig | undefined): Resolved
     throw new ContextBudgetError('CONTEXT_BUDGET_INVALID_CONFIG', undefined, DEFAULT_CONTEXT_BUDGET, Number(totalLimit) || 0)
   }
 
-  const caps: Record<ContextBudgetRegion, number> = { ...DEFAULT_REGION_CAPS }
+  // Defaults must be effective at every valid total limit.  In particular,
+  // persist the normalized values in the report so a replay never turns a
+  // live-valid low total into an invalid explicit per-region configuration.
+  const caps = Object.fromEntries(
+    CONTEXT_BUDGET_REGIONS.map(region => [region, Math.min(DEFAULT_REGION_CAPS[region], totalLimit)]),
+  ) as Record<ContextBudgetRegion, number>
   for (const [region, cap] of Object.entries(config?.regionCaps ?? {})) {
     if (!CONTEXT_BUDGET_REGIONS.includes(region as ContextBudgetRegion) || !isPositiveInteger(cap) || cap > totalLimit) {
       throw new ContextBudgetError('CONTEXT_BUDGET_INVALID_CONFIG', region as ContextBudgetRegion, totalLimit, Number(cap) || 0)
@@ -297,7 +302,15 @@ function projectRegion(
     const first = candidates[0]
     if (!first || first.target !== 'system' || typeof first.content !== 'string') return []
     const replacement = { ...first, content: shrinkWorkingMemory(first, cap) }
-    notices.push(notice(first, estimateBudgetTokens(replacement.content), 'region_cap'))
+    const projectedEstimate = estimateBudgetTokens(replacement.content)
+    // JSON string quoting has a two-byte minimum.  A positive cap smaller
+    // than that is still a valid configuration, but no working-memory value
+    // can fit it, so omit this optional region rather than violating the cap.
+    if (projectedEstimate > cap) {
+      notices.push(notice(first, 0, 'region_cap'))
+      return []
+    }
+    notices.push(notice(first, projectedEstimate, 'region_cap'))
     return [replacement]
   }
 
@@ -354,8 +367,9 @@ function shrinkScratchpad(item: ContextBudgetItem, cap: number): ContextBudgetIt
 
 function truncateText(value: string, maxBudgetTokens: number, sourceId: string): string {
   if (estimateBudgetTokens(value) <= maxBudgetTokens) return value
+  if (maxBudgetTokens < estimateBudgetTokens('')) return ''
   const marker = `\n[context-budget omitted; source=${sourceId}; hash=${contentHash(value)}]`
-  if (estimateBudgetTokens(marker) >= maxBudgetTokens) return marker.slice(0, Math.max(0, maxBudgetTokens))
+  if (estimateBudgetTokens(marker) >= maxBudgetTokens) return ''
 
   const chars = Array.from(value)
   let low = 0

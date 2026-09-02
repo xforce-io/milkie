@@ -136,6 +136,46 @@ describe('applyContextBudget', () => {
     expect(projected.system).not.toContain('old'.repeat(20))
   })
 
+  it('omits optional working memory when its positive cap cannot encode a string', () => {
+    const raw = { data: { current: 'keep' }, log: [{ entry: 'old' }] }
+    const items = [
+      item('header', 'control', 'system', 'system', 0),
+      item('current', 'currentTurn', 'message', [textMessage('user', 'go')], 1),
+      {
+        ...item('wm', 'workingMemory', 'system', '\n--- Working Memory ---\n' + JSON.stringify(raw), 2),
+        rawContent: raw,
+      },
+    ]
+
+    const projected = applyContextBudget(items, {
+      maxInputTokens: 1000,
+      regionCaps: { workingMemory: 1 },
+    }, 1)
+
+    expect(projected.system).not.toContain('Working Memory')
+    expect(projected.report.regions).toContainEqual(expect.objectContaining({
+      region: 'workingMemory', projectedEstimated: 0,
+    }))
+    expect(projected.report.notices).toContainEqual(expect.objectContaining({
+      sourceId: 'wm', projectedBudgetTokens: 0, reason: 'region_cap',
+    }))
+  })
+
+  it('normalizes implicit region caps to a low valid total', () => {
+    const projected = applyContextBudget([
+      item('header', 'control', 'system', 'system', 0),
+      item('current', 'currentTurn', 'message', [textMessage('user', 'go')], 1),
+    ], { maxInputTokens: 4096 }, 1)
+
+    expect(projected.report.regionCaps).toEqual(expect.objectContaining({
+      control: 4096,
+      currentTurn: 4096,
+      scratchpad: 4096,
+      workingMemory: 4096,
+      sessionContext: 2048,
+    }))
+  })
+
   it('charges fixed request fields in the reported total', () => {
     const items = [
       item('header', 'control', 'system', 'system', 0),
