@@ -100,6 +100,36 @@ describe('Milkie.replay', () => {
     expect(replayGateway.callCount).toBe(0)  // cache served everything
   })
 
+  it('replays the recorded context budget instead of the current registration config', async () => {
+    const store = new MemoryEventStore()
+    const originalConfig = {
+      ...oneShotAgent('budget-agent'),
+      contextBudget: { maxInputTokens: 8192, regionCaps: { history: 1024 } },
+    }
+    const recordMilkie = new Milkie({
+      stateStore: new MemoryStore(),
+      gateway: new SequentialGateway([text('budgeted')]),
+      eventStore: store,
+    })
+    recordMilkie.registerAgent(originalConfig)
+    const original = await recordMilkie.invoke({ agentId: 'budget-agent', goal: 'g', input: 'i' })
+    expect((await store.readByRunId(original.agentRunId)).some(event => event.type === 'context.budget.applied')).toBe(true)
+
+    const replayMilkie = new Milkie({
+      stateStore: new MemoryStore(),
+      gateway: new SequentialGateway([]),
+      eventStore: store,
+    })
+    replayMilkie.registerAgent({
+      ...originalConfig,
+      contextBudget: { maxInputTokens: 1 },
+    })
+
+    await expect(replayMilkie.replay(original.agentRunId)).resolves.toMatchObject({
+      status: 'completed', output: 'budgeted',
+    })
+  })
+
   it('throws ReplayError when runId has no events', async () => {
     const milkie = new Milkie({
       stateStore: new MemoryStore(),

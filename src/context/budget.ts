@@ -36,6 +36,8 @@ export interface ContextBudgetItem {
   readonly mergePrefix?: string
   /** Stable source handle for the retained raw Trace/checkpoint evidence. */
   readonly evidenceRef?: string
+  /** Optional unrendered value for structured region-specific projection. */
+  readonly rawContent?: unknown
 }
 
 export interface ContextProjectionNotice {
@@ -50,6 +52,7 @@ export interface ContextProjectionNotice {
 
 export interface ContextBudgetReport {
   readonly totalLimit: number
+  readonly regionCaps: Readonly<Record<ContextBudgetRegion, number>>
   readonly totalEstimated: number
   readonly contextEpoch: number
   readonly regions: ReadonlyArray<{
@@ -65,6 +68,11 @@ export interface BudgetedContext {
   readonly messages: Message[]
   readonly tools?: ToolSchema[]
   readonly report: ContextBudgetReport
+}
+
+export interface ContextBudgetRequestFields {
+  readonly model: string
+  readonly cacheBreakpoint?: 'system-end'
 }
 
 export class ContextBudgetError extends Error {
@@ -98,7 +106,6 @@ export const DEFAULT_REGION_CAPS: Readonly<Record<ContextBudgetRegion, number>> 
 
 const REQUIRED_REGIONS = new Set<ContextBudgetRegion>(['control', 'currentTurn'])
 const OPTIONAL_ORDER: readonly ContextBudgetRegion[] = [
-  'scratchpad',
   'workingMemory',
   'sessionContext',
   'history',
@@ -119,6 +126,7 @@ export function applyContextBudget(
   items: readonly ContextBudgetItem[],
   config: ContextBudgetConfig | undefined,
   contextEpoch: number,
+  requestFields: ContextBudgetRequestFields = { model: '' },
 ): BudgetedContext {
   const budget = resolveContextBudget(config)
   const selected: ContextBudgetItem[] = []
@@ -134,8 +142,24 @@ export function applyContextBudget(
     selected.push(...candidates)
   }
 
-  if (estimateRequest(selected) > budget.totalLimit) {
-    throw requiredRegionError(undefined, budget.totalLimit, estimateRequest(selected))
+  if (estimateRequest(selected, requestFields) > budget.totalLimit) {
+    throw requiredRegionError(undefined, budget.totalLimit, estimateRequest(selected, requestFields))
+  }
+
+  const scratchpad = items.filter(item => item.region === 'scratchpad')
+  if (scratchpad.length > 0) {
+    const available = Math.min(
+      budget.caps.scratchpad,
+      Math.max(0, budget.totalLimit - estimateRequest(selected, requestFields)),
+    )
+    if (available === 0) {
+      throw requiredRegionError('scratchpad', budget.caps.scratchpad, estimateItems(scratchpad))
+    }
+    const projectedScratchpad = projectRegion('scratchpad', scratchpad, available, notices)
+    if (estimateRequest([...selected, ...projectedScratchpad], requestFields) > budget.totalLimit) {
+      throw requiredRegionError('scratchpad', available, estimateItems(projectedScratchpad))
+    }
+    selected.push(...projectedScratchpad)
   }
 
   for (const region of OPTIONAL_ORDER) {
@@ -143,21 +167,21 @@ export function applyContextBudget(
     const cap = budget.caps[region]
     if (candidates.length === 0 || cap === 0) continue
 
-    const available = Math.min(cap, Math.max(0, budget.totalLimit - estimateRequest(selected)))
+    const available = Math.min(cap, Math.max(0, budget.totalLimit - estimateRequest(selected, requestFields)))
     if (available === 0) {
       notices.push(...candidates.map(item => notice(item, 0, 'total_cap')))
       continue
     }
 
     if (region === 'history' || region === 'externalProjection') {
-      addNewestWholeItems(selected, candidates, available, budget.totalLimit, notices)
+      addNewestWholeItems(selected, candidates, available, budget.totalLimit, requestFields, notices)
       continue
     }
 
     const projected = projectRegion(region, candidates, available, notices)
     for (const item of projected) {
       const withItem = [...selected, item]
-      if (estimateRequest(withItem) <= budget.totalLimit) {
+      if (estimateRequest(withItem, requestFields) <= budget.totalLimit) {
         selected.push(item)
       } else {
         notices.push(notice(item, 0, 'total_cap'))
@@ -166,7 +190,7 @@ export function applyContextBudget(
   }
 
   const ordered = selected.slice().sort((a, b) => a.order - b.order)
-  const finalEstimate = estimateRequest(ordered)
+  const finalEstimate = estimateRequest(ordered, requestFields)
   if (finalEstimate > budget.totalLimit) {
     throw requiredRegionError(undefined, budget.totalLimit, finalEstimate)
   }
@@ -186,6 +210,7 @@ export function applyContextBudget(
     ...(tools.length > 0 ? { tools } : {}),
     report: {
       totalLimit: budget.totalLimit,
+      regionCaps: budget.caps,
       totalEstimated: finalEstimate,
       contextEpoch,
       regions: CONTEXT_BUDGET_REGIONS.map(region => ({
@@ -223,13 +248,14 @@ function addNewestWholeItems(
   candidates: readonly ContextBudgetItem[],
   cap: number,
   totalLimit: number,
+  requestFields: ContextBudgetRequestFields,
   notices: ContextProjectionNotice[],
 ): void {
   let used = 0
   const kept = new Set<string>()
   for (const item of candidates.slice().reverse()) {
     const itemEstimate = estimateBudgetTokens(item.content)
-    if (used + itemEstimate <= cap && estimateRequest([...selected, item]) <= totalLimit) {
+    if (used + itemEstimate <= cap && estimateRequest([...selected, item], requestFields) <= totalLimit) {
       selected.push(item)
       used += itemEstimate
       kept.add(item.id)
@@ -270,7 +296,7 @@ function projectRegion(
   if (region === 'workingMemory') {
     const first = candidates[0]
     if (!first || first.target !== 'system' || typeof first.content !== 'string') return []
-    const replacement = { ...first, content: truncateText(first.content, cap, first.id) }
+    const replacement = { ...first, content: shrinkWorkingMemory(first, cap) }
     notices.push(notice(first, estimateBudgetTokens(replacement.content), 'region_cap'))
     return [replacement]
   }
@@ -342,16 +368,49 @@ function truncateText(value: string, maxBudgetTokens: number, sourceId: string):
   return chars.slice(0, low).join('') + marker
 }
 
+function shrinkWorkingMemory(item: ContextBudgetItem, cap: number): string {
+  const raw = item.rawContent as { data?: Record<string, unknown>; log?: unknown[] } | undefined
+  if (!raw || !raw.data || !Array.isArray(raw.log)) return truncateText(String(item.content), cap, item.id)
+
+  const log = [...raw.log]
+  while (log.length > 0) {
+    const rendered = renderWorkingMemory(raw.data, log)
+    if (estimateBudgetTokens(rendered) <= cap) return rendered
+    log.shift()
+  }
+
+  const complete = renderWorkingMemory(raw.data, [])
+  if (estimateBudgetTokens(complete) <= cap) return complete
+  const omitted = {
+    dataOmitted: true,
+    logOmitted: raw.log.length,
+    contentHash: contentHash(raw),
+  }
+  const fallback = `\n--- Working Memory ---\n${JSON.stringify(omitted, null, 2)}`
+  if (estimateBudgetTokens(fallback) <= cap) return fallback
+  return truncateText(fallback, cap, item.id)
+}
+
+function renderWorkingMemory(data: Record<string, unknown>, log: unknown[]): string {
+  return '\n--- Working Memory ---\n' + JSON.stringify({ data, log }, null, 2)
+}
+
 function estimateItems(items: readonly ContextBudgetItem[]): number {
   return items.reduce((total, item) => total + estimateBudgetTokens(item.content), 0)
 }
 
-function estimateRequest(items: readonly ContextBudgetItem[]): number {
+function estimateRequest(items: readonly ContextBudgetItem[], requestFields: ContextBudgetRequestFields): number {
   const ordered = items.slice().sort((a, b) => a.order - b.order)
   const system = ordered.filter(item => item.target === 'system').map(item => item.content).join('\n')
   const messages = messagesFromBudgetItems(ordered)
   const tools = ordered.filter(item => item.target === 'tool').flatMap(item => item.content as ToolSchema[])
-  return estimateBudgetTokens({ system, messages, ...(tools.length > 0 ? { tools } : {}) })
+  return estimateBudgetTokens({
+    model: requestFields.model,
+    system,
+    messages,
+    ...(tools.length > 0 ? { tools } : {}),
+    ...(requestFields.cacheBreakpoint ? { cacheBreakpoint: requestFields.cacheBreakpoint } : {}),
+  })
 }
 
 export function messagesFromBudgetItems(items: readonly ContextBudgetItem[]): Message[] {

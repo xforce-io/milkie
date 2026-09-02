@@ -148,6 +148,8 @@ export interface AgentRuntimeOptions {
    *  Present → replay-restore mode: after each tool call, restore WM from the next
    *  snapshot instead of trusting the (non-re-run) handler. Absent → record mode. */
   replayWmSnapshots?: unknown[]
+  /** #257: recorded budget reports replay the original request projection. */
+  replayContextBudgetReports?: ContextBudgetReport[]
 }
 
 type SkillLoadRequest = {
@@ -173,6 +175,7 @@ export class AgentRuntime {
   private readonly eventStore?:      import('../trace/EventStore.js').IEventStore
   private readonly traceObjectStore?: ITraceObjectStore
   private readonly replayWmSnapshots?: unknown[]  // SPIKE(#73)
+  private readonly replayContextBudgetReports?: ContextBudgetReport[]
   /** #113 P1/P2: per-run registry of objectIds. `promoted=true` once an
    *  object.created event has been emitted for it (eager createObject, or a
    *  cite that promoted a lazily-registered grep candidate). Lets cite fail-fast
@@ -247,6 +250,7 @@ export class AgentRuntime {
     this.recorder        = opts.recorder
     this.eventStore      = opts.eventStore
     this.replayWmSnapshots = opts.replayWmSnapshots
+    this.replayContextBudgetReports = opts.replayContextBudgetReports
     this.traceObjectStore = opts.traceObjectStore
     this.subAgentConfigs = opts.subAgentConfigs
     this.childRecorderFactory = opts.childRecorderFactory
@@ -623,7 +627,9 @@ export class AgentRuntime {
   private shapeToolResultForLlm(r: ToolResult, llmSpan: Span): string {
     const strategy = this.toolStrategyFor(r.toolName)
     const defaultShape = { kind: 'truncate', maxChars: 4096, tailHint: true } as const
-    const shape = r.isError ? (strategy?.onError ?? defaultShape) : (strategy?.shape ?? defaultShape)
+    const shape = strategy
+      ? (r.isError ? (strategy.onError ?? 'verbatim') : (strategy.shape ?? 'verbatim'))
+      : defaultShape
     const raw = r.isError ? r.error : r.output
     const rawString = serializeOutput(raw)
     const shaped = applyShape(raw, shape)
@@ -1355,14 +1361,29 @@ export class AgentRuntime {
         currentEpoch:  this.regions.getEpoch(),
       }
       const assembled = assemble(this.regions, scope)
-      const budgeted = applyContextBudget(
-        assembled.budgetItems,
-        this.config.contextBudget,
-        this.regions.getEpoch(),
-      )
-      this.emitContextBudgetApplied(budgeted.report)
+      const requestFields = {
+        model: this.config.model?.model ?? '',
+        ...(assembled.cacheBreakpoint ? { cacheBreakpoint: assembled.cacheBreakpoint } : {}),
+      }
+      const recordedBudget = this.replayContextBudgetReports?.shift()
+      const budgeted = recordedBudget || this.replayContextBudgetReports === undefined
+        ? applyContextBudget(
+          assembled.budgetItems,
+          recordedBudget
+            ? { maxInputTokens: recordedBudget.totalLimit, regionCaps: recordedBudget.regionCaps }
+            : this.config.contextBudget,
+          this.regions.getEpoch(),
+          requestFields,
+        )
+        : {
+          system:   assembled.system,
+          messages: assembled.messages,
+          ...(assembled.tools ? { tools: assembled.tools } : {}),
+          report: undefined,
+        }
+      if (budgeted.report) this.emitContextBudgetApplied(budgeted.report)
       const request: ModelRequest = {
-        model:    this.config.model?.model ?? '',
+        model:    requestFields.model,
         system:   budgeted.system,
         messages: budgeted.messages,
         ...(budgeted.tools ? { tools: budgeted.tools } : {}),

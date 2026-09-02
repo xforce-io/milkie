@@ -30,6 +30,7 @@ import { InMemoryRecorder } from '../trajectory/InMemoryRecorder.js'
 import { TrajectoryStore } from '../trajectory/TrajectoryStore.js'
 import { createGateway } from '../gateway/GatewayFactory.js'
 import { AgentRuntime, type MakeChildPort } from './AgentRuntime.js'
+import type { ContextBudgetReport } from '../context/budget.js'
 import { readCheckpointLifecycle } from './checkpointSchema.js'
 import {
   DefaultIOPort,
@@ -777,6 +778,12 @@ export class Milkie {
       replayWmSnapshots: events
         .filter(e => e.type === 'wm.mutated')
         .map(e => (e.payload as { snapshot: unknown }).snapshot),
+      // #257: a replay must reconstruct the recorded request projection, not
+      // apply this process's current budget configuration. Legacy traces have
+      // no events and therefore keep their original unbudgeted request shape.
+      replayContextBudgetReports: events
+        .filter(e => e.type === 'context.budget.applied')
+        .map(e => e.payload as ContextBudgetReport),
     })
 
     const result = await runtime.run(snapshot.input)

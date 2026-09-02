@@ -96,6 +96,62 @@ describe('applyContextBudget', () => {
     ]))
   })
 
+  it('fails closed when no total budget remains for an active tool protocol', () => {
+    const required = [
+      item('header', 'control', 'system', 'system', 0),
+      item('current', 'currentTurn', 'message', [textMessage('user', 'go')], 1),
+    ]
+    const exactLimit = applyContextBudget(required, { maxInputTokens: 1000 }, 1).report.totalEstimated
+    const withProtocol = [...required, item('scratch:assistant', 'scratchpad', 'message', [{
+      role: 'assistant',
+      content: [{ type: 'tool_use', id: 'call-1', name: 'lookup', input: {} }],
+    }], 2)]
+
+    expect(() => applyContextBudget(withProtocol, {
+      maxInputTokens: exactLimit,
+      regionCaps: { scratchpad: exactLimit },
+    }, 1)).toThrow(expect.objectContaining({
+      code: 'CONTEXT_BUDGET_REQUIRED_REGION_EXCEEDED', region: 'scratchpad',
+    }))
+  })
+
+  it('drops oldest working-memory log entries before using a hash-only fallback', () => {
+    const raw = {
+      data: { current: 'keep' },
+      log: [{ entry: 'old'.repeat(90) }, { entry: 'new'.repeat(20) }],
+    }
+    const rendered = '\n--- Working Memory ---\n' + JSON.stringify(raw, null, 2)
+    const items = [
+      item('header', 'control', 'system', 'system', 0),
+      item('current', 'currentTurn', 'message', [textMessage('user', 'go')], 1),
+      { ...item('wm', 'workingMemory', 'system', rendered, 2), rawContent: raw },
+    ]
+
+    const projected = applyContextBudget(items, {
+      maxInputTokens: 1000,
+      regionCaps: { workingMemory: 250 },
+    }, 1)
+
+    expect(projected.system).toContain('new'.repeat(20))
+    expect(projected.system).not.toContain('old'.repeat(20))
+  })
+
+  it('charges fixed request fields in the reported total', () => {
+    const items = [
+      item('header', 'control', 'system', 'system', 0),
+      item('current', 'currentTurn', 'message', [textMessage('user', 'go')], 1),
+    ]
+    const projected = applyContextBudget(items, { maxInputTokens: 1000 }, 1, {
+      model: 'specific-model', cacheBreakpoint: 'system-end',
+    })
+    expect(projected.report.totalEstimated).toBe(estimateBudgetTokens({
+      model: 'specific-model',
+      system: projected.system,
+      messages: projected.messages,
+      cacheBreakpoint: 'system-end',
+    }))
+  })
+
   it('rejects invalid region caps deterministically', () => {
     expect(() => applyContextBudget([], {
       maxInputTokens: 100,

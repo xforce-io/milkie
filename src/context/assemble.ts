@@ -56,6 +56,7 @@ export function assemble(regions: ContextRegions, scope: AssembleScope): Assembl
         content: r.format(r.content) as string,
         order:   order++,
         evidenceRef: evidenceRefFor(r),
+        rawContent: r.content,
       })
     }
   }
@@ -65,18 +66,21 @@ export function assemble(regions: ContextRegions, scope: AssembleScope): Assembl
       if (r.id === 'current-turn' && isProjectedCurrentTurn(r.content)) {
         const liveInput = currentTurnInput(r.content)
         const prefix = `${CURRENT_USER_MESSAGE_MARKER}\n`
-        budgetItems.push({
-          id:      'external-projection:current-turn',
-          region:  'externalProjection',
-          target:  'message',
-          content: [{
-            role:    'user',
-            content: [{ type: 'text', text: renderDeliveredContextBlock(r.content.projections) }],
-          }],
-          order: order++,
-          mergeKey: 'current-turn',
-          evidenceRef: `run:${r.content.projections.map(projection => projection.sourceRunId).join(',')}`,
-        })
+        for (const [index, projection] of r.content.projections.entries()) {
+          budgetItems.push({
+            id:      `external-projection:${projection.sourceRunId}:${index}`,
+            region:  'externalProjection',
+            target:  'message',
+            content: [{
+              role:    'user',
+              content: [{ type: 'text', text: renderDeliveredContextBlock([projection]) }],
+            }],
+            order:       order++,
+            mergeKey:    'current-turn',
+            evidenceRef: `run:${projection.sourceRunId}`,
+            rawContent:  projection,
+          })
+        }
         budgetItems.push({
           id:      r.id,
           region:  'currentTurn',
@@ -92,6 +96,23 @@ export function assemble(regions: ContextRegions, scope: AssembleScope): Assembl
         })
         continue
       }
+      if (isVariableRegion(r)) {
+        const title = r.section === 'session-context' ? '--- Session Context ---' : '--- Turn Context ---'
+        for (const key of Object.keys(r.content).sort()) {
+          const value = r.content[key]
+          budgetItems.push({
+            id:      `${r.id}:${key}`,
+            region:  'sessionContext',
+            target:  'message',
+            content: [{ role: 'user', content: [{ type: 'text', text: `${title}\n${key}: ${formatVariable(value)}` }] }],
+            order:       order++,
+            mergeKey:    r.id,
+            evidenceRef: `region:${r.id}:${key}`,
+            rawContent:  value,
+          })
+        }
+        continue
+      }
       const out = r.format(r.content)
       budgetItems.push({
         id:      r.id,
@@ -100,6 +121,7 @@ export function assemble(regions: ContextRegions, scope: AssembleScope): Assembl
         content: Array.isArray(out) ? out as Message[] : [out as Message],
         order:   order++,
         evidenceRef: evidenceRefFor(r),
+        rawContent: r.content,
       })
     }
   }
@@ -112,6 +134,7 @@ export function assemble(regions: ContextRegions, scope: AssembleScope): Assembl
       content: [r.format(r.content) as ToolSchema],
       order:   order++,
       evidenceRef: evidenceRefFor(r),
+      rawContent: r.content,
     })
   }
 
@@ -140,6 +163,17 @@ function isProjectedCurrentTurn(content: unknown): content is { input: string; p
     && typeof content === 'object'
     && Array.isArray((content as { projections?: unknown }).projections)
     && (content as { projections: ContextProjection[] }).projections.length > 0
+}
+
+function isVariableRegion(region: Region): region is Region & { content: Record<string, unknown> } {
+  return (region.section === 'session-context' || region.section === 'turn-context')
+    && !!region.content
+    && typeof region.content === 'object'
+    && !Array.isArray(region.content)
+}
+
+function formatVariable(value: unknown): string {
+  return typeof value === 'string' ? value : JSON.stringify(value)
 }
 
 function budgetRegionFor(region: Region): ContextBudgetRegion {

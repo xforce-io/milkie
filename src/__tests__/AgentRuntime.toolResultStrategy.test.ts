@@ -110,14 +110,14 @@ describe('AgentRuntime — ToolResultStrategy applied end-to-end', () => {
     expect(tr.content.endsWith('...')).toBe(true)
   })
 
-  test('tool without resultStrategy → tool_result content unchanged (verbatim default)', async () => {
+  test('tool without resultStrategy → tool_result content uses the bounded runtime default', async () => {
     const verbatimTool: ToolDefinition = {
       name:        'big_read_verbatim',
       description: 'returns a large string',
       inputSchema: { type: 'object', properties: {}, required: [] },
       parallelSafe: true,
       handler: async () => 'Y'.repeat(5000),
-      // no resultStrategy — defaults to verbatim
+      // no resultStrategy — #257 applies the bounded runtime default
     }
 
     const { gateway, requestsSeen } = makeRequestCapturingGateway('big_read_verbatim')
@@ -149,8 +149,9 @@ describe('AgentRuntime — ToolResultStrategy applied end-to-end', () => {
     }
     expect(tr).toBeDefined()
 
-    // Verbatim: full 5000 chars must arrive unchanged
-    expect(tr.content.length).toBe(5000)
+    expect(tr.content.length).toBeLessThanOrEqual(4200)
+    expect(tr.content.length).toBeLessThan(5000)
+    expect(tr.content).toContain('[...truncated')
   })
 
   test('built-in run_command default strategy shapes oversized stdout into LLM tool_result (alfred#160)', async () => {
