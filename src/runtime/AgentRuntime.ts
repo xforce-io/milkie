@@ -32,6 +32,7 @@ import type { RunLifecycleState } from './RunLifecycle.js'
 import { CHECKPOINT_SCHEMA_VERSION, readCheckpointLifecycle } from './checkpointSchema.js'
 import { ContextRegions } from '../context/ContextRegions.js'
 import { assemble, type AssembleScope } from '../context/assemble.js'
+import { applyContextBudget, ContextBudgetError, type ContextBudgetReport } from '../context/budget.js'
 import {
   makeHeaderRegion,
   makeSkillRegion,
@@ -51,6 +52,7 @@ import {
   IOControlError,
   LlmInvocationError,
   type AgentErrorEnvelope,
+  type ContextBudgetErrorEnvelope,
   type ModelEvent,
   type ModelRequest,
   type ToolSchema,
@@ -620,7 +622,8 @@ export class AgentRuntime {
    */
   private shapeToolResultForLlm(r: ToolResult, llmSpan: Span): string {
     const strategy = this.toolStrategyFor(r.toolName)
-    const shape = r.isError ? (strategy?.onError ?? 'verbatim') : (strategy?.shape ?? 'verbatim')
+    const defaultShape = { kind: 'truncate', maxChars: 4096, tailHint: true } as const
+    const shape = r.isError ? (strategy?.onError ?? defaultShape) : (strategy?.shape ?? defaultShape)
     const raw = r.isError ? r.error : r.output
     const rawString = serializeOutput(raw)
     const shaped = applyShape(raw, shape)
@@ -850,6 +853,27 @@ export class AgentRuntime {
         })
       })
     }
+  }
+
+  private emitContextBudgetApplied(report: ContextBudgetReport): void {
+    this.recorder.recordEvent(this.rootSpan, 'context.budget.applied', {
+      totalLimit:     report.totalLimit,
+      totalEstimated: report.totalEstimated,
+      contextEpoch:   report.contextEpoch,
+      regions:        JSON.stringify(report.regions),
+      notices:        JSON.stringify(report.notices),
+    })
+    if (!this.eventStore) return
+    this.enqueueTraceWrite(async () => {
+      await this.eventStore!.append({
+        id:        uuidv4(),
+        runId:     this.agentRunId,
+        type:      'context.budget.applied',
+        actor:     this.config.agentId,
+        timestamp: Date.now(),
+        payload:   report,
+      })
+    })
   }
 
   private emitInitialRegionAdds(): void {
@@ -1250,7 +1274,9 @@ export class AgentRuntime {
           ? err.envelope
           : err instanceof LlmInvocationError
             ? err.envelope
-            : modelErrorEnvelope(err))
+            : err instanceof ContextBudgetError
+              ? contextBudgetErrorEnvelope(err)
+              : modelErrorEnvelope(err))
       const output = structuredError?.message
         ?? (err instanceof Error ? err.message : String(err))
       return this.buildAgentResult({
@@ -1329,11 +1355,17 @@ export class AgentRuntime {
         currentEpoch:  this.regions.getEpoch(),
       }
       const assembled = assemble(this.regions, scope)
+      const budgeted = applyContextBudget(
+        assembled.budgetItems,
+        this.config.contextBudget,
+        this.regions.getEpoch(),
+      )
+      this.emitContextBudgetApplied(budgeted.report)
       const request: ModelRequest = {
         model:    this.config.model?.model ?? '',
-        system:   assembled.system,
-        messages: assembled.messages,
-        ...(assembled.tools ? { tools: assembled.tools } : {}),
+        system:   budgeted.system,
+        messages: budgeted.messages,
+        ...(budgeted.tools ? { tools: budgeted.tools } : {}),
         ...(assembled.cacheBreakpoint ? { cacheBreakpoint: assembled.cacheBreakpoint } : {}),
       }
       await this.tryFlushTraceWrites()
@@ -1794,5 +1826,17 @@ export class AgentRuntime {
 
     // Should never reach here — TypeScript requires explicit return
     return { toolCallId: call.id, toolName: call.name, output: null, error: 'Unexpected retry exhaustion', isError: true, duration: 0 }
+  }
+}
+
+function contextBudgetErrorEnvelope(error: ContextBudgetError): ContextBudgetErrorEnvelope {
+  return {
+    code:      error.code,
+    message:   error.message as ContextBudgetErrorEnvelope['message'],
+    phase:     'context_budget',
+    retryable: false,
+    ...(error.region ? { region: error.region } : {}),
+    limit:     error.limit,
+    estimated: error.estimated,
   }
 }

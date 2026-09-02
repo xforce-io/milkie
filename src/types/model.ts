@@ -125,6 +125,18 @@ export interface RunCancelledErrorEnvelope {
   model?:     undefined
 }
 
+export interface ContextBudgetErrorEnvelope {
+  code: 'CONTEXT_BUDGET_INVALID_CONFIG' | 'CONTEXT_BUDGET_REQUIRED_REGION_EXCEEDED'
+  message: 'Context budget configuration is invalid.' | 'Required context region exceeds the configured budget.'
+  phase: 'context_budget'
+  retryable: false
+  region?: string
+  limit: number
+  estimated: number
+  provider?: undefined
+  model?: undefined
+}
+
 export interface LlmInvocationFailureEnvelope {
   code:       'LLM_INVOCATION_FAILED'
   message:    'LLM invocation failed.'
@@ -159,6 +171,7 @@ export type RuntimeErrorEnvelope =
   | AbandonedRunErrorEnvelope
   | RunDeadlineExceededErrorEnvelope
   | RunCancelledErrorEnvelope
+  | ContextBudgetErrorEnvelope
 export type AgentErrorEnvelope =
   | ModelErrorEnvelope
   | RuntimeErrorEnvelope
