@@ -12,10 +12,9 @@ import type { JSONValue } from '../types/common.js'
  * event log — so they are captured separately), and a versioned manifest.
  *
  * Multi-turn note: a context's "history" is carried forward into the latest run's
- * checkpoint (regions/working-memory), so the latest run + its descendants is
- * sufficient to continue the conversation. Explicit resume predecessors are also
- * bundled to preserve exact source checkpoints and replay. Other prior turns' raw I/O events are not
- * bundled (no by-context index exists, and they are not needed for continuation).
+ * checkpoint (regions/working-memory). The previousRunId chain is also bundled
+ * so previously returned checkpoint IDs remain resolvable after import, and
+ * session history and resume provenance do not acquire missing ancestors.
  */
 export interface PortableSession {
   manifest: {
@@ -33,7 +32,7 @@ export interface PortableSession {
 export const PORTABLE_SESSION_SCHEMA_VERSION = 1
 
 /**
- * Collect a run and all of its sub-agent descendants, in breadth-first order.
+ * Collect a run, its session predecessors and sub-agent descendants in breadth-first order.
  * Descendants are discovered from `agent.spawned` events (each carries the
  * child's independent runId). Cycles/duplicates are guarded by a visited set.
  */
@@ -51,12 +50,10 @@ export async function collectRunTree(
     const runEvents = await eventStore.readByRunId(runId)
     for (const e of runEvents) {
       events.push(e)
-      // Resumed runs depend on the exact source checkpoint for replay and provenance.
+      // Preserve earlier returned checkpoint IDs and session provenance on export.
       if (e.type === 'agent.run.started') {
-        const start = e.payload as AgentRunStartedPayload
-        if (start.resumedFromCheckpointId && start.previousRunId && !visited.has(start.previousRunId)) {
-          queue.push(start.previousRunId)
-        }
+        const previousRunId = (e.payload as AgentRunStartedPayload).previousRunId
+        if (previousRunId && !visited.has(previousRunId)) queue.push(previousRunId)
       }
       if (e.type === 'agent.spawned') {
         const childRunId = (e.payload as AgentSpawnedPayload).childRunId
