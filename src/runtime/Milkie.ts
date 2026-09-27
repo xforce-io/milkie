@@ -1,3 +1,4 @@
+import { completedPayload } from './resultEnvelope.js'
 import { v4 as uuid } from 'uuid'
 import { checkpointFromEvents } from '../trace/diagnostics/checkpointFromEvents.js'
 import { runEventsToMessages } from '../trace/diagnostics/sessionHistory.js'
@@ -514,16 +515,7 @@ export class Milkie {
     const invokeStartedAt = Date.now()
     try {
       const result = await runtime.run(request.input)
-      await rec?.detach({
-        status: result.status,
-        lastTextOutput: result.output,
-        ...(result.error ? { error: result.error } : {}),
-        stopReason: result.stopReason,
-        ...(result.stopCode ? { stopCode: result.stopCode } : {}),
-        partial: result.partial,
-        ...(result.checkpointId ? { checkpointId: result.checkpointId } : {}),
-        artifacts: result.artifacts,
-      })
+      await rec?.detach(completedPayload(result))
       invokeLog.info({ agentId: config.agentId, durationMs: Date.now() - invokeStartedAt, status: result.status }, 'invoke completed')
       return result
     } catch (err) {
@@ -619,13 +611,7 @@ export class Milkie {
     })
     try {
       const result = await runtime.run(input)
-      await rec?.detach({
-        status: result.status, lastTextOutput: result.output,
-        stopReason: result.stopReason, partial: result.partial, artifacts: result.artifacts,
-        ...(result.stopCode ? { stopCode: result.stopCode } : {}),
-        ...(result.checkpointId ? { checkpointId: result.checkpointId } : {}),
-        ...(result.error ? { error: result.error } : {}),
-      })
+      await rec?.detach(completedPayload(result))
       return result
     } catch (err) {
       await rec?.detach({ status: 'error', error: err instanceof Error ? err.message : String(err) })

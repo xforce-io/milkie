@@ -211,9 +211,8 @@ export interface AgentSpawnedPayload {
   goal:        string
 }
 
-export interface AgentReturnedPayload {
+export interface AgentReturnedPayload extends AgentRunCompletedPayload {
   childRunId: string
-  status:     'completed' | 'interrupted' | 'error'
 }
 
 // ---- Non-determinism payloads (Phase 4) ----

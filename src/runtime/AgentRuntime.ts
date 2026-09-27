@@ -75,7 +75,7 @@ import type { InMemoryRecorder } from '../trajectory/InMemoryRecorder.js'
 import type { ITraceObjectStore } from '../trace/TraceObjectStore.js'
 import { canonicalize, contentAddressForCanonicalBytes } from '../trace/hash.js'
 import type { CausalCursor } from '../trace/CausalCursor.js'
-import { checkpointFromEvents } from '../trace/diagnostics/checkpointFromEvents.js'
+import { completedPayload } from './resultEnvelope.js'
 import type { Region } from '../context/Region.js'
 import type { SkillLifecyclePayload, AgentRunStartedPayload, AgentRunCompletedPayload, LineageBuffer, ObjectType } from '../trace/types.js'
 import { modelErrorEnvelope } from '../gateway/ModelGatewayError.js'
@@ -385,33 +385,26 @@ export class AgentRuntime {
             parentRunControl:   this.runControl,
             control:            this.controlOpts,
           })
-          await finish?.({
-            status: result.status,
-            lastTextOutput: result.output,
-            ...(result.error ? { error: result.error } : {}),
-          })
+          const terminal = completedPayload(result)
+          await finish?.(terminal)
 
-          // #73: read the child's resume state from its event log (source of truth).
-          const childCheckpoint = result.status === 'interrupted' && this.eventStore
-            ? checkpointFromEvents(await this.eventStore.readByRunId(childRunId)) ?? undefined
-            : undefined
           await this.recordChild({
             taskId, agentId, runId: childRunId, contextId: childContextId,
-            checkpointId: childCheckpoint?.checkpointId,
+            ...terminal,
             status: result.status === 'interrupted' ? 'interrupted' : result.status === 'completed' ? 'success' : 'error',
           })
           this.recorder.recordEvent(spawnSpan, 'agent.spawn.complete', { resultStatus: result.status })
-          this.emitAgentReturned(childRunId, result.status)
+          this.emitAgentReturned(childRunId, terminal)
           spawnSpan.attributes['resultStatus']   = result.status
           spawnSpan.attributes['childTraceId']   = childTraceId
           spawnSpan.attributes['childContextId'] = childContextId
-          if (childCheckpoint?.checkpointId) spawnSpan.attributes['checkpointId'] = childCheckpoint.checkpointId
+          if (result.checkpointId) spawnSpan.attributes['checkpointId'] = result.checkpointId
           this.recorder.endSpan(spawnSpan, 'ok')
-          return result.output
+          return result
         } catch (err) {
           await finish?.({ status: 'error', error: err instanceof Error ? err.message : String(err) })
           await this.recordChild({ taskId, agentId, runId: childRunId, contextId: childContextId, status: 'error' })
-          this.emitAgentReturned(childRunId, 'error')
+          this.emitAgentReturned(childRunId, { status: 'error', error: err instanceof Error ? err.message : String(err) })
           spawnSpan.attributes['resultStatus'] = 'error'
           this.recorder.endSpan(spawnSpan, 'error')
           throw err
@@ -738,7 +731,7 @@ export class AgentRuntime {
     })
   }
 
-  private emitAgentReturned(childRunId: string, status: 'completed' | 'interrupted' | 'error'): void {
+  private emitAgentReturned(childRunId: string, result: AgentRunCompletedPayload): void {
     if (!this.eventStore) return
     // Same IOPort-bypass rationale as emitAgentSpawned: informational event,
     // written to the event log only (recorder already has the spawn span).
@@ -749,7 +742,7 @@ export class AgentRuntime {
         type:      'agent.returned',
         actor:     this.config.agentId,
         timestamp: Date.now(),
-        payload:   { childRunId, status },
+        payload:   { childRunId, ...result },
       })
     })
   }

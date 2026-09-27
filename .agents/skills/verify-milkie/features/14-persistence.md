@@ -42,4 +42,4 @@
 
 ## 已知缺口
 
-真实 Redis 与消费者安装首版未执行；npm pack/prepack 会构建，安装可能访问 registry，按本次验证范围执行。恢复 UUID 仍受 #259 影响。
+真实 Redis 与消费者安装首版未执行；npm pack/prepack 会构建，安装可能访问 registry，按本次验证范围执行。新 checkpointId 可在 JSONL 重建后精确恢复，无需 stateStore UUID 索引；历史裸 UUID 不新增全局扫描支持。

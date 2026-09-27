@@ -1,3 +1,4 @@
+import { completedPayload } from '../runtime/resultEnvelope.js'
 import http, { type IncomingMessage, type ServerResponse, type Server } from 'http'
 import { Milkie, SessionImportConflictError } from '../runtime/Milkie.js'
 import { BroadcastingEventStore } from '../trace/BroadcastingEventStore.js'
@@ -132,11 +133,11 @@ export function createServeServer(opts: ServeOptions): Server {
           ...(result.error ? { error: result.error } : {}),
         })
         writeSSE(res, 'agent.run.completed', {
-          status: 'error', output: result.output, message,
+          ...completedPayload(result), output: result.output, contextId: result.contextId, message,
           error: result.error ?? message, runId: result.agentRunId,
         })
       } else {
-        writeSSE(res, 'agent.run.completed', { status: result.status, output: result.output, runId: result.agentRunId })
+        writeSSE(res, 'agent.run.completed', { ...completedPayload(result), output: result.output, runId: result.agentRunId, contextId: result.contextId })
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)

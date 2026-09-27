@@ -42,7 +42,7 @@
 
 核心已经移除多态业务 FSM；`fsm.states` 类型残留不代表 `on`/`ctx.emit` 业务拓扑仍可用。s-011 当前测试验证单态工具槽位收集。
 
-#259：结果可能带不可恢复 checkpointId；#261：子执行和 HTTP 出口信息丢失。completed 表示执行受控停止，不能独立证明任务完成。
+checkpointId 仅在事件存储保存快照后返回；子执行和 HTTP 使用共享结果投影。completed 表示执行受控停止，不能独立证明任务完成。修复验收见[本次验收入口](../references/issues-259-261.md)。
 
 ## 对应 Stories
 
