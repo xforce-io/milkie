@@ -72,9 +72,10 @@ test('durable snapshot ID survives SQLite/JSONL instance reconstruction and need
   } finally { state?.close(); fs.rmSync(dir, { recursive: true, force: true }) }
 })
 
-test('portable session retains resolvability of exported checkpoint IDs', async () => {
+test('portable session preserves an old checkpoint ID after later ordinary invokes', async () => {
   const source = build(new MemoryStore(), new MemoryEventStore())
   const result = await invoke(source.milkie)
+  await invoke(source.milkie)
   const target = build(new MemoryStore(), new MemoryEventStore())
   await target.milkie.importSession(await source.milkie.exportSession(result.contextId))
   await resume(target.milkie, result.checkpointId!)
