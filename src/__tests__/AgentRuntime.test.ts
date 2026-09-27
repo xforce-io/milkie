@@ -364,7 +364,7 @@ describe('AgentRuntime', () => {
       expect(recoveredWM.get('note')).toBe('kept')
     })
 
-    it('resume reuses checkpoint contextId, agentRunId, and traceId', async () => {
+    it('resume keeps checkpoint contextId and creates an independent run', async () => {
       const stateStore = new MemoryStore()
       const checkpoint: AgentCheckpoint = {
         checkpointId: 'cp-1',
@@ -398,7 +398,7 @@ describe('AgentRuntime', () => {
 
       expect(result.status).toBe('completed')
       expect(result.output).toBe('resumed')
-      expect(result.agentRunId).toBe('run-original')
+      expect(result.agentRunId).not.toBe('run-original')
       expect(result.contextId).toBe('ctx-original')
     })
 
