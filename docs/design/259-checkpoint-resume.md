@@ -44,7 +44,7 @@ AgentRuntime 负责生成与公布标识；Milkie 负责解析；checkpointFromE
 
 ## 10 迁移/兼容/回滚
 
-不改快照 schema。旧裸 UUID 只有已有 stateStore 对应记录时可读，不新增全局扫描。会话导出/导入保留事件内 ID，因此无需额外索引迁移。回滚后新 ID 不可解析，原 context latest 路径仍存在。
+不改快照 schema。旧裸 UUID 只有已有 stateStore 对应记录时可读，不新增全局扫描。会话导出沿 previousRunId 保留前驱事件，保证普通 invoke 产生新快照后，旧 ID 在导入后仍可恢复，无需额外索引迁移；代价是导出包随会话历史增长。回滚后新 ID 不可解析，原 context latest 路径仍存在。
 
 ## 11 测试计划
 
