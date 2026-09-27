@@ -1004,14 +1004,14 @@ export class AgentRuntime {
   }
 
   // #73: build the resume-state checkpoint object. checkpointId is a content-free
-  // uuid (previously minted by the now-archived CheckpointManager). The object is
+  // identifier carrying its run locator and unique snapshot ID. The object is
   // NOT persisted to the stateStore — persistCheckpoint writes it to the event log.
   private buildCheckpoint(_resumeState?: string, currentTurn?: string): AgentCheckpoint {
     // #175 §8/D7: write v2 (explicit schemaVersion + lifecycle). The de-cored
     // single-state runtime resumes by re-entering states[0], so the old `fsm`
     // {currentState,resumeState} is no longer written (`_resumeState` ignored).
     return {
-      checkpointId: uuidv4(),
+      checkpointId: `checkpoint:v1:${encodeURIComponent(this.agentRunId)}:${uuidv4()}`,
       sequence:    this.turnNumber,
       goal:        this.goal,
       currentTurn: currentTurn ?? this.getCurrentTurn() ?? undefined,
@@ -1097,7 +1097,6 @@ export class AgentRuntime {
   // not state). No stateStore checkpoint blob is written. Requires an eventStore:
   // without one the run cannot be resumed (events are the sole resume substrate).
   private async persistCheckpoint(checkpoint: AgentCheckpoint): Promise<void> {
-    this.lastCheckpointId = checkpoint.checkpointId
     if (!this.eventStore) return
     await this.eventStore.append({
       id:        uuidv4(),
@@ -1107,6 +1106,7 @@ export class AgentRuntime {
       timestamp: Date.now(),
       payload:   { checkpoint },
     })
+    this.lastCheckpointId = checkpoint.checkpointId
     await this.stateStore.set(`context:${this.contextId}:checkpoint-run:latest`, this.agentRunId)
   }
 

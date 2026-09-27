@@ -555,7 +555,7 @@ export class Milkie {
     // Fall back to a stateStore blob under the key (legacy / manually-seeded).
     const checkpoint = await this.resolveCheckpoint(checkpointId)
     if (!checkpoint) {
-      throw new Error(`Checkpoint not found: "${checkpointId}"`)
+      throw Object.assign(new Error(`Checkpoint not found: "${checkpointId}"`), { code: 'CHECKPOINT_NOT_FOUND' })
     }
 
     const gateway = this.resolveGateway(config)
@@ -619,6 +619,14 @@ export class Milkie {
    * to a stateStore blob stored under the key (legacy or test-seeded).
    */
   private async resolveCheckpoint(checkpointId: string): Promise<AgentCheckpoint | null> {
+    if (checkpointId.startsWith('checkpoint:v1:')) {
+      const match = /^checkpoint:v1:([^:]+):([^:]+)$/.exec(checkpointId)
+      if (!match || !this.eventStore) return null
+      let runId: string
+      try { runId = decodeURIComponent(match[1]!) } catch { return null }
+      if (!runId || runId.includes('/') || runId.includes('\\') || runId.includes('\0') || runId === '.' || runId === '..') return null
+      return checkpointFromEvents(await this.eventStore.readByRunId(runId), checkpointId)
+    }
     if (this.eventStore) {
       let runId: string | undefined
       const ctxMatch = checkpointId.match(/^context:(.+):checkpoint(?::latest)?$/)
