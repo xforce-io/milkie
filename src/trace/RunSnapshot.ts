@@ -8,6 +8,8 @@ export interface RunSnapshot {
   input:          string
   contextId:      string
   parentId?:      string
+  previousRunId?: string
+  resumedFromCheckpointId?: string
   terminalStatus?: AgentRunCompletedPayload['status']
   /** Structured terminal error from agent.run.completed, when present. */
   terminalError?: AgentErrorEnvelope | string
@@ -42,6 +44,8 @@ export function extractRunSnapshot(events: Event[]): RunSnapshot {
     input:          startPayload.input,
     contextId:      startPayload.contextId,
     parentId:       startPayload.parentId,
+    ...(startPayload.previousRunId ? { previousRunId: startPayload.previousRunId } : {}),
+    ...(startPayload.resumedFromCheckpointId ? { resumedFromCheckpointId: startPayload.resumedFromCheckpointId } : {}),
     terminalStatus,
     ...(completedPayload?.error !== undefined ? { terminalError: completedPayload.error } : {}),
     ...(completedPayload?.lastTextOutput !== undefined

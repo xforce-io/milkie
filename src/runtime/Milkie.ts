@@ -1,3 +1,4 @@
+import { completedPayload } from './resultEnvelope.js'
 import { v4 as uuid } from 'uuid'
 import { checkpointFromEvents } from '../trace/diagnostics/checkpointFromEvents.js'
 import { runEventsToMessages } from '../trace/diagnostics/sessionHistory.js'
@@ -514,16 +515,7 @@ export class Milkie {
     const invokeStartedAt = Date.now()
     try {
       const result = await runtime.run(request.input)
-      await rec?.detach({
-        status: result.status,
-        lastTextOutput: result.output,
-        ...(result.error ? { error: result.error } : {}),
-        stopReason: result.stopReason,
-        ...(result.stopCode ? { stopCode: result.stopCode } : {}),
-        partial: result.partial,
-        ...(result.checkpointId ? { checkpointId: result.checkpointId } : {}),
-        artifacts: result.artifacts,
-      })
+      await rec?.detach(completedPayload(result))
       invokeLog.info({ agentId: config.agentId, durationMs: Date.now() - invokeStartedAt, status: result.status }, 'invoke completed')
       return result
     } catch (err) {
@@ -555,12 +547,12 @@ export class Milkie {
     // Fall back to a stateStore blob under the key (legacy / manually-seeded).
     const checkpoint = await this.resolveCheckpoint(checkpointId)
     if (!checkpoint) {
-      throw new Error(`Checkpoint not found: "${checkpointId}"`)
+      throw Object.assign(new Error(`Checkpoint not found: "${checkpointId}"`), { code: 'CHECKPOINT_NOT_FOUND' })
     }
 
     const gateway = this.resolveGateway(config)
     const contextId = checkpoint.meta.contextId ?? uuid()
-    const agentRunId = checkpoint.meta.agentRunId
+    const agentRunId = uuid()
     const runtimeConfig = { ...config, model: this.resolveModel(config) }
     const childRecorderFactory = this.trajectoryStore
       ? (childConfig: AgentConfig, childContextId: string, childTraceId: string) =>
@@ -586,6 +578,7 @@ export class Milkie {
     const makeChildPort = this.buildMakeChildPort()
     const causalCursor = new CausalCursor()
 
+    const ioPort = this.wrapIOPort(gateway, agentRunId, causalCursor, this.trustedProviderFamily(config))
     const runtime = new AgentRuntime({
       config: runtimeConfig,
       goal,
@@ -594,7 +587,8 @@ export class Milkie {
       contextId,
       stateStore: this.stateStore,
       recorder,
-      ioPort:          this.wrapIOPort(gateway, agentRunId, causalCursor, this.trustedProviderFamily(config)),
+      ioPort,
+      previousRunId: checkpoint.meta.agentRunId,
       ...(opts?.control ? { control: opts.control } : {}),
       eventStore:      this.eventStore ?? undefined,
       traceObjectStore: this.traceObjectStore ?? undefined,
@@ -608,7 +602,21 @@ export class Milkie {
 
     await runtime.loadCheckpoint(checkpoint)
 
-    return runtime.run(input)
+    const rec = ioPort instanceof RecordingIOPort ? ioPort : null
+    await rec?.attach({
+      agentId: config.agentId, goal, input, contextId,
+      previousRunId: checkpoint.meta.agentRunId,
+      resumedFromCheckpointId: checkpoint.checkpointId,
+      builtinTools: [...runtime.getEffectiveBuiltinTools()].sort(),
+    })
+    try {
+      const result = await runtime.run(input)
+      await rec?.detach(completedPayload(result))
+      return result
+    } catch (err) {
+      await rec?.detach({ status: 'error', error: err instanceof Error ? err.message : String(err) })
+      throw err
+    }
   }
 
   /**
@@ -619,6 +627,14 @@ export class Milkie {
    * to a stateStore blob stored under the key (legacy or test-seeded).
    */
   private async resolveCheckpoint(checkpointId: string): Promise<AgentCheckpoint | null> {
+    if (checkpointId.startsWith('checkpoint:v1:')) {
+      const match = /^checkpoint:v1:([^:]+):([^:]+)$/.exec(checkpointId)
+      if (!match || !this.eventStore) return null
+      let runId: string
+      try { runId = decodeURIComponent(match[1]!) } catch { return null }
+      if (!runId || runId.includes('/') || runId.includes('\\') || runId.includes('\0') || runId === '.' || runId === '..') return null
+      return checkpointFromEvents(await this.eventStore.readByRunId(runId), checkpointId)
+    }
     if (this.eventStore) {
       let runId: string | undefined
       const ctxMatch = checkpointId.match(/^context:(.+):checkpoint(?::latest)?$/)
@@ -768,6 +784,7 @@ export class Milkie {
       contextId:       snapshot.contextId,
       agentRunId:      runId,
       parentId:        snapshot.parentId,
+      previousRunId:   snapshot.previousRunId,
       stateStore:      new MemoryStore(),  // ephemeral
       recorder,
       ioPort:          proxyPort,            // NOT wrapped — replay writes no events
@@ -792,6 +809,14 @@ export class Milkie {
         return []
       }),
     })
+
+    if (snapshot.resumedFromCheckpointId) {
+      const sourceEvents = snapshot.previousRunId
+        ? await this.eventStore.readByRunId(snapshot.previousRunId) : []
+      const checkpoint = checkpointFromEvents(sourceEvents, snapshot.resumedFromCheckpointId)
+      if (!checkpoint) throw new ReplayError('resume source checkpoint is missing')
+      await runtime.loadCheckpoint(checkpoint)
+    }
 
     const result = await runtime.run(snapshot.input)
     if (divergenceError) throw divergenceError

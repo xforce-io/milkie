@@ -70,7 +70,7 @@ export interface AgentEvent {
   payload: unknown
 }
 
-export interface ChildAgentRecord {
+export interface ChildAgentRecord extends Omit<import('../trace/types.js').AgentRunCompletedPayload, 'status'> {
   taskId:        string
   agentId:       string
   runId?:        string

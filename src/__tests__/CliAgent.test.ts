@@ -231,7 +231,13 @@ sys`
       const cwdSpy = jest.spyOn(process, 'cwd').mockReturnValue(tmpDir)
       try {
         const result = await main(['agent', 'resume', contextId])
-        expectTerminalAgentError(result, runId, contextId)
+        const resumedRunId = (JSON.parse(result.stdout.trim()) as { runId: string }).runId
+        expect(resumedRunId).not.toBe(runId)
+        expectTerminalAgentError(result, resumedRunId, contextId)
+        const events = fs.readFileSync(path.join(tmpDir, '.milkie', 'runs', `${resumedRunId}.jsonl`), 'utf8')
+          .trim().split('\n').map(line => JSON.parse(line))
+        expect(events.find(e => e.type === 'agent.run.started').payload).toMatchObject({ previousRunId: runId })
+        expect(events.filter(e => e.type === 'agent.run.completed')).toHaveLength(1)
       } finally {
         cwdSpy.mockRestore()
       }
