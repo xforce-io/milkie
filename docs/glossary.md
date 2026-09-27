@@ -13,3 +13,4 @@
 | artifacts | 执行结果中已登记产物及其定位信息的集合。 | — |
 | resume | 从已保存的执行状态快照恢复执行的接口。 | — |
 | 功能地图 | 按用户能力列出入口、行为、验证方法和已知缺口的仓库内目录。 | feature maps、feature map |
+| resumedFromCheckpointId | 恢复执行开始事件中标识本次采用的确定快照的字段。 | — |

@@ -179,6 +179,8 @@ export interface AgentRunStartedPayload {
    * from the event log alone — no separate, non-atomic by-context index.
    */
   previousRunId?: string
+  /** Exact source snapshot for an explicitly resumed run. */
+  resumedFromCheckpointId?: string
   /**
    * #235: sorted effective built-in tool names for this run (audit summary only;
    * never the execution authority — ToolRegistry is).

@@ -1,4 +1,4 @@
-import type { Event, AgentSpawnedPayload } from '../trace/types.js'
+import type { Event, AgentSpawnedPayload, AgentRunStartedPayload } from '../trace/types.js'
 import type { IEventStore } from '../trace/EventStore.js'
 import type { JSONValue } from '../types/common.js'
 
@@ -13,7 +13,8 @@ import type { JSONValue } from '../types/common.js'
  *
  * Multi-turn note: a context's "history" is carried forward into the latest run's
  * checkpoint (regions/working-memory), so the latest run + its descendants is
- * sufficient to continue the conversation. Prior turns' raw I/O events are not
+ * sufficient to continue the conversation. Explicit resume predecessors are also
+ * bundled to preserve exact source checkpoints and replay. Other prior turns' raw I/O events are not
  * bundled (no by-context index exists, and they are not needed for continuation).
  */
 export interface PortableSession {
@@ -50,6 +51,13 @@ export async function collectRunTree(
     const runEvents = await eventStore.readByRunId(runId)
     for (const e of runEvents) {
       events.push(e)
+      // Resumed runs depend on the exact source checkpoint for replay and provenance.
+      if (e.type === 'agent.run.started') {
+        const start = e.payload as AgentRunStartedPayload
+        if (start.resumedFromCheckpointId && start.previousRunId && !visited.has(start.previousRunId)) {
+          queue.push(start.previousRunId)
+        }
+      }
       if (e.type === 'agent.spawned') {
         const childRunId = (e.payload as AgentSpawnedPayload).childRunId
         if (childRunId && !visited.has(childRunId)) queue.push(childRunId)
