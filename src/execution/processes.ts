@@ -29,9 +29,9 @@ export class ProcessTracker {
   private readonly noted = new Set<number>()
   private timer?: NodeJS.Timeout
   private failed = false
-  constructor(private readonly token: string) {
+  constructor(private readonly token: string, private readonly readInventory: (token: string) => ProcessRow[] = snapshot) {
     if (!/^[0-9a-f-]{36}$/.test(token)) throw new Error('Invalid process scope.')
-    snapshot(token) // Refuse to launch if process inventory cannot be inspected.
+    this.readInventory(token) // Refuse to launch if process inventory cannot be inspected.
   }
   /** Remember the direct child even when its environment is not visible in the process listing. */
   note(pid: number): void {
@@ -43,7 +43,7 @@ export class ProcessTracker {
     this.timer = setInterval(() => { try { this.observe() } catch { this.failed = true } }, 200)
   }
   private observe(): ProcessRow[] {
-    const rows = snapshot(this.token)
+    const rows = this.readInventory(this.token)
     const current = new Set<number>()
     for (const row of rows) {
       if (row.tagged || this.noted.has(row.pid) || this.owned.get(row.pid) === row.startedAt) current.add(row.pid)
@@ -64,7 +64,7 @@ export class ProcessTracker {
     let emptyChecks = 0
     while (Date.now() < deadline) {
       let rows: ProcessRow[]
-      try { rows = this.observe() } catch { rows = [] }
+      try { rows = this.observe() } catch { this.failed = true; rows = [] }
       const liveNoted = [...this.noted].filter(pid => {
         try { process.kill(pid, 0); return true } catch { return false }
       })

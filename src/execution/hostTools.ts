@@ -91,12 +91,13 @@ export function normalizeToolResult(value: unknown): ToolResult {
   return { ok: false, code: 'rejected', message: 'Handler returned an invalid result.' }
 }
 /** Fail closed on anything other than the one milkie MCP server and disabled external imports. */
-export function assertGrokInventory(report: unknown): void {
+export function assertGrokInventory(report: unknown, command: string): void {
   if (!report || typeof report !== 'object') throw new ExecutionError('policy_mismatch')
   const body = report as Record<string, unknown>
   const servers = body.mcpServers
-  const server = Array.isArray(servers) ? servers[0] as { name?: string } | undefined : undefined
-  if (!Array.isArray(servers) || servers.length !== 1 || server?.name !== 'milkie') throw new ExecutionError('policy_mismatch')
+  // `target` is the command Grok actually loaded. The reported source path can still point at the host file.
+  const server = Array.isArray(servers) ? servers[0] as { name?: string; target?: string } | undefined : undefined
+  if (!Array.isArray(servers) || servers.length !== 1 || server?.name !== 'milkie' || server.target !== command) throw new ExecutionError('policy_mismatch')
   for (const key of ['hooks', 'plugins', 'lspServers', 'marketplaces']) {
     const value = body[key]
     if (!Array.isArray(value) || value.length !== 0) throw new ExecutionError('policy_mismatch')
@@ -113,6 +114,36 @@ export function assertGrokInventory(report: unknown): void {
 function tomlString(value: string): string {
   if (/["\\\n]/.test(value)) throw new ExecutionError('storage_error')
   return `"${value}"`
+}
+/** A project MCP table can replace the host server while inspect still reports the name milkie. */
+export function assertProjectGrokConfig(cwd: string): void {
+  const file = join(cwd, '.grok', 'config.toml')
+  if (!existsSync(file)) return
+  const text = readFileSync(file, 'utf8')
+  if (/^\s*\[mcp_servers(?:\.|\])/m.test(text) || /^\s*mcp_servers\s*=/m.test(text)) throw new ExecutionError('policy_mismatch')
+}
+/** One host-tool run owns the shared Grok config until it exits. A live holder, or a dead one whose stop was not confirmed, fails closed. */
+export function acquireGrokConfigLock(configDir: string, runId: string, previousConfirmed: (previousRunId: string) => boolean): () => void {
+  const file = join(configDir, 'milkie-host-tools.lock')
+  const payload = `${process.pid} ${runId}\n`
+  const claim = () => writeFileSync(file, payload, { flag: 'wx', mode: 0o600 })
+  try {
+    claim()
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw new ExecutionError('storage_error')
+    const [pidText, previousRunId] = (existsSync(file) ? readFileSync(file, 'utf8') : '').trim().split(' ')
+    const pid = Number(pidText)
+    let live = false
+    if (Number.isInteger(pid) && pid > 0) {
+      try { process.kill(pid, 0); live = true } catch (err) { live = (err as NodeJS.ErrnoException).code === 'EPERM' }
+    }
+    if (live || !previousRunId || !previousConfirmed(previousRunId)) throw new ExecutionError('policy_mismatch')
+    try { unlinkSync(file) } catch { throw new ExecutionError('policy_mismatch') }
+    try { claim() } catch { throw new ExecutionError('policy_mismatch') }
+  }
+  return () => {
+    try { if (readFileSync(file, 'utf8') === payload) unlinkSync(file) } catch { /* A raced release leaves the next acquire fail-closed. */ }
+  }
 }
 export function writeGrokHostConfig(configDir: string, script: string, socketPath: string, toolsFile: string): void {
   const file = join(configDir, 'config.toml')
@@ -133,6 +164,7 @@ export function assertPiHostConfig(configDir: string): void {
   if (!Array.isArray(packages) || packages.length !== 0) throw new ExecutionError('policy_mismatch')
 }
 export function inspectGrok(cwd: string, env: NodeJS.ProcessEnv, leaderSocket: string, alive: () => boolean): Promise<void> {
+  assertProjectGrokConfig(cwd)
   return new Promise((resolve, reject) => {
     const child = spawn('grok', ['inspect', '--json', '--leader-socket', leaderSocket], { cwd, env, stdio: ['ignore', 'pipe', 'ignore'] })
     let stdout = ''
@@ -145,7 +177,7 @@ export function inspectGrok(cwd: string, env: NodeJS.ProcessEnv, leaderSocket: s
     child.on('exit', code => {
       clearTimeout(timer); clearInterval(pulse)
       if (!alive() || code !== 0) { reject(new ExecutionError('policy_mismatch')); return }
-      try { assertGrokInventory(JSON.parse(stdout)); resolve() } catch (error) { reject(error instanceof ExecutionError ? error : new ExecutionError('policy_mismatch')) }
+      try { assertGrokInventory(JSON.parse(stdout), process.execPath); resolve() } catch (error) { reject(error instanceof ExecutionError ? error : new ExecutionError('policy_mismatch')) }
     })
   })
 }

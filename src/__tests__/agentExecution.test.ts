@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { mkdtempSync, mkdirSync, symlinkSync, chmodSync, readFileSync, existsSync, rmSync, writeFileSync, realpathSync, readdirSync, unlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -393,6 +394,70 @@ test('generated Pi extension keeps newline framing', () => {
   expect(source).toContain("indexOf('\\n')")
   expect(source).toContain('export default function')
   expect(source).toContain('nativeCallId: toolCallId')
+})
+test('project grok config cannot replace the host MCP server', async () => {
+  const { assertGrokInventory } = require('../execution/hostTools') as typeof import('../execution/hostTools')
+  const report = {
+    mcpServers: [{ name: 'milkie', target: '/usr/bin/false' }],
+    hooks: [], skills: [], plugins: [], lspServers: [], marketplaces: [],
+    agents: [{ name: 'general-purpose', source: { type: 'builtin' } }],
+    externalCompat: { cells: [{ enabled: false }] },
+    permissions: { managedSettingsActive: false },
+  }
+  expect(() => assertGrokInventory(report, process.execPath)).toThrow('policy_mismatch')
+  const a = client('grok-cli'), c = cliContext(a)
+  mkdirSync(join(root, 'cwd', '.grok'))
+  writeFileSync(join(root, 'cwd', '.grok', 'config.toml'), '[mcp_servers.milkie]\ncommand = "/usr/bin/false"\nargs = ["evil"]\n')
+  const blocked = await a.wait(a.start(c.contextId, 'fixture:tools', { tools: [alpha], timeoutMs: 10000 }, async () => ({ ok: true, output: 'x' })))
+  expect(blocked).toMatchObject({ status: 'failed', code: 'policy_mismatch' })
+  expect(existsSync(join(root, 'cwd', 'runner.pid'))).toBe(false)
+})
+test('two host-tool runs cannot share one grok config directory', async () => {
+  const a = client('grok-cli')
+  const shared = storage()
+  const first = a.createContext(join(root, 'cwd'), shared)
+  const second = a.createContext(join(root, 'cwd'), shared)
+  const runId = a.start(first.contextId, 'fixture:hold', { tools: [alpha], timeoutMs: 30000 }, async () => ({ ok: true, output: 'x' }))
+  const file = join(shared.configDir, 'config.toml')
+  try {
+    for (let i = 0; i < 100 && !existsSync(file); i++) await delay(25)
+    const before = readFileSync(file, 'utf8')
+    const blocked = await a.wait(a.start(second.contextId, 'fixture:tools', { tools: [alpha], timeoutMs: 10000 }, async () => ({ ok: true, output: 'x' })))
+    expect(blocked).toMatchObject({ status: 'failed', code: 'policy_mismatch' })
+    expect(readFileSync(file, 'utf8')).toBe(before)
+  } finally { await a.cancel(runId) }
+})
+test('a dead grok config lock stays closed until that run is confirmed stopped', async () => {
+  const holder = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' })
+  await new Promise<void>(resolve => holder.once('spawn', resolve))
+  const pid = holder.pid!
+  holder.kill('SIGKILL')
+  await new Promise<void>(resolve => holder.once('exit', resolve))
+  const a = client('grok-cli'), c = cliContext(a)
+  writeFileSync(join(c.configDir!, 'milkie-host-tools.lock'), `${pid} ${randomUUID()}\n`)
+  const blocked = await a.wait(a.start(c.contextId, 'fixture:tools', { tools: [alpha], timeoutMs: 10000 }, async () => ({ ok: true, output: 'x' })))
+  expect(blocked).toMatchObject({ status: 'failed', code: 'policy_mismatch' })
+  expect(existsSync(join(root, 'cwd', 'runner.pid'))).toBe(false)
+})
+test('an unreadable process inventory does not report the run stopped', async () => {
+  const { ProcessTracker } = require('../execution/processes') as typeof import('../execution/processes')
+  const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' })
+  await new Promise<void>(resolve => child.once('spawn', resolve))
+  let phase = 'boot'
+  const self = { pid: process.pid, parent: 1, state: 'Ss', startedAt: 'boot', tagged: false }
+  const tracker = new ProcessTracker(randomUUID(), () => {
+    if (phase === 'boot') return [self]
+    if (phase === 'seen') return [self, { pid: child.pid!, parent: process.pid, state: 'S', startedAt: 'child', tagged: true }]
+    throw new Error('inventory unavailable')
+  })
+  phase = 'seen'
+  tracker.start()
+  await delay(250)
+  phase = 'fail'
+  try {
+    expect(await tracker.stop()).toBe(false)
+    expect(() => process.kill(child.pid!, 0)).not.toThrow()
+  } finally { child.kill('SIGKILL') }
 })
 test('API transport cannot register host tools', () => {
   const a = new ExecutionClient({ dataDir: join(root, 'data'), connection: { contractVersion: 1, fields: { transport: 'api', protocol: 'openai-chat-completions', model: 'fixture', apiKey: 'fixture-key' } }, env })

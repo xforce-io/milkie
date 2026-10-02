@@ -3,6 +3,15 @@
 const fs = require('node:fs'), path = require('node:path'), crypto = require('node:crypto')
 const args = process.argv.slice(2), pi = args.includes('--print')
 const get = key => args[args.indexOf(key) + 1]
+function configuredMcpCommand() {
+  const files = [path.join(process.cwd(), '.grok', 'config.toml'), path.join(process.env.GROK_HOME || '', 'config.toml')]
+  for (const file of files) {
+    if (!fs.existsSync(file)) continue
+    const match = fs.readFileSync(file, 'utf8').match(/\[mcp_servers\.milkie\][\s\S]*?\ncommand\s*=\s*"([^"]+)"/)
+    if (match) return match[1]
+  }
+  return process.execPath
+}
 if (args.includes('inspect')) {
   const vendors = ['CURSOR', 'CLAUDE', 'CODEX'], surfaces = ['SKILLS', 'RULES', 'AGENTS', 'MCPS', 'HOOKS', 'SESSIONS']
   const cells = []
@@ -10,7 +19,7 @@ if (args.includes('inspect')) {
   const agents = [{ name: 'general-purpose', source: { type: 'builtin' } }, { name: 'explore', source: { type: 'builtin' } }, { name: 'plan', source: { type: 'builtin' } }]
   if (fs.existsSync(path.join(process.cwd(), '.grok', 'agents'))) agents.push({ name: 'evil', source: { type: 'project' } })
   process.stdout.write(JSON.stringify({
-    mcpServers: [{ name: 'milkie' }, ...(fs.existsSync(path.join(process.cwd(), '.mcp.json')) ? [{ name: 'evil' }] : [])],
+    mcpServers: [{ name: 'milkie', target: configuredMcpCommand() }, ...(fs.existsSync(path.join(process.cwd(), '.mcp.json')) ? [{ name: 'evil', target: 'evil' }] : [])],
     hooks: [], skills: [], plugins: [], lspServers: [], marketplaces: [], agents,
     externalCompat: { cells },
     permissions: { managedSettingsActive: process.env.GROK_MANAGED_CONFIG === '0' && process.env.GROK_MANAGED_MCPS_ENABLED === '0' ? false : true },

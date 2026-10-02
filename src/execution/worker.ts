@@ -5,7 +5,7 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { resolveAndParseConnection } from '../connection/parse.js'
 import { assembleApiGateway } from '../connection/assemble.js'
 import { CliEvents, assertNativeSession, classifyFailure, cliCommand, cliEnvironment, prepareCliStorage } from './adapters.js'
-import { assertPiHostConfig, inspectGrok, openToolBridge, watchParentPipe, writeGrokHostConfig, writePiExtension, type ToolBridge } from './hostTools.js'
+import { acquireGrokConfigLock, assertPiHostConfig, inspectGrok, openToolBridge, watchParentPipe, writeGrokHostConfig, writePiExtension, type ToolBridge } from './hostTools.js'
 import { ProcessTracker, EXECUTION_TOKEN_ENV } from './processes.js'
 import { ExecutionStore } from './store.js'
 import { ExecutionError, type ToolCall, type WorkerRequest, type WorkerToolReply, type ExecutionStatus } from './types.js'
@@ -32,6 +32,7 @@ export async function runExecution(request: WorkerRequest, life?: ParentLife): P
   let promptPath: string | undefined
   let tracker: ProcessTracker | undefined
   let bridge: ToolBridge | undefined
+  let releaseConfig: (() => void) | undefined
   const pulse = () => {
     if (terminal) return
     record.heartbeatAt = Date.now()
@@ -88,6 +89,7 @@ export async function runExecution(request: WorkerRequest, life?: ParentLife): P
       })
       if (life?.dead) { finish('unknown', true); return }
       if (context.connection.runtime === 'grok-cli') {
+        releaseConfig = acquireGrokConfigLock(context.configDir!, record.runId, previousRunId => store.run(previousRunId)?.stopped === true)
         writeGrokHostConfig(context.configDir!, join(__dirname, 'mcp-server.js'), bridge.socketPath, toolsFile)
         await inspectGrok(context.cwd, cliEnvironment(process.env, context, { socketPath: bridge.socketPath, forwarding: hosted.forwarding }), join(context.configDir!, 'leader.sock'), () => !life?.dead)
       } else {
@@ -175,7 +177,11 @@ export async function runExecution(request: WorkerRequest, life?: ParentLife): P
     // API abort guarantees local request termination, not remote side-effect reversal.
     const stopped = cleanup ? await cleanup() : true
     finish(stopped ? (stopping ?? 'failed') : 'unknown', stopped)
-  } finally { tracker?.close(); clearInterval(timer); await bridge?.close(); if (promptPath) { try { unlinkSync(promptPath) } catch { /* absent */ } } }
+  } finally {
+    // Keep the config lock when stop was not confirmed. The next run must not rewrite it over a live descendant.
+    if (record.stopped) releaseConfig?.()
+    tracker?.close(); clearInterval(timer); await bridge?.close(); if (promptPath) { try { unlinkSync(promptPath) } catch { /* absent */ } }
+  }
 }
 
 if (require.main === module) {
