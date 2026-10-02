@@ -3,6 +3,9 @@ import { isAbsolute, join, relative } from 'node:path'
 import { ExecutionError, type CliStorage, type ExecutionContext, type ExecutionConstraints, type ExecutionCode } from './types.js'
 
 const CREDENTIAL_ENV = /(?:^GROK_AUTH$|_API_KEY$|_AUTH_TOKEN$|_OAUTH_TOKEN$|_ACCESS_TOKEN$|_REFRESH_TOKEN$)/
+// CLIs read config, plugins, skills and MCP servers from HOME and from their own env overlays,
+// so the CLI receives only these host variables and HOME is the dedicated config directory.
+const CLI_ENV = /^(?:PATH|LANG|LANGUAGE|LC_[A-Z_]+|TERM|TZ|TMPDIR|TMP|TEMP|USER|LOGNAME|SHELL|(?:HTTP|HTTPS|ALL|NO)_PROXY|(?:http|https|all|no)_proxy|NODE_USE_ENV_PROXY|SSL_CERT_FILE|SSL_CERT_DIR|NODE_EXTRA_CA_CERTS)$/
 export interface CliCommand { command: string; args: string[]; stdin?: string }
 
 function directory(path: string | undefined, code: 'config_missing' | 'session_missing'): string {
@@ -35,8 +38,14 @@ function bindGrokSessions(configDir: string, sessionDir: string): void {
   let info: ReturnType<typeof lstatSync>
   try { info = lstatSync(link) } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new ExecutionError('storage_error')
-    symlinkSync(sessionDir, link)
-    return
+    try {
+      symlinkSync(sessionDir, link)
+      return
+    } catch (linkError) {
+      // A concurrent context may have bound the same entry first; validate it below.
+      if ((linkError as NodeJS.ErrnoException).code !== 'EEXIST') throw new ExecutionError('storage_error')
+      try { info = lstatSync(link) } catch { throw new ExecutionError('storage_error') }
+    }
   }
   let target: string
   try { target = realpathSync(link) } catch { throw new ExecutionError('invalid_request') }
@@ -56,21 +65,30 @@ export function prepareCliStorage(context: ExecutionContext): void {
   const storage = resolveCliStorage(context.connection.runtime, { configDir: context.configDir ?? '', sessionDir: context.sessionDir ?? '' })
   if (storage.configDir !== context.configDir || storage.sessionDir !== context.sessionDir) throw new ExecutionError('invalid_request')
 }
-export function cliEnvironment(base: NodeJS.ProcessEnv, context: ExecutionContext): NodeJS.ProcessEnv {
+/** Environment for the supervising worker: the host environment without credentials. */
+export function supervisorEnvironment(base: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {}
   for (const [key, value] of Object.entries(base)) {
     if (value !== undefined && !CREDENTIAL_ENV.test(key)) env[key] = value
   }
+  return env
+}
+/** Environment for the CLI itself: allowlisted host variables plus the dedicated storage. */
+export function cliEnvironment(base: NodeJS.ProcessEnv, context: ExecutionContext): NodeJS.ProcessEnv {
+  if (!context.configDir || !context.sessionDir) throw new ExecutionError('config_missing')
+  const env: NodeJS.ProcessEnv = {}
+  for (const [key, value] of Object.entries(base)) {
+    if (value !== undefined && CLI_ENV.test(key)) env[key] = value
+  }
+  env.HOME = context.configDir
   if (context.connection.runtime === 'grok-cli') {
     env.GROK_HOME = context.configDir
-    env.GROK_LEADER_SOCKET = join(context.configDir!, 'leader.sock')
-    delete env.PI_CODING_AGENT_DIR
-    delete env.PI_CODING_AGENT_SESSION_DIR
+    env.GROK_LEADER_SOCKET = join(context.configDir, 'leader.sock')
   } else if (context.connection.runtime === 'pi') {
     env.PI_CODING_AGENT_DIR = context.configDir
     env.PI_CODING_AGENT_SESSION_DIR = context.sessionDir
-    delete env.GROK_HOME
-    delete env.GROK_LEADER_SOCKET
+  } else {
+    throw new ExecutionError('unsupported_runtime')
   }
   return env
 }

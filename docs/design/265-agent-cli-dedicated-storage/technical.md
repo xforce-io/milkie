@@ -4,7 +4,7 @@
 |---|---|
 | Issue | [#265](https://github.com/xforce-io/milkie/issues/265) |
 | L1 | [product.md](product.md) v1 |
-| 版本 | v1 |
+| 版本 | v1.1 |
 | 验收 | S1.A1–S1.A3、S2.A1–S2.A5 |
 
 ## 1. 设计依据与技术目标
@@ -35,7 +35,7 @@
 
 Grok 会话文件位置为 `sessionDir/encodeURIComponent(cwd)/nativeSessionId/chat_history.jsonl`。Pi 会话文件为 `sessionDir/<contextId>.jsonl`。续接沿用已有的非空与 Pi 会话头核对。
 
-配置目录中的 `sessions`：不存在则创建指向会话目录的符号链接；已是指向同一实路径的符号链接或目录则复用；指向别处则 `invalid_request`。不移动已有数据。
+配置目录中的 `sessions`：不存在则创建指向会话目录的符号链接；已是指向同一实路径的符号链接或目录则复用；指向别处则 `invalid_request`。不移动已有数据。并发创建时若另一方先建立了入口（`EEXIST`），按已存在入口同样校验，不抛出带路径的原始错误。
 
 ## 5. 接口与协作契约
 
@@ -50,7 +50,9 @@ Grok 子进程：`GROK_HOME` 为配置目录，`GROK_LEADER_SOCKET` 与参数 `-
 
 Pi 子进程：`PI_CODING_AGENT_DIR` 为配置目录，参数同时包含 `--session-dir <会话目录>` 和 `--session <精确文件>`。不传 `--continue` 或无目标的 `--resume`。
 
-子进程环境从调用方环境复制后，删除名为 `GROK_AUTH` 的变量，以及以 `_API_KEY`、`_AUTH_TOKEN`、`_OAUTH_TOKEN`、`_ACCESS_TOKEN`、`_REFRESH_TOKEN` 结尾的变量。然后写入上面的专用变量。PATH 与 HOME 保留；CLI 配置不从 HOME 推导。
+环境分两层。监督进程（worker）使用调用方环境，删除名为 `GROK_AUTH` 的变量，以及以 `_API_KEY`、`_AUTH_TOKEN`、`_OAUTH_TOKEN`、`_ACCESS_TOKEN`、`_REFRESH_TOKEN` 结尾的变量。CLI 进程只接收白名单内的宿主变量：`PATH`、语言与时区（`LANG`、`LANGUAGE`、`LC_*`、`TZ`）、`TERM`、临时目录（`TMPDIR`、`TMP`、`TEMP`）、`USER`、`LOGNAME`、`SHELL`、代理（`HTTP(S)_PROXY`、`ALL_PROXY`、`NO_PROXY` 及小写形式、`NODE_USE_ENV_PROXY`）和证书（`SSL_CERT_FILE`、`SSL_CERT_DIR`、`NODE_EXTRA_CA_CERTS`）。然后写入上面的专用变量，并把 `HOME` 设为配置目录。
+
+v1 保留宿主 `HOME`，假设 CLI 配置不从 HOME 推导，实测不成立：Grok 1.0.41 设置 `GROK_HOME` 后，仍从 HOME 读取 `~/.claude`、`~/.cursor`、`~/.agents` 下的 skills 与插件，并拉起 `~/.cursor/mcp.json` 中的 MCP 服务器；`GROK_*_ENABLED` 等导入开关不能阻止。宿主环境中的 `GROK_CONFIG`、`GROK_CONFIG_PATH`、`GROK_DEPLOYMENT_KEY`、`GROK_AUTH_PROVIDER_COMMAND` 等变量也会把配置或登录引向配置目录之外，因此 CLI 环境改为白名单，不再沿用黑名单。
 
 ## 6. 运行与保障机制
 
@@ -68,10 +70,10 @@ Pi 子进程：`PI_CODING_AGENT_DIR` 为配置目录，参数同时包含 `--ses
 
 | 验收 | 机制 |
 |---|---|
-| S1.A1 S1.A2 | 真实 CLI 活探针：临时配置目录只放入登录材料，会话目录单独挂接；断言会话文件、环境变量和 leader socket |
+| S1.A1 S1.A2 | 真实 CLI 活探针：临时配置目录只放入登录材料，会话目录单独挂接；断言会话文件、环境变量和 leader socket；Grok 另以同一 CLI 环境运行 `grok inspect --json`，断言无宿主 HOME 路径 |
 | S1.A3 S2.A5 | Linux 容器活探针：不挂载宿主 HOME；成功续接一条，缺失失败一条，并取消一次运行中的 CLI |
 | S2.A1–S2.A4 | SDK 单测在 `spawn` 前抛出对应错误；确定性子进程不能代替真实 CLI 的隔离证明 |
-| 回归 | 既有执行单测改为显式传入两个目录，确认不再写 `HOME/.grok` |
+| 回归 | 既有执行单测改为显式传入两个目录，确认不再写 `HOME/.grok`；CLI 收到的 `HOME` 为配置目录，非白名单变量（含 `NODE_OPTIONS`、`GROK_CONFIG*`、`XDG_*`）不传入；`sessions` 入口并发创建归一为 `ExecutionError` |
 
 ## 9. 技术风险与开放问题
 
