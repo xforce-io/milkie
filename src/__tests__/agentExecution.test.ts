@@ -125,6 +125,72 @@ test('CLI argv contains exact session selection and enforceable tool flags, neve
   expect(grokCommand.args[grokCommand.args.indexOf('--disallowed-tools') + 1]).not.toContain('read_file')
   expect(grokCommand.args).not.toContain('--tools')
 })
+test('a context lock stops a second release from deleting the newer claim', async () => {
+  const store = new ExecutionStore(join(root, 'store-lock'))
+  const contextId = 'f7471111-1111-4111-8111-111111111112'
+  const oldRun = randomUUID()
+  const newRun = randomUUID()
+  store.claim(contextId, oldRun)
+  const ready = join(root, 'lock-ready')
+  const gate = join(root, 'lock-gate')
+  const holderCode = `const fs=require('node:fs');const {ExecutionStore}=require(${JSON.stringify(resolve('dist/execution/store.js'))});const store=new ExecutionStore(process.argv[1]);store.exclusive(process.argv[2],()=>{fs.writeFileSync(process.argv[5],'held');const deadline=Date.now()+5000;while(!fs.existsSync(process.argv[6])){if(Date.now()>deadline)throw new Error('timed out');Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,20)}if(fs.readFileSync(store.path('active',process.argv[2]),'utf8')===process.argv[3])store.release(process.argv[2],process.argv[3]);store.claim(process.argv[2],process.argv[4])});console.log('done')`
+  const holder = spawn(process.execPath, ['-e', holderCode, store.root, contextId, oldRun, newRun, ready, gate])
+  let holderOut = ''
+  holder.stdout.on('data', chunk => { holderOut += chunk })
+  try {
+    for (let i = 0; i < 50 && !existsSync(ready); i++) await delay(20)
+    expect(existsSync(ready)).toBe(true)
+    const releaseCode = `const {ExecutionStore}=require(${JSON.stringify(resolve('dist/execution/store.js'))});try{new ExecutionStore(process.argv[1]).release(process.argv[2],process.argv[3]);console.log('released')}catch(e){console.log(e.code)}`
+    const released = await new Promise<string>((resolveRelease, reject) => {
+      const child = spawn(process.execPath, ['-e', releaseCode, store.root, contextId, oldRun])
+      let out = ''
+      child.stdout.on('data', chunk => { out += chunk })
+      child.on('error', reject)
+      child.on('exit', () => resolveRelease(out.trim()))
+    })
+    expect(released).toBe('context_busy')
+    expect(readFileSync(store.path('active', contextId), 'utf8')).toBe(oldRun)
+    writeFileSync(gate, 'go')
+    await new Promise<void>((resolveExit, reject) => { holder.on('error', reject); holder.on('exit', code => code === 0 ? resolveExit() : reject(new Error(holderOut || `holder exited ${code}`))) })
+    expect(readFileSync(store.path('active', contextId), 'utf8')).toBe(newRun)
+  } finally { if (holder.exitCode === null) holder.kill('SIGKILL') }
+})
+test('reconcile does not overwrite a result while the context lock is held', async () => {
+  const a = client('grok-cli'), c = cliContext(a)
+  const store = new ExecutionStore(join(root, 'data'))
+  const runId = randomUUID()
+  const callId = randomUUID()
+  store.claim(c.contextId, runId)
+  store.write('runs', runId, { version: 1, runId, contextId: c.contextId, status: 'unknown', startedAt: 1, heartbeatAt: 1, stopped: true })
+  store.write('calls', callId, { version: 1, callId, name: 'alpha', input: { n: 1 }, runId, contextId: c.contextId, status: 'pending' })
+  const ready = join(root, 'reconcile-ready')
+  const gate = join(root, 'reconcile-gate')
+  const holderCode = `const fs=require('node:fs');const {ExecutionStore}=require(${JSON.stringify(resolve('dist/execution/store.js'))});new ExecutionStore(process.argv[1]).exclusive(process.argv[2],()=>{fs.writeFileSync(process.argv[3],'held');const deadline=Date.now()+5000;while(!fs.existsSync(process.argv[4])){if(Date.now()>deadline)throw new Error('timed out');Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,20)}});console.log('done')`
+  const holder = spawn(process.execPath, ['-e', holderCode, store.root, c.contextId, ready, gate])
+  try {
+    for (let i = 0; i < 50 && !existsSync(ready); i++) await delay(20)
+    expect(existsSync(ready)).toBe(true)
+    const reconcileCode = `const {ExecutionClient}=require(${JSON.stringify(resolve('dist/execution/ExecutionClient.js'))});try{new ExecutionClient({dataDir:process.argv[1],connection:{contractVersion:1,fields:{transport:'agent-cli',runtime:'grok-cli'}}}).reconcile(process.argv[2],process.argv[3]);console.log('reconciled')}catch(e){console.log(e.code)}`
+    const blocked = await new Promise<string>((resolveBlocked, reject) => {
+      const child = spawn(process.execPath, ['-e', reconcileCode, store.root, callId, 'other'])
+      let out = ''
+      child.stdout.on('data', chunk => { out += chunk })
+      child.on('error', reject)
+      child.on('exit', () => resolveBlocked(out.trim()))
+    })
+    expect(blocked).toBe('context_busy')
+    expect(store.read('calls', callId)).toMatchObject({ status: 'pending' })
+  } finally {
+    writeFileSync(gate, 'go')
+    await new Promise<void>(resolveExit => {
+      const timer = setTimeout(() => { if (holder.exitCode === null) holder.kill('SIGKILL') }, 2000)
+      holder.once('exit', () => { clearTimeout(timer); resolveExit() })
+    })
+  }
+  expect(a.reconcile(callId, 'done')).toMatchObject({ status: 'reconciled', output: 'done' })
+  expect(() => a.reconcile(callId, 'other')).toThrow('invalid_request')
+  expect(store.read('calls', callId)).toMatchObject({ output: 'done' })
+})
 test('two host processes cannot both claim an execution context', async () => {
   const store=new ExecutionStore(join(root,'store')),contextId='f7471111-1111-4111-8111-111111111111'
   const code=`const {ExecutionStore}=require(${JSON.stringify(resolve('dist/execution/store.js'))}); try {new ExecutionStore(process.argv[1]).claim(process.argv[2],process.argv[3]);console.log('claimed')}catch(e){console.log(e.code)}`

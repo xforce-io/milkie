@@ -85,10 +85,12 @@ export class ExecutionClient {
     workingDirectory(context.cwd)
     const worker = join(__dirname, 'worker.js')
     if (!existsSync(worker)) throw new ExecutionError('process_failed')
-    if (this.pendingCalls(contextId).length > 0) throw new ExecutionError('context_busy')
-    this.releaseSettledClaim(contextId)
     const runId = randomUUID()
-    this.store.claim(contextId, runId)
+    this.store.exclusive(contextId, () => {
+      if (this.pendingCalls(contextId).length > 0) throw new ExecutionError('context_busy')
+      this.releaseSettledClaim(contextId)
+      this.store.claim(contextId, runId)
+    })
     let child: ChildProcess | undefined
     try {
       // A call can be recorded after the first scan and before this claim.
@@ -148,24 +150,28 @@ export class ExecutionClient {
   reconcile(callId: string, output: string): ToolCallRecord {
     this.assertSupported()
     if (typeof output !== 'string' || output.length === 0 || output.length > 65536) throw new ExecutionError('invalid_request')
-    const call = this.toolCall(callId)
-    if (!call) throw new ExecutionError('invalid_request')
-    if (call.status === 'reconciled') {
-      if (call.output !== output) throw new ExecutionError('invalid_request')
-      const saved = this.store.run(call.runId)
-      if (!saved) throw new ExecutionError('invalid_request')
-      if (ACTIVE.has(saved.status)) throw new ExecutionError('context_busy')
+    const existing = this.toolCall(callId)
+    if (!existing) throw new ExecutionError('invalid_request')
+    return this.store.exclusive(existing.contextId, () => {
+      const call = this.toolCall(callId)
+      if (!call) throw new ExecutionError('invalid_request')
+      if (call.status === 'reconciled') {
+        if (call.output !== output) throw new ExecutionError('invalid_request')
+        const saved = this.store.run(call.runId)
+        if (!saved) throw new ExecutionError('invalid_request')
+        if (ACTIVE.has(saved.status)) throw new ExecutionError('context_busy')
+        this.releaseSettledClaim(call.contextId)
+        return call
+      }
+      if (call.status !== 'pending') throw new ExecutionError('invalid_request')
+      const run = this.store.run(call.runId)
+      if (!run) throw new ExecutionError('invalid_request')
+      if (ACTIVE.has(run.status)) throw new ExecutionError('context_busy')
+      const updated: ToolCallRecord = { ...call, status: 'reconciled', output }
+      this.store.write('calls', call.callId, updated)
       this.releaseSettledClaim(call.contextId)
-      return call
-    }
-    if (call.status !== 'pending') throw new ExecutionError('invalid_request')
-    const run = this.store.run(call.runId)
-    if (!run) throw new ExecutionError('invalid_request')
-    if (ACTIVE.has(run.status)) throw new ExecutionError('context_busy')
-    const updated: ToolCallRecord = { ...call, status: 'reconciled', output }
-    this.store.write('calls', call.callId, updated)
-    this.releaseSettledClaim(call.contextId)
-    return updated
+      return updated
+    })
   }
   /** Drop a claim whose run has stopped and whose calls are already reconciled. */
   private releaseSettledClaim(contextId: string): void {
