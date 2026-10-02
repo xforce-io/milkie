@@ -45,7 +45,7 @@ const PROTOCOLS: Record<string, AdapterFamily> = {
   'anthropic-messages': 'anthropic',
   'openai-chat-completions': 'openai-compatible',
 }
-const RUNTIMES: Record<string, true> = { 'claude-code': true, 'grok-cli': true, codex: true }
+const RUNTIMES: Record<string, true> = { 'claude-code': true, 'grok-cli': true, codex: true, pi: true }
 const ADAPTER_TO_PROTOCOL: Record<string, Protocol> = {
   anthropic: 'anthropic-messages',
   'openai-compatible': 'openai-chat-completions',

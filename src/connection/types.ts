@@ -13,7 +13,7 @@ export type CanonicalField = typeof SUFFIX_TO_FIELD[Suffix]
 
 export type Transport = 'api' | 'agent-cli'
 export type Protocol = 'anthropic-messages' | 'openai-chat-completions'
-export type Runtime = 'claude-code' | 'grok-cli' | 'codex'
+export type Runtime = 'claude-code' | 'grok-cli' | 'codex' | 'pi'
 export type ConnectionSource = 'canonical' | 'legacy'
 export type AdapterFamily = 'anthropic' | 'openai-compatible'
 

@@ -230,3 +230,7 @@ Runnable demos live under [examples/](./examples/) — see its
 ## License
 
 MIT
+
+### 外部 CLI 执行
+
+统一执行、查询、取消与原生会话续接的 SDK 用法见[外部执行 SDK](docs/agent-cli-execution.md)。提供 Grok/Pi 适配，默认只读；支持范围与真实验收入口见文档。

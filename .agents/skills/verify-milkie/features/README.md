@@ -26,12 +26,22 @@
 | [14-persistence](14-persistence.md) | 存储、重启与发布物 | Redis/消费者安装待验证 |
 | [15-planned-boundaries](15-planned-boundaries.md) | 规划能力与旧场景边界 | 规划或部分实现 |
 
+| [16-agent-cli-execution](16-agent-cli-execution.md) | 外部 CLI 执行与原生会话续接 | #263 候选；按 S1–S5 验证真实 CLI |
+| [17-agent-cli-dedicated-storage](17-agent-cli-dedicated-storage.md) | CLI 专用配置目录与会话目录 | #265；缺失时启动前失败 |
+
 ## 主入口逐项归属
 
 此表用于源码漂移检查；每个入口仅指定一个主归属，跨能力路径通过功能文件说明。
 
 | 类型 | 入口 | 功能文件 |
 |---|---|---|
+| SDK | `ExecutionClient.capabilities` | [16-agent-cli-execution](16-agent-cli-execution.md) |
+| SDK | `ExecutionClient.createContext` | [16-agent-cli-execution](16-agent-cli-execution.md) |
+| SDK | `ExecutionClient.getContext` | [16-agent-cli-execution](16-agent-cli-execution.md) |
+| SDK | `ExecutionClient.start` | [16-agent-cli-execution](16-agent-cli-execution.md) |
+| SDK | `ExecutionClient.query` | [16-agent-cli-execution](16-agent-cli-execution.md) |
+| SDK | `ExecutionClient.wait` | [16-agent-cli-execution](16-agent-cli-execution.md) |
+| SDK | `ExecutionClient.cancel` | [16-agent-cli-execution](16-agent-cli-execution.md) |
 | SDK | `loadManifest` | [01-registration](01-registration.md) |
 | SDK | `loadAgentFile` | [01-registration](01-registration.md) |
 | SDK | `registerAgent` | [01-registration](01-registration.md) |
