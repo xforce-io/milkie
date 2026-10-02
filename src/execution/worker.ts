@@ -50,9 +50,16 @@ export async function runExecution(request: WorkerRequest, life?: ParentLife): P
     terminal = true; clearInterval(timer)
     if (tracker) record.resources = tracker.resources()
     record.status = status; record.stopped = stopped; record.finishedAt = Date.now(); record.heartbeatAt = Date.now()
-    // Drop the claim before publishing the terminal record, so a visible stopped run is no longer held.
-    if (status !== 'unknown') store.release(context.contextId, record.runId)
+    // Release before publishing so a visible stopped run is usually no longer held.
+    // A busy lock must not skip the write: the claim stays and the next start retries the release.
+    let releaseFailed: unknown
+    if (status !== 'unknown') {
+      try { store.release(context.contextId, record.runId) }
+      catch (error) { releaseFailed = error }
+    }
     store.write('runs', record.runId, record)
+    if (releaseFailed instanceof ExecutionError && releaseFailed.code === 'context_busy') return
+    if (releaseFailed) throw releaseFailed
   }
   const onHost = (call: ToolCall) => new Promise<unknown>((resolve, reject) => {
     const timer = setInterval(() => { if (life?.dead || terminal) { clearInterval(timer); reject(new Error('Host unavailable.')) } }, 40)

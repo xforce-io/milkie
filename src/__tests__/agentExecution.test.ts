@@ -677,6 +677,29 @@ test('reconcile can release a claim that survived the checked write', () => {
   expect(existsSync(store.path('active', c.contextId))).toBe(false)
   expect(() => restarted.reconcile(callId, 'other')).toThrow('invalid_request')
 })
+test('a busy context lock still stores the terminal run', async () => {
+  const a = client('grok-cli'), c = cliContext(a)
+  const store = new ExecutionStore(join(root, 'data'))
+  const runId = a.start(c.contextId, 'fixture:sleep', { timeoutMs: 30000 })
+  for (let i = 0; i < 50 && store.run(runId)?.status !== 'running'; i++) await delay(20)
+  expect(store.run(runId)?.status).toBe('running')
+  const ready = join(root, 'busy-ready'), gate = join(root, 'busy-gate')
+  const holderCode = `const fs=require('node:fs');const {ExecutionStore}=require(${JSON.stringify(resolve('dist/execution/store.js'))});new ExecutionStore(process.argv[1]).exclusive(process.argv[2],()=>{fs.writeFileSync(process.argv[3],'held');const deadline=Date.now()+8000;while(!fs.existsSync(process.argv[4])){if(Date.now()>deadline)throw new Error('timed out');Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,20)}});`
+  const holder = spawn(process.execPath, ['-e', holderCode, store.root, c.contextId, ready, gate])
+  try {
+    for (let i = 0; i < 50 && !existsSync(ready); i++) await delay(20)
+    expect(existsSync(ready)).toBe(true)
+    const cancelled = await a.cancel(runId)
+    expect(cancelled).toMatchObject({ status: 'cancelled', stopped: true })
+    expect(readFileSync(store.path('active', c.contextId), 'utf8')).toBe(runId)
+    writeFileSync(gate, 'go')
+    await new Promise<void>((resolveExit, reject) => { holder.on('error', reject); holder.on('exit', code => code === 0 ? resolveExit() : reject(new Error(`holder exited ${code}`))) })
+    const resumed = await a.wait(a.start(c.contextId, 'again', { timeoutMs: 10000 }))
+    expect(resumed.status).toBe('succeeded')
+    expect(resumed.runId).not.toBe(runId)
+    expect(existsSync(store.path('active', c.contextId))).toBe(false)
+  } finally { if (holder.exitCode === null) { try { writeFileSync(gate, 'go') } catch { /* absent */ } holder.kill('SIGKILL') } }
+})
 test('start releases a claim left after the checked write', async () => {
   const a = client('grok-cli'), c = cliContext(a)
   const store = new ExecutionStore(join(root, 'data'))
