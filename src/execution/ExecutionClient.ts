@@ -90,6 +90,8 @@ export class ExecutionClient {
     this.store.claim(contextId, runId)
     let child: ChildProcess | undefined
     try {
+      // A call can be recorded after the first scan and before this claim.
+      if (this.pendingCalls(contextId).length > 0) throw new ExecutionError('context_busy')
       // The prior run may have finalized between the first read and this claim.
       context = this.store.context(contextId)
       if (JSON.stringify(context.connection) !== JSON.stringify(this.projection)) throw new ExecutionError('connection_mismatch')
@@ -146,7 +148,7 @@ export class ExecutionClient {
     if (ACTIVE.has(run.status)) throw new ExecutionError('context_busy')
     const updated: ToolCallRecord = { ...call, status: 'reconciled', output }
     this.store.write('calls', call.callId, updated)
-    if (this.pendingCalls(call.contextId).length === 0) {
+    if (this.pendingCalls(call.contextId).length === 0 && run.stopped) {
       const claim = this.store.path('active', call.contextId)
       if (existsSync(claim)) {
         if (readFileSync(claim, 'utf8') !== run.runId) throw new ExecutionError('storage_error')

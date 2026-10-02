@@ -541,6 +541,32 @@ test.each(['grok-cli', 'pi'])('%s lost tool reply blocks resume until the host r
     expect(sessionAfter.nativeSessionFile).toBe(sessionBefore.nativeSessionFile)
   } finally { if (host.exitCode === null) host.kill('SIGKILL') }
 })
+test('reconcile keeps the claim until the lost run is confirmed stopped', () => {
+  const a = client('grok-cli'), c = cliContext(a)
+  const store = new ExecutionStore(join(root, 'data'))
+  const runId = randomUUID()
+  store.claim(c.contextId, runId)
+  store.write('runs', runId, { version: 1, runId, contextId: c.contextId, status: 'unknown', startedAt: 1, heartbeatAt: 1, stopped: false })
+  const callId = randomUUID()
+  store.write('calls', callId, { version: 1, callId, name: 'alpha', input: { n: 1 }, runId, contextId: c.contextId, status: 'pending' })
+  expect(a.reconcile(callId, 'checked').status).toBe('reconciled')
+  expect(readFileSync(store.path('active', c.contextId), 'utf8')).toBe(runId)
+  expect(() => a.start(c.contextId, 'again', { tools: [alpha], timeoutMs: 10000 }, async () => ({ ok: true, output: 'x' }))).toThrow('context_busy')
+})
+test('a pending call recorded during claim is rejected before the next worker starts', () => {
+  const a = client('grok-cli'), c = cliContext(a)
+  const store = new ExecutionStore(join(root, 'data'))
+  const claim = store.claim.bind(store)
+  store.claim = (contextId: string, runId: string) => {
+    claim(contextId, runId)
+    const callId = randomUUID()
+    store.write('calls', callId, { version: 1, callId, name: 'alpha', input: { n: 1 }, runId: randomUUID(), contextId, status: 'pending' })
+  }
+  ;(a as unknown as { store: ExecutionStore }).store = store
+  expect(() => a.start(c.contextId, 'fixture:tools', { tools: [alpha], timeoutMs: 10000 }, async () => ({ ok: true, output: 'x' }))).toThrow('context_busy')
+  expect(existsSync(store.path('active', c.contextId))).toBe(false)
+  expect(readdirSync(join(root, 'data', 'runs')).filter(name => name.endsWith('.json'))).toEqual([])
+})
 test('API transport cannot register host tools', () => {
   const a = new ExecutionClient({ dataDir: join(root, 'data'), connection: { contractVersion: 1, fields: { transport: 'api', protocol: 'openai-chat-completions', model: 'fixture', apiKey: 'fixture-key' } }, env })
   const c = a.createContext(join(root, 'cwd'))

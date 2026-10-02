@@ -28,7 +28,7 @@
 
 接入进程可以退出。新的 `ExecutionClient` 指向同一 `dataDir`。`start` 先看该上下文还有没有 `pending` 调用，有则 `context_busy`，并且不占用新的执行。没有时沿用原来的 claim 和续接。
 
-`reconcile` 把一条 `pending` 记为 `reconciled`。该上下文再无 `pending`，且占用文件里的 runId 就是这条调用所属的执行时，释放占用。下一次 `start` 因此可以续接。
+`reconcile` 把一条 `pending` 记为 `reconciled`。该上下文再无 `pending`，所属执行的 `stopped` 已是 true，且占用文件里的 runId 就是这条调用所属的执行时，才释放占用。未确认本地资源停止时占用继续留着。`start` 在取得占用之后、启动 worker 之前再查一次 `pending`；若这时已经有未核对调用，释放本轮占用并返回 `context_busy`。
 
 工具帧一解析完就写记录，然后才进入串行队列。拒绝和参数失败仍立即回复，不进队列。
 
