@@ -9,7 +9,7 @@
     "agents",
     "contracts"
   ],
-  "description": "TypeScript Agent framework — Agent = FSM",
+  "description": "TypeScript Agent framework \u2014 Agent = FSM",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
@@ -19,9 +19,9 @@
     "build": "tsc",
     "prepack": "npm run build",
     "dev": "tsc --watch",
-    "test": "npm run test:unit && npm run test:e2e:deterministic",
+    "test": "npm run test:unit && npm run test:e2e:deterministic && npm run test:execution",
     "test:unit": "jest src/__tests__/AgentRuntime.test.ts src/__tests__/AgentRuntime.toolResultStrategy.test.ts src/__tests__/ContextBudget.test.ts src/__tests__/FSMEngine.test.ts src/__tests__/MemoryStore.test.ts src/__tests__/WorkingMemory.test.ts src/__tests__/SQLiteStore.abiMismatch.test.ts src/__tests__/Replay.test.ts src/__tests__/skillListManifest.test.ts src/__tests__/assertUnpublished.test.ts --runInBand",
-    "test:all": "jest",
+    "test:all": "npm run build && jest",
     "test:smoke": "jest src/__tests__/volcengine.smoke.test.ts --runInBand",
     "test:watch": "jest --watch",
     "test:e2e": "npm run test:e2e:deterministic",
@@ -31,7 +31,8 @@
     "eval:repair": "tsx examples/repair-ticketing/eval/run-eval.ts",
     "test:e2e:redis": "sh tests/e2e/run-redis-e2e.sh",
     "lint": "eslint src --ext .ts",
-    "test:package": "jest tests/e2e/package-distribution.test.ts --runInBand"
+    "test:package": "jest tests/e2e/package-distribution.test.ts --runInBand",
+    "test:execution": "npm run build && jest --runInBand --runTestsByPath src/__tests__/agentExecution.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.52.0",

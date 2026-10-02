@@ -37,4 +37,4 @@
 
 ## 已知缺口
 
-连接契约接受 agent-cli 配置不代表本仓库已实现 agent-cli 执行器；assembleApiGateway 仅装配 API 连接。真实远端模型可用性须单独验证。
+assembleApiGateway 仅装配 API 连接；外部 CLI 的执行支持及原生会话续接归 [外部执行](16-agent-cli-execution.md)。配置解析成功不代表执行能力或登录可用，真实远端模型可用性须单独验证。

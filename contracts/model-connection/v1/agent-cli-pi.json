@@ -1,0 +1,18 @@
+{
+  "kind": "success",
+  "input": {
+    "contractVersion": 1,
+    "fields": {
+      "transport": "agent-cli",
+      "runtime": "pi"
+    }
+  },
+  "expect": {
+    "contractVersion": 1,
+    "transport": "agent-cli",
+    "runtime": "pi",
+    "hasApiKey": false,
+    "hasBaseUrl": false,
+    "source": "canonical"
+  }
+}

@@ -209,3 +209,6 @@ export type {
   Span,
   SpanAttributes,
 } from './types/trajectory.js'
+
+// Unified external execution and native CLI session continuation (#263).
+export * from './execution/index.js'

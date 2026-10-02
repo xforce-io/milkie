@@ -33,6 +33,8 @@ for kind, entry, target in re.findall(r'^\| (SDK|CLI|HTTP) \| `([^`]+)` \| \[[^\
 
 milkie = (root / 'src/runtime/Milkie.ts').read_text().split('export class Milkie', 1)[1]
 sdk = set(re.findall(r'^  (?:async )?(\w+)\(', milkie, re.M)) - {'constructor'}
+execution = (root / 'src/execution/ExecutionClient.ts').read_text().split('export class ExecutionClient', 1)[1]
+sdk.update('ExecutionClient.' + name for name in re.findall(r'^  (?:async )?(\w+)\(', execution, re.M) if name != 'constructor')
 cli_source = (root / 'src/cli/main.ts').read_text()
 cli = set()
 # This source declares the agent group, then trace group, then standalone serve.
