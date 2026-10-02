@@ -86,6 +86,7 @@ export class ExecutionClient {
     const worker = join(__dirname, 'worker.js')
     if (!existsSync(worker)) throw new ExecutionError('process_failed')
     if (this.pendingCalls(contextId).length > 0) throw new ExecutionError('context_busy')
+    this.releaseSettledClaim(contextId)
     const runId = randomUUID()
     this.store.claim(contextId, runId)
     let child: ChildProcess | undefined
@@ -148,20 +149,34 @@ export class ExecutionClient {
     this.assertSupported()
     if (typeof output !== 'string' || output.length === 0 || output.length > 65536) throw new ExecutionError('invalid_request')
     const call = this.toolCall(callId)
-    if (!call || call.status !== 'pending') throw new ExecutionError('invalid_request')
+    if (!call) throw new ExecutionError('invalid_request')
+    if (call.status === 'reconciled') {
+      if (call.output !== output) throw new ExecutionError('invalid_request')
+      const saved = this.store.run(call.runId)
+      if (!saved) throw new ExecutionError('invalid_request')
+      if (ACTIVE.has(saved.status)) throw new ExecutionError('context_busy')
+      this.releaseSettledClaim(call.contextId)
+      return call
+    }
+    if (call.status !== 'pending') throw new ExecutionError('invalid_request')
     const run = this.store.run(call.runId)
     if (!run) throw new ExecutionError('invalid_request')
     if (ACTIVE.has(run.status)) throw new ExecutionError('context_busy')
     const updated: ToolCallRecord = { ...call, status: 'reconciled', output }
     this.store.write('calls', call.callId, updated)
-    if (this.pendingCalls(call.contextId).length === 0 && run.stopped) {
-      const claim = this.store.path('active', call.contextId)
-      if (existsSync(claim)) {
-        if (readFileSync(claim, 'utf8') !== run.runId) throw new ExecutionError('storage_error')
-        this.store.release(call.contextId, run.runId)
-      }
-    }
+    this.releaseSettledClaim(call.contextId)
     return updated
+  }
+  /** Drop a claim whose run has stopped and whose calls are already reconciled. */
+  private releaseSettledClaim(contextId: string): void {
+    if (this.pendingCalls(contextId).length > 0) return
+    const claim = this.store.path('active', contextId)
+    if (!existsSync(claim)) return
+    const runId = readFileSync(claim, 'utf8')
+    const run = this.store.run(runId)
+    if (!run || run.contextId !== contextId) throw new ExecutionError('storage_error')
+    if (!run.stopped || ACTIVE.has(run.status)) return
+    this.store.release(contextId, run.runId)
   }
   private pendingCalls(contextId: string): ToolCallRecord[] {
     const dir = join(this.store.root, 'calls')
