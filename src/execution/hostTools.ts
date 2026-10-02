@@ -4,6 +4,7 @@ import { existsSync, readFileSync, realpathSync, writeFileSync, unlinkSync, chmo
 import { createServer, Socket } from 'node:net'
 import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { parse as parseToml } from 'smol-toml'
 import { ExecutionError, type HostToolSchema, type HostToolSpec, type ToolCall, type ToolCallRecord, type ToolResult } from './types.js'
 import { ExecutionStore } from './store.js'
 
@@ -115,12 +116,20 @@ function tomlString(value: string): string {
   if (/["\\\n]/.test(value)) throw new ExecutionError('storage_error')
   return `"${value}"`
 }
-/** A project MCP table can replace the host server while inspect still reports the name milkie. */
+/** A project MCP table can replace the host server. Quoted and dotted TOML keys are the same table. */
 export function assertProjectGrokConfig(cwd: string): void {
   const file = join(cwd, '.grok', 'config.toml')
   if (!existsSync(file)) return
-  const text = readFileSync(file, 'utf8')
-  if (/^\s*\[mcp_servers(?:\.|\])/m.test(text) || /^\s*mcp_servers\s*=/m.test(text)) throw new ExecutionError('policy_mismatch')
+  let body: unknown
+  try { body = parseToml(readFileSync(file, 'utf8')) } catch { throw new ExecutionError('policy_mismatch') }
+  if (!body || typeof body !== 'object' || Array.isArray(body) || Object.prototype.hasOwnProperty.call(body, 'mcp_servers')) throw new ExecutionError('policy_mismatch')
+}
+/** `grok mcp list` reports the command and args actually loaded. Inspect's target omits args. */
+export function assertGrokMcpLaunch(report: unknown, command: string, args: string[]): void {
+  if (!Array.isArray(report) || report.length !== 1) throw new ExecutionError('policy_mismatch')
+  const server = report[0] as { name?: unknown; command?: unknown; args?: unknown; enabled?: unknown }
+  if (server?.name !== 'milkie' || server.command !== command || server.enabled === false) throw new ExecutionError('policy_mismatch')
+  if (!Array.isArray(server.args) || server.args.length !== args.length || server.args.some((item, index) => item !== args[index])) throw new ExecutionError('policy_mismatch')
 }
 /** One host-tool run owns the shared Grok config until it exits. A live holder, or a dead one whose stop was not confirmed, fails closed. */
 export function acquireGrokConfigLock(configDir: string, runId: string, previousConfirmed: (previousRunId: string) => boolean): () => void {
@@ -163,10 +172,9 @@ export function assertPiHostConfig(configDir: string): void {
   if (packages === undefined) return
   if (!Array.isArray(packages) || packages.length !== 0) throw new ExecutionError('policy_mismatch')
 }
-export function inspectGrok(cwd: string, env: NodeJS.ProcessEnv, leaderSocket: string, alive: () => boolean): Promise<void> {
-  assertProjectGrokConfig(cwd)
+function readGrok(args: string[], cwd: string, env: NodeJS.ProcessEnv, alive: () => boolean): Promise<unknown> {
   return new Promise((resolve, reject) => {
-    const child = spawn('grok', ['inspect', '--json', '--leader-socket', leaderSocket], { cwd, env, stdio: ['ignore', 'pipe', 'ignore'] })
+    const child = spawn('grok', args, { cwd, env, stdio: ['ignore', 'pipe', 'ignore'] })
     let stdout = ''
     const timer = setTimeout(() => { child.kill('SIGKILL'); reject(new ExecutionError('policy_mismatch')) }, 15000)
     const pulse = setInterval(() => { if (!alive()) child.kill('SIGKILL') }, 50)
@@ -177,9 +185,17 @@ export function inspectGrok(cwd: string, env: NodeJS.ProcessEnv, leaderSocket: s
     child.on('exit', code => {
       clearTimeout(timer); clearInterval(pulse)
       if (!alive() || code !== 0) { reject(new ExecutionError('policy_mismatch')); return }
-      try { assertGrokInventory(JSON.parse(stdout), process.execPath); resolve() } catch (error) { reject(error instanceof ExecutionError ? error : new ExecutionError('policy_mismatch')) }
+      try { resolve(JSON.parse(stdout)) } catch { reject(new ExecutionError('policy_mismatch')) }
     })
   })
+}
+export function inspectGrok(cwd: string, env: NodeJS.ProcessEnv, leaderSocket: string, launch: { command: string; args: string[] }, alive: () => boolean): Promise<void> {
+  assertProjectGrokConfig(cwd)
+  const grokArgs = ['--leader-socket', leaderSocket]
+  return readGrok(['inspect', '--json', ...grokArgs], cwd, env, alive).then(report => {
+    assertGrokInventory(report, launch.command)
+    return readGrok(['mcp', 'list', '--json', ...grokArgs], cwd, env, alive)
+  }).then(report => { assertGrokMcpLaunch(report, launch.command, launch.args) })
 }
 function resolveTypeboxModule(): string {
   try {

@@ -23,7 +23,7 @@
 
 宿主进程同时握住一条管道的写端。宿主进程消失后管道读到 EOF，IPC 也会断开。监督进程据此终止 CLI，把执行写成 `unknown`，不删除尚未应答的调用记录，也不释放上下文占用。
 
-Grok 在拉起模型前执行 `grok inspect --json`。MCP server 必须恰好是 `milkie`，且清单里的 `target` 必须等于本次写入的启动命令。工作区 `.grok/config.toml` 里只要有 `mcp_servers` 表就拒绝：Grok 1.0.41 会用它覆盖同名服务器的 command，而清单里的 source 路径仍可能指向宿主文件；该版本的清单不包含 args。外部导入单元全部关闭，托管配置处于关闭，hooks、plugins、lsp 与 marketplace 为空。skills 只允许 Grok 自带的 bundled 来源；项目或导入的 skill 失败。内置 agent 可以出现，因为命令行同时带 `--no-subagents`。不一致抛出 `policy_mismatch`，不拉起模型。
+Grok 在拉起模型前执行 `grok inspect --json`，再执行 `grok mcp list --json`。MCP server 必须恰好是 `milkie`。inspect 的 `target` 必须等于本次写入的启动命令；`mcp list` 里的 `command` 和 `args` 必须与本次写入的完整启动配置一致。工作区 `.grok/config.toml` 用 TOML 解析，出现 `mcp_servers` 就拒绝，包括引号键和点号键：Grok 1.0.41 会用项目表覆盖同名服务器，inspect 仍可能只显示宿主命令且不包含 args。外部导入单元全部关闭，托管配置处于关闭，hooks、plugins、lsp 与 marketplace 为空。skills 只允许 Grok 自带的 bundled 来源；项目或导入的 skill 失败。内置 agent 可以出现，因为命令行同时带 `--no-subagents`。不一致抛出 `policy_mismatch`，不拉起模型。
 
 ## 4. 数据与状态契约
 

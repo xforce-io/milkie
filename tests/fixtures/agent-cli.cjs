@@ -3,6 +3,28 @@
 const fs = require('node:fs'), path = require('node:path'), crypto = require('node:crypto')
 const args = process.argv.slice(2), pi = args.includes('--print')
 const get = key => args[args.indexOf(key) + 1]
+function configuredMcpLaunch() {
+  const override = path.join(process.cwd(), '.grok', 'fixture-mcp-args.json')
+  if (fs.existsSync(override)) {
+    const body = JSON.parse(fs.readFileSync(override, 'utf8'))
+    return { command: typeof body.command === 'string' ? body.command : configuredMcpCommand(), args: Array.isArray(body.args) ? body.args : [] }
+  }
+  const files = [path.join(process.cwd(), '.grok', 'config.toml'), path.join(process.env.GROK_HOME || '', 'config.toml')]
+  for (const file of files) {
+    if (!fs.existsSync(file)) continue
+    const text = fs.readFileSync(file, 'utf8')
+    const command = text.match(/\[mcp_servers\.milkie\][\s\S]*?\ncommand\s*=\s*"([^"]+)"/)
+    const args = text.match(/\[mcp_servers\.milkie\][\s\S]*?\nargs\s*=\s*\[([\s\S]*?)\]/)
+    if (!command || !args) continue
+    return { command: command[1], args: [...args[1].matchAll(/"([^"]*)"/g)].map(match => match[1]) }
+  }
+  return { command: process.execPath, args: [] }
+}
+if (args[0] === 'mcp' && args.includes('list')) {
+  const launch = configuredMcpLaunch()
+  process.stdout.write(JSON.stringify([{ name: 'milkie', command: launch.command, args: launch.args, enabled: true }]))
+  process.exit(0)
+}
 function configuredMcpCommand() {
   const files = [path.join(process.cwd(), '.grok', 'config.toml'), path.join(process.env.GROK_HOME || '', 'config.toml')]
   for (const file of files) {

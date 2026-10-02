@@ -90,8 +90,10 @@ export async function runExecution(request: WorkerRequest, life?: ParentLife): P
       if (life?.dead) { finish('unknown', true); return }
       if (context.connection.runtime === 'grok-cli') {
         releaseConfig = acquireGrokConfigLock(context.configDir!, record.runId, previousRunId => store.run(previousRunId)?.stopped === true)
-        writeGrokHostConfig(context.configDir!, join(__dirname, 'mcp-server.js'), bridge.socketPath, toolsFile)
-        await inspectGrok(context.cwd, cliEnvironment(process.env, context, { socketPath: bridge.socketPath, forwarding: hosted.forwarding }), join(context.configDir!, 'leader.sock'), () => !life?.dead)
+        const script = join(__dirname, 'mcp-server.js')
+        const launchArgs = [script, bridge.socketPath, toolsFile]
+        writeGrokHostConfig(context.configDir!, script, bridge.socketPath, toolsFile)
+        await inspectGrok(context.cwd, cliEnvironment(process.env, context, { socketPath: bridge.socketPath, forwarding: hosted.forwarding }), join(context.configDir!, 'leader.sock'), { command: process.execPath, args: launchArgs }, () => !life?.dead)
       } else {
         assertPiHostConfig(context.configDir!)
         extensionPath = join(store.root, 'runs', `${record.runId}.extension.mjs`)

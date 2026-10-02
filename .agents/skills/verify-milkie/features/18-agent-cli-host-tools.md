@@ -17,7 +17,7 @@ SDK `ExecutionClient.start(contextId, input, { tools, forwarding }, handler)` �
 | S1.A3 | Pi：同 S1.A1 | 调用成功且有 `nativeCallId` |
 | S1.A4 | Pi：同 S1.A2 | 调用状态 `rejected` |
 | S1.A5 | 夹具提交非法参数 | `invalid_input`，处理函数未被调用。不代替真实 CLI 成功 |
-| S2.A1 | Grok：项目 MCP、命令、读文件；另一次 `toolPolicy` 与工具并存 | 清单的启动命令不一致，或工作区 `.grok/config.toml` 声明了 MCP，则 `policy_mismatch` 且无模型进程；另两类无越权效果；冲突约束在启动前拒绝 |
+| S2.A1 | Grok：项目 MCP、命令、读文件；另一次 `toolPolicy` 与工具并存 | 清单的启动命令或 `mcp list` 的 command/args 不一致，或工作区 `.grok/config.toml` 声明了 MCP，则 `policy_mismatch` 且无模型进程；另两类无越权效果；冲突约束在启动前拒绝 |
 | S2.A2 | Pi：扩展、命令、读文件；另一次冲突约束 | 扩展没有写出文件；另两类无越权效果；冲突约束在启动前拒绝 |
 | S3.A1 | Grok：调用尚未应答时杀死宿主 | `unknown`，CLI 已退出，调用仍为 `pending` |
 | S3.A2 | Pi：同 S3.A1 | 同 S3.A1 |
