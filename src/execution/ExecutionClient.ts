@@ -1,4 +1,4 @@
-import { fork } from 'node:child_process'
+import { fork, type ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
@@ -7,7 +7,8 @@ import type { ConnectionInput } from '../connection/types.js'
 import { resolveAndParseConnection } from '../connection/parse.js'
 import { ExecutionStore, workingDirectory } from './store.js'
 import { assertNativeSession, prepareCliStorage, resolveCliStorage, supervisorEnvironment } from './adapters.js'
-import { ExecutionError, type CliStorage, type ExecutionCapabilities, type ExecutionClientOptions, type ExecutionConstraints, type ExecutionContext, type ExecutionRecord, type WorkerRequest } from './types.js'
+import { assertHostTools, normalizeToolResult } from './hostTools.js'
+import { ExecutionError, type CliStorage, type ExecutionCapabilities, type ExecutionClientOptions, type ExecutionConstraints, type ExecutionContext, type ExecutionRecord, type HostToolSpec, type ToolCallRecord, type ToolHandler, type WorkerRequest, type WorkerToolMessage } from './types.js'
 
 const ACTIVE = new Set(['starting', 'running'])
 export class ExecutionClient {
@@ -15,6 +16,8 @@ export class ExecutionClient {
   private readonly projection
   private readonly env: NodeJS.ProcessEnv
   private readonly connection: ConnectionInput
+  /** Host-lifetime pipes. Closing one tells the worker to stop the CLI. */
+  private readonly parentPipes: unknown[] = []
   constructor(options: ExecutionClientOptions) {
     this.connection = structuredClone(options.connection)
     this.projection = resolveAndParseConnection(this.connection).projection
@@ -24,7 +27,21 @@ export class ExecutionClient {
   capabilities(): ExecutionCapabilities {
     const supported = this.projection.transport === 'api' || this.projection.runtime === 'grok-cli' || this.projection.runtime === 'pi'
     const platform = process.platform !== 'win32'
-    return { supported: supported && platform, ...(!supported ? { code: 'unsupported_runtime' as const } : !platform ? { code: 'platform_unsupported' as const } : {}), availability: 'unchecked', resume: supported && platform && this.projection.transport === 'agent-cli', workingDirectory: supported && platform, toolPolicies: supported && platform ? ['read-only', 'standard'] : [], timeout: supported && platform, cancel: supported && platform }
+    const ready = supported && platform
+    const cli = ready && this.projection.transport === 'agent-cli'
+    return {
+      supported: ready,
+      ...(!supported ? { code: 'unsupported_runtime' as const } : !platform ? { code: 'platform_unsupported' as const } : {}),
+      availability: 'unchecked',
+      resume: cli,
+      workingDirectory: ready,
+      toolPolicies: ready ? ['read-only', 'standard'] : [],
+      hostTools: cli,
+      nativeCallId: cli && this.projection.runtime === 'pi',
+      forwarding: cli ? ['serial', 'parallel'] : [],
+      timeout: ready,
+      cancel: ready,
+    }
   }
   createContext(cwd: string, storage?: CliStorage): ExecutionContext {
     this.assertSupported()
@@ -40,12 +57,29 @@ export class ExecutionClient {
     return context
   }
   getContext(contextId: string): ExecutionContext { return this.store.context(contextId) }
-  start(contextId: string, input: string, constraints: ExecutionConstraints = {}): string {
+  start(contextId: string, input: string, constraints: ExecutionConstraints = {}, handler?: ToolHandler): string {
     this.assertSupported()
     if (typeof input !== 'string' || !input.trim() || input.length > 1024 * 1024) throw new ExecutionError('invalid_request')
-    if (!constraints || Array.isArray(constraints) || typeof constraints !== 'object' || Object.keys(constraints).some(k => k !== 'toolPolicy' && k !== 'timeoutMs')) throw new ExecutionError('unsupported_constraint')
-    const normalized: Required<ExecutionConstraints> = { toolPolicy: constraints.toolPolicy ?? 'read-only', timeoutMs: constraints.timeoutMs ?? 120000 }
-    if (!['read-only', 'standard'].includes(normalized.toolPolicy) || !Number.isInteger(normalized.timeoutMs) || normalized.timeoutMs <= 0 || normalized.timeoutMs > 3600000) throw new ExecutionError('unsupported_constraint')
+    if (!constraints || Array.isArray(constraints) || typeof constraints !== 'object') throw new ExecutionError('unsupported_constraint')
+    const allowed = new Set(['toolPolicy', 'timeoutMs', 'tools', 'forwarding'])
+    if (Object.keys(constraints).some(key => !allowed.has(key))) throw new ExecutionError('unsupported_constraint')
+    const hasTools = constraints.tools !== undefined
+    if (hasTools && constraints.toolPolicy !== undefined) throw new ExecutionError('unsupported_constraint')
+    if (!hasTools && constraints.forwarding !== undefined) throw new ExecutionError('unsupported_constraint')
+    const timeoutMs = constraints.timeoutMs ?? 120000
+    if (!Number.isInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > 3600000) throw new ExecutionError('unsupported_constraint')
+    const toolPolicy = constraints.toolPolicy ?? 'read-only'
+    let hostTools: { tools: HostToolSpec[]; forwarding: 'serial' | 'parallel' } | undefined
+    if (hasTools) {
+      if (this.projection.transport !== 'agent-cli' || !handler) throw new ExecutionError(this.projection.transport === 'agent-cli' ? 'invalid_request' : 'unsupported_constraint')
+      if (!Array.isArray(constraints.tools) || constraints.tools.length === 0) throw new ExecutionError('invalid_request')
+      const forwarding = constraints.forwarding ?? 'serial'
+      if (forwarding !== 'serial' && forwarding !== 'parallel') throw new ExecutionError('unsupported_constraint')
+      let tools: HostToolSpec[]
+      try { tools = structuredClone(constraints.tools) } catch { throw new ExecutionError('invalid_request') }
+      assertHostTools(tools)
+      hostTools = { tools, forwarding }
+    } else if (toolPolicy !== 'read-only' && toolPolicy !== 'standard') throw new ExecutionError('unsupported_constraint')
     let context = this.store.context(contextId)
     if (JSON.stringify(context.connection) !== JSON.stringify(this.projection)) throw new ExecutionError('connection_mismatch')
     workingDirectory(context.cwd)
@@ -53,6 +87,7 @@ export class ExecutionClient {
     if (!existsSync(worker)) throw new ExecutionError('process_failed')
     const runId = randomUUID()
     this.store.claim(contextId, runId)
+    let child: ChildProcess | undefined
     try {
       // The prior run may have finalized between the first read and this claim.
       context = this.store.context(contextId)
@@ -64,7 +99,15 @@ export class ExecutionClient {
       const record: ExecutionRecord = { version: 1, runId, contextId, nativeSessionId: context.nativeSessionId, status: 'starting', startedAt: Date.now(), heartbeatAt: Date.now(), stopped: false }
       this.store.write('runs', runId, record)
       const childEnv = context.connection.transport === 'agent-cli' ? supervisorEnvironment(this.env) : this.env
-      const child = fork(worker, [], { env: childEnv, detached: true, stdio: ['ignore', 'ignore', 'ignore', 'ipc'], execArgv: [] })
+      child = fork(worker, [], { env: childEnv, detached: !hostTools, stdio: hostTools ? ['ignore', 'ignore', 'ignore', 'ipc', 'pipe'] : ['ignore', 'ignore', 'ignore', 'ipc'], execArgv: [] })
+      const pipe = hostTools ? child.stdio[4] : undefined
+      if (hostTools && (!pipe || typeof pipe === 'string' || !('on' in pipe))) throw new ExecutionError('process_failed')
+      if (pipe && typeof pipe !== 'string') {
+        const stream = pipe as NodeJS.EventEmitter & { unref?: () => void }
+        stream.on('error', () => { /* Worker exit closes this end after the run is stored. */ })
+        stream.unref?.()
+        this.parentPipes.push(stream)
+      }
       const fail = () => {
         // Once IPC was accepted execution may have started: don't release its claim.
         try {
@@ -73,12 +116,24 @@ export class ExecutionClient {
         } catch { /* A stale starting record remains unknown; never crash the host or release its claim. */ }
       }
       child.on('error', fail)
-      const message: WorkerRequest = { dataDir: this.store.root, context, record, connection: this.connection, input, constraints: normalized }
+      if (hostTools && handler) {
+        child.on('message', (message: WorkerToolMessage) => {
+          if (!message || message.type !== 'tool-call' || !message.call) return
+          void Promise.resolve().then(() => handler(message.call)).then(result => normalizeToolResult(result), () => normalizeToolResult(undefined)).then(result => {
+            try { child?.send({ type: 'tool-result', callId: message.call.callId, result }) } catch { /* The worker has already exited. */ }
+          })
+        })
+      }
+      const message: WorkerRequest = { dataDir: this.store.root, context, record, connection: this.connection, input, constraints: { toolPolicy: hostTools ? undefined : toolPolicy, timeoutMs }, ...(hostTools ? { hostTools } : {}) }
       child.send(message, err => { if (err) fail() })
-      child.unref()
+      if (!hostTools) child.unref()
       return runId
-    } catch (e) { this.store.release(contextId, runId); throw e }
+    } catch (e) {
+      if (child && child.exitCode === null) child.kill('SIGKILL')
+      this.store.release(contextId, runId); throw e
+    }
   }
+  toolCall(callId: string): ToolCallRecord | undefined { return this.store.read<ToolCallRecord>('calls', callId) }
   query(runId: string): ExecutionRecord | undefined {
     const record = this.store.run(runId)
     if (record && ACTIVE.has(record.status) && Date.now() - record.heartbeatAt > 5000) return { ...record, status: 'unknown', stopped: false }

@@ -1,6 +1,7 @@
 import { openSync, readSync, closeSync, lstatSync, statSync, symlinkSync, realpathSync } from 'node:fs'
 import { isAbsolute, join, relative } from 'node:path'
-import { ExecutionError, type CliStorage, type ExecutionContext, type ExecutionConstraints, type ExecutionCode } from './types.js'
+import { GROK_NATIVE_TOOLS, grokLockEnv } from './hostTools.js'
+import { ExecutionError, type CliStorage, type ExecutionContext, type ExecutionCode } from './types.js'
 
 const CREDENTIAL_ENV = /(?:^GROK_AUTH$|_API_KEY$|_AUTH_TOKEN$|_OAUTH_TOKEN$|_ACCESS_TOKEN$|_REFRESH_TOKEN$)/
 // CLIs read config, plugins, skills and MCP servers from HOME and from their own env overlays,
@@ -74,7 +75,7 @@ export function supervisorEnvironment(base: NodeJS.ProcessEnv): NodeJS.ProcessEn
   return env
 }
 /** Environment for the CLI itself: allowlisted host variables plus the dedicated storage. */
-export function cliEnvironment(base: NodeJS.ProcessEnv, context: ExecutionContext): NodeJS.ProcessEnv {
+export function cliEnvironment(base: NodeJS.ProcessEnv, context: ExecutionContext, host?: { socketPath: string; forwarding: 'serial' | 'parallel' }): NodeJS.ProcessEnv {
   if (!context.configDir || !context.sessionDir) throw new ExecutionError('config_missing')
   const env: NodeJS.ProcessEnv = {}
   for (const [key, value] of Object.entries(base)) {
@@ -84,11 +85,16 @@ export function cliEnvironment(base: NodeJS.ProcessEnv, context: ExecutionContex
   if (context.connection.runtime === 'grok-cli') {
     env.GROK_HOME = context.configDir
     env.GROK_LEADER_SOCKET = join(context.configDir, 'leader.sock')
+    if (host) Object.assign(env, grokLockEnv())
   } else if (context.connection.runtime === 'pi') {
     env.PI_CODING_AGENT_DIR = context.configDir
     env.PI_CODING_AGENT_SESSION_DIR = context.sessionDir
   } else {
     throw new ExecutionError('unsupported_runtime')
+  }
+  if (host) {
+    env.MILKIE_TOOL_SOCKET = host.socketPath
+    env.MILKIE_FORWARDING = host.forwarding
   }
   return env
 }
@@ -117,13 +123,21 @@ export function assertNativeSession(context: ExecutionContext): void {
     } catch { throw new ExecutionError('session_missing') }
   }
 }
-export function cliCommand(context: ExecutionContext, input: string, constraints: Required<ExecutionConstraints>, promptFile: string): CliCommand {
+export function cliCommand(context: ExecutionContext, input: string, constraints: { toolPolicy?: 'read-only' | 'standard'; timeoutMs: number }, promptFile: string, host?: { names: string[]; extensionPath?: string }): CliCommand {
   const model = context.connection.model ? ['--model', context.connection.model] : []
   if (context.connection.runtime === 'pi') {
-    return { command: 'pi', args: ['--print', '--mode', 'json', '--session-dir', context.sessionDir!, '--session', context.nativeSessionFile!, '--no-extensions', '--no-skills', '--no-prompt-templates', '--no-themes', '--no-context-files', '--no-approve', '--tools', constraints.toolPolicy === 'read-only' ? 'read,grep,find,ls' : 'read,bash,edit,write,grep,find,ls', ...model], stdin: input }
+    if (host && !host.extensionPath) throw new ExecutionError('process_failed')
+    const tools = host ? ['--no-builtin-tools', '--extension', host.extensionPath!, '--tools', host.names.join(',')] : ['--tools', constraints.toolPolicy === 'standard' ? 'read,bash,edit,write,grep,find,ls' : 'read,grep,find,ls']
+    return { command: 'pi', args: ['--print', '--mode', 'json', '--session-dir', context.sessionDir!, '--session', context.nativeSessionFile!, '--no-extensions', '--no-skills', '--no-prompt-templates', '--no-themes', '--no-context-files', '--no-approve', ...tools, ...model], stdin: input }
   }
   if (context.connection.runtime === 'grok-cli') {
-    return { command: 'grok', args: ['--cwd', context.cwd, '--leader-socket', join(context.configDir!, 'leader.sock'), context.hasExecuted ? '--resume' : '--session-id', context.nativeSessionId!, '--output-format', 'streaming-json', '--no-subagents', '--disable-web-search', '--permission-mode', constraints.toolPolicy === 'read-only' ? 'plan' : 'bypassPermissions', ...(constraints.toolPolicy === 'read-only' ? ['--disallowed-tools', 'run_terminal_command,search_replace,write,spawn_subagent,exit_plan_mode,enter_plan_mode,kill_command_or_subagent,todo_write,send_feedback,scheduler_create,scheduler_delete,scheduler_list,get_command_or_subagent_output,ask_user_question,monitor,search_tool,use_tool,workflow,image_gen,image_edit,image_to_video,reference_to_video'] : []), ...model, '--prompt-file', promptFile] }
+    const permissionMode = (host || constraints.toolPolicy === 'standard') ? 'bypassPermissions' : 'plan'
+    // Removing every builtin also drops the host MCP tool from the model request. Permission denies block the effect instead.
+    const readOnlyDenied = !host && constraints.toolPolicy !== 'standard' ? ['--disallowed-tools', GROK_NATIVE_TOOLS] : []
+    // Grok 1.0.41 reaches MCP tools only through search_tool/use_tool. Removing those two also removes the host tool.
+    // Out-of-bounds access is closed by the milkie-only server plus these permission denies.
+    const hostLock = host ? ['--disallowed-tools', 'x_search,web_search,web_fetch', '--deny', 'Bash(*)', '--deny', 'Read(**)', '--deny', 'Edit(**)', '--deny', 'Grep'] : []
+    return { command: 'grok', args: ['--cwd', context.cwd, '--leader-socket', join(context.configDir!, 'leader.sock'), context.hasExecuted ? '--resume' : '--session-id', context.nativeSessionId!, '--output-format', 'streaming-json', '--no-subagents', '--disable-web-search', '--permission-mode', permissionMode, ...readOnlyDenied, ...hostLock, ...model, '--prompt-file', promptFile] }
   }
   throw new ExecutionError('unsupported_runtime')
 }
