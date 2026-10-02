@@ -50,8 +50,9 @@ export async function runExecution(request: WorkerRequest, life?: ParentLife): P
     terminal = true; clearInterval(timer)
     if (tracker) record.resources = tracker.resources()
     record.status = status; record.stopped = stopped; record.finishedAt = Date.now(); record.heartbeatAt = Date.now()
-    store.write('runs', record.runId, record)
+    // Drop the claim before publishing the terminal record, so a visible stopped run is no longer held.
     if (status !== 'unknown') store.release(context.contextId, record.runId)
+    store.write('runs', record.runId, record)
   }
   const onHost = (call: ToolCall) => new Promise<unknown>((resolve, reject) => {
     const timer = setInterval(() => { if (life?.dead || terminal) { clearInterval(timer); reject(new Error('Host unavailable.')) } }, 40)

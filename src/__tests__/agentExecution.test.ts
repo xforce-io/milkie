@@ -155,23 +155,41 @@ test('a context lock stops a second release from deleting the newer claim', asyn
     expect(readFileSync(store.path('active', contextId), 'utf8')).toBe(newRun)
   } finally { if (holder.exitCode === null) holder.kill('SIGKILL') }
 })
-test('an empty context lock is not stolen', () => {
-  const store = new ExecutionStore(join(root, 'store-empty-lock'))
+test('two processes cannot both hold one context lock', async () => {
+  const store = new ExecutionStore(join(root, 'store-two-lock'))
   const contextId = 'f7471111-1111-4111-8111-111111111114'
-  const file = join(store.root, 'locks', `${contextId}.lock`)
-  writeFileSync(file, '', { flag: 'wx', mode: 0o600 })
-  expect(() => store.exclusive(contextId, () => { throw new Error('entered') })).toThrow('context_busy')
-  expect(readFileSync(file, 'utf8')).toBe('')
-})
-test('releasing a context lock leaves a replacement lock in place', () => {
-  const store = new ExecutionStore(join(root, 'store-replace-lock'))
-  const contextId = 'f7471111-1111-4111-8111-111111111115'
-  const file = join(store.root, 'locks', `${contextId}.lock`)
-  store.exclusive(contextId, () => {
-    unlinkSync(file)
-    writeFileSync(file, `${process.pid}\n`, { flag: 'wx', mode: 0o600 })
+  const log = join(root, 'lock-log')
+  const code = `const fs=require('node:fs');const {ExecutionStore}=require(${JSON.stringify(resolve('dist/execution/store.js'))});try{new ExecutionStore(process.argv[1]).exclusive(process.argv[2],()=>{fs.appendFileSync(process.argv[3],'enter\\n');Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,200);fs.appendFileSync(process.argv[3],'exit\\n')});console.log('entered')}catch(e){console.log(e.code)}`
+  const run = () => new Promise<string>((resolveRun, reject) => {
+    const child = spawn(process.execPath, ['-e', code, store.root, contextId, log])
+    let out = ''
+    child.stdout.on('data', chunk => { out += chunk })
+    child.on('error', reject)
+    child.on('exit', () => resolveRun(out.trim()))
   })
-  expect(readFileSync(file, 'utf8')).toBe(`${process.pid}\n`)
+  const results = (await Promise.all([run(), run()])).sort()
+  expect(results).toEqual(['context_busy', 'entered'])
+  const text = readFileSync(log, 'utf8')
+  expect(text).toBe('enter\nexit\n')
+})
+test('a killed holder releases the context lock', async () => {
+  const store = new ExecutionStore(join(root, 'store-dead-lock'))
+  const contextId = 'f7471111-1111-4111-8111-111111111115'
+  const ready = join(root, 'dead-ready')
+  const holderCode = `const fs=require('node:fs');const {ExecutionStore}=require(${JSON.stringify(resolve('dist/execution/store.js'))});new ExecutionStore(process.argv[1]).exclusive(process.argv[2],()=>{fs.writeFileSync(process.argv[3],'held');setInterval(()=>{},1000)});`
+  const holder = spawn(process.execPath, ['-e', holderCode, store.root, contextId, ready])
+  try {
+    for (let i = 0; i < 50 && !existsSync(ready); i++) await delay(20)
+    expect(existsSync(ready)).toBe(true)
+    holder.kill('SIGKILL')
+    await new Promise<void>(resolveExit => holder.once('exit', () => resolveExit()))
+    let entered = false
+    for (let i = 0; i < 50 && !entered; i++) {
+      try { store.exclusive(contextId, () => { entered = true }) }
+      catch (error) { if (!(error instanceof Error) || !error.message.includes('context_busy')) throw error; await delay(20) }
+    }
+    expect(entered).toBe(true)
+  } finally { if (holder.exitCode === null) holder.kill('SIGKILL') }
 })
 test('reconcile does not overwrite a result while the context lock is held', async () => {
   const a = client('grok-cli'), c = cliContext(a)
