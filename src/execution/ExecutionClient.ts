@@ -6,7 +6,7 @@ import { setTimeout as delay } from 'node:timers/promises'
 import type { ConnectionInput } from '../connection/types.js'
 import { resolveAndParseConnection } from '../connection/parse.js'
 import { ExecutionStore, workingDirectory } from './store.js'
-import { assertNativeSession, cliEnvironment, prepareCliStorage, resolveCliStorage } from './adapters.js'
+import { assertNativeSession, prepareCliStorage, resolveCliStorage, supervisorEnvironment } from './adapters.js'
 import { ExecutionError, type CliStorage, type ExecutionCapabilities, type ExecutionClientOptions, type ExecutionConstraints, type ExecutionContext, type ExecutionRecord, type WorkerRequest } from './types.js'
 
 const ACTIVE = new Set(['starting', 'running'])
@@ -63,7 +63,7 @@ export class ExecutionClient {
       }
       const record: ExecutionRecord = { version: 1, runId, contextId, nativeSessionId: context.nativeSessionId, status: 'starting', startedAt: Date.now(), heartbeatAt: Date.now(), stopped: false }
       this.store.write('runs', runId, record)
-      const childEnv = context.connection.transport === 'agent-cli' ? cliEnvironment(this.env, context) : this.env
+      const childEnv = context.connection.transport === 'agent-cli' ? supervisorEnvironment(this.env) : this.env
       const child = fork(worker, [], { env: childEnv, detached: true, stdio: ['ignore', 'ignore', 'ignore', 'ipc'], execArgv: [] })
       const fail = () => {
         // Once IPC was accepted execution may have started: don't release its claim.

@@ -226,6 +226,36 @@ test('dedicated storage is required and credential env does not reach the CLI', 
   expect(() => a.createContext(join(root, 'cwd'), { configDir: shared.configDir, sessionDir: storage().sessionDir })).toThrow('invalid_request')
   expect(first.configDir).toBe(realpathSync(shared.configDir))
 })
+test.each(['grok-cli','pi'])('%s CLI gets HOME on the config directory and only allowlisted host variables', async runtime => {
+  Object.assign(env, { HOST_ONLY_MARKER: 'x', NODE_OPTIONS: '--no-warnings', GROK_CONFIG: 'x', GROK_CONFIG_PATH: '/host/grok.toml', GROK_DEPLOYMENT_KEY: 'x', GROK_AUTH_PROVIDER_COMMAND: 'x', XDG_CONFIG_HOME: '/host/xdg', PI_OFFLINE: '1', HTTPS_PROXY: 'http://proxy.invalid:3128', LANG: 'C.UTF-8' })
+  const a = client(runtime), c = cliContext(a)
+  expect((await a.wait(a.start(c.contextId, 'marker'))).status).toBe('succeeded')
+  const invocation = JSON.parse(readFileSync(join(root, 'cwd', 'cli-invocation.json'), 'utf8'))
+  expect(invocation.home).toBe(c.configDir)
+  for (const key of ['HOST_ONLY_MARKER', 'NODE_OPTIONS', 'GROK_CONFIG', 'GROK_CONFIG_PATH', 'GROK_DEPLOYMENT_KEY', 'GROK_AUTH_PROVIDER_COMMAND', 'XDG_CONFIG_HOME', 'PI_OFFLINE']) expect(invocation.envKeys).not.toContain(key)
+  for (const key of ['PATH', 'HTTPS_PROXY', 'LANG']) expect(invocation.envKeys).toContain(key)
+  const own = runtime === 'grok-cli' ? ['GROK_HOME', 'GROK_LEADER_SOCKET'] : ['PI_CODING_AGENT_DIR', 'PI_CODING_AGENT_SESSION_DIR']
+  for (const key of own) expect(invocation.envKeys).toContain(key)
+})
+test('a Grok sessions entry created concurrently is validated instead of leaking a raw error', () => {
+  const fs = require('node:fs') as typeof import('node:fs')
+  const { resolveCliStorage } = require('../execution/adapters') as typeof import('../execution/adapters')
+  const own = storage(), other = storage()
+  const realSymlink = fs.symlinkSync
+  const race = (target: string) => jest.spyOn(fs, 'symlinkSync').mockImplementationOnce((_from, path) => {
+    realSymlink(target, path)
+    throw Object.assign(new Error(`EEXIST: file already exists, symlink '${String(path)}'`), { code: 'EEXIST' })
+  })
+  try {
+    race(realpathSync(own.sessionDir))
+    expect(resolveCliStorage('grok-cli', own).sessionDir).toBe(realpathSync(own.sessionDir))
+    race(realpathSync(own.sessionDir))
+    let error: any
+    try { resolveCliStorage('grok-cli', other) } catch (e) { error = e }
+    expect(error?.code).toBe('invalid_request')
+    expect(String(error?.message)).not.toContain(root)
+  } finally { jest.restoreAllMocks() }
+})
 test('native cancellation and missing CLI login are separate structured failures', () => {
   const events=new CliEvents('grok-cli')
   events.push('{"type":"end","stopReason":"cancelled","sessionId":"native"}\n')

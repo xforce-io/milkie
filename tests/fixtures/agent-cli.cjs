@@ -15,6 +15,8 @@ function run() {
     sessionDir: args.includes('--session-dir') ? get('--session-dir') : null,
     session: args.includes('--session') ? get('--session') : null,
     credentialPresent: Boolean(credential),
+    home: process.env.HOME ?? null,
+    envKeys: Object.keys(process.env).sort(),
   }))
   if (!pi && !process.env.GROK_HOME) { process.stderr.write('GROK_HOME missing'); process.exit(1) }
   const file = pi ? get('--session') : path.join(process.env.GROK_HOME, 'sessions', encodeURIComponent(fs.realpathSync(process.cwd())), get(args.includes('--resume') ? '--resume' : '--session-id'), 'chat_history.jsonl')

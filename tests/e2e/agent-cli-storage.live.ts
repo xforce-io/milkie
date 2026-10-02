@@ -1,12 +1,12 @@
 /** Opt-in real storage probe: MILKIE_LIVE_STORAGE=1 tsx tests/e2e/agent-cli-storage.live.ts */
-import { spawn } from 'node:child_process'
+import { spawn, execFileSync } from 'node:child_process'
 import { mkdtempSync, existsSync, mkdirSync, rmSync, readdirSync, statSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import assert from 'node:assert/strict'
 import { ExecutionClient } from '../../dist/execution/ExecutionClient'
-import { nativeFile } from '../../dist/execution/adapters'
+import { cliEnvironment, nativeFile } from '../../dist/execution/adapters'
 import { prepareDedicatedStorage } from './dedicated-storage'
 
 function snapshot(dir: string): string[] {
@@ -23,6 +23,14 @@ function snapshot(dir: string): string[] {
   }
   walk(dir)
   return found.sort()
+}
+
+/** Every path string Grok reports as discovered config, skills, plugins, hooks or MCP servers. */
+function discoveredHostPaths(value: unknown, home: string, found: string[] = []): string[] {
+  if (typeof value === 'string') { if (value.includes(`${home}/`)) found.push(value) }
+  else if (Array.isArray(value)) value.forEach(item => discoveredHostPaths(item, home, found))
+  else if (value && typeof value === 'object') Object.values(value).forEach(item => discoveredHostPaths(item, home, found))
+  return found
 }
 
 async function main() {
@@ -47,6 +55,10 @@ async function main() {
     const work = join(base, 'work')
     mkdirSync(work)
     const context = client.createContext(work, storage)
+    if (runtime === 'grok-cli') {
+      const discovered = JSON.parse(execFileSync('grok', ['inspect', '--json', '--leader-socket', join(context.configDir!, 'leader.sock')], { cwd: work, env: cliEnvironment(process.env, context), encoding: 'utf8' }))
+      assert.deepEqual(discoveredHostPaths(discovered, homedir()), [])
+    }
     const marker = `synthetic-${randomUUID()}`
     const firstHost = spawn(process.execPath, [resolve('tests/fixtures/execution-host.cjs')], { stdio: ['pipe', 'pipe', 'inherit'] })
     let firstOut = ''
