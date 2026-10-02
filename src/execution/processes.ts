@@ -26,11 +26,18 @@ function snapshot(token: string): ProcessRow[] {
 /** Tracks inherited execution markers as well as observed descendants that later clear their environment. */
 export class ProcessTracker {
   private readonly owned = new Map<number, string>()
+  private readonly noted = new Set<number>()
   private timer?: NodeJS.Timeout
   private failed = false
   constructor(private readonly token: string) {
     if (!/^[0-9a-f-]{36}$/.test(token)) throw new Error('Invalid process scope.')
     snapshot(token) // Refuse to launch if process inventory cannot be inspected.
+  }
+  /** Remember the direct child even when its environment is not visible in the process listing. */
+  note(pid: number): void {
+    if (!Number.isInteger(pid) || pid <= 0 || pid === process.pid) return
+    this.noted.add(pid)
+    if (!this.owned.has(pid)) this.owned.set(pid, '')
   }
   start(): void {
     this.timer = setInterval(() => { try { this.observe() } catch { this.failed = true } }, 200)
@@ -39,7 +46,7 @@ export class ProcessTracker {
     const rows = snapshot(this.token)
     const current = new Set<number>()
     for (const row of rows) {
-      if (row.tagged || this.owned.get(row.pid) === row.startedAt) current.add(row.pid)
+      if (row.tagged || this.noted.has(row.pid) || this.owned.get(row.pid) === row.startedAt) current.add(row.pid)
     }
     let changed = true
     while (changed) {
@@ -57,16 +64,20 @@ export class ProcessTracker {
     let emptyChecks = 0
     while (Date.now() < deadline) {
       let rows: ProcessRow[]
-      try { rows = this.observe() } catch { return false }
-      if (rows.length === 0) {
+      try { rows = this.observe() } catch { rows = [] }
+      const liveNoted = [...this.noted].filter(pid => {
+        try { process.kill(pid, 0); return true } catch { return false }
+      })
+      if (rows.length === 0 && liveNoted.length === 0) {
         if (++emptyChecks === 2) return !this.failed
       } else {
         emptyChecks = 0
         const signal = Date.now() - started < 1500 ? 'SIGTERM' : 'SIGKILL'
         // Each signal follows a fresh inventory: PID reuse cannot target an unrelated row.
         // Children first gives their CLI parent a chance to reap them.
-        for (const row of rows.reverse()) {
-          try { process.kill(row.pid, signal) } catch (e) {
+        const pids = new Set<number>([...liveNoted, ...rows.map(row => row.pid)])
+        for (const pid of [...pids].reverse()) {
+          try { process.kill(pid, signal) } catch (e) {
             // A denied signal is not proof of liveness: subsequent inventories must still confirm exit.
             // If it remains live, the bounded stop returns false.
           }

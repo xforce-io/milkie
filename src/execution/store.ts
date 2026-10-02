@@ -15,7 +15,7 @@ export class ExecutionStore {
   constructor(root: string) {
     this.root = resolve(root)
     mkdirSync(this.root, { recursive: true, mode: 0o700 })
-    for (const dir of ['contexts', 'runs', 'active', 'cancel', 'native']) mkdirSync(join(this.root, dir), { recursive: true, mode: 0o700 })
+    for (const dir of ['contexts', 'runs', 'active', 'cancel', 'native', 'calls']) mkdirSync(join(this.root, dir), { recursive: true, mode: 0o700 })
   }
   path(kind: string, id: string): string { assertId(id); return join(this.root, kind, `${id}.json`) }
   read<T>(kind: string, id: string): T | undefined {

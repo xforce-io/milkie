@@ -3,9 +3,23 @@
 const fs = require('node:fs'), path = require('node:path'), crypto = require('node:crypto')
 const args = process.argv.slice(2), pi = args.includes('--print')
 const get = key => args[args.indexOf(key) + 1]
+if (args.includes('inspect')) {
+  const vendors = ['CURSOR', 'CLAUDE', 'CODEX'], surfaces = ['SKILLS', 'RULES', 'AGENTS', 'MCPS', 'HOOKS', 'SESSIONS']
+  const cells = []
+  for (const vendor of vendors) for (const surface of surfaces) cells.push({ vendor, surface, enabled: process.env[`GROK_${vendor}_${surface}_ENABLED`] === '0' ? false : true, source: 'env' })
+  const agents = [{ name: 'general-purpose', source: { type: 'builtin' } }, { name: 'explore', source: { type: 'builtin' } }, { name: 'plan', source: { type: 'builtin' } }]
+  if (fs.existsSync(path.join(process.cwd(), '.grok', 'agents'))) agents.push({ name: 'evil', source: { type: 'project' } })
+  process.stdout.write(JSON.stringify({
+    mcpServers: [{ name: 'milkie' }, ...(fs.existsSync(path.join(process.cwd(), '.mcp.json')) ? [{ name: 'evil' }] : [])],
+    hooks: [], skills: [], plugins: [], lspServers: [], marketplaces: [], agents,
+    externalCompat: { cells },
+    permissions: { managedSettingsActive: process.env.GROK_MANAGED_CONFIG === '0' && process.env.GROK_MANAGED_MCPS_ENABLED === '0' ? false : true },
+  }))
+  process.exit(0)
+}
 let input = pi ? '' : fs.readFileSync(get('--prompt-file'), 'utf8')
 function emit(e) { process.stdout.write(JSON.stringify(e) + '\n') }
-function run() {
+async function run() {
   fs.writeFileSync(path.join(process.cwd(), 'runner.pid'), String(process.pid))
   const credential = Object.keys(process.env).find(key => /(?:^GROK_AUTH$|_API_KEY$|_AUTH_TOKEN$|_OAUTH_TOKEN$|_ACCESS_TOKEN$|_REFRESH_TOKEN$)/.test(key) && process.env[key])
   fs.writeFileSync(path.join(process.cwd(), 'cli-invocation.json'), JSON.stringify({
@@ -17,6 +31,7 @@ function run() {
     credentialPresent: Boolean(credential),
     home: process.env.HOME ?? null,
     envKeys: Object.keys(process.env).sort(),
+    args,
   }))
   if (!pi && !process.env.GROK_HOME) { process.stderr.write('GROK_HOME missing'); process.exit(1) }
   const file = pi ? get('--session') : path.join(process.env.GROK_HOME, 'sessions', encodeURIComponent(fs.realpathSync(process.cwd())), get(args.includes('--resume') ? '--resume' : '--session-id'), 'chat_history.jsonl')
@@ -28,6 +43,42 @@ function run() {
   fs.mkdirSync(path.dirname(file), {recursive:true})
   history.push({ input })
   fs.writeFileSync(file, history.map(JSON.stringify).join('\n') + '\n')
+  const toolInputs = new Set(['fixture:tools', 'fixture:invalid', 'fixture:reject', 'fixture:foreign', 'fixture:hold'])
+  if (toolInputs.has(input)) {
+    if (!process.env.MILKIE_TOOL_SOCKET) { process.stderr.write('tool socket missing'); process.exit(1) }
+    const call = (id, name, value) => ({ id, name, input: value, ...(pi ? { nativeCallId: `native-${name}` } : {}) })
+    const calls = input === 'fixture:invalid' ? [call('1', 'alpha', { n: 'nope' })]
+      : input === 'fixture:foreign' ? [call('1', 'bash', {})]
+      : input === 'fixture:tools' ? [call('1', 'alpha', { n: 1 }), call('2', 'beta', { n: 2 })]
+      : [call('1', 'alpha', { n: 1 })]
+    const results = await new Promise((resolve, reject) => {
+      const socket = require('node:net').connect(process.env.MILKIE_TOOL_SOCKET)
+      let buf = '', got = []
+      socket.on('error', reject)
+      socket.on('data', chunk => {
+        buf += chunk
+        let nl
+        while ((nl = buf.indexOf('\n')) >= 0) {
+          const line = buf.slice(0, nl); buf = buf.slice(nl + 1)
+          if (line) got.push(JSON.parse(line))
+          if (input !== 'fixture:hold' && got.length === calls.length) { socket.end(); resolve(got) }
+        }
+      })
+      socket.on('connect', () => {
+        socket.write(calls.map(item => JSON.stringify(item)).join('\n') + '\n')
+        if (input === 'fixture:hold') setInterval(() => {}, 1000)
+      })
+    })
+    if (input === 'fixture:hold') return
+    const output = results.map(item => item.ok ? item.output : item.code).join('|')
+    const id = history[0].id
+    if (pi) {
+      emit(history[0])
+      emit({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: output }], stopReason: 'stop' } })
+      emit({ type: 'agent_end', messages: [] })
+    } else { emit({ type: 'text', data: output }); emit({ type: 'end', stopReason: 'end_turn', sessionId: id }) }
+    return
+  }
   if (pi) emit(history[0])
   if (input === 'fixture:sleep' || input === 'fixture:child' || input === 'fixture:escaped-child') {
     if (input === 'fixture:child' || input === 'fixture:escaped-child') {

@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, symlinkSync, chmodSync, readFileSync, existsSync, rmSync, writeFileSync, realpathSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, symlinkSync, chmodSync, readFileSync, existsSync, rmSync, writeFileSync, realpathSync, readdirSync, unlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
@@ -121,6 +121,8 @@ test('CLI argv contains exact session selection and enforceable tool flags, neve
   const grok: ExecutionContext={...c,connection:{...c.connection,runtime:'grok-cli'},configDir:'/owned/grok-config'}
   const grokCommand=cliCommand(grok,'private prompt',{toolPolicy:'read-only',timeoutMs:10},'/private/prompt')
   expect(grokCommand.args).toContain('--leader-socket');expect(grokCommand.args).toContain('/owned/grok-config/leader.sock');expect(grokCommand.args).not.toContain('private prompt')
+  expect(grokCommand.args[grokCommand.args.indexOf('--disallowed-tools') + 1]).not.toContain('read_file')
+  expect(grokCommand.args).not.toContain('--tools')
 })
 test('two host processes cannot both claim an execution context', async () => {
   const store=new ExecutionStore(join(root,'store')),contextId='f7471111-1111-4111-8111-111111111111'
@@ -268,4 +270,133 @@ test('a short wait returns the known active state without cancelling execution',
   const a=client('pi'), c=cliContext(a), id=a.start(c.contextId,'fixture:sleep')
   try { expect(['starting','running']).toContain((await a.wait(id,10)).status) }
   finally { await a.cancel(id) }
+})
+const alpha = { name: 'alpha', description: 'Alpha', inputSchema: { type: 'object' as const, properties: { n: { type: 'integer' as const } }, required: ['n'], additionalProperties: false } }
+const beta = { name: 'beta', description: 'Beta', inputSchema: alpha.inputSchema }
+function calls() {
+  const dir = join(root, 'data', 'calls')
+  if (!existsSync(dir)) return []
+  return readdirSync(dir).filter(name => name.endsWith('.json')).map(name => JSON.parse(readFileSync(join(dir, name), 'utf8')))
+}
+describe.each(['grok-cli', 'pi'])('%s host tools', runtime => {
+  test('capabilities, serial forwarding, rejection, and invalid input stay distinct', async () => {
+    const a = client(runtime)
+    expect(a.capabilities()).toMatchObject({ hostTools: true, nativeCallId: runtime === 'pi', forwarding: ['serial', 'parallel'] })
+    const c = cliContext(a)
+    if (runtime === 'pi') {
+      const settingsFile = join(c.configDir!, 'settings.json')
+      writeFileSync(settingsFile, JSON.stringify({ packages: ['npm:pi-web-access'] }))
+      const blocked = await a.wait(a.start(c.contextId, 'x', { tools: [alpha], timeoutMs: 10000 }, async () => ({ ok: true, output: 'x' })))
+      expect(blocked).toMatchObject({ status: 'failed', code: 'policy_mismatch' })
+      unlinkSync(settingsFile)
+    }
+    expect(() => a.start(c.contextId, 'x', { tools: [alpha], toolPolicy: 'standard' }, async () => ({ ok: true, output: 'x' }))).toThrow('unsupported_constraint')
+    expect(() => a.start(c.contextId, 'x', { forwarding: 'serial' })).toThrow('unsupported_constraint')
+    expect(() => a.start(c.contextId, 'x', { tools: [alpha] })).toThrow('invalid_request')
+    expect(() => a.start(c.contextId, 'x', { tools: [{ name: 'bash', description: 'shell', inputSchema: alpha.inputSchema }] }, async () => ({ ok: true, output: 'x' }))).toThrow('invalid_request')
+    let called = false
+    const invalid = await a.wait(a.start(c.contextId, 'fixture:invalid', { tools: [alpha], timeoutMs: 10000 }, () => { called = true; return { ok: true, output: 'x' } }))
+    expect(invalid.status).toBe('succeeded'); expect(called).toBe(false)
+    expect(calls()[0]).toMatchObject({ status: 'invalid_input', name: 'alpha', runId: invalid.runId, contextId: c.contextId })
+    const rejected = await a.wait(a.start(cliContext(a).contextId, 'fixture:reject', { tools: [alpha], timeoutMs: 10000 }, () => ({ ok: false, code: 'rejected', message: 'no' })))
+    expect(rejected.status).toBe('succeeded')
+    expect(calls().find((call: { runId: string }) => call.runId === rejected.runId)).toMatchObject({ status: 'rejected', message: 'no' })
+    let foreign = 0
+    const denied = await a.wait(a.start(cliContext(a).contextId, 'fixture:foreign', { tools: [alpha], timeoutMs: 10000 }, () => { foreign += 1; return { ok: true, output: 'x' } }))
+    expect(denied.status).toBe('succeeded'); expect(foreign).toBe(0)
+    expect(calls().find((call: { runId: string }) => call.runId === denied.runId)).toMatchObject({ status: 'rejected', name: 'bash' })
+    let active = 0, max = 0
+    const order: string[] = []
+    const serialContext = cliContext(a)
+    const serial = await a.wait(a.start(serialContext.contextId, 'fixture:tools', { tools: [alpha, beta], timeoutMs: 10000 }, async call => {
+      active += 1; max = Math.max(max, active); order.push(call.name); await delay(80); active -= 1
+      return { ok: true, output: call.name }
+    }))
+    expect(serial.status).toBe('succeeded'); expect(serial.output).toBe('alpha|beta'); expect(order).toEqual(['alpha', 'beta']); expect(max).toBe(1)
+    const recorded = calls().filter((call: { runId: string }) => call.runId === serial.runId).sort((left: { name: string }, right: { name: string }) => left.name.localeCompare(right.name))
+    expect(recorded.map((call: { status: string }) => call.status)).toEqual(['succeeded', 'succeeded'])
+    const alphaCall = recorded.find((call: { name: string }) => call.name === 'alpha')
+    expect(a.toolCall(alphaCall.callId)).toMatchObject({ runId: serial.runId, contextId: serialContext.contextId, status: 'succeeded' })
+    expect(JSON.stringify(alphaCall)).not.toMatch(/API_KEY|auth\.json|GROK_AUTH/)
+    if (runtime === 'pi') expect(alphaCall.nativeCallId).toBe('native-alpha')
+    else expect(alphaCall.nativeCallId).toBeUndefined()
+    const invocation = JSON.parse(readFileSync(join(root, 'cwd', 'cli-invocation.json'), 'utf8'))
+    expect(invocation.home).toBe(serialContext.configDir)
+    expect(invocation.credentialPresent).toBe(false)
+    if (runtime === 'pi') {
+      expect(invocation.args).toEqual(expect.arrayContaining(['--no-extensions', '--no-builtin-tools', '--extension', '--tools', 'alpha,beta']))
+      expect(invocation.args.join(' ')).not.toContain('read,bash')
+    } else {
+      expect(invocation.args).toEqual(expect.arrayContaining(['--disallowed-tools', '--deny', 'Bash(*)', 'Read(**)', 'Edit(**)', 'Grep']))
+      const grokArgs = invocation.args.join(',')
+      expect(grokArgs).toContain('x_search,web_search,web_fetch')
+      expect(grokArgs).not.toContain('search_tool')
+      expect(grokArgs).not.toContain('use_tool')
+      for (const key of ['MILKIE_TOOL_SOCKET', 'GROK_MANAGED_CONFIG', 'GROK_CURSOR_MCPS_ENABLED', 'GROK_CLAUDE_HOOKS_ENABLED', 'GROK_CODEX_SKILLS_ENABLED']) expect(invocation.envKeys).toContain(key)
+    }
+    active = 0; max = 0
+    await a.wait(a.start(cliContext(a).contextId, 'fixture:tools', { tools: [alpha, beta], forwarding: 'parallel', timeoutMs: 10000 }, async call => {
+      active += 1; max = Math.max(max, active); await delay(80); active -= 1
+      return { ok: true, output: call.name }
+    }))
+    expect(max).toBe(2)
+  })
+  test('host death leaves the run unknown and the unanswered call recorded', async () => {
+    const a = client(runtime), c = cliContext(a)
+    const host = spawn(process.execPath, [resolve('tests/fixtures/execution-tool-host.cjs')], { env })
+    let output = '', pid = 0
+    host.stdout.on('data', chunk => { output += chunk })
+    try {
+      host.stdin.end(JSON.stringify({ dataDir: join(root, 'data'), connection: { contractVersion: 1, fields: { transport: 'agent-cli', runtime } }, contextId: c.contextId, input: 'fixture:hold', constraints: { tools: [alpha], timeoutMs: 30000 } }))
+      const runId = await new Promise<string>((resolveId, reject) => {
+        const timer = setTimeout(() => reject(new Error(`host did not start: ${output}`)), 5000)
+        const finish = () => { if (!output.trim()) return; clearTimeout(timer); resolveId(output.trim()) }
+        host.stdout.on('data', finish)
+        finish()
+      })
+      let pending: { status?: string } | undefined
+      for (let i = 0; i < 200 && pending?.status !== 'pending'; i++) { pending = calls().find((call: { runId: string }) => call.runId === runId); await delay(25) }
+      expect(pending?.status).toBe('pending')
+      await waitFile(join(root, 'cwd', 'runner.pid'))
+      pid = Number(readFileSync(join(root, 'cwd', 'runner.pid'), 'utf8'))
+      const exited = new Promise<void>(resolveExit => host.once('exit', () => resolveExit()))
+      host.kill('SIGKILL'); await exited
+      let stored: { status?: string } | undefined
+      for (let i = 0; i < 200 && stored?.status !== 'unknown'; i++) { stored = new ExecutionStore(join(root, 'data')).run(runId); await delay(25) }
+      expect(stored?.status).toBe('unknown')
+      expect(calls().find((call: { runId: string }) => call.runId === runId)?.status).toBe('pending')
+      expect(() => process.kill(pid, 0)).toThrow()
+      expect(() => a.start(c.contextId, 'replay')).toThrow('context_busy')
+    } finally {
+      if (host.exitCode === null) host.kill('SIGKILL')
+      if (pid) { try { process.kill(pid, 'SIGKILL') } catch { /* already stopped */ } }
+    }
+  })
+})
+test('grok host tools fail before the model when the loaded servers do not match', async () => {
+  const a = client('grok-cli'), c = cliContext(a)
+  writeFileSync(join(root, 'cwd', '.mcp.json'), '{"mcpServers":{"evil":{"command":"node"}}}\n')
+  const mismatch = await a.wait(a.start(c.contextId, 'fixture:tools', { tools: [alpha, beta], timeoutMs: 10000 }, async () => ({ ok: true, output: 'x' })))
+  expect(mismatch.status).toBe('failed'); expect(mismatch.code).toBe('policy_mismatch')
+  expect(existsSync(join(root, 'cwd', 'runner.pid'))).toBe(false)
+  const owned = cliContext(a)
+  writeFileSync(join(owned.configDir!, 'config.toml'), 'enabled = true\n')
+  const foreign = await a.wait(a.start(owned.contextId, 'fixture:tools', { tools: [alpha], timeoutMs: 10000 }, async () => ({ ok: true, output: 'x' })))
+  expect(foreign.code).toBe('policy_mismatch')
+  expect(readFileSync(join(owned.configDir!, 'config.toml'), 'utf8')).toBe('enabled = true\n')
+})
+test('generated Pi extension keeps newline framing', () => {
+  const { writePiExtension } = require('../execution/hostTools') as typeof import('../execution/hostTools')
+  const file = join(root, 'extension.mjs')
+  writePiExtension(file, [alpha], '/tmp/milkie-test.sock', 'serial')
+  const source = readFileSync(file, 'utf8')
+  expect(source).toContain("indexOf('\\n')")
+  expect(source).toContain('export default function')
+  expect(source).toContain('nativeCallId: toolCallId')
+})
+test('API transport cannot register host tools', () => {
+  const a = new ExecutionClient({ dataDir: join(root, 'data'), connection: { contractVersion: 1, fields: { transport: 'api', protocol: 'openai-chat-completions', model: 'fixture', apiKey: 'fixture-key' } }, env })
+  const c = a.createContext(join(root, 'cwd'))
+  expect(a.capabilities().hostTools).toBe(false)
+  expect(() => a.start(c.contextId, 'hello', { tools: [alpha] }, async () => ({ ok: true, output: 'x' }))).toThrow('unsupported_constraint')
 })

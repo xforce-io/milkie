@@ -1,0 +1,334 @@
+import { execFileSync, spawn } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
+import { existsSync, readFileSync, realpathSync, writeFileSync, unlinkSync, chmodSync } from 'node:fs'
+import { createServer, Socket } from 'node:net'
+import { dirname, join } from 'node:path'
+import { pathToFileURL } from 'node:url'
+import { ExecutionError, type HostToolSchema, type HostToolSpec, type ToolCall, type ToolCallRecord, type ToolResult } from './types.js'
+import { ExecutionStore } from './store.js'
+
+/** Native tools that must stay unavailable while the host owns the tool surface. */
+export const GROK_NATIVE_TOOLS = [
+  'run_terminal_command', 'search_replace', 'write', 'spawn_subagent', 'exit_plan_mode', 'enter_plan_mode',
+  'kill_command_or_subagent', 'todo_write', 'send_feedback', 'scheduler_create', 'scheduler_delete', 'scheduler_list',
+  'get_command_or_subagent_output', 'ask_user_question', 'monitor', 'search_tool', 'use_tool', 'workflow',
+  'image_gen', 'image_edit', 'image_to_video', 'reference_to_video',
+].join(',')
+/** Builtins that stay available in read-only mode. Host-tool runs deny them too. */
+export const GROK_READ_TOOLS = ['read_file', 'list_dir', 'grep']
+/** Names Grok still exposes when only the model-facing name is denied. */
+export const GROK_HOST_TOOL_ALIASES = ['run_terminal_cmd', 'command', 'cmd', 'bash_command', 'task', 'kill_task', 'kill_terminal_command', 'get_task_output', 'get_terminal_command_output', 'send_subagent_message', 'x_search', 'web_search', 'web_fetch', 'code_interpreter']
+const RESERVED = new Set([...GROK_NATIVE_TOOLS.split(','), ...GROK_READ_TOOLS, ...GROK_HOST_TOOL_ALIASES, 'read', 'grep', 'find', 'ls', 'bash', 'edit', 'write', 'ask_question'])
+const MAX_OUTPUT = 65536
+const MAX_MESSAGE = 1024
+const MARKER = '# milkie-host-tools\n'
+
+export function grokLockEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {}
+  for (const vendor of ['CURSOR', 'CLAUDE', 'CODEX']) {
+    for (const surface of ['SKILLS', 'RULES', 'AGENTS', 'MCPS', 'HOOKS', 'SESSIONS']) env[`GROK_${vendor}_${surface}_ENABLED`] = '0'
+  }
+  env.GROK_MANAGED_CONFIG = '0'
+  env.GROK_MANAGED_MCPS_ENABLED = '0'
+  env.GROK_MANAGED_MCP_GATEWAY_TOOLS_ENABLED = '0'
+  return env
+}
+export function assertHostTools(tools: HostToolSpec[]): void {
+  if (tools.length > 32) throw new ExecutionError('invalid_request')
+  const names = new Set<string>()
+  for (const tool of tools) {
+    if (!tool || typeof tool !== 'object') throw new ExecutionError('invalid_request')
+    if (typeof tool.name !== 'string' || !/^[a-z][a-z0-9_]{0,40}$/.test(tool.name) || RESERVED.has(tool.name) || names.has(tool.name)) throw new ExecutionError('invalid_request')
+    names.add(tool.name)
+    if (typeof tool.description !== 'string' || !tool.description.trim() || tool.description.length > 4000) throw new ExecutionError('invalid_request')
+    if (tool.inputSchema?.type !== 'object') throw new ExecutionError('invalid_request')
+    assertSchema(tool.inputSchema, 0)
+  }
+}
+function assertSchema(schema: HostToolSchema, depth: number): void {
+  if (depth > 8 || !schema || typeof schema !== 'object') throw new ExecutionError('invalid_request')
+  if (!['object', 'string', 'number', 'integer', 'boolean', 'array'].includes(schema.type)) throw new ExecutionError('invalid_request')
+  if (schema.type === 'object') {
+    if (schema.properties !== undefined) {
+      if (!schema.properties || typeof schema.properties !== 'object' || Array.isArray(schema.properties)) throw new ExecutionError('invalid_request')
+      for (const child of Object.values(schema.properties)) assertSchema(child, depth + 1)
+    }
+    if (schema.required !== undefined && (!Array.isArray(schema.required) || schema.required.some(item => typeof item !== 'string'))) throw new ExecutionError('invalid_request')
+    if (schema.additionalProperties !== undefined && typeof schema.additionalProperties !== 'boolean') throw new ExecutionError('invalid_request')
+  }
+  if (schema.type === 'array') {
+    if (!schema.items) throw new ExecutionError('invalid_request')
+    assertSchema(schema.items, depth + 1)
+  }
+}
+export function validateToolInput(schema: HostToolSchema, value: unknown): boolean {
+  return matchSchema(schema, value)
+}
+function matchSchema(schema: HostToolSchema, value: unknown): boolean {
+  if (schema.type === 'string') return typeof value === 'string'
+  if (schema.type === 'number') return typeof value === 'number' && Number.isFinite(value)
+  if (schema.type === 'integer') return typeof value === 'number' && Number.isInteger(value)
+  if (schema.type === 'boolean') return typeof value === 'boolean'
+  if (schema.type === 'array') return Array.isArray(value) && !!schema.items && value.every(item => matchSchema(schema.items!, item))
+  if (schema.type !== 'object' || !value || typeof value !== 'object' || Array.isArray(value)) return false
+  const record = value as Record<string, unknown>
+  const properties = schema.properties ?? {}
+  for (const key of schema.required ?? []) if (!(key in record)) return false
+  for (const key of Object.keys(record)) {
+    const child = properties[key]
+    if (!child) { if (schema.additionalProperties !== true) return false; continue }
+    if (!matchSchema(child, record[key])) return false
+  }
+  return true
+}
+export function normalizeToolResult(value: unknown): ToolResult {
+  if (!value || typeof value !== 'object') return { ok: false, code: 'rejected', message: 'Handler returned an invalid result.' }
+  const result = value as { ok?: unknown; output?: unknown; code?: unknown; message?: unknown }
+  if (result.ok === true && typeof result.output === 'string' && result.output.length <= MAX_OUTPUT) return { ok: true, output: result.output }
+  if (result.ok === false && (result.code === 'invalid_input' || result.code === 'rejected') && typeof result.message === 'string' && result.message.length > 0 && result.message.length <= MAX_MESSAGE) {
+    return { ok: false, code: result.code, message: result.message }
+  }
+  return { ok: false, code: 'rejected', message: 'Handler returned an invalid result.' }
+}
+/** Fail closed on anything other than the one milkie MCP server and disabled external imports. */
+export function assertGrokInventory(report: unknown): void {
+  if (!report || typeof report !== 'object') throw new ExecutionError('policy_mismatch')
+  const body = report as Record<string, unknown>
+  const servers = body.mcpServers
+  const server = Array.isArray(servers) ? servers[0] as { name?: string } | undefined : undefined
+  if (!Array.isArray(servers) || servers.length !== 1 || server?.name !== 'milkie') throw new ExecutionError('policy_mismatch')
+  for (const key of ['hooks', 'plugins', 'lspServers', 'marketplaces']) {
+    const value = body[key]
+    if (!Array.isArray(value) || value.length !== 0) throw new ExecutionError('policy_mismatch')
+  }
+  const skills = body.skills
+  // Grok unpacks its own bundled skills into a fresh GROK_HOME during the first run. Project and imported skills still fail.
+  if (!Array.isArray(skills) || skills.some(skill => !skill || typeof skill !== 'object' || (skill as { source?: { type?: string } }).source?.type !== 'bundled')) throw new ExecutionError('policy_mismatch')
+  const agents = body.agents
+  if (!Array.isArray(agents) || agents.some(agent => !agent || typeof agent !== 'object' || (agent as { source?: { type?: string } }).source?.type !== 'builtin')) throw new ExecutionError('policy_mismatch')
+  const cells = (body.externalCompat as { cells?: unknown } | undefined)?.cells
+  if (!Array.isArray(cells) || cells.length === 0 || cells.some(cell => !cell || typeof cell !== 'object' || (cell as { enabled?: unknown }).enabled !== false)) throw new ExecutionError('policy_mismatch')
+  if ((body.permissions as { managedSettingsActive?: unknown } | undefined)?.managedSettingsActive !== false) throw new ExecutionError('policy_mismatch')
+}
+function tomlString(value: string): string {
+  if (/["\\\n]/.test(value)) throw new ExecutionError('storage_error')
+  return `"${value}"`
+}
+export function writeGrokHostConfig(configDir: string, script: string, socketPath: string, toolsFile: string): void {
+  const file = join(configDir, 'config.toml')
+  if (existsSync(file) && !readFileSync(file, 'utf8').startsWith(MARKER)) throw new ExecutionError('policy_mismatch')
+  if (!existsSync(script)) throw new ExecutionError('process_failed')
+  const body = `${MARKER}[mcp_servers.milkie]\ncommand = ${tomlString(process.execPath)}\nargs = [${[script, socketPath, toolsFile].map(tomlString).join(', ')}]\n`
+  writeFileSync(file, body, { mode: 0o600 })
+}
+/** Pi settings packages install extra tools. Host mode rejects that old config before the model starts. */
+export function assertPiHostConfig(configDir: string): void {
+  const file = join(configDir, 'settings.json')
+  if (!existsSync(file)) return
+  let body: unknown
+  try { body = JSON.parse(readFileSync(file, 'utf8')) } catch { throw new ExecutionError('policy_mismatch') }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) throw new ExecutionError('policy_mismatch')
+  const packages = (body as { packages?: unknown }).packages
+  if (packages === undefined) return
+  if (!Array.isArray(packages) || packages.length !== 0) throw new ExecutionError('policy_mismatch')
+}
+export function inspectGrok(cwd: string, env: NodeJS.ProcessEnv, leaderSocket: string, alive: () => boolean): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn('grok', ['inspect', '--json', '--leader-socket', leaderSocket], { cwd, env, stdio: ['ignore', 'pipe', 'ignore'] })
+    let stdout = ''
+    const timer = setTimeout(() => { child.kill('SIGKILL'); reject(new ExecutionError('policy_mismatch')) }, 15000)
+    const pulse = setInterval(() => { if (!alive()) child.kill('SIGKILL') }, 50)
+    const fail = () => { clearTimeout(timer); clearInterval(pulse); reject(new ExecutionError('policy_mismatch')) }
+    child.stdout.setEncoding('utf8')
+    child.stdout.on('data', (chunk: string) => { stdout = (stdout + chunk).slice(0, 1_000_000) })
+    child.on('error', fail)
+    child.on('exit', code => {
+      clearTimeout(timer); clearInterval(pulse)
+      if (!alive() || code !== 0) { reject(new ExecutionError('policy_mismatch')); return }
+      try { assertGrokInventory(JSON.parse(stdout)); resolve() } catch (error) { reject(error instanceof ExecutionError ? error : new ExecutionError('policy_mismatch')) }
+    })
+  })
+}
+function resolveTypeboxModule(): string {
+  try {
+    const bin = execFileSync('/usr/bin/which', ['pi'], { encoding: 'utf8', env: process.env }).trim()
+    let dir = dirname(realpathSync(bin))
+    for (let i = 0; i < 8; i++) {
+      const candidate = join(dir, 'node_modules', 'typebox', 'build', 'index.mjs')
+      if (existsSync(candidate)) return pathToFileURL(candidate).href
+      const parent = dirname(dir)
+      if (parent === dir) break
+      dir = parent
+    }
+  } catch { /* Fixture pi does not load this extension. */ }
+  return 'typebox'
+}
+export function writePiExtension(file: string, tools: HostToolSpec[], socketPath: string, forwarding: 'serial' | 'parallel'): void {
+  const spec = JSON.stringify({ socketPath, forwarding, tools })
+  const typebox = JSON.stringify(resolveTypeboxModule())
+  const source = `import net from 'node:net'
+import { Type } from ${typebox}
+const spec = ${spec}
+function toType(schema) {
+  if (schema.type === 'string') return Type.String()
+  if (schema.type === 'number') return Type.Number()
+  if (schema.type === 'integer') return Type.Integer()
+  if (schema.type === 'boolean') return Type.Boolean()
+  if (schema.type === 'array') return Type.Array(toType(schema.items))
+  const properties = {}
+  for (const [key, value] of Object.entries(schema.properties || {})) {
+    const child = toType(value)
+    properties[key] = (schema.required || []).includes(key) ? child : Type.Optional(child)
+  }
+  return Type.Object(properties)
+}
+let buffer = ''
+let socket
+const pending = new Map()
+function fail(error) {
+  for (const waiter of pending.values()) waiter.reject(error)
+  pending.clear()
+}
+function connect() {
+  if (socket) return socket
+  socket = net.createConnection(spec.socketPath)
+  socket.setEncoding('utf8')
+  socket.on('data', chunk => {
+    buffer += chunk
+    let newline
+    while ((newline = buffer.indexOf('\\n')) >= 0) {
+      const line = buffer.slice(0, newline)
+      buffer = buffer.slice(newline + 1)
+      if (!line) continue
+      const message = JSON.parse(line)
+      const waiter = pending.get(message.id)
+      if (!waiter) continue
+      pending.delete(message.id)
+      waiter.resolve(message)
+    }
+  })
+  socket.on('error', fail)
+  return socket
+}
+function roundTrip(payload) {
+  const client = connect()
+  return new Promise((resolve, reject) => {
+    pending.set(payload.id, { resolve, reject })
+    // An idle socket must not keep Pi's --print process alive after the turn ends.
+    client.ref()
+    client.write(JSON.stringify(payload) + '\\n')
+  }).finally(() => { if (pending.size === 0) client.unref() })
+}
+export default function (pi) {
+  for (const tool of spec.tools) {
+    pi.registerTool({
+      name: tool.name,
+      label: tool.name,
+      description: tool.description,
+      parameters: toType(tool.inputSchema),
+      executionMode: spec.forwarding === 'parallel' ? 'parallel' : 'sequential',
+      async execute(toolCallId, params) {
+        const result = await roundTrip({ id: toolCallId, name: tool.name, nativeCallId: toolCallId, input: params })
+        const text = result.ok ? result.output : result.code + ': ' + result.message
+        return { content: [{ type: 'text', text }], details: { ok: Boolean(result.ok), code: result.code } }
+      },
+    })
+  }
+}
+`
+  writeFileSync(file, source, { mode: 0o600 })
+}
+export interface ToolBridge { socketPath: string; close(): Promise<void> }
+export async function openToolBridge(options: {
+  tools: HostToolSpec[]
+  forwarding: 'serial' | 'parallel'
+  runId: string
+  contextId: string
+  store: ExecutionStore
+  alive: () => boolean
+  onHost: (call: ToolCall) => Promise<unknown>
+  onBroken: (error: unknown) => void
+}): Promise<ToolBridge> {
+  const socketPath = join('/tmp', `milkie-${options.runId}.sock`)
+  try { unlinkSync(socketPath) } catch { /* absent */ }
+  let failed = false
+  const broken = (error: unknown) => { if (failed) return; failed = true; options.onBroken(error) }
+  let tail = Promise.resolve()
+  const enqueue = (job: () => Promise<void>) => {
+    if (options.forwarding === 'parallel') return job()
+    const run = tail.then(job, job)
+    tail = run.then(() => undefined, () => undefined)
+    return run
+  }
+  const tools = new Map(options.tools.map(tool => [tool.name, tool]))
+  const handle = async (socket: Socket, line: string) => {
+    const message = JSON.parse(line) as { id?: unknown; name?: unknown; nativeCallId?: unknown; input?: unknown }
+    if (typeof message.id !== 'string' || typeof message.name !== 'string') throw new Error('Malformed tool call.')
+    const encoded = JSON.stringify(message.input)
+    if (encoded.length > MAX_OUTPUT) throw new Error('Tool input is too large.')
+    const nativeCallId = typeof message.nativeCallId === 'string' && message.nativeCallId ? message.nativeCallId : undefined
+    const callId = randomUUID()
+    const base: ToolCallRecord = { version: 1, callId, name: message.name, input: message.input, runId: options.runId, contextId: options.contextId, status: 'pending', ...(nativeCallId ? { nativeCallId } : {}) }
+    const tool = tools.get(message.name)
+    const reply = (result: ToolResult) => socket.write(`${JSON.stringify({ id: message.id, ...result })}\n`)
+    if (!tool) {
+      const rejected: ToolResult = { ok: false, code: 'rejected', message: 'Tool is not registered.' }
+      options.store.write('calls', callId, { ...base, status: 'rejected', message: rejected.message })
+      reply(rejected)
+      return
+    }
+    if (!validateToolInput(tool.inputSchema, message.input)) {
+      const invalid: ToolResult = { ok: false, code: 'invalid_input', message: 'Input does not match the tool schema.' }
+      options.store.write('calls', callId, { ...base, status: 'invalid_input', message: invalid.message })
+      reply(invalid)
+      return
+    }
+    options.store.write('calls', callId, base)
+    if (!options.alive()) return
+    let result: ToolResult
+    try { result = normalizeToolResult(await options.onHost({ callId, ...(nativeCallId ? { nativeCallId } : {}), name: message.name, input: message.input, runId: options.runId, contextId: options.contextId })) }
+    catch (error) { if (!options.alive()) return; throw error }
+    if (!options.alive()) return
+    options.store.write('calls', callId, { ...base, status: result.ok ? 'succeeded' : result.code, ...(result.ok ? { output: result.output } : { message: result.message }) })
+    reply(result)
+  }
+  const sockets = new Set<Socket>()
+  const server = createServer(socket => {
+    sockets.add(socket)
+    socket.on('close', () => sockets.delete(socket))
+    let buffer = ''
+    socket.setEncoding('utf8')
+    socket.on('error', () => { /* The CLI closing its end is not a successful tool result. */ })
+    socket.on('data', chunk => {
+      buffer += chunk
+      if (buffer.length > 1_048_576) { socket.destroy(); broken(new Error('Tool call is too large.')); return }
+      let newline: number
+      while ((newline = buffer.indexOf('\n')) >= 0) {
+        const line = buffer.slice(0, newline)
+        buffer = buffer.slice(newline + 1)
+        if (!line) continue
+        void enqueue(() => handle(socket, line)).catch(broken)
+      }
+    })
+  })
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject)
+    server.listen(socketPath, () => { server.removeAllListeners('error'); server.on('error', broken); resolve() })
+  })
+  chmodSync(socketPath, 0o600)
+  return { socketPath, close: () => {
+    for (const socket of sockets) socket.destroy()
+    server.unref()
+    server.close()
+    try { unlinkSync(socketPath) } catch { /* absent */ }
+    return Promise.resolve()
+  } }
+}
+/** fd 4 is the host-lifetime pipe. EOF means the host process is gone. The returned function must run before process.exit: an open stream on this fd keeps Node from actually exiting. */
+export function watchParentPipe(mark: () => void): () => void {
+  const socket = new Socket({ fd: 4, readable: true, writable: false })
+  socket.on('end', mark)
+  socket.on('error', () => { /* An unusable descriptor is not host death. IPC disconnect remains the other signal. */ })
+  socket.resume()
+  return () => { socket.destroy() }
+}
