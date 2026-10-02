@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, openSync, closeSync, readFileSync, writeFileSync, renameSync, unlinkSync, realpathSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, openSync, closeSync, readFileSync, writeFileSync, writeSync, renameSync, unlinkSync, realpathSync, statSync, fstatSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { ExecutionError, type ExecutionContext, type ExecutionRecord } from './types.js'
@@ -19,33 +19,53 @@ export class ExecutionStore {
     mkdirSync(this.root, { recursive: true, mode: 0o700 })
     for (const dir of ['contexts', 'runs', 'active', 'cancel', 'native', 'calls', 'locks']) mkdirSync(join(this.root, dir), { recursive: true, mode: 0o700 })
   }
-  /** One context at a time across processes. A live holder fails closed; a dead holder is taken once. */
+  /** One context at a time across processes. An empty or unverified lock is left in place. */
   exclusive<T>(contextId: string, body: () => T): T {
     assertId(contextId)
     if (this.heldLocks.has(contextId)) return body()
     const file = join(this.root, 'locks', `${contextId}.lock`)
-    const payload = `${process.pid}\n`
-    const acquire = () => writeFileSync(file, payload, { flag: 'wx', mode: 0o600 })
-    try {
-      acquire()
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw new ExecutionError('storage_error')
-      const observed = existsSync(file) ? readFileSync(file, 'utf8') : ''
-      const pid = Number(observed.trim())
-      let live = false
-      if (Number.isInteger(pid) && pid > 0) {
-        try { process.kill(pid, 0); live = true } catch (err) { live = (err as NodeJS.ErrnoException).code === 'EPERM' }
-      }
-      if (live) throw new ExecutionError('context_busy')
-      try { if (readFileSync(file, 'utf8') === observed) unlinkSync(file) } catch { throw new ExecutionError('context_busy') }
-      try { acquire() } catch { throw new ExecutionError('context_busy') }
-    }
+    const fd = this.openContextLock(file)
+    try { writeSync(fd, `${process.pid}\n`) } catch { closeSync(fd); throw new ExecutionError('storage_error') }
     this.heldLocks.add(contextId)
     try { return body() }
     finally {
       this.heldLocks.delete(contextId)
-      try { if (readFileSync(file, 'utf8') === payload) unlinkSync(file) } catch { /* A live leftover lock fails the next acquire closed. */ }
+      try {
+        const own = fstatSync(fd)
+        const current = statSync(file)
+        if (own.ino === current.ino && own.dev === current.dev) unlinkSync(file)
+      } catch { /* The lock file is already gone. */ }
+      closeSync(fd)
     }
+  }
+  private openContextLock(file: string): number {
+    try { return openSync(file, 'wx', 0o600) }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw new ExecutionError('storage_error')
+      return this.takeDeadContextLock(file)
+    }
+  }
+  /** Remove a lock only when its pid is confirmed dead, then create a new one. */
+  private takeDeadContextLock(file: string): number {
+    let observed: string
+    try { observed = readFileSync(file, 'utf8') } catch { throw new ExecutionError('context_busy') }
+    const pid = Number(observed.trim())
+    if (!Number.isInteger(pid) || pid <= 0) throw new ExecutionError('context_busy')
+    try { process.kill(pid, 0); throw new ExecutionError('context_busy') }
+    catch (error) {
+      if (error instanceof ExecutionError) throw error
+      const code = (error as NodeJS.ErrnoException).code
+      if (code === 'EPERM' || code !== 'ESRCH') throw new ExecutionError('context_busy')
+    }
+    const dead = openSync(file, 'r')
+    try {
+      if (readFileSync(dead, 'utf8') !== observed) throw new ExecutionError('context_busy')
+      const held = fstatSync(dead)
+      const current = statSync(file)
+      if (held.ino !== current.ino || held.dev !== current.dev) throw new ExecutionError('context_busy')
+      unlinkSync(file)
+    } finally { closeSync(dead) }
+    try { return openSync(file, 'wx', 0o600) } catch { throw new ExecutionError('context_busy') }
   }
   path(kind: string, id: string): string { assertId(id); return join(this.root, kind, `${id}.json`) }
   read<T>(kind: string, id: string): T | undefined {

@@ -155,6 +155,24 @@ test('a context lock stops a second release from deleting the newer claim', asyn
     expect(readFileSync(store.path('active', contextId), 'utf8')).toBe(newRun)
   } finally { if (holder.exitCode === null) holder.kill('SIGKILL') }
 })
+test('an empty context lock is not stolen', () => {
+  const store = new ExecutionStore(join(root, 'store-empty-lock'))
+  const contextId = 'f7471111-1111-4111-8111-111111111114'
+  const file = join(store.root, 'locks', `${contextId}.lock`)
+  writeFileSync(file, '', { flag: 'wx', mode: 0o600 })
+  expect(() => store.exclusive(contextId, () => { throw new Error('entered') })).toThrow('context_busy')
+  expect(readFileSync(file, 'utf8')).toBe('')
+})
+test('releasing a context lock leaves a replacement lock in place', () => {
+  const store = new ExecutionStore(join(root, 'store-replace-lock'))
+  const contextId = 'f7471111-1111-4111-8111-111111111115'
+  const file = join(store.root, 'locks', `${contextId}.lock`)
+  store.exclusive(contextId, () => {
+    unlinkSync(file)
+    writeFileSync(file, `${process.pid}\n`, { flag: 'wx', mode: 0o600 })
+  })
+  expect(readFileSync(file, 'utf8')).toBe(`${process.pid}\n`)
+})
 test('reconcile does not overwrite a result while the context lock is held', async () => {
   const a = client('grok-cli'), c = cliContext(a)
   const store = new ExecutionStore(join(root, 'data'))
