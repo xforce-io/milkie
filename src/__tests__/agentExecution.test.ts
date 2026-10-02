@@ -477,6 +477,70 @@ test('an unreadable process inventory does not report the run stopped', async ()
     expect(() => process.kill(child.pid!, 0)).not.toThrow()
   } finally { child.kill('SIGKILL') }
 })
+test.each(['grok-cli', 'pi'])('%s resume rejects a tool removed from the next registration', async runtime => {
+  const a = client(runtime), c = cliContext(a)
+  const first = await a.wait(a.start(c.contextId, 'fixture:tools', { tools: [alpha, beta], timeoutMs: 10000 }, async call => {
+    expect(a.toolCall(call.callId)?.status).toBe('pending')
+    if (call.name === 'alpha') {
+      let betaPending = false
+      for (let i = 0; i < 20 && !betaPending; i++) { betaPending = calls().some(item => item.runId === call.runId && item.name === 'beta' && item.status === 'pending'); if (!betaPending) await delay(10) }
+      expect(betaPending).toBe(true)
+    }
+    return { ok: true, output: call.name }
+  }))
+  expect(first.status).toBe('succeeded')
+  const before = a.getContext(c.contextId)
+  const firstIds = calls().filter(call => call.runId === first.runId).map(call => call.callId)
+  const b = client(runtime)
+  let revokedHandler = false
+  const second = await b.wait(b.start(c.contextId, 'fixture:revoked', { tools: [beta], timeoutMs: 10000 }, () => { revokedHandler = true; return { ok: true, output: 'x' } }))
+  expect(second.status).toBe('succeeded')
+  expect(revokedHandler).toBe(false)
+  const revoked = calls().find(call => call.runId === second.runId && call.name === 'alpha')
+  expect(revoked?.status).toBe('rejected')
+  expect(firstIds).not.toContain(revoked?.callId)
+  const listed = JSON.parse(readFileSync(join(root, 'data', 'runs', `${second.runId}.tools.json`), 'utf8')) as Array<{ name: string }>
+  expect(listed.map(tool => tool.name)).toEqual(['beta', 'alpha'])
+  const after = b.getContext(c.contextId)
+  expect(after.nativeSessionId).toBe(before.nativeSessionId)
+  expect(after.nativeSessionFile).toBe(before.nativeSessionFile)
+})
+test.each(['grok-cli', 'pi'])('%s lost tool reply blocks resume until the host reconciles it', async runtime => {
+  const a = client(runtime), c = cliContext(a)
+  const effect = join(root, `effect-${runtime}`)
+  const host = spawn(process.execPath, [resolve('tests/fixtures/execution-tool-host.cjs')], { env })
+  let output = ''
+  host.stdout.on('data', chunk => { output += chunk })
+  try {
+    host.stdin.end(JSON.stringify({ dataDir: join(root, 'data'), connection: { contractVersion: 1, fields: { transport: 'agent-cli', runtime } }, contextId: c.contextId, input: 'fixture:hold', constraints: { tools: [alpha], timeoutMs: 30000 }, effect }))
+    const runId = await new Promise<string>((resolveId, reject) => {
+      const timer = setTimeout(() => reject(new Error(`host did not start: ${output}`)), 5000)
+      const finish = () => { if (!output.trim()) return; clearTimeout(timer); resolveId(output.trim()) }
+      host.stdout.on('data', finish)
+      finish()
+    })
+    let pending: { callId?: string; status?: string; name?: string; input?: unknown } | undefined
+    for (let i = 0; i < 200 && (pending?.status !== 'pending' || !existsSync(effect)); i++) { pending = calls().find(call => call.runId === runId); await delay(25) }
+    expect(pending).toMatchObject({ status: 'pending', name: 'alpha', input: { n: 1 } })
+    expect(() => a.reconcile(pending!.callId!, 'too soon')).toThrow('context_busy')
+    const exited = new Promise<void>(resolveExit => host.once('exit', () => resolveExit()))
+    host.kill('SIGKILL'); await exited
+    for (let i = 0; i < 200 && new ExecutionStore(join(root, 'data')).run(runId)?.status !== 'unknown'; i++) await delay(25)
+    const b = client(runtime)
+    expect(() => b.start(c.contextId, 'again', { tools: [alpha], timeoutMs: 10000 }, async () => ({ ok: true, output: 'x' }))).toThrow('context_busy')
+    expect(() => b.reconcile(pending!.callId!, '')).toThrow('invalid_request')
+    const sessionBefore = b.getContext(c.contextId)
+    expect(b.reconcile(pending!.callId!, 'already done').status).toBe('reconciled')
+    let repeated = false
+    const resumed = await b.wait(b.start(c.contextId, 'already done', { tools: [alpha], timeoutMs: 10000 }, () => { repeated = true; return { ok: true, output: 'again' } }))
+    expect(resumed.status).toBe('succeeded')
+    expect(repeated).toBe(false)
+    expect(readFileSync(effect, 'utf8')).toBe('once')
+    const sessionAfter = b.getContext(c.contextId)
+    expect(sessionAfter.nativeSessionId).toBe(sessionBefore.nativeSessionId)
+    expect(sessionAfter.nativeSessionFile).toBe(sessionBefore.nativeSessionFile)
+  } finally { if (host.exitCode === null) host.kill('SIGKILL') }
+})
 test('API transport cannot register host tools', () => {
   const a = new ExecutionClient({ dataDir: join(root, 'data'), connection: { contractVersion: 1, fields: { transport: 'api', protocol: 'openai-chat-completions', model: 'fixture', apiKey: 'fixture-key' } }, env })
   const c = a.createContext(join(root, 'cwd'))

@@ -1,7 +1,7 @@
 import { fork, type ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
-import { existsSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { setTimeout as delay } from 'node:timers/promises'
 import type { ConnectionInput } from '../connection/types.js'
 import { resolveAndParseConnection } from '../connection/parse.js'
@@ -85,6 +85,7 @@ export class ExecutionClient {
     workingDirectory(context.cwd)
     const worker = join(__dirname, 'worker.js')
     if (!existsSync(worker)) throw new ExecutionError('process_failed')
+    if (this.pendingCalls(contextId).length > 0) throw new ExecutionError('context_busy')
     const runId = randomUUID()
     this.store.claim(contextId, runId)
     let child: ChildProcess | undefined
@@ -134,6 +135,37 @@ export class ExecutionClient {
     }
   }
   toolCall(callId: string): ToolCallRecord | undefined { return this.store.read<ToolCallRecord>('calls', callId) }
+  /** Record the host's checked result for a call whose reply never reached the CLI. */
+  reconcile(callId: string, output: string): ToolCallRecord {
+    this.assertSupported()
+    if (typeof output !== 'string' || output.length === 0 || output.length > 65536) throw new ExecutionError('invalid_request')
+    const call = this.toolCall(callId)
+    if (!call || call.status !== 'pending') throw new ExecutionError('invalid_request')
+    const run = this.store.run(call.runId)
+    if (!run) throw new ExecutionError('invalid_request')
+    if (ACTIVE.has(run.status)) throw new ExecutionError('context_busy')
+    const updated: ToolCallRecord = { ...call, status: 'reconciled', output }
+    this.store.write('calls', call.callId, updated)
+    if (this.pendingCalls(call.contextId).length === 0) {
+      const claim = this.store.path('active', call.contextId)
+      if (existsSync(claim)) {
+        if (readFileSync(claim, 'utf8') !== run.runId) throw new ExecutionError('storage_error')
+        this.store.release(call.contextId, run.runId)
+      }
+    }
+    return updated
+  }
+  private pendingCalls(contextId: string): ToolCallRecord[] {
+    const dir = join(this.store.root, 'calls')
+    if (!existsSync(dir)) return []
+    const found: ToolCallRecord[] = []
+    for (const name of readdirSync(dir)) {
+      if (!name.endsWith('.json')) continue
+      const call = this.store.read<ToolCallRecord>('calls', name.slice(0, -'.json'.length))
+      if (call && call.contextId === contextId && call.status === 'pending') found.push(call)
+    }
+    return found
+  }
   query(runId: string): ExecutionRecord | undefined {
     const record = this.store.run(runId)
     if (record && ACTIVE.has(record.status) && Date.now() - record.heartbeatAt > 5000) return { ...record, status: 'unknown', stopped: false }

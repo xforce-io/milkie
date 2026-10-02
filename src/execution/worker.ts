@@ -5,7 +5,7 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { resolveAndParseConnection } from '../connection/parse.js'
 import { assembleApiGateway } from '../connection/assemble.js'
 import { CliEvents, assertNativeSession, classifyFailure, cliCommand, cliEnvironment, prepareCliStorage } from './adapters.js'
-import { acquireGrokConfigLock, assertPiHostConfig, inspectGrok, openToolBridge, watchParentPipe, writeGrokHostConfig, writePiExtension, type ToolBridge } from './hostTools.js'
+import { acquireGrokConfigLock, assertPiHostConfig, inspectGrok, openToolBridge, visibleHostTools, watchParentPipe, writeGrokHostConfig, writePiExtension, type ToolBridge } from './hostTools.js'
 import { ProcessTracker, EXECUTION_TOKEN_ENV } from './processes.js'
 import { ExecutionStore } from './store.js'
 import { ExecutionError, type ToolCall, type WorkerRequest, type WorkerToolReply, type ExecutionStatus } from './types.js'
@@ -78,9 +78,11 @@ export async function runExecution(request: WorkerRequest, life?: ParentLife): P
     prepareCliStorage(context)
     assertNativeSession(context)
     let extensionPath: string | undefined
+    let visibleTools = hosted?.tools
     if (hosted) {
+      visibleTools = visibleHostTools(store, context.contextId, hosted.tools)
       const toolsFile = join(store.root, 'runs', `${record.runId}.tools.json`)
-      writeFileSync(toolsFile, JSON.stringify(hosted.tools), { mode: 0o600 })
+      writeFileSync(toolsFile, JSON.stringify(visibleTools), { mode: 0o600 })
       bridge = await openToolBridge({
         tools: hosted.tools, forwarding: hosted.forwarding, runId: record.runId, contextId: context.contextId, store,
         alive: () => !life?.dead && !terminal,
@@ -97,14 +99,14 @@ export async function runExecution(request: WorkerRequest, life?: ParentLife): P
       } else {
         assertPiHostConfig(context.configDir!)
         extensionPath = join(store.root, 'runs', `${record.runId}.extension.mjs`)
-        writePiExtension(extensionPath, hosted.tools, bridge.socketPath, hosted.forwarding)
+        writePiExtension(extensionPath, visibleTools, bridge.socketPath, hosted.forwarding)
       }
     }
     if (life?.dead) { finish('unknown', true); return }
     if (stopping) { finish(stopping, true); return }
     const promptFile = join(store.root, 'runs', `${record.runId}.prompt`)
     promptPath = promptFile
-    const command = cliCommand(context, request.input, { toolPolicy: constraints.toolPolicy, timeoutMs: constraints.timeoutMs }, promptFile, hosted ? { names: hosted.tools.map(tool => tool.name), extensionPath } : undefined)
+    const command = cliCommand(context, request.input, { toolPolicy: constraints.toolPolicy, timeoutMs: constraints.timeoutMs }, promptFile, hosted && visibleTools ? { names: visibleTools.map(tool => tool.name), extensionPath } : undefined)
     const childEnv = cliEnvironment(process.env, context, hosted && bridge ? { socketPath: bridge.socketPath, forwarding: hosted.forwarding } : undefined)
     // Grok takes a file; Pi takes stdin. Never expose a prompt in process argv.
     if (context.connection.runtime === 'grok-cli') writeFileSync(promptFile, request.input, { mode: 0o600, flag: 'wx' })
@@ -137,7 +139,14 @@ export async function runExecution(request: WorkerRequest, life?: ParentLife): P
     store.write('contexts', context.contextId, context)
     child.stdin.end(command.stdin)
     const outcome = await Promise.race([closed.then(code => ({ kind: 'exit' as const, code })), stopFinished])
+    const keepSession = () => {
+      if (!events.sessionId || context.nativeSessionId) return
+      context.nativeSessionId = events.sessionId
+      record.nativeSessionId = events.sessionId
+      store.write('contexts', context.contextId, context)
+    }
     if (life?.dead) {
+      keepSession()
       const stopped = outcome.kind === 'stop' ? outcome.stopped : await (cleanup?.() ?? Promise.resolve(true))
       finish('unknown', stopped)
       return

@@ -40,7 +40,7 @@ export interface ToolCallRecord {
   input: unknown
   runId: string
   contextId: string
-  status: 'pending' | 'succeeded' | 'invalid_input' | 'rejected'
+  status: 'pending' | 'succeeded' | 'invalid_input' | 'rejected' | 'reconciled'
   output?: string
   message?: string
 }
