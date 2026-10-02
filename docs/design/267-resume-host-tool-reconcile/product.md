@@ -55,6 +55,7 @@ S1 不经过宿主消失：首轮成功结束后，新进程用更少的工具�
 
 - `start(contextId, input, constraints, handler)` 续接时使用本轮的 `constraints.tools`。已撤销的工具不在这张表里。
 - `toolCall(callId)` 读取调用记录。`pending` 表示状态不确定，并带有工具名和参数。
+- `pendingToolCalls(contextId)` 列出该上下文仍未核对的调用。串行队列里尚未交给处理函数的调用也在这里，宿主不需要扫描存储文件。
 - `reconcile(callId, output)` 记录宿主核对后的结果。`output` 由宿主同时写进下一轮 `start` 的输入。milkie 不改写该输入，也不把结果补进原会话。
 
 重新进入时使用同一 `dataDir` 和同一连接新建客户端，沿用原来的 `contextId`。`createContext` 仍表示新开上下文。

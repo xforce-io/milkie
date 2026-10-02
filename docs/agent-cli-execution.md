@@ -37,7 +37,7 @@ API 使用同样的 SDK，连接填 `transport: api`、protocol、model 和 apiK
 
 `standard` 是调用方显式授权原生工具读写与命令执行：Pi 开放指定内置工具，Grok 本轮关闭原生逐工具确认。它不提供路径隔离，不应交给未授权调用方；默认 `read-only` 不启用此模式。
 
-宿主工具与 `toolPolicy` 不能同时使用。宿主传入工具名称、说明和 JSON Schema 对象子集，并提供处理函数。milkie 生成调用标识，把调用交给该函数，再把结果交回 CLI。参数不匹配是 `invalid_input`，宿主拒绝是 `rejected`，二者都不是成功。未指定转发策略时按串行交给宿主；需要并行时显式传入 `forwarding: 'parallel'`。这种执行不脱离宿主：宿主进程消失后，CLI 被终止，执行状态为 `unknown`，尚未应答的调用记录保留。下一轮可以去掉部分工具；不在本轮授权表里的调用记为 `rejected`。CLI 目录仍保留该上下文曾经登记的名称，这样调用才能到达入口。还有 `pending` 调用时，`start` 返回 `context_busy`。宿主用 `reconcile(callId, output)` 记下核对结果，并自行把这段结果写进下一次 `start` 的输入；全部核对完才释放占用并续接原会话。Grok 在此模式下只加载 milkie 登记的一个 MCP server，并在模型启动前核对实际加载结果；不一致时执行失败码是 `policy_mismatch`。Pi 只加载本次生成的扩展，`--tools` 只有宿主登记的名称。能力里的 `nativeCallId` 表示该 CLI 会不会提供自己的工具调用标识：Pi 会，Grok 不会。详见 [宿主工具设计](design/266-agent-cli-host-tools/product.md)。
+宿主工具与 `toolPolicy` 不能同时使用。宿主传入工具名称、说明和 JSON Schema 对象子集，并提供处理函数。milkie 生成调用标识，把调用交给该函数，再把结果交回 CLI。参数不匹配是 `invalid_input`，宿主拒绝是 `rejected`，二者都不是成功。未指定转发策略时按串行交给宿主；需要并行时显式传入 `forwarding: 'parallel'`。这种执行不脱离宿主：宿主进程消失后，CLI 被终止，执行状态为 `unknown`，尚未应答的调用记录保留。下一轮可以去掉部分工具；不在本轮授权表里的调用记为 `rejected`。CLI 目录仍保留该上下文曾经登记的名称，这样调用才能到达入口。还有 `pending` 调用时，`start` 返回 `context_busy`。`pendingToolCalls(contextId)` 列出这些调用，包括尚未交给处理函数的队列项。宿主用 `reconcile(callId, output)` 记下核对结果，并自行把这段结果写进下一次 `start` 的输入；全部核对完才释放占用并续接原会话。Grok 在此模式下只加载 milkie 登记的一个 MCP server，并在模型启动前核对实际加载结果；不一致时执行失败码是 `policy_mismatch`。Pi 只加载本次生成的扩展，`--tools` 只有宿主登记的名称。能力里的 `nativeCallId` 表示该 CLI 会不会提供自己的工具调用标识：Pi 会，Grok 不会。详见 [宿主工具设计](design/266-agent-cli-host-tools/product.md)。
 
 默认只读，执行时限 120 秒、最大一小时；未知约束在启动前拒绝。工作目录不等于文件系统隔离。不能把停止视为撤销文件或远端副作用。监督进程核对继承本轮标识和已观察到的子进程，包含脱离原进程组的任务；不能确认时返回 unknown。此机制用于可信任务，不是对抗性内核隔离，也不覆盖外部已有服务；要求未声明的隔离约束会在启动前拒绝。
 

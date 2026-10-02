@@ -2,7 +2,7 @@
 
 ## 用户入口
 
-SDK `ExecutionClient.start`、`ExecutionClient.toolCall`、`ExecutionClient.reconcile`。无新增 HTTP、CLI 或页面。设计为 [product.md](../../../../docs/design/267-resume-host-tool-reconcile/product.md) v1，S1–S2 的子项归本功能。
+SDK `ExecutionClient.start`、`ExecutionClient.toolCall`、`ExecutionClient.pendingToolCalls`、`ExecutionClient.reconcile`。无新增 HTTP、CLI 或页面。设计为 [product.md](../../../../docs/design/267-resume-host-tool-reconcile/product.md) v1，S1–S2 的子项归本功能。
 
 ## 源码依据
 

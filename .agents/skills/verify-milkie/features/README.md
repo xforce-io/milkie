@@ -46,6 +46,7 @@
 | SDK | `ExecutionClient.cancel` | [16-agent-cli-execution](16-agent-cli-execution.md) |
 | SDK | `ExecutionClient.toolCall` | [18-agent-cli-host-tools](18-agent-cli-host-tools.md) |
 | SDK | `ExecutionClient.reconcile` | [19-agent-cli-host-tool-resume](19-agent-cli-host-tool-resume.md) |
+| SDK | `ExecutionClient.pendingToolCalls` | [19-agent-cli-host-tool-resume](19-agent-cli-host-tool-resume.md) |
 | SDK | `loadManifest` | [01-registration](01-registration.md) |
 | SDK | `loadAgentFile` | [01-registration](01-registration.md) |
 | SDK | `registerAgent` | [01-registration](01-registration.md) |

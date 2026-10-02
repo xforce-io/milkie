@@ -567,6 +567,31 @@ test('a pending call recorded during claim is rejected before the next worker st
   expect(existsSync(store.path('active', c.contextId))).toBe(false)
   expect(readdirSync(join(root, 'data', 'runs')).filter(name => name.endsWith('.json'))).toEqual([])
 })
+test('a queued call stays discoverable when the host exits before its handler', async () => {
+  const a = client('grok-cli'), c = cliContext(a)
+  const host = spawn(process.execPath, [resolve('tests/fixtures/execution-tool-host.cjs')], { env })
+  let output = ''
+  host.stdout.on('data', chunk => { output += chunk })
+  try {
+    host.stdin.end(JSON.stringify({ dataDir: join(root, 'data'), connection: { contractVersion: 1, fields: { transport: 'agent-cli', runtime: 'grok-cli' } }, contextId: c.contextId, input: 'fixture:tools', constraints: { tools: [alpha, beta], timeoutMs: 30000 } }))
+    const runId = await new Promise<string>((resolveId, reject) => {
+      const timer = setTimeout(() => reject(new Error(`host did not start: ${output}`)), 5000)
+      const finish = () => { if (!output.trim()) return; clearTimeout(timer); resolveId(output.trim()) }
+      host.stdout.on('data', finish)
+      finish()
+    })
+    let pending: Array<{ name: string; status: string }> = []
+    for (let i = 0; i < 200 && pending.length < 2; i++) { pending = calls().filter((call: { runId: string; status: string }) => call.runId === runId && call.status === 'pending'); await delay(25) }
+    expect(pending.map(call => call.name).sort()).toEqual(['alpha', 'beta'])
+    const exited = new Promise<void>(resolveExit => host.once('exit', () => resolveExit()))
+    host.kill('SIGKILL'); await exited
+    for (let i = 0; i < 200 && new ExecutionStore(join(root, 'data')).run(runId)?.status !== 'unknown'; i++) await delay(25)
+    const found = client('grok-cli').pendingToolCalls(c.contextId)
+    expect(found.map(call => call.name).sort()).toEqual(['alpha', 'beta'])
+    expect(found.every(call => call.status === 'pending')).toBe(true)
+    expect(() => client('grok-cli').pendingToolCalls(randomUUID())).toThrow('context_not_found')
+  } finally { if (host.exitCode === null) host.kill('SIGKILL') }
+})
 test('API transport cannot register host tools', () => {
   const a = new ExecutionClient({ dataDir: join(root, 'data'), connection: { contractVersion: 1, fields: { transport: 'api', protocol: 'openai-chat-completions', model: 'fixture', apiKey: 'fixture-key' } }, env })
   const c = a.createContext(join(root, 'cwd'))

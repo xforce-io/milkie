@@ -49,7 +49,7 @@ CLI 目录和授权表分开。`visibleHostTools` 把本上下文先前运行写
 - 所属执行仍是 `starting` 或 `running`：`context_busy`。
 - 成功后返回更新过的调用记录。
 
-`start` 在 claim 之前检查 `pending`。错误文本仍只有错误码。
+`start` 在 claim 之前检查 `pending`。错误文本仍只有错误码。`pendingToolCalls(contextId)` 返回该上下文的 `pending` 记录。上下文不存在是 `context_not_found`。
 
 ## 6. 运行与保障机制
 

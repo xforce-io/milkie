@@ -137,6 +137,12 @@ export class ExecutionClient {
     }
   }
   toolCall(callId: string): ToolCallRecord | undefined { return this.store.read<ToolCallRecord>('calls', callId) }
+  /** Pending calls for a context, including ones persisted before the handler ran. */
+  pendingToolCalls(contextId: string): ToolCallRecord[] {
+    this.assertSupported()
+    this.store.context(contextId)
+    return this.pendingCalls(contextId)
+  }
   /** Record the host's checked result for a call whose reply never reached the CLI. */
   reconcile(callId: string, output: string): ToolCallRecord {
     this.assertSupported()
