@@ -74,13 +74,14 @@ async function run() {
   fs.mkdirSync(path.dirname(file), {recursive:true})
   history.push({ input })
   fs.writeFileSync(file, history.map(JSON.stringify).join('\n') + '\n')
-  const toolInputs = new Set(['fixture:tools', 'fixture:invalid', 'fixture:reject', 'fixture:foreign', 'fixture:hold'])
+  const toolInputs = new Set(['fixture:tools', 'fixture:invalid', 'fixture:reject', 'fixture:foreign', 'fixture:hold', 'fixture:revoked'])
   if (toolInputs.has(input)) {
     if (!process.env.MILKIE_TOOL_SOCKET) { process.stderr.write('tool socket missing'); process.exit(1) }
     const call = (id, name, value) => ({ id, name, input: value, ...(pi ? { nativeCallId: `native-${name}` } : {}) })
     const calls = input === 'fixture:invalid' ? [call('1', 'alpha', { n: 'nope' })]
       : input === 'fixture:foreign' ? [call('1', 'bash', {})]
       : input === 'fixture:tools' ? [call('1', 'alpha', { n: 1 }), call('2', 'beta', { n: 2 })]
+      : input === 'fixture:revoked' ? [call('1', 'alpha', { n: 1 })]
       : [call('1', 'alpha', { n: 1 })]
     const results = await new Promise((resolve, reject) => {
       const socket = require('node:net').connect(process.env.MILKIE_TOOL_SOCKET)
@@ -96,6 +97,7 @@ async function run() {
         }
       })
       socket.on('connect', () => {
+        if (input === 'fixture:hold' && pi) emit(history[0])
         socket.write(calls.map(item => JSON.stringify(item)).join('\n') + '\n')
         if (input === 'fixture:hold') setInterval(() => {}, 1000)
       })

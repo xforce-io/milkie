@@ -1,6 +1,6 @@
 import { execFileSync, spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { existsSync, readFileSync, realpathSync, writeFileSync, unlinkSync, chmodSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, realpathSync, writeFileSync, unlinkSync, chmodSync } from 'node:fs'
 import { createServer, Socket } from 'node:net'
 import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -33,6 +33,32 @@ export function grokLockEnv(): NodeJS.ProcessEnv {
   env.GROK_MANAGED_MCPS_ENABLED = '0'
   env.GROK_MANAGED_MCP_GATEWAY_TOOLS_ENABLED = '0'
   return env
+}
+/** CLI-visible catalog. Previously registered names stay listed so a real CLI can deliver them; only `current` is authorized. */
+export function visibleHostTools(store: ExecutionStore, contextId: string, current: HostToolSpec[]): HostToolSpec[] {
+  const authorized = new Set(current.map(tool => tool.name))
+  const revoked = new Map<string, HostToolSpec>()
+  const dir = join(store.root, 'runs')
+  if (!existsSync(dir)) return [...current]
+  for (const entry of readdirSync(dir)) {
+    if (!entry.endsWith('.json') || entry.endsWith('.tools.json')) continue
+    const run = store.run(entry.slice(0, -'.json'.length))
+    if (!run || run.contextId !== contextId) continue
+    const toolsPath = join(dir, `${run.runId}.tools.json`)
+    if (!existsSync(toolsPath)) continue
+    let listed: unknown
+    try { listed = JSON.parse(readFileSync(toolsPath, 'utf8')) } catch { throw new ExecutionError('storage_error') }
+    if (!Array.isArray(listed)) throw new ExecutionError('storage_error')
+    for (const tool of listed) {
+      if (!tool || typeof tool !== 'object' || typeof (tool as { name?: unknown }).name !== 'string') throw new ExecutionError('storage_error')
+      const name = (tool as { name: string }).name
+      if (authorized.has(name) || revoked.has(name)) continue
+      revoked.set(name, tool as HostToolSpec)
+    }
+  }
+  const visible = [...current, ...revoked.values()]
+  if (visible.length > 32) throw new ExecutionError('invalid_request')
+  return visible
 }
 export function assertHostTools(tools: HostToolSpec[]): void {
   if (tools.length > 32) throw new ExecutionError('invalid_request')
@@ -286,6 +312,18 @@ export default function (pi) {
 `
   writeFileSync(file, source, { mode: 0o600 })
 }
+/** Host completion is not delivery. A failed write leaves the call pending. */
+function deliverReply(socket: Socket, payload: string): Promise<boolean> {
+  if (socket.destroyed || !socket.writable) return Promise.resolve(false)
+  return new Promise(resolve => {
+    let settled = false
+    const finish = (ok: boolean) => { if (!settled) { settled = true; resolve(ok) } }
+    const onError = () => finish(false)
+    socket.once('error', onError)
+    try { socket.write(payload, error => { socket.off('error', onError); finish(!error) }) }
+    catch { socket.off('error', onError); finish(false) }
+  })
+}
 export interface ToolBridge { socketPath: string; close(): Promise<void> }
 export async function openToolBridge(options: {
   tools: HostToolSpec[]
@@ -309,15 +347,16 @@ export async function openToolBridge(options: {
     return run
   }
   const tools = new Map(options.tools.map(tool => [tool.name, tool]))
-  const handle = async (socket: Socket, line: string) => {
+  const prepare = (socket: Socket, line: string): (() => Promise<void>) | undefined => {
     const message = JSON.parse(line) as { id?: unknown; name?: unknown; nativeCallId?: unknown; input?: unknown }
     if (typeof message.id !== 'string' || typeof message.name !== 'string') throw new Error('Malformed tool call.')
+    const name = message.name
     const encoded = JSON.stringify(message.input)
     if (encoded.length > MAX_OUTPUT) throw new Error('Tool input is too large.')
     const nativeCallId = typeof message.nativeCallId === 'string' && message.nativeCallId ? message.nativeCallId : undefined
     const callId = randomUUID()
-    const base: ToolCallRecord = { version: 1, callId, name: message.name, input: message.input, runId: options.runId, contextId: options.contextId, status: 'pending', ...(nativeCallId ? { nativeCallId } : {}) }
-    const tool = tools.get(message.name)
+    const base: ToolCallRecord = { version: 1, callId, name, input: message.input, runId: options.runId, contextId: options.contextId, status: 'pending', ...(nativeCallId ? { nativeCallId } : {}) }
+    const tool = tools.get(name)
     const reply = (result: ToolResult) => socket.write(`${JSON.stringify({ id: message.id, ...result })}\n`)
     if (!tool) {
       const rejected: ToolResult = { ok: false, code: 'rejected', message: 'Tool is not registered.' }
@@ -331,14 +370,18 @@ export async function openToolBridge(options: {
       reply(invalid)
       return
     }
+    // Persist before the serial queue so a later frame is recorded even if the host dies during the previous call.
     options.store.write('calls', callId, base)
-    if (!options.alive()) return
-    let result: ToolResult
-    try { result = normalizeToolResult(await options.onHost({ callId, ...(nativeCallId ? { nativeCallId } : {}), name: message.name, input: message.input, runId: options.runId, contextId: options.contextId })) }
-    catch (error) { if (!options.alive()) return; throw error }
-    if (!options.alive()) return
-    options.store.write('calls', callId, { ...base, status: result.ok ? 'succeeded' : result.code, ...(result.ok ? { output: result.output } : { message: result.message }) })
-    reply(result)
+    return async () => {
+      if (!options.alive()) return
+      let result: ToolResult
+      try { result = normalizeToolResult(await options.onHost({ callId, ...(nativeCallId ? { nativeCallId } : {}), name, input: message.input, runId: options.runId, contextId: options.contextId })) }
+      catch (error) { if (!options.alive()) return; throw error }
+      if (!options.alive()) return
+      const delivered = await deliverReply(socket, `${JSON.stringify({ id: message.id, ...result })}\n`)
+      if (!delivered) return
+      options.store.write('calls', callId, { ...base, status: result.ok ? 'succeeded' : result.code, ...(result.ok ? { output: result.output } : { message: result.message }) })
+    }
   }
   const sockets = new Set<Socket>()
   const server = createServer(socket => {
@@ -355,7 +398,10 @@ export async function openToolBridge(options: {
         const line = buffer.slice(0, newline)
         buffer = buffer.slice(newline + 1)
         if (!line) continue
-        void enqueue(() => handle(socket, line)).catch(broken)
+        try {
+          const job = prepare(socket, line)
+          if (job) void enqueue(job).catch(broken)
+        } catch (error) { broken(error) }
       }
     })
   })

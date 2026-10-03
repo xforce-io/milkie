@@ -29,6 +29,7 @@
 | [16-agent-cli-execution](16-agent-cli-execution.md) | 外部 CLI 执行与原生会话续接 | #263 候选；按 S1–S5 验证真实 CLI |
 | [17-agent-cli-dedicated-storage](17-agent-cli-dedicated-storage.md) | CLI 专用配置目录与会话目录 | #265；缺失时启动前失败 |
 | [18-agent-cli-host-tools](18-agent-cli-host-tools.md) | CLI 宿主工具、能力关停与调用记录 | #266；真实 CLI 验收 |
+| [19-agent-cli-host-tool-resume](19-agent-cli-host-tool-resume.md) | 续接时重装宿主工具并核对未回复调用 | #267；真实 CLI 验收 |
 
 ## 主入口逐项归属
 
@@ -44,6 +45,8 @@
 | SDK | `ExecutionClient.wait` | [16-agent-cli-execution](16-agent-cli-execution.md) |
 | SDK | `ExecutionClient.cancel` | [16-agent-cli-execution](16-agent-cli-execution.md) |
 | SDK | `ExecutionClient.toolCall` | [18-agent-cli-host-tools](18-agent-cli-host-tools.md) |
+| SDK | `ExecutionClient.reconcile` | [19-agent-cli-host-tool-resume](19-agent-cli-host-tool-resume.md) |
+| SDK | `ExecutionClient.pendingToolCalls` | [19-agent-cli-host-tool-resume](19-agent-cli-host-tool-resume.md) |
 | SDK | `loadManifest` | [01-registration](01-registration.md) |
 | SDK | `loadAgentFile` | [01-registration](01-registration.md) |
 | SDK | `registerAgent` | [01-registration](01-registration.md) |

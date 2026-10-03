@@ -3,8 +3,10 @@ import { mkdtempSync, mkdirSync, symlinkSync, chmodSync, readFileSync, existsSyn
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
+import { connect } from 'node:net'
 import { setTimeout as delay } from 'node:timers/promises'
 import { CliEvents, cliCommand, nativeFile } from '../execution/adapters'
+import { openToolBridge } from '../execution/hostTools'
 import { ExecutionStore } from '../execution/store'
 import type { CliStorage, ExecutionContext } from '../execution/types'
 // The public distribution launches worker.js; build before running this suite.
@@ -124,6 +126,109 @@ test('CLI argv contains exact session selection and enforceable tool flags, neve
   expect(grokCommand.args).toContain('--leader-socket');expect(grokCommand.args).toContain('/owned/grok-config/leader.sock');expect(grokCommand.args).not.toContain('private prompt')
   expect(grokCommand.args[grokCommand.args.indexOf('--disallowed-tools') + 1]).not.toContain('read_file')
   expect(grokCommand.args).not.toContain('--tools')
+})
+test('a context lock stops a second release from deleting the newer claim', async () => {
+  const store = new ExecutionStore(join(root, 'store-lock'))
+  const contextId = 'f7471111-1111-4111-8111-111111111112'
+  const oldRun = randomUUID()
+  const newRun = randomUUID()
+  store.claim(contextId, oldRun)
+  const ready = join(root, 'lock-ready')
+  const gate = join(root, 'lock-gate')
+  const holderCode = `const fs=require('node:fs');const {ExecutionStore}=require(${JSON.stringify(resolve('dist/execution/store.js'))});const store=new ExecutionStore(process.argv[1]);store.exclusive(process.argv[2],()=>{fs.writeFileSync(process.argv[5],'held');const deadline=Date.now()+5000;while(!fs.existsSync(process.argv[6])){if(Date.now()>deadline)throw new Error('timed out');Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,20)}if(fs.readFileSync(store.path('active',process.argv[2]),'utf8')===process.argv[3])store.release(process.argv[2],process.argv[3]);store.claim(process.argv[2],process.argv[4])});console.log('done')`
+  const holder = spawn(process.execPath, ['-e', holderCode, store.root, contextId, oldRun, newRun, ready, gate])
+  let holderOut = ''
+  holder.stdout.on('data', chunk => { holderOut += chunk })
+  try {
+    for (let i = 0; i < 50 && !existsSync(ready); i++) await delay(20)
+    expect(existsSync(ready)).toBe(true)
+    const releaseCode = `const {ExecutionStore}=require(${JSON.stringify(resolve('dist/execution/store.js'))});try{new ExecutionStore(process.argv[1]).release(process.argv[2],process.argv[3]);console.log('released')}catch(e){console.log(e.code)}`
+    const released = await new Promise<string>((resolveRelease, reject) => {
+      const child = spawn(process.execPath, ['-e', releaseCode, store.root, contextId, oldRun])
+      let out = ''
+      child.stdout.on('data', chunk => { out += chunk })
+      child.on('error', reject)
+      child.on('exit', () => resolveRelease(out.trim()))
+    })
+    expect(released).toBe('context_busy')
+    expect(readFileSync(store.path('active', contextId), 'utf8')).toBe(oldRun)
+    writeFileSync(gate, 'go')
+    await new Promise<void>((resolveExit, reject) => { holder.on('error', reject); holder.on('exit', code => code === 0 ? resolveExit() : reject(new Error(holderOut || `holder exited ${code}`))) })
+    expect(readFileSync(store.path('active', contextId), 'utf8')).toBe(newRun)
+  } finally { if (holder.exitCode === null) holder.kill('SIGKILL') }
+})
+test('two processes cannot both hold one context lock', async () => {
+  const store = new ExecutionStore(join(root, 'store-two-lock'))
+  const contextId = 'f7471111-1111-4111-8111-111111111114'
+  const log = join(root, 'lock-log')
+  const code = `const fs=require('node:fs');const {ExecutionStore}=require(${JSON.stringify(resolve('dist/execution/store.js'))});try{new ExecutionStore(process.argv[1]).exclusive(process.argv[2],()=>{fs.appendFileSync(process.argv[3],'enter\\n');Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,200);fs.appendFileSync(process.argv[3],'exit\\n')});console.log('entered')}catch(e){console.log(e.code)}`
+  const run = () => new Promise<string>((resolveRun, reject) => {
+    const child = spawn(process.execPath, ['-e', code, store.root, contextId, log])
+    let out = ''
+    child.stdout.on('data', chunk => { out += chunk })
+    child.on('error', reject)
+    child.on('exit', () => resolveRun(out.trim()))
+  })
+  const results = (await Promise.all([run(), run()])).sort()
+  expect(results).toEqual(['context_busy', 'entered'])
+  const text = readFileSync(log, 'utf8')
+  expect(text).toBe('enter\nexit\n')
+})
+test('a killed holder releases the context lock', async () => {
+  const store = new ExecutionStore(join(root, 'store-dead-lock'))
+  const contextId = 'f7471111-1111-4111-8111-111111111115'
+  const ready = join(root, 'dead-ready')
+  const holderCode = `const fs=require('node:fs');const {ExecutionStore}=require(${JSON.stringify(resolve('dist/execution/store.js'))});new ExecutionStore(process.argv[1]).exclusive(process.argv[2],()=>{fs.writeFileSync(process.argv[3],'held');Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,10000)});`
+  const holder = spawn(process.execPath, ['-e', holderCode, store.root, contextId, ready])
+  try {
+    for (let i = 0; i < 50 && !existsSync(ready); i++) await delay(20)
+    expect(existsSync(ready)).toBe(true)
+    expect(() => store.exclusive(contextId, () => undefined)).toThrow('context_busy')
+    holder.kill('SIGKILL')
+    await new Promise<void>(resolveExit => holder.once('exit', () => resolveExit()))
+    let entered = false
+    for (let i = 0; i < 50 && !entered; i++) {
+      try { store.exclusive(contextId, () => { entered = true }) }
+      catch (error) { if (!(error instanceof Error) || !error.message.includes('context_busy')) throw error; await delay(20) }
+    }
+    expect(entered).toBe(true)
+  } finally { if (holder.exitCode === null) holder.kill('SIGKILL') }
+})
+test('reconcile does not overwrite a result while the context lock is held', async () => {
+  const a = client('grok-cli'), c = cliContext(a)
+  const store = new ExecutionStore(join(root, 'data'))
+  const runId = randomUUID()
+  const callId = randomUUID()
+  store.claim(c.contextId, runId)
+  store.write('runs', runId, { version: 1, runId, contextId: c.contextId, status: 'unknown', startedAt: 1, heartbeatAt: 1, stopped: true })
+  store.write('calls', callId, { version: 1, callId, name: 'alpha', input: { n: 1 }, runId, contextId: c.contextId, status: 'pending' })
+  const ready = join(root, 'reconcile-ready')
+  const gate = join(root, 'reconcile-gate')
+  const holderCode = `const fs=require('node:fs');const {ExecutionStore}=require(${JSON.stringify(resolve('dist/execution/store.js'))});new ExecutionStore(process.argv[1]).exclusive(process.argv[2],()=>{fs.writeFileSync(process.argv[3],'held');const deadline=Date.now()+5000;while(!fs.existsSync(process.argv[4])){if(Date.now()>deadline)throw new Error('timed out');Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,20)}});console.log('done')`
+  const holder = spawn(process.execPath, ['-e', holderCode, store.root, c.contextId, ready, gate])
+  try {
+    for (let i = 0; i < 50 && !existsSync(ready); i++) await delay(20)
+    expect(existsSync(ready)).toBe(true)
+    const reconcileCode = `const {ExecutionClient}=require(${JSON.stringify(resolve('dist/execution/ExecutionClient.js'))});try{new ExecutionClient({dataDir:process.argv[1],connection:{contractVersion:1,fields:{transport:'agent-cli',runtime:'grok-cli'}}}).reconcile(process.argv[2],process.argv[3]);console.log('reconciled')}catch(e){console.log(e.code)}`
+    const blocked = await new Promise<string>((resolveBlocked, reject) => {
+      const child = spawn(process.execPath, ['-e', reconcileCode, store.root, callId, 'other'])
+      let out = ''
+      child.stdout.on('data', chunk => { out += chunk })
+      child.on('error', reject)
+      child.on('exit', () => resolveBlocked(out.trim()))
+    })
+    expect(blocked).toBe('context_busy')
+    expect(store.read('calls', callId)).toMatchObject({ status: 'pending' })
+  } finally {
+    writeFileSync(gate, 'go')
+    await new Promise<void>(resolveExit => {
+      const timer = setTimeout(() => { if (holder.exitCode === null) holder.kill('SIGKILL') }, 2000)
+      holder.once('exit', () => { clearTimeout(timer); resolveExit() })
+    })
+  }
+  expect(a.reconcile(callId, 'done')).toMatchObject({ status: 'reconciled', output: 'done' })
+  expect(() => a.reconcile(callId, 'other')).toThrow('invalid_request')
+  expect(store.read('calls', callId)).toMatchObject({ output: 'done' })
 })
 test('two host processes cannot both claim an execution context', async () => {
   const store=new ExecutionStore(join(root,'store')),contextId='f7471111-1111-4111-8111-111111111111'
@@ -476,6 +581,265 @@ test('an unreadable process inventory does not report the run stopped', async ()
     expect(await tracker.stop()).toBe(false)
     expect(() => process.kill(child.pid!, 0)).not.toThrow()
   } finally { child.kill('SIGKILL') }
+})
+test.each(['grok-cli', 'pi'])('%s resume rejects a tool removed from the next registration', async runtime => {
+  const a = client(runtime), c = cliContext(a)
+  const first = await a.wait(a.start(c.contextId, 'fixture:tools', { tools: [alpha, beta], timeoutMs: 10000 }, async call => {
+    expect(a.toolCall(call.callId)?.status).toBe('pending')
+    if (call.name === 'alpha') {
+      let betaPending = false
+      for (let i = 0; i < 20 && !betaPending; i++) { betaPending = calls().some(item => item.runId === call.runId && item.name === 'beta' && item.status === 'pending'); if (!betaPending) await delay(10) }
+      expect(betaPending).toBe(true)
+    }
+    return { ok: true, output: call.name }
+  }))
+  expect(first.status).toBe('succeeded')
+  const before = a.getContext(c.contextId)
+  const firstIds = calls().filter(call => call.runId === first.runId).map(call => call.callId)
+  const b = client(runtime)
+  let revokedHandler = false
+  const second = await b.wait(b.start(c.contextId, 'fixture:revoked', { tools: [beta], timeoutMs: 10000 }, () => { revokedHandler = true; return { ok: true, output: 'x' } }))
+  expect(second.status).toBe('succeeded')
+  expect(revokedHandler).toBe(false)
+  const revoked = calls().find(call => call.runId === second.runId && call.name === 'alpha')
+  expect(revoked?.status).toBe('rejected')
+  expect(firstIds).not.toContain(revoked?.callId)
+  const listed = JSON.parse(readFileSync(join(root, 'data', 'runs', `${second.runId}.tools.json`), 'utf8')) as Array<{ name: string }>
+  expect(listed.map(tool => tool.name)).toEqual(['beta', 'alpha'])
+  const after = b.getContext(c.contextId)
+  expect(after.nativeSessionId).toBe(before.nativeSessionId)
+  expect(after.nativeSessionFile).toBe(before.nativeSessionFile)
+})
+test.each(['grok-cli', 'pi'])('%s lost tool reply blocks resume until the host reconciles it', async runtime => {
+  const a = client(runtime), c = cliContext(a)
+  const effect = join(root, `effect-${runtime}`)
+  const host = spawn(process.execPath, [resolve('tests/fixtures/execution-tool-host.cjs')], { env })
+  let output = ''
+  host.stdout.on('data', chunk => { output += chunk })
+  try {
+    host.stdin.end(JSON.stringify({ dataDir: join(root, 'data'), connection: { contractVersion: 1, fields: { transport: 'agent-cli', runtime } }, contextId: c.contextId, input: 'fixture:hold', constraints: { tools: [alpha], timeoutMs: 30000 }, effect }))
+    const runId = await new Promise<string>((resolveId, reject) => {
+      const timer = setTimeout(() => reject(new Error(`host did not start: ${output}`)), 5000)
+      const finish = () => { if (!output.trim()) return; clearTimeout(timer); resolveId(output.trim()) }
+      host.stdout.on('data', finish)
+      finish()
+    })
+    let pending: { callId?: string; status?: string; name?: string; input?: unknown } | undefined
+    for (let i = 0; i < 200 && (pending?.status !== 'pending' || !existsSync(effect)); i++) { pending = calls().find(call => call.runId === runId); await delay(25) }
+    expect(pending).toMatchObject({ status: 'pending', name: 'alpha', input: { n: 1 } })
+    expect(() => a.reconcile(pending!.callId!, 'too soon')).toThrow('context_busy')
+    const exited = new Promise<void>(resolveExit => host.once('exit', () => resolveExit()))
+    host.kill('SIGKILL'); await exited
+    for (let i = 0; i < 200 && new ExecutionStore(join(root, 'data')).run(runId)?.status !== 'unknown'; i++) await delay(25)
+    const b = client(runtime)
+    expect(() => b.start(c.contextId, 'again', { tools: [alpha], timeoutMs: 10000 }, async () => ({ ok: true, output: 'x' }))).toThrow('context_busy')
+    expect(() => b.reconcile(pending!.callId!, '')).toThrow('invalid_request')
+    const sessionBefore = b.getContext(c.contextId)
+    expect(b.reconcile(pending!.callId!, 'already done').status).toBe('reconciled')
+    let repeated = false
+    const resumed = await b.wait(b.start(c.contextId, 'already done', { tools: [alpha], timeoutMs: 10000 }, () => { repeated = true; return { ok: true, output: 'again' } }))
+    expect(resumed.status).toBe('succeeded')
+    expect(repeated).toBe(false)
+    expect(readFileSync(effect, 'utf8')).toBe('once')
+    const sessionAfter = b.getContext(c.contextId)
+    expect(sessionAfter.nativeSessionId).toBe(sessionBefore.nativeSessionId)
+    expect(sessionAfter.nativeSessionFile).toBe(sessionBefore.nativeSessionFile)
+  } finally { if (host.exitCode === null) host.kill('SIGKILL') }
+})
+test('reconcile keeps the claim until the lost run is confirmed stopped', () => {
+  const a = client('grok-cli'), c = cliContext(a)
+  const store = new ExecutionStore(join(root, 'data'))
+  const runId = randomUUID()
+  store.claim(c.contextId, runId)
+  store.write('runs', runId, { version: 1, runId, contextId: c.contextId, status: 'unknown', startedAt: 1, heartbeatAt: 1, stopped: false })
+  const callId = randomUUID()
+  store.write('calls', callId, { version: 1, callId, name: 'alpha', input: { n: 1 }, runId, contextId: c.contextId, status: 'pending' })
+  expect(a.reconcile(callId, 'checked').status).toBe('reconciled')
+  expect(readFileSync(store.path('active', c.contextId), 'utf8')).toBe(runId)
+  expect(() => a.start(c.contextId, 'again', { tools: [alpha], timeoutMs: 10000 }, async () => ({ ok: true, output: 'x' }))).toThrow('context_busy')
+})
+test('reconcile can release a claim that survived the checked write', () => {
+  const a = client('grok-cli'), c = cliContext(a)
+  const store = new ExecutionStore(join(root, 'data'))
+  const runId = randomUUID()
+  const callId = randomUUID()
+  store.claim(c.contextId, runId)
+  store.write('runs', runId, { version: 1, runId, contextId: c.contextId, status: 'unknown', startedAt: 1, heartbeatAt: 1, stopped: true })
+  store.write('calls', callId, { version: 1, callId, name: 'alpha', input: { n: 1 }, runId, contextId: c.contextId, status: 'pending' })
+  const write = store.write.bind(store)
+  store.write = (kind: string, id: string, value: unknown) => {
+    write(kind, id, value)
+    if (kind === 'calls') throw new Error('simulated host loss after durable write')
+  }
+  ;(a as unknown as { store: ExecutionStore }).store = store
+  expect(() => a.reconcile(callId, 'done')).toThrow('simulated host loss after durable write')
+  const restarted = client('grok-cli')
+  expect(restarted.pendingToolCalls(c.contextId)).toEqual([])
+  expect(existsSync(store.path('active', c.contextId))).toBe(true)
+  expect(restarted.reconcile(callId, 'done')).toMatchObject({ status: 'reconciled', output: 'done' })
+  expect(existsSync(store.path('active', c.contextId))).toBe(false)
+  expect(() => restarted.reconcile(callId, 'other')).toThrow('invalid_request')
+})
+test('a busy context lock still stores the terminal run', async () => {
+  const a = client('grok-cli'), c = cliContext(a)
+  const store = new ExecutionStore(join(root, 'data'))
+  const runId = a.start(c.contextId, 'fixture:sleep', { timeoutMs: 30000 })
+  for (let i = 0; i < 50 && store.run(runId)?.status !== 'running'; i++) await delay(20)
+  expect(store.run(runId)?.status).toBe('running')
+  const ready = join(root, 'busy-ready'), gate = join(root, 'busy-gate')
+  const holderCode = `const fs=require('node:fs');const {ExecutionStore}=require(${JSON.stringify(resolve('dist/execution/store.js'))});new ExecutionStore(process.argv[1]).exclusive(process.argv[2],()=>{fs.writeFileSync(process.argv[3],'held');const deadline=Date.now()+8000;while(!fs.existsSync(process.argv[4])){if(Date.now()>deadline)throw new Error('timed out');Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,20)}});`
+  const holder = spawn(process.execPath, ['-e', holderCode, store.root, c.contextId, ready, gate])
+  try {
+    for (let i = 0; i < 50 && !existsSync(ready); i++) await delay(20)
+    expect(existsSync(ready)).toBe(true)
+    const cancelled = await a.cancel(runId)
+    expect(cancelled).toMatchObject({ status: 'cancelled', stopped: true })
+    expect(readFileSync(store.path('active', c.contextId), 'utf8')).toBe(runId)
+    writeFileSync(gate, 'go')
+    await new Promise<void>((resolveExit, reject) => { holder.on('error', reject); holder.on('exit', code => code === 0 ? resolveExit() : reject(new Error(`holder exited ${code}`))) })
+    const resumed = await a.wait(a.start(c.contextId, 'again', { timeoutMs: 10000 }))
+    expect(resumed.status).toBe('succeeded')
+    expect(resumed.runId).not.toBe(runId)
+    expect(existsSync(store.path('active', c.contextId))).toBe(false)
+  } finally { if (holder.exitCode === null) { try { writeFileSync(gate, 'go') } catch { /* absent */ } holder.kill('SIGKILL') } }
+})
+test('start releases a claim left after the checked write', async () => {
+  const a = client('grok-cli'), c = cliContext(a)
+  const store = new ExecutionStore(join(root, 'data'))
+  const runId = randomUUID()
+  const callId = randomUUID()
+  store.claim(c.contextId, runId)
+  store.write('runs', runId, { version: 1, runId, contextId: c.contextId, status: 'unknown', startedAt: 1, heartbeatAt: 1, stopped: true })
+  store.write('calls', callId, { version: 1, callId, name: 'alpha', input: { n: 1 }, runId, contextId: c.contextId, status: 'reconciled', output: 'done' })
+  const restarted = client('grok-cli')
+  expect(restarted.pendingToolCalls(c.contextId)).toEqual([])
+  const resumed = await restarted.wait(restarted.start(c.contextId, 'resume-after-checked-write', { timeoutMs: 10000 }))
+  expect(resumed.status).toBe('succeeded')
+  expect(resumed.runId).not.toBe(runId)
+  expect(existsSync(store.path('active', c.contextId))).toBe(false)
+})
+test('startup failure retains its lock through rollback and allows a repaired retry', async () => {
+  const Database = require('better-sqlite3') as typeof import('better-sqlite3')
+  const a = client('pi'), c = cliContext(a)
+  const store = new ExecutionStore(join(root, 'data'))
+  ;(a as unknown as { store: ExecutionStore }).store = store
+  const readContext = store.context.bind(store)
+  const contender = new Database(join(store.root, 'locks', `${c.contextId}.sqlite`), { timeout: 0 })
+  let reads = 0, competingError: string | undefined
+  store.context = contextId => {
+    const context = readContext(contextId)
+    if (++reads === 2) {
+      // Compete after claim but before startup validation. Keep any acquired lock
+      // until start returns, reproducing the cleanup failure on the old code.
+      try { contender.exec('BEGIN IMMEDIATE') }
+      catch (error) { competingError = (error as { code?: string }).code }
+      unlinkSync(join(c.configDir!, 'auth.json'))
+    }
+    return context
+  }
+  try {
+    expect(() => a.start(c.contextId, 'first')).toThrow('config_missing')
+    expect(competingError).toBe('SQLITE_BUSY')
+    expect(existsSync(store.path('active', c.contextId))).toBe(false)
+    expect(readdirSync(join(store.root, 'runs'))).toEqual([])
+  } finally {
+    contender.close()
+    store.context = readContext
+    writeFileSync(join(c.configDir!, 'auth.json'), '{"fixture":true}\n')
+  }
+  expect((await a.wait(a.start(c.contextId, 'retry'))).status).toBe('succeeded')
+})
+test('a pending call recorded during claim is rejected before the next worker starts', () => {
+  const a = client('grok-cli'), c = cliContext(a)
+  const store = new ExecutionStore(join(root, 'data'))
+  const claim = store.claim.bind(store)
+  store.claim = (contextId: string, runId: string) => {
+    claim(contextId, runId)
+    const callId = randomUUID()
+    store.write('calls', callId, { version: 1, callId, name: 'alpha', input: { n: 1 }, runId: randomUUID(), contextId, status: 'pending' })
+  }
+  ;(a as unknown as { store: ExecutionStore }).store = store
+  expect(() => a.start(c.contextId, 'fixture:tools', { tools: [alpha], timeoutMs: 10000 }, async () => ({ ok: true, output: 'x' }))).toThrow('context_busy')
+  expect(existsSync(store.path('active', c.contextId))).toBe(false)
+  expect(readdirSync(join(root, 'data', 'runs')).filter(name => name.endsWith('.json'))).toEqual([])
+})
+test('a queued call stays discoverable when the host exits before its handler', async () => {
+  const a = client('grok-cli'), c = cliContext(a)
+  const host = spawn(process.execPath, [resolve('tests/fixtures/execution-tool-host.cjs')], { env })
+  let output = ''
+  host.stdout.on('data', chunk => { output += chunk })
+  try {
+    host.stdin.end(JSON.stringify({ dataDir: join(root, 'data'), connection: { contractVersion: 1, fields: { transport: 'agent-cli', runtime: 'grok-cli' } }, contextId: c.contextId, input: 'fixture:tools', constraints: { tools: [alpha, beta], timeoutMs: 30000 } }))
+    const runId = await new Promise<string>((resolveId, reject) => {
+      const timer = setTimeout(() => reject(new Error(`host did not start: ${output}`)), 5000)
+      const finish = () => { if (!output.trim()) return; clearTimeout(timer); resolveId(output.trim()) }
+      host.stdout.on('data', finish)
+      finish()
+    })
+    let pending: Array<{ name: string; status: string }> = []
+    for (let i = 0; i < 200 && pending.length < 2; i++) { pending = calls().filter((call: { runId: string; status: string }) => call.runId === runId && call.status === 'pending'); await delay(25) }
+    expect(pending.map(call => call.name).sort()).toEqual(['alpha', 'beta'])
+    const exited = new Promise<void>(resolveExit => host.once('exit', () => resolveExit()))
+    host.kill('SIGKILL'); await exited
+    for (let i = 0; i < 200 && new ExecutionStore(join(root, 'data')).run(runId)?.status !== 'unknown'; i++) await delay(25)
+    const found = client('grok-cli').pendingToolCalls(c.contextId)
+    expect(found.map(call => call.name).sort()).toEqual(['alpha', 'beta'])
+    expect(found.every(call => call.status === 'pending')).toBe(true)
+    expect(() => client('grok-cli').pendingToolCalls(randomUUID())).toThrow('context_not_found')
+  } finally { if (host.exitCode === null) host.kill('SIGKILL') }
+})
+test('a closed tool socket leaves the completed host call pending', async () => {
+  const a = client('grok-cli'), c = cliContext(a)
+  const store = new ExecutionStore(join(root, 'data'))
+  const runId = randomUUID()
+  let release: () => void = () => undefined
+  const gate = new Promise<void>(resolve => { release = resolve })
+  const bridge = await openToolBridge({
+    tools: [alpha], forwarding: 'serial', runId, contextId: c.contextId, store, alive: () => true,
+    onHost: async () => { await gate; return { ok: true, output: 'charged' } },
+    onBroken: () => undefined,
+  })
+  try {
+    const socket = connect(bridge.socketPath)
+    await new Promise<void>(resolve => socket.once('connect', resolve))
+    socket.write(JSON.stringify({ id: '1', name: 'alpha', input: { n: 1 } }) + '\n')
+    for (let i = 0; i < 50 && a.pendingToolCalls(c.contextId).length === 0; i++) await delay(10)
+    expect(a.pendingToolCalls(c.contextId)).toHaveLength(1)
+    socket.destroy()
+    release()
+    await delay(50)
+    const pending = a.pendingToolCalls(c.contextId)
+    expect(pending.map(call => call.status)).toEqual(['pending'])
+    const call = pending[0]
+    if (!call) throw new Error('missing pending call')
+    expect(call.output).toBeUndefined()
+    store.write('runs', runId, { version: 1, runId, contextId: c.contextId, status: 'unknown', startedAt: 1, heartbeatAt: 1, stopped: true })
+    expect(() => a.start(c.contextId, 'again', { timeoutMs: 10000 })).toThrow('context_busy')
+    expect(a.reconcile(call.callId, 'already charged')).toMatchObject({ status: 'reconciled', output: 'already charged' })
+  } finally { await bridge.close() }
+})
+test('a live tool socket records success after the reply is written', async () => {
+  const store = new ExecutionStore(join(root, 'data'))
+  const contextId = 'f7471111-1111-4111-8111-111111111116'
+  const runId = randomUUID()
+  const bridge = await openToolBridge({
+    tools: [alpha], forwarding: 'serial', runId, contextId, store, alive: () => true,
+    onHost: async () => ({ ok: true, output: 'charged' }),
+    onBroken: () => undefined,
+  })
+  try {
+    const socket = connect(bridge.socketPath)
+    const received = new Promise<string>((resolveReply, reject) => {
+      const timer = setTimeout(() => reject(new Error('reply was not written')), 1000)
+      socket.on('data', chunk => { clearTimeout(timer); resolveReply(chunk.toString()) })
+    })
+    await new Promise<void>(resolve => socket.once('connect', resolve))
+    socket.write(JSON.stringify({ id: '1', name: 'alpha', input: { n: 1 } }) + '\n')
+    expect(await received).toContain('"output":"charged"')
+    const saved = readdirSync(join(store.root, 'calls')).filter(name => name.endsWith('.json')).map(name => JSON.parse(readFileSync(join(store.root, 'calls', name), 'utf8')))
+    expect(saved).toEqual([expect.objectContaining({ status: 'succeeded', output: 'charged', contextId })])
+    socket.end()
+  } finally { await bridge.close() }
 })
 test('API transport cannot register host tools', () => {
   const a = new ExecutionClient({ dataDir: join(root, 'data'), connection: { contractVersion: 1, fields: { transport: 'api', protocol: 'openai-chat-completions', model: 'fixture', apiKey: 'fixture-key' } }, env })
