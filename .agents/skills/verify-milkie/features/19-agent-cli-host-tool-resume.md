@@ -17,6 +17,7 @@ SDK `ExecutionClient.start`、`ExecutionClient.toolCall`、`ExecutionClient.pend
 | S1.A3 | Pi：同 S1.A2 | 同 S1.A2 |
 | S2.A1 | 夹具：副作用后宿主消失，核对前 start，核对后续接 | `pending` 可查询；核对前 `context_busy`；副作用只有一次 |
 | S2.A1 | 夹具：宿主已返回结果，但工具连接在回复写入前断开 | 记录保持 `pending` 且没有 output；核对前 `context_busy`；`reconcile` 可接受 |
+| S2.A1 | 夹具：启动取得占用后配置失效，同时另一连接竞争上下文锁；修复配置后重试 | 返回原始配置错误；无孤立占用；同一上下文可重新执行 |
 | S2.A2 | Grok：同 S2.A1 的真实执行 | 同 S2.A1 |
 | S2.A3 | Pi：同 S2.A2 | 同 S2.A1 |
 

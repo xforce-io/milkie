@@ -28,6 +28,34 @@ async function until<T>(label: string, read: () => T | undefined, timeoutMs = 18
   throw new Error(`${label} timed out`)
 }
 
+/** Run the first turn in a separate host that exits before the next host resumes. */
+async function firstTurnInHost(request: Record<string, unknown>) {
+  const source = `
+    const { ExecutionClient } = require(${JSON.stringify(resolve('dist/execution/ExecutionClient.js'))});
+    let input = '';
+    process.stdin.setEncoding('utf8');
+    process.stdin.on('data', chunk => { input += chunk });
+    process.stdin.on('end', async () => {
+      try {
+        const request = JSON.parse(input);
+        const client = new ExecutionClient(request);
+        const runId = client.start(request.contextId, request.prompt, request.constraints, () => ({ ok: true, output: 'kept' }));
+        process.stdout.write(JSON.stringify(await client.wait(runId, 200000)));
+      } catch { process.exitCode = 1; }
+    });
+  `
+  const child = spawn(process.execPath, ['-e', source], { stdio: ['pipe', 'pipe', 'inherit'] })
+  let output = ''
+  child.stdout.on('data', chunk => { output += chunk })
+  const exited = new Promise<void>((resolveExit, reject) => {
+    child.on('error', reject)
+    child.on('exit', code => code === 0 ? resolveExit() : reject(new Error('First host failed.')))
+  })
+  child.stdin.end(JSON.stringify(request))
+  await exited
+  return JSON.parse(output) as { status: string; code?: string; runId: string }
+}
+
 async function main() {
   if (process.env.MILKIE_LIVE_RESUME !== '1') throw new Error('Explicit MILKIE_LIVE_RESUME=1 is required.')
   const root = mkdtempSync(join(tmpdir(), 'milkie-267-live-'))
@@ -52,7 +80,7 @@ async function main() {
     mkdirSync(work, { recursive: true })
     const context = client.createContext(work, storage)
     const firstPrompt = `Call ${toolName('extra')} exactly once with text "first". Do not use a terminal, read files, or grep. Reply with only the tool result.`
-    const first = await client.wait(client.start(context.contextId, firstPrompt, { tools: [note, extra], timeoutMs: 180000 }, async () => ({ ok: true, output: 'kept' })), 200000)
+    const first = await firstTurnInHost({ dataDir, connection, contextId: context.contextId, prompt: firstPrompt, constraints: { tools: [note, extra], timeoutMs: 180000 } })
     assert.equal(first.status, 'succeeded', first.code)
     const firstCall = callsOf(store, first.runId).find(call => call.name === 'extra' && call.status === 'succeeded')
     assert.ok(firstCall)

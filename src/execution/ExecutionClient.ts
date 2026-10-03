@@ -86,58 +86,60 @@ export class ExecutionClient {
     const worker = join(__dirname, 'worker.js')
     if (!existsSync(worker)) throw new ExecutionError('process_failed')
     const runId = randomUUID()
-    this.store.exclusive(contextId, () => {
+    // Keep claim, startup and synchronous rollback under one lock. Otherwise a
+    // contender can prevent cleanup before a recoverable run record exists.
+    return this.store.exclusive(contextId, () => {
       if (this.pendingCalls(contextId).length > 0) throw new ExecutionError('context_busy')
       this.releaseSettledClaim(contextId)
       this.store.claim(contextId, runId)
-    })
-    let child: ChildProcess | undefined
-    try {
-      // A call can be recorded after the first scan and before this claim.
-      if (this.pendingCalls(contextId).length > 0) throw new ExecutionError('context_busy')
-      // The prior run may have finalized between the first read and this claim.
-      context = this.store.context(contextId)
-      if (JSON.stringify(context.connection) !== JSON.stringify(this.projection)) throw new ExecutionError('connection_mismatch')
-      if (context.connection.transport === 'agent-cli') {
-        prepareCliStorage(context)
-        assertNativeSession(context)
-      }
-      const record: ExecutionRecord = { version: 1, runId, contextId, nativeSessionId: context.nativeSessionId, status: 'starting', startedAt: Date.now(), heartbeatAt: Date.now(), stopped: false }
-      this.store.write('runs', runId, record)
-      const childEnv = context.connection.transport === 'agent-cli' ? supervisorEnvironment(this.env) : this.env
-      child = fork(worker, [], { env: childEnv, detached: !hostTools, stdio: hostTools ? ['ignore', 'ignore', 'ignore', 'ipc', 'pipe'] : ['ignore', 'ignore', 'ignore', 'ipc'], execArgv: [] })
-      const pipe = hostTools ? child.stdio[4] : undefined
-      if (hostTools && (!pipe || typeof pipe === 'string' || !('on' in pipe))) throw new ExecutionError('process_failed')
-      if (pipe && typeof pipe !== 'string') {
-        const stream = pipe as NodeJS.EventEmitter & { unref?: () => void }
-        stream.on('error', () => { /* Worker exit closes this end after the run is stored. */ })
-        stream.unref?.()
-        this.parentPipes.push(stream)
-      }
-      const fail = () => {
-        // Once IPC was accepted execution may have started: don't release its claim.
-        try {
-          const current = this.store.run(runId)
-          if (current && ACTIVE.has(current.status)) { current.status = 'unknown'; current.code = 'process_failed'; this.store.write('runs', runId, current) }
-        } catch { /* A stale starting record remains unknown; never crash the host or release its claim. */ }
-      }
-      child.on('error', fail)
-      if (hostTools && handler) {
-        child.on('message', (message: WorkerToolMessage) => {
-          if (!message || message.type !== 'tool-call' || !message.call) return
-          void Promise.resolve().then(() => handler(message.call)).then(result => normalizeToolResult(result), () => normalizeToolResult(undefined)).then(result => {
-            try { child?.send({ type: 'tool-result', callId: message.call.callId, result }) } catch { /* The worker has already exited. */ }
+      let child: ChildProcess | undefined
+      try {
+        // A call can be recorded after the first scan and before this claim.
+        if (this.pendingCalls(contextId).length > 0) throw new ExecutionError('context_busy')
+        // The prior run may have finalized between the first read and this claim.
+        context = this.store.context(contextId)
+        if (JSON.stringify(context.connection) !== JSON.stringify(this.projection)) throw new ExecutionError('connection_mismatch')
+        if (context.connection.transport === 'agent-cli') {
+          prepareCliStorage(context)
+          assertNativeSession(context)
+        }
+        const record: ExecutionRecord = { version: 1, runId, contextId, nativeSessionId: context.nativeSessionId, status: 'starting', startedAt: Date.now(), heartbeatAt: Date.now(), stopped: false }
+        this.store.write('runs', runId, record)
+        const childEnv = context.connection.transport === 'agent-cli' ? supervisorEnvironment(this.env) : this.env
+        child = fork(worker, [], { env: childEnv, detached: !hostTools, stdio: hostTools ? ['ignore', 'ignore', 'ignore', 'ipc', 'pipe'] : ['ignore', 'ignore', 'ignore', 'ipc'], execArgv: [] })
+        const pipe = hostTools ? child.stdio[4] : undefined
+        if (hostTools && (!pipe || typeof pipe === 'string' || !('on' in pipe))) throw new ExecutionError('process_failed')
+        if (pipe && typeof pipe !== 'string') {
+          const stream = pipe as NodeJS.EventEmitter & { unref?: () => void }
+          stream.on('error', () => { /* Worker exit closes this end after the run is stored. */ })
+          stream.unref?.()
+          this.parentPipes.push(stream)
+        }
+        const fail = () => {
+          // Once IPC was accepted execution may have started: don't release its claim.
+          try {
+            const current = this.store.run(runId)
+            if (current && ACTIVE.has(current.status)) { current.status = 'unknown'; current.code = 'process_failed'; this.store.write('runs', runId, current) }
+          } catch { /* A stale starting record remains unknown; never crash the host or release its claim. */ }
+        }
+        child.on('error', fail)
+        if (hostTools && handler) {
+          child.on('message', (message: WorkerToolMessage) => {
+            if (!message || message.type !== 'tool-call' || !message.call) return
+            void Promise.resolve().then(() => handler(message.call)).then(result => normalizeToolResult(result), () => normalizeToolResult(undefined)).then(result => {
+              try { child?.send({ type: 'tool-result', callId: message.call.callId, result }) } catch { /* The worker has already exited. */ }
+            })
           })
-        })
+        }
+        const message: WorkerRequest = { dataDir: this.store.root, context, record, connection: this.connection, input, constraints: { toolPolicy: hostTools ? undefined : toolPolicy, timeoutMs }, ...(hostTools ? { hostTools } : {}) }
+        child.send(message, err => { if (err) fail() })
+        if (!hostTools) child.unref()
+        return runId
+      } catch (e) {
+        if (child && child.exitCode === null) child.kill('SIGKILL')
+        this.store.release(contextId, runId); throw e
       }
-      const message: WorkerRequest = { dataDir: this.store.root, context, record, connection: this.connection, input, constraints: { toolPolicy: hostTools ? undefined : toolPolicy, timeoutMs }, ...(hostTools ? { hostTools } : {}) }
-      child.send(message, err => { if (err) fail() })
-      if (!hostTools) child.unref()
-      return runId
-    } catch (e) {
-      if (child && child.exitCode === null) child.kill('SIGKILL')
-      this.store.release(contextId, runId); throw e
-    }
+    })
   }
   toolCall(callId: string): ToolCallRecord | undefined { return this.store.read<ToolCallRecord>('calls', callId) }
   /** Pending calls for a context, including ones persisted before the handler ran. */

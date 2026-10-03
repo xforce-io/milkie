@@ -717,6 +717,37 @@ test('start releases a claim left after the checked write', async () => {
   expect(resumed.runId).not.toBe(runId)
   expect(existsSync(store.path('active', c.contextId))).toBe(false)
 })
+test('startup failure retains its lock through rollback and allows a repaired retry', async () => {
+  const Database = require('better-sqlite3') as typeof import('better-sqlite3')
+  const a = client('pi'), c = cliContext(a)
+  const store = new ExecutionStore(join(root, 'data'))
+  ;(a as unknown as { store: ExecutionStore }).store = store
+  const readContext = store.context.bind(store)
+  const contender = new Database(join(store.root, 'locks', `${c.contextId}.sqlite`), { timeout: 0 })
+  let reads = 0, competingError: string | undefined
+  store.context = contextId => {
+    const context = readContext(contextId)
+    if (++reads === 2) {
+      // Compete after claim but before startup validation. Keep any acquired lock
+      // until start returns, reproducing the cleanup failure on the old code.
+      try { contender.exec('BEGIN IMMEDIATE') }
+      catch (error) { competingError = (error as { code?: string }).code }
+      unlinkSync(join(c.configDir!, 'auth.json'))
+    }
+    return context
+  }
+  try {
+    expect(() => a.start(c.contextId, 'first')).toThrow('config_missing')
+    expect(competingError).toBe('SQLITE_BUSY')
+    expect(existsSync(store.path('active', c.contextId))).toBe(false)
+    expect(readdirSync(join(store.root, 'runs'))).toEqual([])
+  } finally {
+    contender.close()
+    store.context = readContext
+    writeFileSync(join(c.configDir!, 'auth.json'), '{"fixture":true}\n')
+  }
+  expect((await a.wait(a.start(c.contextId, 'retry'))).status).toBe('succeeded')
+})
 test('a pending call recorded during claim is rejected before the next worker starts', () => {
   const a = client('grok-cli'), c = cliContext(a)
   const store = new ExecutionStore(join(root, 'data'))
