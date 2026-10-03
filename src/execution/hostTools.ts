@@ -312,6 +312,18 @@ export default function (pi) {
 `
   writeFileSync(file, source, { mode: 0o600 })
 }
+/** Host completion is not delivery. A failed write leaves the call pending. */
+function deliverReply(socket: Socket, payload: string): Promise<boolean> {
+  if (socket.destroyed || !socket.writable) return Promise.resolve(false)
+  return new Promise(resolve => {
+    let settled = false
+    const finish = (ok: boolean) => { if (!settled) { settled = true; resolve(ok) } }
+    const onError = () => finish(false)
+    socket.once('error', onError)
+    try { socket.write(payload, error => { socket.off('error', onError); finish(!error) }) }
+    catch { socket.off('error', onError); finish(false) }
+  })
+}
 export interface ToolBridge { socketPath: string; close(): Promise<void> }
 export async function openToolBridge(options: {
   tools: HostToolSpec[]
@@ -366,8 +378,9 @@ export async function openToolBridge(options: {
       try { result = normalizeToolResult(await options.onHost({ callId, ...(nativeCallId ? { nativeCallId } : {}), name, input: message.input, runId: options.runId, contextId: options.contextId })) }
       catch (error) { if (!options.alive()) return; throw error }
       if (!options.alive()) return
+      const delivered = await deliverReply(socket, `${JSON.stringify({ id: message.id, ...result })}\n`)
+      if (!delivered) return
       options.store.write('calls', callId, { ...base, status: result.ok ? 'succeeded' : result.code, ...(result.ok ? { output: result.output } : { message: result.message }) })
-      reply(result)
     }
   }
   const sockets = new Set<Socket>()

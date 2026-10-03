@@ -16,6 +16,7 @@ SDK `ExecutionClient.start`、`ExecutionClient.toolCall`、`ExecutionClient.pend
 | S1.A2 | Grok：两轮、一次进程重启、收紧工具 | 原会话；撤销工具被拒绝 |
 | S1.A3 | Pi：同 S1.A2 | 同 S1.A2 |
 | S2.A1 | 夹具：副作用后宿主消失，核对前 start，核对后续接 | `pending` 可查询；核对前 `context_busy`；副作用只有一次 |
+| S2.A1 | 夹具：宿主已返回结果，但工具连接在回复写入前断开 | 记录保持 `pending` 且没有 output；核对前 `context_busy`；`reconcile` 可接受 |
 | S2.A2 | Grok：同 S2.A1 的真实执行 | 同 S2.A1 |
 | S2.A3 | Pi：同 S2.A2 | 同 S2.A1 |
 

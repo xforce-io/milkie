@@ -3,8 +3,10 @@ import { mkdtempSync, mkdirSync, symlinkSync, chmodSync, readFileSync, existsSyn
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
+import { connect } from 'node:net'
 import { setTimeout as delay } from 'node:timers/promises'
 import { CliEvents, cliCommand, nativeFile } from '../execution/adapters'
+import { openToolBridge } from '../execution/hostTools'
 import { ExecutionStore } from '../execution/store'
 import type { CliStorage, ExecutionContext } from '../execution/types'
 // The public distribution launches worker.js; build before running this suite.
@@ -753,6 +755,59 @@ test('a queued call stays discoverable when the host exits before its handler', 
     expect(found.every(call => call.status === 'pending')).toBe(true)
     expect(() => client('grok-cli').pendingToolCalls(randomUUID())).toThrow('context_not_found')
   } finally { if (host.exitCode === null) host.kill('SIGKILL') }
+})
+test('a closed tool socket leaves the completed host call pending', async () => {
+  const a = client('grok-cli'), c = cliContext(a)
+  const store = new ExecutionStore(join(root, 'data'))
+  const runId = randomUUID()
+  let release: () => void = () => undefined
+  const gate = new Promise<void>(resolve => { release = resolve })
+  const bridge = await openToolBridge({
+    tools: [alpha], forwarding: 'serial', runId, contextId: c.contextId, store, alive: () => true,
+    onHost: async () => { await gate; return { ok: true, output: 'charged' } },
+    onBroken: () => undefined,
+  })
+  try {
+    const socket = connect(bridge.socketPath)
+    await new Promise<void>(resolve => socket.once('connect', resolve))
+    socket.write(JSON.stringify({ id: '1', name: 'alpha', input: { n: 1 } }) + '\n')
+    for (let i = 0; i < 50 && a.pendingToolCalls(c.contextId).length === 0; i++) await delay(10)
+    expect(a.pendingToolCalls(c.contextId)).toHaveLength(1)
+    socket.destroy()
+    release()
+    await delay(50)
+    const pending = a.pendingToolCalls(c.contextId)
+    expect(pending.map(call => call.status)).toEqual(['pending'])
+    const call = pending[0]
+    if (!call) throw new Error('missing pending call')
+    expect(call.output).toBeUndefined()
+    store.write('runs', runId, { version: 1, runId, contextId: c.contextId, status: 'unknown', startedAt: 1, heartbeatAt: 1, stopped: true })
+    expect(() => a.start(c.contextId, 'again', { timeoutMs: 10000 })).toThrow('context_busy')
+    expect(a.reconcile(call.callId, 'already charged')).toMatchObject({ status: 'reconciled', output: 'already charged' })
+  } finally { await bridge.close() }
+})
+test('a live tool socket records success after the reply is written', async () => {
+  const store = new ExecutionStore(join(root, 'data'))
+  const contextId = 'f7471111-1111-4111-8111-111111111116'
+  const runId = randomUUID()
+  const bridge = await openToolBridge({
+    tools: [alpha], forwarding: 'serial', runId, contextId, store, alive: () => true,
+    onHost: async () => ({ ok: true, output: 'charged' }),
+    onBroken: () => undefined,
+  })
+  try {
+    const socket = connect(bridge.socketPath)
+    const received = new Promise<string>((resolveReply, reject) => {
+      const timer = setTimeout(() => reject(new Error('reply was not written')), 1000)
+      socket.on('data', chunk => { clearTimeout(timer); resolveReply(chunk.toString()) })
+    })
+    await new Promise<void>(resolve => socket.once('connect', resolve))
+    socket.write(JSON.stringify({ id: '1', name: 'alpha', input: { n: 1 } }) + '\n')
+    expect(await received).toContain('"output":"charged"')
+    const saved = readdirSync(join(store.root, 'calls')).filter(name => name.endsWith('.json')).map(name => JSON.parse(readFileSync(join(store.root, 'calls', name), 'utf8')))
+    expect(saved).toEqual([expect.objectContaining({ status: 'succeeded', output: 'charged', contextId })])
+    socket.end()
+  } finally { await bridge.close() }
 })
 test('API transport cannot register host tools', () => {
   const a = new ExecutionClient({ dataDir: join(root, 'data'), connection: { contractVersion: 1, fields: { transport: 'api', protocol: 'openai-chat-completions', model: 'fixture', apiKey: 'fixture-key' } }, env })

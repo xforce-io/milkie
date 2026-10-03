@@ -19,7 +19,7 @@
 现在的路径：
 
 - `ExecutionClient.start` 用 `ExecutionStore.claim` 占用上下文。执行状态不是 `unknown` 时，`runExecution` 的 `finish` 才 `release`。宿主消失因此一直 `context_busy`（`src/execution/worker.ts` 的 `finish`，`src/execution/ExecutionClient.ts` 的 `start`）。
-- 工具帧在 `openToolBridge` 里解析。合法调用先 `store.write('calls', …, pending)`，再 `onHost`。未登记名称直接 `rejected`（`src/execution/hostTools.ts`）。串行时整段处理都排在前一次处理函数之后，所以后一帧可能在宿主消失前还没有记录。
+- 工具帧在 `openToolBridge` 里解析。合法调用先 `store.write('calls', …, pending)`，再 `onHost`。未登记名称直接 `rejected`（`src/execution/hostTools.ts`）。串行时整段处理都排在前一次处理函数之后，所以后一帧可能在宿主消失前还没有记录。处理函数返回后，只有回复写入工具连接成功，才把这条调用改成终态。连接已断开或写入失败时保持 `pending`。
 - 续接已经由 `hasExecuted` 选择 Grok `--resume` 或既有 Pi 会话文件（`src/execution/adapters.ts` 的 `cliCommand`、`assertNativeSession`）。
 
 改动留在 `ExecutionClient`、`openToolBridge` 和调用记录状态。不改 CLI 命令拼装，不改 #266 的清单核对。
