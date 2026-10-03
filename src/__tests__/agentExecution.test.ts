@@ -178,11 +178,12 @@ test('a killed holder releases the context lock', async () => {
   const store = new ExecutionStore(join(root, 'store-dead-lock'))
   const contextId = 'f7471111-1111-4111-8111-111111111115'
   const ready = join(root, 'dead-ready')
-  const holderCode = `const fs=require('node:fs');const {ExecutionStore}=require(${JSON.stringify(resolve('dist/execution/store.js'))});new ExecutionStore(process.argv[1]).exclusive(process.argv[2],()=>{fs.writeFileSync(process.argv[3],'held');setInterval(()=>{},1000)});`
+  const holderCode = `const fs=require('node:fs');const {ExecutionStore}=require(${JSON.stringify(resolve('dist/execution/store.js'))});new ExecutionStore(process.argv[1]).exclusive(process.argv[2],()=>{fs.writeFileSync(process.argv[3],'held');Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,10000)});`
   const holder = spawn(process.execPath, ['-e', holderCode, store.root, contextId, ready])
   try {
     for (let i = 0; i < 50 && !existsSync(ready); i++) await delay(20)
     expect(existsSync(ready)).toBe(true)
+    expect(() => store.exclusive(contextId, () => undefined)).toThrow('context_busy')
     holder.kill('SIGKILL')
     await new Promise<void>(resolveExit => holder.once('exit', () => resolveExit()))
     let entered = false
