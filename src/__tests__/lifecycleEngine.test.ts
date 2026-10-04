@@ -10,9 +10,10 @@ import {
   makeStateInstructionsRegion,
   makeWmRegion,
   makeToolSchemaRegion,
+  rehydrateRegion,
   runInterTurnEngine,
 } from '../context/lifecycleEngine'
-import type { RegionInput } from '../context/Region'
+import type { Region, RegionInput } from '../context/Region'
 import type { MessageContent, Message } from '../types/common.js'
 import type { ToolSchema } from '../types/model.js'
 
@@ -145,6 +146,27 @@ describe('region factories', () => {
     expect((msgs[0]!.content[0] as { text: string }).text).toBe('what time?')
     expect(msgs[1]!.role).toBe('assistant')
     expect((msgs[1]!.content[0] as { text: string }).text).toBe('noon')
+  })
+
+  test('omits an assistant message when the failed turn stored no text', () => {
+    const r = makeHistoryPairRegion('what time?', '')
+    const msgs = r.format(r.content) as Message[]
+    expect(msgs.map(m => m.role)).toEqual(['user'])
+    expect((r.content as { assistantText: string }).assistantText).toBe('')
+
+    const restored = rehydrateRegion({
+      id: 'history:turn-1',
+      target: 'message',
+      section: 'history',
+      createdAt: 1,
+      intraTurn: 'turn-persistent',
+      interTurn: 'session-persistent',
+      stability: 'session-stable',
+      content: { userInput: 'what time?', assistantText: '' },
+      format: undefined as unknown as Region['format'],
+    })
+    const restoredMsgs = restored.format(restored.content) as Message[]
+    expect(restoredMsgs.map(m => m.role)).toEqual(['user'])
   })
 
   test('makeToolSchemaRegion: target=tool, section=default', () => {
