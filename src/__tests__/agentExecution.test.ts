@@ -108,6 +108,17 @@ test('Pi error in JSON stream is not success despite exit code zero', () => {
   events.push(JSON.stringify({type:'message_end',message:{role:'assistant',content:[],stopReason:'error',errorMessage:'Authentication failed'}})+'\n')
   events.push('{"type":"agent_end"}\n');expect(events.code).toBe('auth_failed')
 })
+test('Grok max-turns stop is an iteration budget, not a generic process failure', () => {
+  const events = new CliEvents('grok-cli')
+  events.push(JSON.stringify({ type: 'end', stopReason: 'max_turns', sessionId: 'sid' }) + '\n')
+  expect(events.code).toBe('iteration_budget_exhausted')
+  expect(events.ended).toBe(false)
+  expect(events.sessionId).toBe('sid')
+  const reached = new CliEvents('grok-cli')
+  reached.push(JSON.stringify({ type: 'max_turns_reached', sessionId: 'sid-2' }) + '\n')
+  expect(reached.code).toBe('iteration_budget_exhausted')
+  expect(reached.sessionId).toBe('sid-2')
+})
 test('Pi auto-retry success replaces an earlier assistant error', () => {
   const events=new CliEvents('pi')
   events.push(JSON.stringify({type:'session',id:'sid'})+'\n')
@@ -841,9 +852,200 @@ test('a live tool socket records success after the reply is written', async () =
     socket.end()
   } finally { await bridge.close() }
 })
+const save = { name: 'save', description: 'Save', inputSchema: { type: 'object' as const, properties: { content: { type: 'string' as const }, parts: { type: 'array' as const, items: { type: 'string' as const } } }, additionalProperties: false } }
+const MAX_TOOL_BYTES = 256 * 1024
+const MAX_ENCODED_BYTES = 2 * 1024 * 1024
+function savedCalls(): Array<{ status: string; output?: string; message?: string; name: string }> {
+  const dir = join(root, 'data', 'calls')
+  if (!existsSync(dir)) return []
+  return readdirSync(dir).filter(name => name.endsWith('.json')).map(name => JSON.parse(readFileSync(join(dir, name), 'utf8')))
+}
+function writeFileCase(calls: Array<{ id: string; name: string; input: unknown }>): void {
+  writeFileSync(join(root, 'cwd', 'file-case.json'), JSON.stringify({ calls }))
+}
+describe.each(['grok-cli', 'pi'])('%s model iteration budget', runtime => {
+  test('rejects an illegal budget before any provider request and accepts 50', async () => {
+    const a = client(runtime), c = cliContext(a)
+    expect(a.capabilities().modelIterations).toBe(true)
+    for (const value of [0, 1.5, 10001, -1]) expect(() => a.start(c.contextId, 'nope', { maxModelIterations: value })).toThrow('unsupported_constraint')
+    expect(existsSync(join(root, 'cwd', 'runner.pid'))).toBe(false)
+    const allowed = await a.wait(a.start(c.contextId, 'within-budget', { maxModelIterations: 50, timeoutMs: 10000 }))
+    expect(allowed.status).toBe('succeeded')
+    expect(allowed.iterationBudget).toEqual({ limit: 50, exhausted: false })
+    const invocation = JSON.parse(readFileSync(join(root, 'cwd', 'cli-invocation.json'), 'utf8')) as { args: string[] }
+    if (runtime === 'grok-cli') expect(invocation.args).toEqual(expect.arrayContaining(['--max-turns', '50']))
+    else {
+      expect(invocation.args).not.toContain('--max-turns')
+      const extension = invocation.args[invocation.args.indexOf('--extension') + 1]
+      if (!extension) throw new Error('missing pi extension')
+      const source = readFileSync(extension, 'utf8')
+      expect(source).toContain('modelIterationBudget = 50')
+      expect(source).toContain('ctx.abort()')
+      expect(source).not.toContain('typebox')
+    }
+  })
+  test('a no-tool loop stops at the budget and the same session can run again', async () => {
+    const a = client(runtime), c = cliContext(a)
+    const exhausted = await a.wait(a.start(c.contextId, 'fixture:loop', { maxModelIterations: 2, timeoutMs: 10000 }))
+    expect(exhausted.status).toBe('failed')
+    expect(exhausted.code).toBe('iteration_budget_exhausted')
+    expect(exhausted.iterationBudget).toEqual({ limit: 2, exhausted: true })
+    expect(JSON.parse(readFileSync(join(root, 'cwd', 'provider-requests.json'), 'utf8'))).toHaveLength(2)
+    const invocation = JSON.parse(readFileSync(join(root, 'cwd', 'cli-invocation.json'), 'utf8')) as { args: string[] }
+    if (runtime === 'pi') {
+      const extension = invocation.args[invocation.args.indexOf('--extension') + 1]
+      if (!extension) throw new Error('missing pi extension')
+      expect(readFileSync(extension, 'utf8')).toContain('modelIterations > modelIterationBudget')
+    }
+    const next = await a.wait(a.start(c.contextId, 'still-here', { timeoutMs: 10000 }))
+    expect(next.status).toBe('succeeded')
+    expect(next.output).toBe('still-here')
+    expect(next.nativeSessionId).toBe(exhausted.nativeSessionId)
+  })
+})
+describe.each(['grok-cli', 'pi'])('%s host tool payload bounds', runtime => {
+  test('delivers a legal result once and rejects an oversized result without a second call', async () => {
+    const a = client(runtime), c = cliContext(a)
+    const exact = 'x'.repeat(MAX_TOOL_BYTES)
+    const eighty = 'x'.repeat(80 * 1024)
+    const chinese = '中'.repeat(87381)
+    expect(Buffer.byteLength(chinese)).toBe(262143)
+    let effects = 0
+    writeFileCase([{ id: '1', name: 'save', input: { content: '80kib' } }])
+    const small = await a.wait(a.start(c.contextId, 'fixture:file', { tools: [save], forwarding: 'serial', timeoutMs: 20000 }, async () => {
+      effects += 1
+      return { ok: true, output: eighty }
+    }))
+    expect(small.status).toBe('succeeded')
+    expect(small.output).toBe(String(80 * 1024))
+    expect(effects).toBe(1)
+    expect(savedCalls()).toEqual([expect.objectContaining({ status: 'succeeded', output: eighty })])
+    effects = 0
+    writeFileCase([{ id: '1', name: 'save', input: { content: 'exact' } }])
+    const legal = await a.wait(a.start(c.contextId, 'fixture:file', { tools: [save], forwarding: 'serial', timeoutMs: 20000 }, async () => {
+      effects += 1
+      return { ok: true, output: exact }
+    }))
+    expect(legal.status).toBe('succeeded')
+    expect(legal.output).toBe(String(MAX_TOOL_BYTES))
+    expect(effects).toBe(1)
+    expect(savedCalls().filter(call => call.output === exact)).toHaveLength(1)
+    effects = 0
+    writeFileCase([{ id: '1', name: 'save', input: { content: 'chinese' } }])
+    const cjk = await a.wait(a.start(c.contextId, 'fixture:file', { tools: [save], forwarding: 'serial', timeoutMs: 20000 }, async () => {
+      effects += 1
+      return { ok: true, output: chinese }
+    }))
+    expect(cjk.status).toBe('succeeded')
+    expect(effects).toBe(1)
+    expect(savedCalls().some(call => call.output === chinese)).toBe(true)
+    effects = 0
+    writeFileCase([{ id: '1', name: 'save', input: { content: 'over' } }])
+    const rejected = await a.wait(a.start(c.contextId, 'fixture:file', { tools: [save], forwarding: 'serial', timeoutMs: 20000 }, async () => {
+      effects += 1
+      return { ok: true, output: `${exact}y` }
+    }))
+    expect(rejected.status).toBe('succeeded')
+    expect(rejected.output).toContain('rejected:Tool result exceeds 262144 bytes.')
+    expect(effects).toBe(1)
+    const over = savedCalls().filter(call => call.message === 'Tool result exceeds 262144 bytes.')
+    expect(over).toEqual([expect.objectContaining({ status: 'rejected' })])
+    expect(over[0]?.output).toBeUndefined()
+  })
+  test('accepts a 256 KiB raw input and rejects a larger one before the handler', async () => {
+    const a = client(runtime), c = cliContext(a)
+    let effects = 0
+    const handler = async () => { effects += 1; return { ok: true as const, output: 'saved' } }
+    writeFileCase([{ id: '1', name: 'save', input: { content: 'a'.repeat(MAX_TOOL_BYTES) } }])
+    const legal = await a.wait(a.start(c.contextId, 'fixture:file', { tools: [save], forwarding: 'serial', timeoutMs: 20000 }, handler))
+    expect(legal.status).toBe('succeeded')
+    expect(legal.output).toBe(String(Buffer.byteLength('saved')))
+    expect(effects).toBe(1)
+    effects = 0
+    writeFileCase([{ id: '1', name: 'save', input: { content: '\0'.repeat(MAX_TOOL_BYTES) } }])
+    const nul = await a.wait(a.start(c.contextId, 'fixture:file', { tools: [save], forwarding: 'serial', timeoutMs: 20000 }, handler))
+    expect(nul.status).toBe('succeeded')
+    expect(effects).toBe(1)
+    effects = 0
+    writeFileCase([{ id: '1', name: 'save', input: { content: '\n'.repeat(200 * 1024) } }])
+    const newlines = await a.wait(a.start(c.contextId, 'fixture:file', { tools: [save], forwarding: 'serial', timeoutMs: 20000 }, handler))
+    expect(newlines.status).toBe('succeeded')
+    expect(effects).toBe(1)
+    effects = 0
+    writeFileCase([{ id: '1', name: 'save', input: { content: '中'.repeat(87381) } }])
+    const cjk = await a.wait(a.start(c.contextId, 'fixture:file', { tools: [save], forwarding: 'serial', timeoutMs: 20000 }, handler))
+    expect(cjk.status).toBe('succeeded')
+    expect(effects).toBe(1)
+    effects = 0
+    writeFileCase([{ id: '1', name: 'save', input: { content: 'a'.repeat(MAX_TOOL_BYTES + 1) } }])
+    const rejected = await a.wait(a.start(c.contextId, 'fixture:file', { tools: [save], forwarding: 'serial', timeoutMs: 20000 }, handler))
+    expect(rejected.status).toBe('succeeded')
+    expect(rejected.output).toBe('invalid_input:Tool input exceeds 262144 bytes.')
+    expect(effects).toBe(0)
+    expect(savedCalls().some(call => call.status === 'invalid_input' && call.message === 'Tool input exceeds 262144 bytes.')).toBe(true)
+  })
+  test('rejects an encoded request over 2 MiB when every raw string is legal', async () => {
+    const a = client(runtime), c = cliContext(a)
+    const first = '\0'.repeat(MAX_TOOL_BYTES)
+    const grokPrefix = Buffer.byteLength(JSON.stringify({ id: '1', name: 'save', input: { parts: [first, ''] } }))
+    const piPrefix = Buffer.byteLength(JSON.stringify({ id: '1', name: 'save', nativeCallId: 'native-save', input: { parts: [first, ''] } }))
+    const extra = Math.floor((MAX_ENCODED_BYTES - grokPrefix) / 6) + 1
+    const grokBytes = grokPrefix + extra * 6
+    const piBytes = piPrefix + extra * 6
+    expect(extra).toBeLessThanOrEqual(MAX_TOOL_BYTES)
+    expect(grokBytes).toBeGreaterThan(MAX_ENCODED_BYTES)
+    expect(piBytes).toBeLessThanOrEqual(MAX_ENCODED_BYTES + 64 * 1024)
+    let effects = 0
+    writeFileCase([{ id: '1', name: 'save', input: { parts: [first, '\0'.repeat(extra)] } }])
+    const rejected = await a.wait(a.start(c.contextId, 'fixture:file', { tools: [save], forwarding: 'serial', timeoutMs: 20000 }, async () => {
+      effects += 1
+      return { ok: true, output: 'saved' }
+    }))
+    expect(rejected.status).toBe('succeeded')
+    expect(rejected.output).toBe('invalid_input:Encoded tool request exceeds 2097152 bytes.')
+    expect(effects).toBe(0)
+  })
+})
+test('tool bridge rejects an unfinished frame past the encoded slack without calling the handler', async () => {
+  const store = new ExecutionStore(join(root, 'data'))
+  let effects = 0
+  let broken = false
+  const bridge = await openToolBridge({
+    tools: [save], forwarding: 'serial', runId: randomUUID(), contextId: randomUUID(), store, alive: () => true,
+    onHost: async () => { effects += 1; return { ok: true, output: 'saved' } },
+    onBroken: () => { broken = true },
+  })
+  try {
+    const socket = connect(bridge.socketPath)
+    await new Promise<void>(resolve => socket.once('connect', resolve))
+    socket.write('x'.repeat(MAX_ENCODED_BYTES + 64 * 1024 + 1))
+    await new Promise<void>(resolve => socket.once('close', () => resolve()))
+    expect(broken).toBe(true)
+    expect(effects).toBe(0)
+    expect(savedCalls()).toEqual([])
+  } finally { await bridge.close() }
+})
+test('reconcile accepts 256 KiB and rejects one more byte', () => {
+  const a = client('grok-cli'), c = cliContext(a)
+  const store = new ExecutionStore(join(root, 'data'))
+  const runId = randomUUID()
+  store.claim(c.contextId, runId)
+  store.write('runs', runId, { version: 1, runId, contextId: c.contextId, status: 'unknown', startedAt: 1, heartbeatAt: 1, stopped: true })
+  const callId = randomUUID()
+  store.write('calls', callId, { version: 1, callId, name: 'save', input: { content: 'x' }, runId, contextId: c.contextId, status: 'pending' })
+  const exact = 'y'.repeat(MAX_TOOL_BYTES)
+  expect(a.reconcile(callId, exact)).toMatchObject({ status: 'reconciled', output: exact })
+  const again = randomUUID()
+  store.write('calls', again, { version: 1, callId: again, name: 'save', input: { content: 'x' }, runId, contextId: c.contextId, status: 'pending' })
+  expect(() => a.reconcile(again, `${exact}z`)).toThrow('invalid_request')
+  expect(() => a.reconcile(again, '')).toThrow('invalid_request')
+})
 test('API transport cannot register host tools', () => {
   const a = new ExecutionClient({ dataDir: join(root, 'data'), connection: { contractVersion: 1, fields: { transport: 'api', protocol: 'openai-chat-completions', model: 'fixture', apiKey: 'fixture-key' } }, env })
   const c = a.createContext(join(root, 'cwd'))
   expect(a.capabilities().hostTools).toBe(false)
+  expect(a.capabilities().modelIterations).toBe(false)
   expect(() => a.start(c.contextId, 'hello', { tools: [alpha] }, async () => ({ ok: true, output: 'x' }))).toThrow('unsupported_constraint')
+  expect(() => a.start(c.contextId, 'hello', { maxModelIterations: 2 })).toThrow('unsupported_constraint')
+  expect(existsSync(join(root, 'cwd', 'runner.pid'))).toBe(false)
 })

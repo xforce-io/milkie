@@ -1,7 +1,7 @@
 import type { ConnectionInput, ConnectionProjection } from '../connection/types.js'
 
 export type ExecutionStatus = 'starting' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'timed_out' | 'unknown'
-export type ExecutionCode = 'invalid_request' | 'unsupported_runtime' | 'unsupported_constraint' | 'context_not_found' | 'connection_mismatch' | 'context_busy' | 'config_missing' | 'session_missing' | 'session_mismatch' | 'auth_failed' | 'process_failed' | 'native_cancelled' | 'protocol_error' | 'storage_error' | 'platform_unsupported' | 'policy_mismatch'
+export type ExecutionCode = 'invalid_request' | 'unsupported_runtime' | 'unsupported_constraint' | 'context_not_found' | 'connection_mismatch' | 'context_busy' | 'config_missing' | 'session_missing' | 'session_mismatch' | 'auth_failed' | 'process_failed' | 'native_cancelled' | 'protocol_error' | 'storage_error' | 'platform_unsupported' | 'policy_mismatch' | 'iteration_budget_exhausted'
 export class ExecutionError extends Error {
   constructor(readonly code: ExecutionCode) {
     super(`Execution request failed: ${code}.`)
@@ -47,6 +47,8 @@ export interface ToolCallRecord {
 export interface ExecutionConstraints {
   toolPolicy?: 'read-only' | 'standard'
   timeoutMs?: number
+  /** Provider requests allowed in this execution. Not a tool-call count or a timeout. */
+  maxModelIterations?: number
   /** Host-executed tools. Mutually exclusive with toolPolicy. */
   tools?: HostToolSpec[]
   /** Default serial. Only valid together with tools. */
@@ -83,6 +85,8 @@ export interface ExecutionRecord {
   /** Process identities only; never argv or environment. */
   resources?: Array<{ pid: number; startedAt: string }>
   output?: string
+  /** Present when the caller set maxModelIterations. exhausted is queryable after the run stops. */
+  iterationBudget?: { limit: number; exhausted: boolean }
 }
 export interface ExecutionCapabilities {
   /** Adapter support is distinct from installed/authenticated readiness. */
@@ -98,6 +102,8 @@ export interface ExecutionCapabilities {
   nativeCallId: boolean
   forwarding: Array<'serial' | 'parallel'>
   timeout: boolean
+  /** Native CLI can enforce a model-iteration budget. API transport cannot. */
+  modelIterations: boolean
   cancel: boolean
 }
 export interface ExecutionClientOptions {
@@ -112,7 +118,7 @@ export interface WorkerRequest {
   record: ExecutionRecord
   connection: ConnectionInput
   input: string
-  constraints: { toolPolicy?: 'read-only' | 'standard'; timeoutMs: number }
+  constraints: { toolPolicy?: 'read-only' | 'standard'; timeoutMs: number; maxModelIterations?: number }
   hostTools?: { tools: HostToolSpec[]; forwarding: 'serial' | 'parallel' }
 }
 export interface WorkerToolMessage { type: 'tool-call'; call: ToolCall }

@@ -40,6 +40,7 @@ export class ExecutionClient {
       nativeCallId: cli && this.projection.runtime === 'pi',
       forwarding: cli ? ['serial', 'parallel'] : [],
       timeout: ready,
+      modelIterations: cli,
       cancel: ready,
     }
   }
@@ -61,13 +62,18 @@ export class ExecutionClient {
     this.assertSupported()
     if (typeof input !== 'string' || !input.trim() || input.length > 1024 * 1024) throw new ExecutionError('invalid_request')
     if (!constraints || Array.isArray(constraints) || typeof constraints !== 'object') throw new ExecutionError('unsupported_constraint')
-    const allowed = new Set(['toolPolicy', 'timeoutMs', 'tools', 'forwarding'])
+    const allowed = new Set(['toolPolicy', 'timeoutMs', 'maxModelIterations', 'tools', 'forwarding'])
     if (Object.keys(constraints).some(key => !allowed.has(key))) throw new ExecutionError('unsupported_constraint')
     const hasTools = constraints.tools !== undefined
     if (hasTools && constraints.toolPolicy !== undefined) throw new ExecutionError('unsupported_constraint')
     if (!hasTools && constraints.forwarding !== undefined) throw new ExecutionError('unsupported_constraint')
     const timeoutMs = constraints.timeoutMs ?? 120000
     if (!Number.isInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > 3600000) throw new ExecutionError('unsupported_constraint')
+    const maxModelIterations = constraints.maxModelIterations
+    if (maxModelIterations !== undefined) {
+      if (!Number.isInteger(maxModelIterations) || maxModelIterations < 1 || maxModelIterations > 10000) throw new ExecutionError('unsupported_constraint')
+      if (this.projection.transport !== 'agent-cli') throw new ExecutionError('unsupported_constraint')
+    }
     const toolPolicy = constraints.toolPolicy ?? 'read-only'
     let hostTools: { tools: HostToolSpec[]; forwarding: 'serial' | 'parallel' } | undefined
     if (hasTools) {
@@ -131,7 +137,7 @@ export class ExecutionClient {
             })
           })
         }
-        const message: WorkerRequest = { dataDir: this.store.root, context, record, connection: this.connection, input, constraints: { toolPolicy: hostTools ? undefined : toolPolicy, timeoutMs }, ...(hostTools ? { hostTools } : {}) }
+        const message: WorkerRequest = { dataDir: this.store.root, context, record, connection: this.connection, input, constraints: { toolPolicy: hostTools ? undefined : toolPolicy, timeoutMs, ...(maxModelIterations !== undefined ? { maxModelIterations } : {}) }, ...(hostTools ? { hostTools } : {}) }
         child.send(message, err => { if (err) fail() })
         if (!hostTools) child.unref()
         return runId
@@ -151,7 +157,7 @@ export class ExecutionClient {
   /** Record the host's checked result for a call whose reply never reached the CLI. */
   reconcile(callId: string, output: string): ToolCallRecord {
     this.assertSupported()
-    if (typeof output !== 'string' || output.length === 0 || output.length > 65536) throw new ExecutionError('invalid_request')
+    if (typeof output !== 'string' || output.length === 0 || Buffer.byteLength(output) > 256 * 1024) throw new ExecutionError('invalid_request')
     const existing = this.toolCall(callId)
     if (!existing) throw new ExecutionError('invalid_request')
     return this.store.exclusive(existing.contextId, () => {
