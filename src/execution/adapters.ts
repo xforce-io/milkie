@@ -175,16 +175,21 @@ export class CliEvents {
     if (!e || typeof e !== 'object') { this.code = 'protocol_error'; return }
     if (this.runtime === 'grok-cli') {
       if (e.type === 'text' && typeof e.data === 'string') this.output += e.data
-      if (e.type === 'max_turns_reached' || e.stopReason === 'max_turns' || e.stopReason === 'error_max_turns') {
+      const budgetEvent = e.type === 'max_turns_reached' || e.stopReason === 'max_turns' || e.stopReason === 'error_max_turns'
+      if (budgetEvent) {
         this.code = 'iteration_budget_exhausted'
         if (typeof e.sessionId === 'string') this.sessionId = e.sessionId
         this.ended = false
       } else if (e.type === 'end') {
-        this.sessionId = typeof e.sessionId === 'string' ? e.sessionId : undefined
-        this.ended = e.stopReason === 'end_turn'
-        if (!this.ended) this.code = e.stopReason === 'cancelled' ? 'native_cancelled' : 'process_failed'
+        if (typeof e.sessionId === 'string') this.sessionId = e.sessionId
+        else if (this.code !== 'iteration_budget_exhausted') this.sessionId = undefined
+        // Grok 1.0.46 follows max_turns_reached with end(cancelled). That later event must not erase the budget fact.
+        if (this.code !== 'iteration_budget_exhausted') {
+          this.ended = e.stopReason === 'end_turn'
+          if (!this.ended) this.code = e.stopReason === 'cancelled' ? 'native_cancelled' : 'process_failed'
+        }
       }
-      if (e.type === 'error') this.code = classifyFailure(JSON.stringify(e))
+      if (e.type === 'error' && this.code !== 'iteration_budget_exhausted') this.code = classifyFailure(JSON.stringify(e))
     } else {
       if (e.type === 'session') this.sessionId = typeof e.id === 'string' ? e.id : undefined
       if (e.type === 'message_end' && e.message?.role === 'assistant' && this.code !== 'protocol_error') {
