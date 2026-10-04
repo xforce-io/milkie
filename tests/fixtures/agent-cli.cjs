@@ -140,7 +140,7 @@ async function run() {
     } else { emit({ type: 'text', data: output }); emit({ type: 'end', stopReason: 'end_turn', sessionId: id }) }
     return
   }
-  if (input === 'fixture:loop') {
+  if (input === 'fixture:loop' || input === 'fixture:loop-foreign') {
     const budget = iterationBudget()
     if (!budget || !Number.isInteger(budget.limit) || budget.limit < 1) { process.stderr.write('missing iteration budget'); process.exit(1) }
     fs.writeFileSync(path.join(process.cwd(), 'provider-requests.json'), JSON.stringify(Array.from({ length: budget.limit }, (_, index) => ({ n: index + 1 }))))
@@ -151,7 +151,10 @@ async function run() {
       emit(history[0])
       emit({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: '' }], stopReason: 'aborted' } })
       emit({ type: 'agent_end', messages: [] })
-    } else emit({ type: 'end', stopReason: 'max_turns', sessionId: id })
+    } else {
+      emit({ type: 'max_turns_reached' })
+      emit({ type: 'end', stopReason: 'cancelled', sessionId: input === 'fixture:loop-foreign' ? crypto.randomUUID() : id })
+    }
     return
   }
   if (input === 'fixture:file') {

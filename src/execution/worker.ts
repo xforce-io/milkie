@@ -189,7 +189,7 @@ export async function runExecution(request: WorkerRequest, life?: ParentLife): P
     if (life?.dead) { finish('unknown', stopped); return }
     if (!stopped) { record.code = 'process_failed'; finish('unknown', false); return }
     const budgetExhausted = iterationMarker !== undefined && existsSync(iterationMarker) && readFileSync(iterationMarker, 'utf8').startsWith('exhausted')
-    if (budgetExhausted || budgetSignal) {
+    if ((budgetExhausted || budgetSignal) && events.code !== 'session_mismatch') {
       record.code = 'iteration_budget_exhausted'
       if (record.iterationBudget) record.iterationBudget = { limit: record.iterationBudget.limit, exhausted: true }
       finish(stopped ? 'failed' : 'unknown', stopped)
