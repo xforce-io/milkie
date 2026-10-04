@@ -52,6 +52,11 @@ async function callTool(message: { id?: unknown; params?: { name?: unknown; argu
   }
   let input: unknown = message.params?.arguments ?? {}
   if (typeof input === 'string') input = JSON.parse(input) as unknown
+  const requestLine = JSON.stringify({ id: String(message.id), name, input })
+  if (Buffer.byteLength(requestLine) > 2 * 1024 * 1024) {
+    send({ jsonrpc: '2.0', id: message.id, result: { content: [{ type: 'text', text: 'invalid_input: Encoded tool request exceeds 2097152 bytes.' }], isError: true } })
+    return
+  }
   const result = await bridgeCall(String(message.id), name, input)
   const text = result.ok ? result.output : `${result.code}: ${result.message}`
   send({ jsonrpc: '2.0', id: message.id, result: { content: [{ type: 'text', text }], isError: result.ok !== true } })
@@ -75,7 +80,11 @@ function take(): void {
     if (buffer.length === 0) return
     if (buffer[0] === 0x7b) {
       const newline = buffer.indexOf(0x0a)
-      if (newline < 0) return
+      if (newline < 0) {
+        if (buffer.length > 2 * 1024 * 1024 + 64 * 1024) process.exit(1)
+        return
+      }
+      if (newline > 2 * 1024 * 1024 + 64 * 1024) process.exit(1)
       const line = buffer.subarray(0, newline).toString('utf8')
       buffer = buffer.subarray(newline + 1)
       handle(JSON.parse(line) as { id?: unknown; method?: string })
@@ -84,7 +93,7 @@ function take(): void {
     const headerEnd = buffer.indexOf('\r\n\r\n')
     if (headerEnd < 0) return
     const length = Number(/Content-Length:\s*(\d+)/i.exec(buffer.subarray(0, headerEnd).toString('utf8'))?.[1])
-    if (!Number.isInteger(length) || length < 0 || length > 1_048_576) process.exit(1)
+    if (!Number.isInteger(length) || length < 0 || length > 2 * 1024 * 1024 + 64 * 1024) process.exit(1)
     const start = headerEnd + 4
     if (buffer.length < start + length) return
     const body = buffer.subarray(start, start + length).toString('utf8')

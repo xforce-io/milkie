@@ -41,6 +41,8 @@ API 使用同样的 SDK，连接填 `transport: api`、protocol、model 和 apiK
 
 默认只读，执行时限 120 秒、最大一小时；未知约束在启动前拒绝。工作目录不等于文件系统隔离。不能把停止视为撤销文件或远端副作用。监督进程核对继承本轮标识和已观察到的子进程，包含脱离原进程组的任务；不能确认时返回 unknown。此机制用于可信任务，不是对抗性内核隔离，也不覆盖外部已有服务；要求未声明的隔离约束会在启动前拒绝。
 
+原生 CLI 可以在单次 `start` 上传入 `maxModelIterations`（整数 1 到 10000）。这是本轮允许的模型迭代次数，不是工具调用次数，也不是超时；不传则保持原有行为。Grok 使用 `--max-turns`，Pi 在发往提供方之前中止超额请求。用尽后执行状态为 `failed`，失败码是 `iteration_budget_exhausted`，同一上下文的下一次 `start` 仍续接原会话。API 传输拒绝该约束，且不会发出模型请求。宿主工具的原始字符串和成功结果以 UTF-8 字节计，上限 256 KiB；编码后的单次工具请求上限 2 MiB。超限是明确拒绝，不截断，合法结果也不会变成 uncertain。核对结果同样以 256 KiB 字节为上限。详见 [275 设计](design/275-cli-iteration-and-tool-bounds.md)。
+
 `starting/running` 表示活动执行；`succeeded/failed/cancelled/timed_out` 是已确认本地资源停止的终态。心跳超过 5 秒未更新会查询为 unknown；等待超时返回最新已知状态，不取消执行或伪造终态；取消超过核对时限则返回 unknown。unknown 不自动回收占用或重放。尚未核对的宿主工具调用继续占用上下文；核对完成后，下一次 start 续接原会话。未核对时不要新建上下文来掩盖失败。稍后仍可查询或取消原 runId。API 取消只确认本地请求结束，不保证远端计算停止。
 
 实现依据见 [设计](design/263-agent-cli-execution.md)。

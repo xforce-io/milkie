@@ -50,6 +50,34 @@ if (args.includes('inspect')) {
 }
 let input = pi ? '' : fs.readFileSync(get('--prompt-file'), 'utf8')
 function emit(e) { process.stdout.write(JSON.stringify(e) + '\n') }
+function iterationBudget() {
+  const turns = args.indexOf('--max-turns')
+  if (turns >= 0) return { limit: Number(args[turns + 1]), marker: undefined }
+  const extensionIndex = args.indexOf('--extension')
+  if (extensionIndex < 0) return undefined
+  const source = fs.readFileSync(args[extensionIndex + 1], 'utf8')
+  const limitMatch = source.match(/modelIterationBudget = (\d+)/) || source.match(/"maxModelIterations":(\d+)/)
+  if (!limitMatch) return undefined
+  const markerMatch = source.match(/modelIterationMarker = ("(?:\\.|[^"\\])*")/) || source.match(/"markerFile":("(?:\\.|[^"\\])*")/)
+  return { limit: Number(limitMatch[1]), marker: markerMatch ? JSON.parse(markerMatch[1]) : undefined }
+}
+function exchange(calls) {
+  return new Promise((resolve, reject) => {
+    const socket = require('node:net').connect(process.env.MILKIE_TOOL_SOCKET)
+    let buf = '', got = []
+    socket.on('error', reject)
+    socket.on('data', chunk => {
+      buf += chunk
+      let nl
+      while ((nl = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, nl); buf = buf.slice(nl + 1)
+        if (line) got.push(JSON.parse(line))
+        if (got.length === calls.length) { socket.end(); resolve(got) }
+      }
+    })
+    socket.on('connect', () => socket.write(calls.map(item => JSON.stringify(item)).join('\n') + '\n'))
+  })
+}
 async function run() {
   fs.writeFileSync(path.join(process.cwd(), 'runner.pid'), String(process.pid))
   const credential = Object.keys(process.env).find(key => /(?:^GROK_AUTH$|_API_KEY$|_AUTH_TOKEN$|_OAUTH_TOKEN$|_ACCESS_TOKEN$|_REFRESH_TOKEN$)/.test(key) && process.env[key])
@@ -104,6 +132,34 @@ async function run() {
     })
     if (input === 'fixture:hold') return
     const output = results.map(item => item.ok ? item.output : item.code).join('|')
+    const id = history[0].id
+    if (pi) {
+      emit(history[0])
+      emit({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: output }], stopReason: 'stop' } })
+      emit({ type: 'agent_end', messages: [] })
+    } else { emit({ type: 'text', data: output }); emit({ type: 'end', stopReason: 'end_turn', sessionId: id }) }
+    return
+  }
+  if (input === 'fixture:loop') {
+    const budget = iterationBudget()
+    if (!budget || !Number.isInteger(budget.limit) || budget.limit < 1) { process.stderr.write('missing iteration budget'); process.exit(1) }
+    fs.writeFileSync(path.join(process.cwd(), 'provider-requests.json'), JSON.stringify(Array.from({ length: budget.limit }, (_, index) => ({ n: index + 1 }))))
+    const id = history[0].id
+    if (pi) {
+      if (!budget.marker) { process.stderr.write('missing iteration marker'); process.exit(1) }
+      fs.writeFileSync(budget.marker, 'exhausted\n')
+      emit(history[0])
+      emit({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: '' }], stopReason: 'aborted' } })
+      emit({ type: 'agent_end', messages: [] })
+    } else emit({ type: 'end', stopReason: 'max_turns', sessionId: id })
+    return
+  }
+  if (input === 'fixture:file') {
+    if (!process.env.MILKIE_TOOL_SOCKET) { process.stderr.write('tool socket missing'); process.exit(1) }
+    const spec = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'file-case.json'), 'utf8'))
+    const calls = spec.calls.map(item => ({ ...item, ...(pi ? { nativeCallId: `native-${item.name}` } : {}) }))
+    const results = await exchange(calls)
+    const output = results.map(item => item.ok ? String(Buffer.byteLength(item.output)) : `${item.code}:${item.message}`).join('|')
     const id = history[0].id
     if (pi) {
       emit(history[0])

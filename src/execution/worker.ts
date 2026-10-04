@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { writeFileSync, unlinkSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { resolveAndParseConnection } from '../connection/parse.js'
@@ -85,6 +85,12 @@ export async function runExecution(request: WorkerRequest, life?: ParentLife): P
     }
     prepareCliStorage(context)
     assertNativeSession(context)
+    const iterationLimit = constraints.maxModelIterations
+    const iterationMarker = iterationLimit ? join(store.root, 'runs', `${record.runId}.iteration`) : undefined
+    if (iterationLimit) {
+      record.iterationBudget = { limit: iterationLimit, exhausted: false }
+      store.write('runs', record.runId, record)
+    }
     let extensionPath: string | undefined
     let visibleTools = hosted?.tools
     if (hosted) {
@@ -107,14 +113,17 @@ export async function runExecution(request: WorkerRequest, life?: ParentLife): P
       } else {
         assertPiHostConfig(context.configDir!)
         extensionPath = join(store.root, 'runs', `${record.runId}.extension.mjs`)
-        writePiExtension(extensionPath, visibleTools, bridge.socketPath, hosted.forwarding)
+        writePiExtension(extensionPath, visibleTools, bridge.socketPath, hosted.forwarding, iterationLimit && iterationMarker ? { limit: iterationLimit, markerFile: iterationMarker } : undefined)
       }
+    } else if (iterationLimit && iterationMarker && context.connection.runtime === 'pi') {
+      extensionPath = join(store.root, 'runs', `${record.runId}.extension.mjs`)
+      writePiExtension(extensionPath, [], undefined, 'serial', { limit: iterationLimit, markerFile: iterationMarker })
     }
     if (life?.dead) { finish('unknown', true); return }
     if (stopping) { finish(stopping, true); return }
     const promptFile = join(store.root, 'runs', `${record.runId}.prompt`)
     promptPath = promptFile
-    const command = cliCommand(context, request.input, { toolPolicy: constraints.toolPolicy, timeoutMs: constraints.timeoutMs }, promptFile, hosted && visibleTools ? { names: visibleTools.map(tool => tool.name), extensionPath } : undefined)
+    const command = cliCommand(context, request.input, { toolPolicy: constraints.toolPolicy, timeoutMs: constraints.timeoutMs, ...(iterationLimit !== undefined ? { maxModelIterations: iterationLimit } : {}) }, promptFile, hosted && visibleTools ? { names: visibleTools.map(tool => tool.name), extensionPath } : extensionPath ? { extensionPath } : undefined)
     const childEnv = cliEnvironment(process.env, context, hosted && bridge ? { socketPath: bridge.socketPath, forwarding: hosted.forwarding } : undefined)
     // Grok takes a file; Pi takes stdin. Never expose a prompt in process argv.
     if (context.connection.runtime === 'grok-cli') writeFileSync(promptFile, request.input, { mode: 0o600, flag: 'wx' })
@@ -171,6 +180,7 @@ export async function runExecution(request: WorkerRequest, life?: ParentLife): P
     await Promise.race([drained, delay(100)])
     events.finish()
     try { unlinkSync(promptFile) } catch { /* Pi has no prompt file */ }
+    const budgetSignal = events.code === 'iteration_budget_exhausted'
     if (events.sessionId) {
       if (context.nativeSessionId && events.sessionId !== context.nativeSessionId) events.code = 'session_mismatch'
       else { context.nativeSessionId = events.sessionId; record.nativeSessionId = events.sessionId; store.write('contexts', context.contextId, context) }
@@ -178,6 +188,13 @@ export async function runExecution(request: WorkerRequest, life?: ParentLife): P
     pulse()
     if (life?.dead) { finish('unknown', stopped); return }
     if (!stopped) { record.code = 'process_failed'; finish('unknown', false); return }
+    const budgetExhausted = iterationMarker !== undefined && existsSync(iterationMarker) && readFileSync(iterationMarker, 'utf8').startsWith('exhausted')
+    if (budgetExhausted || budgetSignal) {
+      record.code = 'iteration_budget_exhausted'
+      if (record.iterationBudget) record.iterationBudget = { limit: record.iterationBudget.limit, exhausted: true }
+      finish(stopped ? 'failed' : 'unknown', stopped)
+      return
+    }
     if (stopping) { finish(stopping, true); return }
     if (record.code === 'process_failed' || processError || exitCode !== 0 || events.code || !events.ended || !events.sessionId) {
       record.code = record.code === 'process_failed' ? 'process_failed' : events.code ?? (exitCode === 0 ? 'protocol_error' : classifyFailure(stderr))

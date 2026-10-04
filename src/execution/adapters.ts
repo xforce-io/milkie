@@ -123,21 +123,25 @@ export function assertNativeSession(context: ExecutionContext): void {
     } catch { throw new ExecutionError('session_missing') }
   }
 }
-export function cliCommand(context: ExecutionContext, input: string, constraints: { toolPolicy?: 'read-only' | 'standard'; timeoutMs: number }, promptFile: string, host?: { names: string[]; extensionPath?: string }): CliCommand {
+export function cliCommand(context: ExecutionContext, input: string, constraints: { toolPolicy?: 'read-only' | 'standard'; timeoutMs: number; maxModelIterations?: number }, promptFile: string, host?: { names?: string[]; extensionPath?: string }): CliCommand {
   const model = context.connection.model ? ['--model', context.connection.model] : []
+  const turnLimit = constraints.maxModelIterations !== undefined ? ['--max-turns', String(constraints.maxModelIterations)] : []
   if (context.connection.runtime === 'pi') {
-    if (host && !host.extensionPath) throw new ExecutionError('process_failed')
-    const tools = host ? ['--no-builtin-tools', '--extension', host.extensionPath!, '--tools', host.names.join(',')] : ['--tools', constraints.toolPolicy === 'standard' ? 'read,bash,edit,write,grep,find,ls' : 'read,grep,find,ls']
+    if (host?.names && !host.extensionPath) throw new ExecutionError('process_failed')
+    const extension = host?.extensionPath ? ['--extension', host.extensionPath] : []
+    const tools = host?.names
+      ? ['--no-builtin-tools', ...extension, '--tools', host.names.join(',')]
+      : ['--tools', constraints.toolPolicy === 'standard' ? 'read,bash,edit,write,grep,find,ls' : 'read,grep,find,ls', ...extension]
     return { command: 'pi', args: ['--print', '--mode', 'json', '--session-dir', context.sessionDir!, '--session', context.nativeSessionFile!, '--no-extensions', '--no-skills', '--no-prompt-templates', '--no-themes', '--no-context-files', '--no-approve', ...tools, ...model], stdin: input }
   }
   if (context.connection.runtime === 'grok-cli') {
-    const permissionMode = (host || constraints.toolPolicy === 'standard') ? 'bypassPermissions' : 'plan'
+    const permissionMode = (host?.names || constraints.toolPolicy === 'standard') ? 'bypassPermissions' : 'plan'
     // Removing every builtin also drops the host MCP tool from the model request. Permission denies block the effect instead.
-    const readOnlyDenied = !host && constraints.toolPolicy !== 'standard' ? ['--disallowed-tools', GROK_NATIVE_TOOLS] : []
+    const readOnlyDenied = !host?.names && constraints.toolPolicy !== 'standard' ? ['--disallowed-tools', GROK_NATIVE_TOOLS] : []
     // Grok 1.0.41 reaches MCP tools only through search_tool/use_tool. Removing those two also removes the host tool.
     // Out-of-bounds access is closed by the milkie-only server plus these permission denies.
-    const hostLock = host ? ['--disallowed-tools', 'x_search,web_search,web_fetch', '--deny', 'Bash(*)', '--deny', 'Read(**)', '--deny', 'Edit(**)', '--deny', 'Grep'] : []
-    return { command: 'grok', args: ['--cwd', context.cwd, '--leader-socket', join(context.configDir!, 'leader.sock'), context.hasExecuted ? '--resume' : '--session-id', context.nativeSessionId!, '--output-format', 'streaming-json', '--no-subagents', '--disable-web-search', '--permission-mode', permissionMode, ...readOnlyDenied, ...hostLock, ...model, '--prompt-file', promptFile] }
+    const hostLock = host?.names ? ['--disallowed-tools', 'x_search,web_search,web_fetch', '--deny', 'Bash(*)', '--deny', 'Read(**)', '--deny', 'Edit(**)', '--deny', 'Grep'] : []
+    return { command: 'grok', args: ['--cwd', context.cwd, '--leader-socket', join(context.configDir!, 'leader.sock'), context.hasExecuted ? '--resume' : '--session-id', context.nativeSessionId!, '--output-format', 'streaming-json', '--no-subagents', '--disable-web-search', '--permission-mode', permissionMode, ...readOnlyDenied, ...hostLock, ...turnLimit, ...model, '--prompt-file', promptFile] }
   }
   throw new ExecutionError('unsupported_runtime')
 }
@@ -171,7 +175,11 @@ export class CliEvents {
     if (!e || typeof e !== 'object') { this.code = 'protocol_error'; return }
     if (this.runtime === 'grok-cli') {
       if (e.type === 'text' && typeof e.data === 'string') this.output += e.data
-      if (e.type === 'end') {
+      if (e.type === 'max_turns_reached' || e.stopReason === 'max_turns' || e.stopReason === 'error_max_turns') {
+        this.code = 'iteration_budget_exhausted'
+        if (typeof e.sessionId === 'string') this.sessionId = e.sessionId
+        this.ended = false
+      } else if (e.type === 'end') {
         this.sessionId = typeof e.sessionId === 'string' ? e.sessionId : undefined
         this.ended = e.stopReason === 'end_turn'
         if (!this.ended) this.code = e.stopReason === 'cancelled' ? 'native_cancelled' : 'process_failed'

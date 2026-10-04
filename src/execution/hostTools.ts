@@ -20,7 +20,10 @@ export const GROK_READ_TOOLS = ['read_file', 'list_dir', 'grep']
 /** Names Grok still exposes when only the model-facing name is denied. */
 export const GROK_HOST_TOOL_ALIASES = ['run_terminal_cmd', 'command', 'cmd', 'bash_command', 'task', 'kill_task', 'kill_terminal_command', 'get_task_output', 'get_terminal_command_output', 'send_subagent_message', 'x_search', 'web_search', 'web_fetch', 'code_interpreter']
 const RESERVED = new Set([...GROK_NATIVE_TOOLS.split(','), ...GROK_READ_TOOLS, ...GROK_HOST_TOOL_ALIASES, 'read', 'grep', 'find', 'ls', 'bash', 'edit', 'write', 'ask_question'])
-const MAX_OUTPUT = 65536
+/** Raw host-tool input strings and successful results. UTF-8 bytes, not UTF-16 code units. */
+export const MAX_TOOL_PAYLOAD_BYTES = 256 * 1024
+/** JSON tool request, including escape expansion. Distinct from the raw payload cap. */
+export const MAX_ENCODED_TOOL_REQUEST_BYTES = 2 * 1024 * 1024
 const MAX_MESSAGE = 1024
 const MARKER = '# milkie-host-tools\n'
 
@@ -111,7 +114,10 @@ function matchSchema(schema: HostToolSchema, value: unknown): boolean {
 export function normalizeToolResult(value: unknown): ToolResult {
   if (!value || typeof value !== 'object') return { ok: false, code: 'rejected', message: 'Handler returned an invalid result.' }
   const result = value as { ok?: unknown; output?: unknown; code?: unknown; message?: unknown }
-  if (result.ok === true && typeof result.output === 'string' && result.output.length <= MAX_OUTPUT) return { ok: true, output: result.output }
+  if (result.ok === true && typeof result.output === 'string') {
+    if (Buffer.byteLength(result.output) <= MAX_TOOL_PAYLOAD_BYTES) return { ok: true, output: result.output }
+    return { ok: false, code: 'rejected', message: 'Tool result exceeds 262144 bytes.' }
+  }
   if (result.ok === false && (result.code === 'invalid_input' || result.code === 'rejected') && typeof result.message === 'string' && result.message.length > 0 && result.message.length <= MAX_MESSAGE) {
     return { ok: false, code: result.code, message: result.message }
   }
@@ -237,10 +243,39 @@ function resolveTypeboxModule(): string {
   } catch { /* Fixture pi does not load this extension. */ }
   return 'typebox'
 }
-export function writePiExtension(file: string, tools: HostToolSpec[], socketPath: string, forwarding: 'serial' | 'parallel'): void {
-  const spec = JSON.stringify({ socketPath, forwarding, tools })
+export function writePiExtension(file: string, tools: HostToolSpec[], socketPath: string | undefined, forwarding: 'serial' | 'parallel', budget?: { limit: number; markerFile: string }): void {
+  if (tools.length === 0) {
+    if (!budget) throw new ExecutionError('process_failed')
+    const source = `import { writeFileSync } from 'node:fs'
+const modelIterationBudget = ${budget.limit}
+const modelIterationMarker = ${JSON.stringify(budget.markerFile)}
+export default function (pi) {
+  let modelIterations = 0
+  pi.on('before_provider_request', (_event, ctx) => {
+    modelIterations += 1
+    if (modelIterations > modelIterationBudget) {
+      writeFileSync(modelIterationMarker, 'exhausted\\n')
+      ctx.abort()
+    }
+  })
+}
+`
+    writeFileSync(file, source, { mode: 0o600 })
+    return
+  }
+  const spec = JSON.stringify({ socketPath, forwarding, tools, maxModelIterations: budget?.limit ?? 0, markerFile: budget?.markerFile ?? '' })
   const typebox = JSON.stringify(resolveTypeboxModule())
-  const source = `import net from 'node:net'
+  const fsImport = budget ? `import { writeFileSync } from 'node:fs'\n` : ''
+  const iterationHook = budget ? `  let modelIterations = 0
+  pi.on('before_provider_request', (_event, ctx) => {
+    modelIterations += 1
+    if (modelIterations > spec.maxModelIterations) {
+      writeFileSync(spec.markerFile, 'exhausted\\n')
+      ctx.abort()
+    }
+  })
+` : ''
+  const source = `${fsImport}import net from 'node:net'
 import { Type } from ${typebox}
 const spec = ${spec}
 function toType(schema) {
@@ -294,7 +329,7 @@ function roundTrip(payload) {
   }).finally(() => { if (pending.size === 0) client.unref() })
 }
 export default function (pi) {
-  for (const tool of spec.tools) {
+${iterationHook}  for (const tool of spec.tools) {
     pi.registerTool({
       name: tool.name,
       label: tool.name,
@@ -311,6 +346,20 @@ export default function (pi) {
 }
 `
   writeFileSync(file, source, { mode: 0o600 })
+}
+function rawStringBytes(value: unknown): number {
+  if (typeof value === 'string') return Buffer.byteLength(value)
+  if (Array.isArray(value)) {
+    let max = 0
+    for (const item of value) max = Math.max(max, rawStringBytes(item))
+    return max
+  }
+  if (value && typeof value === 'object') {
+    let max = 0
+    for (const item of Object.values(value as Record<string, unknown>)) max = Math.max(max, rawStringBytes(item))
+    return max
+  }
+  return 0
 }
 /** Host completion is not delivery. A failed write leaves the call pending. */
 function deliverReply(socket: Socket, payload: string): Promise<boolean> {
@@ -351,13 +400,23 @@ export async function openToolBridge(options: {
     const message = JSON.parse(line) as { id?: unknown; name?: unknown; nativeCallId?: unknown; input?: unknown }
     if (typeof message.id !== 'string' || typeof message.name !== 'string') throw new Error('Malformed tool call.')
     const name = message.name
-    const encoded = JSON.stringify(message.input)
-    if (encoded.length > MAX_OUTPUT) throw new Error('Tool input is too large.')
     const nativeCallId = typeof message.nativeCallId === 'string' && message.nativeCallId ? message.nativeCallId : undefined
     const callId = randomUUID()
     const base: ToolCallRecord = { version: 1, callId, name, input: message.input, runId: options.runId, contextId: options.contextId, status: 'pending', ...(nativeCallId ? { nativeCallId } : {}) }
     const tool = tools.get(name)
     const reply = (result: ToolResult) => socket.write(`${JSON.stringify({ id: message.id, ...result })}\n`)
+    if (Buffer.byteLength(line) > MAX_ENCODED_TOOL_REQUEST_BYTES || rawStringBytes(message.input) > MAX_TOOL_PAYLOAD_BYTES) {
+      const rejected: ToolResult = {
+        ok: false,
+        code: 'invalid_input',
+        message: Buffer.byteLength(line) > MAX_ENCODED_TOOL_REQUEST_BYTES
+          ? 'Encoded tool request exceeds 2097152 bytes.'
+          : 'Tool input exceeds 262144 bytes.',
+      }
+      options.store.write('calls', callId, { ...base, status: 'invalid_input', message: rejected.message })
+      reply(rejected)
+      return
+    }
     if (!tool) {
       const rejected: ToolResult = { ok: false, code: 'rejected', message: 'Tool is not registered.' }
       options.store.write('calls', callId, { ...base, status: 'rejected', message: rejected.message })
@@ -392,7 +451,7 @@ export async function openToolBridge(options: {
     socket.on('error', () => { /* The CLI closing its end is not a successful tool result. */ })
     socket.on('data', chunk => {
       buffer += chunk
-      if (buffer.length > 1_048_576) { socket.destroy(); broken(new Error('Tool call is too large.')); return }
+      if (Buffer.byteLength(buffer) > MAX_ENCODED_TOOL_REQUEST_BYTES + 64 * 1024) { socket.destroy(); broken(new Error('Tool call is too large.')); return }
       let newline: number
       while ((newline = buffer.indexOf('\n')) >= 0) {
         const line = buffer.slice(0, newline)
