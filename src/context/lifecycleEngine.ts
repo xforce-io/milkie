@@ -262,6 +262,18 @@ export function makeScratchpadToolResultRegion(
   }
 }
 
+// A failed turn stores assistantText as "" so the miss stays in the checkpoint.
+// Providers reject an assistant message that has neither text nor tool calls,
+// so the request projection omits that message and keeps the user turn.
+export function formatHistoryPairMessages(userInput: string, assistantText: string): Message[] {
+  const user: Message = { role: 'user', content: [{ type: 'text', text: userInput }] }
+  if (assistantText.length === 0) return [user]
+  return [
+    user,
+    { role: 'assistant', content: [{ type: 'text', text: assistantText }] },
+  ]
+}
+
 export function makeHistoryPairRegion(
   userInput: string,
   assistantText: string,
@@ -275,10 +287,7 @@ export function makeHistoryPairRegion(
     content:   { userInput, assistantText },
     format:    (c): Message[] => {
       const { userInput, assistantText } = c as { userInput: string; assistantText: string }
-      return [
-        { role: 'user',      content: [{ type: 'text', text: userInput }] },
-        { role: 'assistant', content: [{ type: 'text', text: assistantText }] },
-      ]
+      return formatHistoryPairMessages(userInput, assistantText)
     },
   }
 }
@@ -436,10 +445,7 @@ export function rehydrateRegion(r: Region): Region {
       ...r,
       format: (c: unknown): Message[] => {
         const { userInput, assistantText } = c as { userInput: string; assistantText: string }
-        return [
-          { role: 'user',      content: [{ type: 'text', text: userInput }] },
-          { role: 'assistant', content: [{ type: 'text', text: assistantText }] },
-        ]
+        return formatHistoryPairMessages(userInput, assistantText)
       },
     }
   }
