@@ -9,7 +9,7 @@
     "agents",
     "contracts"
   ],
-  "description": "TypeScript Agent framework — Agent = FSM",
+  "description": "TypeScript Agent framework \u2014 Agent = FSM",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
