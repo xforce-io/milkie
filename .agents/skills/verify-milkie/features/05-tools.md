@@ -20,6 +20,7 @@
 |---|---|---|
 | 正常 | 模型调用自定义工具，创建计划并更新一步；在临时目录执行无副作用命令 | 工具响应可观察；计划可查询；命令 stdout/stderr/退出信息可读取；并行只对允许的工具生效。 |
 | 协议错误 | 发送畸形 JSON、字段错误和 handler 业务异常，随后模型改参重试 | 不可修复或校验失败的参数不执行 handler；控制工具允许有界修复后通过校验再执行；协议错误与执行错误可区分；单次工具错误不默认终止整次执行。 |
+| #245 字符串保真 | 畸形 create_plan 中字符串包含逗号、闭括号、转义引号和反斜杠 | 仅修复字符串外的尾逗号；保存的计划文本与原字符串一致，成功调用产生一次写入。 |
 | 边界 | builtinTools.allow=[]，以及未知/重复名称；子 Agent 申请更大集合 | 空集合不暴露内建工具；非法声明拒绝；子 Agent 不扩大父级权限；自定义工具另行注册。 |
 
 ## 验证方法
@@ -44,3 +45,5 @@ run_command 会执行真实子进程，驾驶仅在测试临时目录使用无�
 
 - [docs/stories/s-001-react-with-intra-agent-parallel-tools.md](../../../../docs/stories/s-001-react-with-intra-agent-parallel-tools.md)
 - [docs/stories/s-009-multi-turn-with-tool-error-recovery.md](../../../../docs/stories/s-009-multi-turn-with-tool-error-recovery.md)
+
+#245 的 S1–S3 使用本功能：`npm run test:unit` 覆盖修复与错误分层，`npm run test:e2e:deterministic` 中的 `s-018-control-tool-protocol.e2e.test.ts` 驾驶模型调用、错误反馈、继续调用至成功的主路径。
