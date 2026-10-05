@@ -251,6 +251,9 @@ const modelIterationBudget = ${budget.limit}
 const modelIterationMarker = ${JSON.stringify(budget.markerFile)}
 export default function (pi) {
   let modelIterations = 0
+  // Pi's compaction requests bypass before_provider_request. Do not allow
+  // uncounted provider requests while this execution has an explicit budget.
+  pi.on('session_before_compact', () => ({ cancel: true }))
   pi.on('before_provider_request', (_event, ctx) => {
     modelIterations += 1
     if (modelIterations > modelIterationBudget) {
@@ -267,6 +270,7 @@ export default function (pi) {
   const typebox = JSON.stringify(resolveTypeboxModule())
   const fsImport = budget ? `import { writeFileSync } from 'node:fs'\n` : ''
   const iterationHook = budget ? `  let modelIterations = 0
+  pi.on('session_before_compact', () => ({ cancel: true }))
   pi.on('before_provider_request', (_event, ctx) => {
     modelIterations += 1
     if (modelIterations > spec.maxModelIterations) {

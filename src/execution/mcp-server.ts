@@ -52,11 +52,8 @@ async function callTool(message: { id?: unknown; params?: { name?: unknown; argu
   }
   let input: unknown = message.params?.arguments ?? {}
   if (typeof input === 'string') input = JSON.parse(input) as unknown
-  const requestLine = JSON.stringify({ id: String(message.id), name, input })
-  if (Buffer.byteLength(requestLine) > 2 * 1024 * 1024) {
-    send({ jsonrpc: '2.0', id: message.id, result: { content: [{ type: 'text', text: 'invalid_input: Encoded tool request exceeds 2097152 bytes.' }], isError: true } })
-    return
-  }
+  // The host bridge owns size validation and the persistent rejection record.
+  // Frames within its bounded slack must reach it even when over the limit.
   const result = await bridgeCall(String(message.id), name, input)
   const text = result.ok ? result.output : `${result.code}: ${result.message}`
   send({ jsonrpc: '2.0', id: message.id, result: { content: [{ type: 'text', text }], isError: result.ok !== true } })

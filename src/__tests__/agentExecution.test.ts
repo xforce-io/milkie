@@ -524,6 +524,27 @@ test('generated Pi extension keeps newline framing', () => {
   expect(source).toContain('export default function')
   expect(source).toContain('nativeCallId: toolCallId')
 })
+test.each([false, true])('budgeted Pi extension cancels uncounted compaction (host tools: %s)', hosted => {
+  const { writePiExtension } = require('../execution/hostTools') as typeof import('../execution/hostTools')
+  const file = join(root, 'budget.mjs'), marker = join(root, 'iteration.marker')
+  writePiExtension(file, hosted ? [alpha] : [], hosted ? '/tmp/test.sock' : undefined, 'serial', { limit: 2, markerFile: marker })
+  const source = readFileSync(file, 'utf8').replace(/^import .*$/gm, '').replace('export default function', 'return function')
+  const hooks = new Map<string, (...args: any[]) => any>()
+  const type = { String: () => ({}), Integer: () => ({}), Object: () => ({}) }
+  const initialize = new Function('writeFileSync', 'Type', source)(writeFileSync, type)
+  initialize({ on: (name: string, fn: (...args: any[]) => any) => hooks.set(name, fn), registerTool: () => {} })
+  for (const reason of ['threshold', 'overflow', 'manual']) {
+    expect(hooks.get('session_before_compact')?.({ reason })).toEqual({ cancel: true })
+  }
+  let requests = 0, aborted = false
+  const ctx = { abort: () => { aborted = true } }
+  for (let i = 0; i < 3; i++) {
+    hooks.get('before_provider_request')!({}, ctx)
+    if (!aborted) requests++
+  }
+  expect(requests).toBe(2)
+  expect(readFileSync(marker, 'utf8')).toBe('exhausted\n')
+})
 test('quoted project mcp table cannot replace the host launch arguments', async () => {
   const { assertGrokMcpLaunch, assertProjectGrokConfig } = require('../execution/hostTools') as typeof import('../execution/hostTools')
   const dir = join(root, 'quoted-cwd')
@@ -1063,6 +1084,48 @@ test('tool bridge rejects an unfinished frame past the encoded slack without cal
     expect(effects).toBe(0)
     expect(savedCalls()).toEqual([])
   } finally { await bridge.close() }
+})
+test('Grok MCP oversized request is rejected and persisted before any host effect', async () => {
+  const store = new ExecutionStore(join(root, 'data'))
+  const runId = randomUUID(), contextId = randomUUID()
+  let effects = 0
+  const bridge = await openToolBridge({
+    tools: [save], forwarding: 'serial', runId, contextId, store, alive: () => true,
+    onHost: async () => { effects++; return { ok: true, output: 'saved' } }, onBroken: () => {},
+  })
+  const toolsFile = join(root, 'tools.json')
+  writeFileSync(toolsFile, JSON.stringify([save]))
+  const child = spawn(process.execPath, [resolve('dist/execution/mcp-server.js'), bridge.socketPath, toolsFile], { stdio: ['pipe', 'pipe', 'pipe'] })
+  const deadline = new AbortController()
+  try {
+    const request = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'save', arguments: { parts: Array(9).fill('\0'.repeat(39000)) } } })
+    expect(Buffer.byteLength(request)).toBeGreaterThan(MAX_ENCODED_BYTES)
+    expect(Buffer.byteLength(request)).toBeLessThan(MAX_ENCODED_BYTES + 64 * 1024)
+    const response = new Promise<any>((resolveReply, reject) => {
+      let output = ''
+      child.stdout.on('data', chunk => {
+        output += chunk.toString()
+        if (output.includes('\n')) resolveReply(JSON.parse(output.slice(0, output.indexOf('\n'))))
+      })
+      child.once('error', reject)
+      child.once('exit', code => reject(new Error(`MCP exited before reply: ${code}`)))
+    })
+    child.stdin.write(request + '\n')
+    const reply = await Promise.race([response, delay(5000, undefined, { signal: deadline.signal }).then(() => { throw new Error('MCP reply timed out') })])
+    expect(reply.result).toMatchObject({ isError: true, content: [{ text: 'invalid_input: Encoded tool request exceeds 2097152 bytes.' }] })
+    const calls = savedCalls()
+    expect(calls).toHaveLength(1)
+    expect(calls[0]).toMatchObject({ runId, contextId, name: 'save', status: 'invalid_input' })
+    expect(effects).toBe(0)
+  } finally {
+    deadline.abort()
+    if (child.exitCode === null && child.signalCode === null) {
+      const exited = new Promise<void>(resolveExit => child.once('exit', () => resolveExit()))
+      child.kill()
+      await exited
+    }
+    await bridge.close()
+  }
 })
 test('reconcile accepts 256 KiB and rejects one more byte', () => {
   const a = client('grok-cli'), c = cliContext(a)

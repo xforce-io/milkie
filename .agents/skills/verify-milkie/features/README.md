@@ -30,6 +30,7 @@
 | [17-agent-cli-dedicated-storage](17-agent-cli-dedicated-storage.md) | CLI 专用配置目录与会话目录 | #265；缺失时启动前失败 |
 | [18-agent-cli-host-tools](18-agent-cli-host-tools.md) | CLI 宿主工具、能力关停与调用记录 | #266；真实 CLI 验收 |
 | [19-agent-cli-host-tool-resume](19-agent-cli-host-tool-resume.md) | 续接时重装宿主工具并核对未回复调用 | #267；真实 CLI 验收 |
+| [20-cli-iteration-tool-bounds](20-cli-iteration-tool-bounds.md) | CLI 模型迭代预算与工具数据边界 | #275；压缩取消与 MCP 拒绝记录 |
 
 ## 主入口逐项归属
 

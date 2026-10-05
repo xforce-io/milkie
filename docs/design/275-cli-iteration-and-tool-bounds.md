@@ -8,7 +8,7 @@
 
 `maxModelIterations` 只约束一次 `start`，不跨续接累计。整数范围 1 到 10000；50 合法。缺省时不安装迭代上限。非法值，以及 API 传输上的该字段，在任何模型请求之前返回 `unsupported_constraint`。
 
-Grok 把上限传给 `--max-turns`。停止原因为 `max_turns`、`error_max_turns` 或事件 `max_turns_reached` 时，执行码为 `iteration_budget_exhausted`，并保留已关联的原生会话。Grok 1.0.46 会在 `max_turns_reached` 之后再输出 `end(cancelled)`；后到的取消、错误事件不能擦掉已经观察到的预算耗尽。没有该事件时，普通取消、超时和会话不匹配仍按各自原因分类，也不因设置了预算或发生过工具调用而推断耗尽。Pi 不能靠钩子抛错取消请求：扩展在 `before_provider_request` 中计数，超额时先写标记再 `ctx.abort()`，使请求信号在 HTTP 开始前已中止。监督进程读到该标记后使用同一执行码，不把这次停止记成普通 `process_failed`。执行记录带 `iterationBudget: { limit, exhausted }`。状态为 `failed` 且本地已停止。同一上下文的下一次 `start` 继续使用原会话。
+Grok 把上限传给 `--max-turns`。停止原因为 `max_turns`、`error_max_turns` 或事件 `max_turns_reached` 时，执行码为 `iteration_budget_exhausted`，并保留已关联的原生会话。Grok 1.0.46 会在 `max_turns_reached` 之后再输出 `end(cancelled)`；后到的取消、错误事件不能擦掉已经观察到的预算耗尽。没有该事件时，普通取消、超时和会话不匹配仍按各自原因分类，也不因设置了预算或发生过工具调用而推断耗尽。Pi 不能靠钩子抛错取消请求：扩展在 `before_provider_request` 中计数，超额时先写标记再 `ctx.abort()`，使请求信号在 HTTP 开始前已中止。设置预算时通过 `session_before_compact` 取消 Pi 的自动及手动压缩，因为压缩请求不经过该计数钩子；过长会话可能返回上下文容量错误，而不能发出未计数的压缩请求。监督进程读到该标记后使用同一执行码，不把这次停止记成普通 `process_failed`。执行记录带 `iterationBudget: { limit, exhausted }`。状态为 `failed` 且本地已停止。同一上下文的下一次 `start` 继续使用原会话。
 
 超时和工具调用次数不能代替模型迭代。
 
