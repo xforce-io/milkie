@@ -72,7 +72,7 @@ Gateway 负责字节→JSON；Runtime 负责修复/校验/是否调用 handler�
 ### 6.2 核心业务流程
 
 1. 收到 `update_step` / `create_plan` 调用。
-2. 若带 `#219 invalidArguments`：不修复业务字段、不进 handler，回传解析类 invalid_args。
+2. 若带 `#219 invalidArguments` 且存在本次调用的内存 raw：尝试有界语法修复；无 raw 或修复失败则不进 handler，回传解析类 invalid_args。字符串正文与业务字段不得改写。
 3. 否则对文本/对象做有界修复（尾逗号、唯一可补全的闭合括号）。多解或仍非 JSON → 拒绝。
 4. 用窄 schema 校验：`create_plan` 需要 `steps: string[]`（非空）；`update_step` 需要 `stepId: number` 与 `status: 'done'|'failed'`。多余必拒或剥离规则见 §8——本期**拒绝未知必害字段之外的未声明字段**（additionalProperties=false）。
 5. 通过则 handler；handler 抛错 → execution 码（如无 plan）。
