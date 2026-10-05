@@ -532,7 +532,12 @@ test.each([false, true])('budgeted Pi extension cancels uncounted compaction (ho
   const hooks = new Map<string, (...args: any[]) => any>()
   const type = { String: () => ({}), Integer: () => ({}), Object: () => ({}) }
   const initialize = new Function('writeFileSync', 'Type', source)(writeFileSync, type)
-  initialize({ on: (name: string, fn: (...args: any[]) => any) => hooks.set(name, fn), registerTool: () => {} })
+  let wrapped: any
+  const provider = { id: 'fixture', auth: {}, getModels: () => [], streamSimple: (_model: unknown, _context: unknown, options: unknown) => options }
+  initialize({ on: (name: string, fn: (...args: any[]) => any) => hooks.set(name, fn), registerTool: () => {}, registerProvider: (value: any) => { wrapped = value } })
+  hooks.get('session_start')!({}, { model: { provider: 'fixture' }, modelRegistry: { getProvider: () => provider } })
+  expect(wrapped.auth).toBe(provider.auth)
+  expect(wrapped.streamSimple({}, {}, { maxRetries: 10, sessionId: 'test' })).toEqual({ maxRetries: 0, sessionId: 'test' })
   for (const reason of ['threshold', 'overflow', 'manual']) {
     expect(hooks.get('session_before_compact')?.({ reason })).toEqual({ cancel: true })
   }

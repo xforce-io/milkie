@@ -244,13 +244,23 @@ function resolveTypeboxModule(): string {
   return 'typebox'
 }
 export function writePiExtension(file: string, tools: HostToolSpec[], socketPath: string | undefined, forwarding: 'serial' | 'parallel', budget?: { limit: number; markerFile: string }): void {
+  const providerHook = budget ? `  pi.on('session_start', (_event, ctx) => {
+    const provider = ctx.modelRegistry.getProvider(ctx.model.provider)
+    // Low-level provider retries bypass before_provider_request. Higher-level
+    // Pi retries still pass through it and consume the remaining budget.
+    pi.registerProvider({
+      ...provider,
+      streamSimple: (model, context, options) => provider.streamSimple(model, context, { ...options, maxRetries: 0 }),
+    })
+  })
+` : ''
   if (tools.length === 0) {
     if (!budget) throw new ExecutionError('process_failed')
     const source = `import { writeFileSync } from 'node:fs'
 const modelIterationBudget = ${budget.limit}
 const modelIterationMarker = ${JSON.stringify(budget.markerFile)}
 export default function (pi) {
-  let modelIterations = 0
+${providerHook}  let modelIterations = 0
   // Pi's compaction requests bypass before_provider_request. Do not allow
   // uncounted provider requests while this execution has an explicit budget.
   pi.on('session_before_compact', () => ({ cancel: true }))
@@ -269,7 +279,7 @@ export default function (pi) {
   const spec = JSON.stringify({ socketPath, forwarding, tools, maxModelIterations: budget?.limit ?? 0, markerFile: budget?.markerFile ?? '' })
   const typebox = JSON.stringify(resolveTypeboxModule())
   const fsImport = budget ? `import { writeFileSync } from 'node:fs'\n` : ''
-  const iterationHook = budget ? `  let modelIterations = 0
+  const iterationHook = budget ? `${providerHook}  let modelIterations = 0
   pi.on('session_before_compact', () => ({ cancel: true }))
   pi.on('before_provider_request', (_event, ctx) => {
     modelIterations += 1
