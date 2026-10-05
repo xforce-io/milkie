@@ -37,7 +37,7 @@ export function tryRepairJson(raw: string): unknown | undefined {
   if (unique.size === 1) return unique.values().next().value
   
   // Try stripping trailing commas before closers
-  const stripped = raw.replace(/,(\s*[}\]])/g, '$1')
+  const stripped = stripTrailingCommas(raw)
   if (stripped !== raw) {
     consider(stripped)
     if (unique.size === 1) return unique.values().next().value
@@ -53,6 +53,26 @@ export function tryRepairJson(raw: string): unknown | undefined {
   if (unique.size === 1) return unique.values().next().value
   
   return undefined
+}
+
+function stripTrailingCommas(raw: string): string {
+  let quoted = false, escaped = false, result = ''
+  for (let i = 0; i < raw.length; i++) {
+    const char = raw[i]!
+    if (quoted) {
+      if (escaped) escaped = false
+      else if (char === '\\') escaped = true
+      else if (char === '"') quoted = false
+    } else if (char === '"') {
+      quoted = true
+    } else if (char === ',') {
+      let next = i + 1
+      while (next < raw.length && /\s/.test(raw[next]!)) next++
+      if (raw[next] === '}' || raw[next] === ']') continue
+    }
+    result += char
+  }
+  return result
 }
 
 export function validateControlToolInput(name: string, input: unknown): ProtocolAccept | ProtocolReject {

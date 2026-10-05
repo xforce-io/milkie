@@ -54,6 +54,10 @@ function toolUse(call: ToolCall): ModelResponse {
 
 describe('#245 control tool protocol', () => {
   describe('Unit: resolveControlToolCall direct', () => {
+    it.each(['keep ,} literally', 'keep ,] literally', 'quoted "text,}" and \\path,]', 'keep ,\n} literally'])('preserves string content during trailing-comma repair: %s', text => {
+      const raw = `{"steps":[${JSON.stringify(text)},],}`
+      expect(tryRepairJson(raw)).toEqual({ steps: [text] })
+    })
     it('repairs trailing-comma via rawArguments', () => {
       const call: ToolCall = {
         id: 'u1',
@@ -101,6 +105,27 @@ describe('#245 control tool protocol', () => {
   })
 
   describe('S1: lightweight malformed params can be repaired or get actionable feedback', () => {
+    it('persists the original plan text after repairing syntax outside strings', async () => {
+      const text = '保留逗号,} 和引号 "x,]" 与反斜杠 \\path'
+      const raw = `{"steps":[${JSON.stringify(text)},],}`
+      const call: ToolCall = {
+        id: 'c1', name: 'create_plan', input: {}, rawArguments: raw,
+        invalidArguments: { code: 'TOOL_ARGUMENTS_INVALID_JSON', message: 'Invalid JSON', rawLength: raw.length },
+      }
+      const eventStore = new MemoryEventStore()
+      const milkie = new Milkie({ stateStore: new MemoryStore(), eventStore, gateway: new ScriptedGateway([
+        toolUse(call), { content: [{ type: 'text', text: 'ok' }], toolCalls: [], finishReason: 'stop' },
+      ]) })
+      milkie.registerAgent(config())
+      const result = await milkie.invoke({ agentId: 'planner', goal: 'g', input: 'i' })
+      expect(result.status).toBe('completed')
+      const events = await eventStore.readByRunId(result.agentRunId)
+      const writes = events.filter(e => e.type === 'wm.mutated')
+      expect(writes).toHaveLength(1)
+      const plan = (writes[0]!.payload as { snapshot: { data: { plan: Plan } } }).snapshot.data.plan
+      expect(plan.steps[0]!.desc).toBe(text)
+      expect(events.filter(e => e.type === 'tool.responded')[0]!.payload).toMatchObject({ status: 'ok' })
+    })
     it('repairs trailing-comma update_step and accepts it', async () => {
       expect(tryRepairJson('{"stepId":0,"status":"done",}')).toEqual({ stepId: 0, status: 'done' })
 
