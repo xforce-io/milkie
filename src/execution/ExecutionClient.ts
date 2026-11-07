@@ -16,9 +16,12 @@ export class ExecutionClient {
   private readonly projection
   private readonly env: NodeJS.ProcessEnv
   private readonly connection: ConnectionInput
+  private readonly hostLifetime: boolean
   /** Host-lifetime pipes. Closing one tells the worker to stop the CLI. */
   private readonly parentPipes: unknown[] = []
   constructor(options: ExecutionClientOptions) {
+    if (options.lifetime !== undefined && options.lifetime !== 'host' && options.lifetime !== 'independent') throw new ExecutionError('invalid_request')
+    this.hostLifetime = options.lifetime === 'host'
     this.connection = structuredClone(options.connection)
     this.projection = resolveAndParseConnection(this.connection).projection
     this.store = new ExecutionStore(options.dataDir)
@@ -112,9 +115,10 @@ export class ExecutionClient {
         const record: ExecutionRecord = { version: 1, runId, contextId, nativeSessionId: context.nativeSessionId, status: 'starting', startedAt: Date.now(), heartbeatAt: Date.now(), stopped: false }
         this.store.write('runs', runId, record)
         const childEnv = context.connection.transport === 'agent-cli' ? supervisorEnvironment(this.env) : this.env
-        child = fork(worker, [], { env: childEnv, detached: !hostTools, stdio: hostTools ? ['ignore', 'ignore', 'ignore', 'ipc', 'pipe'] : ['ignore', 'ignore', 'ignore', 'ipc'], execArgv: [] })
-        const pipe = hostTools ? child.stdio[4] : undefined
-        if (hostTools && (!pipe || typeof pipe === 'string' || !('on' in pipe))) throw new ExecutionError('process_failed')
+        const attached = !!hostTools || this.hostLifetime
+        child = fork(worker, [], { env: childEnv, detached: !attached, stdio: attached ? ['ignore', 'ignore', 'ignore', 'ipc', 'pipe'] : ['ignore', 'ignore', 'ignore', 'ipc'], execArgv: [] })
+        const pipe = attached ? child.stdio[4] : undefined
+        if (attached && (!pipe || typeof pipe === 'string' || !('on' in pipe))) throw new ExecutionError('process_failed')
         if (pipe && typeof pipe !== 'string') {
           const stream = pipe as NodeJS.EventEmitter & { unref?: () => void }
           stream.on('error', () => { /* Worker exit closes this end after the run is stored. */ })
@@ -137,9 +141,9 @@ export class ExecutionClient {
             })
           })
         }
-        const message: WorkerRequest = { dataDir: this.store.root, context, record, connection: this.connection, input, constraints: { toolPolicy: hostTools ? undefined : toolPolicy, timeoutMs, ...(maxModelIterations !== undefined ? { maxModelIterations } : {}) }, ...(hostTools ? { hostTools } : {}) }
+        const message: WorkerRequest = { hostLifetime: this.hostLifetime, dataDir: this.store.root, context, record, connection: this.connection, input, constraints: { toolPolicy: hostTools ? undefined : toolPolicy, timeoutMs, ...(maxModelIterations !== undefined ? { maxModelIterations } : {}) }, ...(hostTools ? { hostTools } : {}) }
         child.send(message, err => { if (err) fail() })
-        if (!hostTools) child.unref()
+        if (!attached) child.unref()
         return runId
       } catch (e) {
         if (child && child.exitCode === null) child.kill('SIGKILL')

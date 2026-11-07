@@ -107,12 +107,15 @@ export interface ExecutionCapabilities {
   cancel: boolean
 }
 export interface ExecutionClientOptions {
+  /** Stop workers if this host exits. Default independent preserves the SDK contract. */
+  lifetime?: 'host' | 'independent'
   connection: ConnectionInput
   dataDir: string
   /** Explicit child environment; never persisted or included in diagnostics. */
   env?: NodeJS.ProcessEnv
 }
 export interface WorkerRequest {
+  hostLifetime?: boolean
   dataDir: string
   context: ExecutionContext
   record: ExecutionRecord

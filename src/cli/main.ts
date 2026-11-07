@@ -104,7 +104,8 @@ export interface MainResult {
 /**
  * Programmatic entry to the milkie CLI. Returns captured stdout / stderr /
  * exit code instead of writing to process streams — makes the surface
- * unit-testable without spawning a child process.
+ * unit-testable without spawning a child process. execution-sidecar is the
+ * streaming exception: its JSON-RPC messages use process stdio directly.
  *
  * The real `bin` wrapper (src/cli/index.ts) is a thin shim that calls
  * `main(process.argv.slice(2))`, pipes the result to console, and exits.
@@ -124,6 +125,16 @@ export async function main(argv: string[]): Promise<MainResult> {
     .configureOutput({
       writeOut: (s) => { stdout.push(s) },
       writeErr: (s) => { stderr.push(s) },
+    })
+
+  program.command('execution-sidecar')
+    .description('Run the versioned local execution protocol over stdio')
+    .requiredOption('--data-dir <path>', 'absolute execution data directory')
+    .requiredOption('--connection-file <path>', 'absolute host-prepared connection file')
+    .action(async (opts: { dataDir: string; connectionFile: string }) => {
+      const { runExecutionSidecarCli } = await import('../execution/sidecar-cli.js')
+      const result = await runExecutionSidecarCli(['--data-dir', opts.dataDir, '--connection-file', opts.connectionFile])
+      stdout.push(result.stdout); stderr.push(result.stderr); exitCode = result.exitCode
     })
 
   const agent = program.command('agent')

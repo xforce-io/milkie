@@ -32,6 +32,8 @@
 | [19-agent-cli-host-tool-resume](19-agent-cli-host-tool-resume.md) | 续接时重装宿主工具并核对未回复调用 | #267；真实 CLI 验收 |
 | [20-cli-iteration-tool-bounds](20-cli-iteration-tool-bounds.md) | CLI 模型迭代预算与工具数据边界 | #275；压缩取消与 MCP 拒绝记录 |
 
+| [21-execution-sidecar](21-execution-sidecar.md) | 本地版本化执行协议与宿主生命周期 | #277 候选；Codex 与第二真实 Harness 验收尚未完成 |
+
 ## 主入口逐项归属
 
 此表用于源码漂移检查；每个入口仅指定一个主归属，跨能力路径通过功能文件说明。
@@ -85,6 +87,7 @@
 | CLI | `trace report <runId>` | [10-trace-inspection](10-trace-inspection.md) |
 | CLI | `trace execution <runId>` | [10-trace-inspection](10-trace-inspection.md) |
 | CLI | `trace replay <runId>` | [11-replay](11-replay.md) |
+| CLI | `execution-sidecar` | [21-execution-sidecar](21-execution-sidecar.md) |
 | CLI | `serve` | [13-http-service](13-http-service.md) |
 | HTTP | `GET /health` | [13-http-service](13-http-service.md) |
 | HTTP | `POST /chat` | [13-http-service](13-http-service.md) |

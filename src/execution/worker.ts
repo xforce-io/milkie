@@ -226,8 +226,9 @@ if (require.main === module) {
   process.once('message', (message: WorkerRequest) => {
     clearTimeout(startup)
     // The host holds the write end. EOF or IPC disconnect means it can no longer answer tool calls.
-    const releaseParent = message.hostTools ? watchParentPipe(() => { life.dead = true }) : undefined
-    if (message.hostTools) process.on('disconnect', () => { life.dead = true })
+    const attached = !!message.hostTools || message.hostLifetime === true
+    const releaseParent = attached ? watchParentPipe(() => { life.dead = true }) : undefined
+    if (attached) process.on('disconnect', () => { life.dead = true })
     else if (process.connected) process.disconnect()
     const exit = (code: number) => { releaseParent?.(); process.exit(code) }
     void runExecution(message, life).then(() => exit(0), () => exit(1))

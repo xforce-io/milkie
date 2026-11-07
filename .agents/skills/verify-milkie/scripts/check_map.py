@@ -41,8 +41,7 @@ cli = set()
 for section, prefix in [(cli_source.split("const agent = program.command('agent')", 1)[1].split("const trace = program.command('trace')", 1)[0], 'agent '),
                         (cli_source.split("const trace = program.command('trace')", 1)[1].split("  program\n    .command('serve')", 1)[0], 'trace ')]:
     cli.update(prefix + name for name in re.findall(r"\.command\('([^']+)'\)", section))
-if ".command('serve')" in cli_source:
-    cli.add('serve')
+cli.update(set(re.findall(r"program\s*\.command\('([^']+)'\)", cli_source)) - {'agent', 'trace'})
 http_source = (root / 'src/cli/serve.ts').read_text()
 http = {f'{method} {route}' for method, route in re.findall(r"req.method === '(GET|POST|PUT|PATCH|DELETE)'\s*&& route === '([^']+)'", http_source)}
 
