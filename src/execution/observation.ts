@@ -7,6 +7,7 @@ import { ExecutionStore } from './store.js'
 export interface ObservationOptions { traceparent: string; maxEvents: number; maxBytes: number }
 export interface ObservationCapabilities {
   version: 1
+  purge: true
   lifecycle: 'supervisor'
   activity: boolean
   usage: 'native-session-cumulative' | 'native-message' | 'gateway-response' | 'unavailable'
@@ -15,7 +16,7 @@ export interface ObservationCapabilities {
   hiddenReasoning: 'unavailable'
 }
 export function observationCapabilities(runtime: string): ObservationCapabilities {
-  return { version: 1, lifecycle: 'supervisor', activity: runtime !== 'api', usage: runtime === 'codex' ? 'native-session-cumulative' : runtime === 'pi' ? 'native-message' : runtime === 'api' ? 'gateway-response' : 'unavailable', modelRequests: runtime === 'api' ? 'gateway-boundary' : 'unavailable', hostTools: runtime !== 'api', hiddenReasoning: 'unavailable' }
+  return { version: 1, purge: true, lifecycle: 'supervisor', activity: runtime !== 'api', usage: runtime === 'codex' ? 'native-session-cumulative' : runtime === 'pi' ? 'native-message' : runtime === 'api' ? 'gateway-response' : 'unavailable', modelRequests: runtime === 'api' ? 'gateway-boundary' : 'unavailable', hostTools: runtime !== 'api', hiddenReasoning: 'unavailable' }
 }
 export function assertObservation(value: ObservationOptions): void {
   if (!value || typeof value !== 'object' || Object.keys(value).some(k => !['traceparent', 'maxEvents', 'maxBytes'].includes(k)) || typeof value.traceparent !== 'string' || !/^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$/.test(value.traceparent) || /^0+$/.test(value.traceparent.slice(3, 35)) || /^0+$/.test(value.traceparent.slice(36, 52)) || !Number.isSafeInteger(value.maxEvents) || value.maxEvents < 2 || value.maxEvents > 100000 || !Number.isSafeInteger(value.maxBytes) || value.maxBytes < 4096 || value.maxBytes > 64 * 1024 * 1024) throw new ExecutionError('unsupported_constraint')
@@ -80,7 +81,7 @@ export interface ObservationPage {
   enabled: boolean
   events: ExecutionObservation[]
   nextSequence: number
-  status: { state: 'disabled' | 'pending' | 'recording' | 'finished' | 'incomplete'; complete: boolean; lastSequence: number; dropped: number; fault?: 'capacity' | 'storage' | 'corrupt' | 'unavailable' }
+  status: { state: 'disabled' | 'pending' | 'recording' | 'finished' | 'incomplete'; complete: boolean; lastSequence: number; dropped: number; fault?: 'capacity' | 'storage' | 'corrupt' | 'unavailable' | 'expired' | 'cleanup_pending' }
 }
 
 /** One worker writes one bounded source. It never owns the business outcome. */
@@ -144,6 +145,7 @@ export class ObservationJournal {
 export function readObservations(store: ExecutionStore, run: ExecutionRecord, afterSequence = 0, limit = 100): ObservationPage {
   if (!Number.isSafeInteger(afterSequence) || afterSequence < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 1000) throw new ExecutionError('invalid_request')
   if (!run.observation) return { enabled: false, events: [], nextSequence: afterSequence, status: { state: 'disabled', complete: false, lastSequence: 0, dropped: 0 } }
+  if (run.observationCleanup) return { enabled: true, events: [], nextSequence: afterSequence, status: { state: 'incomplete', complete: false, lastSequence: 0, dropped: 0, fault: run.observationCleanup.completedAt ? 'expired' : 'cleanup_pending' } }
   const events: ExecutionObservation[] = []
   let state: ObservationState | undefined, fault: ObservationPage['status']['fault'], previous = 0, terminal = false
   try {

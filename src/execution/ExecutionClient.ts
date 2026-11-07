@@ -2,7 +2,7 @@ import { assertObservation, observationCapabilities, readObservations } from './
 import { fork, type ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
-import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, unlinkSync } from 'node:fs'
 import { setTimeout as delay } from 'node:timers/promises'
 import type { ConnectionInput } from '../connection/types.js'
 import { resolveAndParseConnection } from '../connection/parse.js'
@@ -173,6 +173,27 @@ export class ExecutionClient {
     const run = this.query(runId)
     if (!run) throw new ExecutionError('invalid_request')
     return readObservations(this.store, run, afterSequence, limit)
+  }
+  /** Idempotent observation-only retention operation. No execution is started or cancelled. */
+  purgeObservations(runId: string): { version: 1; runId: string; contextId: string; state: 'purged' | 'disabled'; purgedAt?: number } {
+    const initial = this.store.run(runId)
+    if (!initial) throw new ExecutionError('invalid_request')
+    return this.store.exclusive(initial.contextId, () => {
+      const run = this.store.run(runId)
+      if (!run || run.contextId !== initial.contextId) throw new ExecutionError('storage_error')
+      if (!run.observation) return { version: 1, runId, contextId: run.contextId, state: 'disabled' }
+      // finish() closes the journal before publishing finishedAt. Pending host
+      // effects must remain diagnosable until the caller reconciles them.
+      if (ACTIVE.has(run.status) || !run.finishedAt || !run.stopped || this.pendingCalls(run.contextId).some(c => c.runId === runId)) throw new ExecutionError('context_busy')
+      run.observationCleanup ??= { requestedAt: Date.now() }
+      this.store.write('runs', runId, run)
+      for (const file of [join(this.store.root, 'observations', `${runId}.jsonl`), this.store.path('observations', runId)]) {
+        try { unlinkSync(file) } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new ExecutionError('storage_error') }
+      }
+      run.observationCleanup.completedAt ??= Date.now()
+      this.store.write('runs', runId, run)
+      return { version: 1, runId, contextId: run.contextId, state: 'purged', purgedAt: run.observationCleanup.completedAt }
+    })
   }
   toolCall(callId: string): ToolCallRecord | undefined { return this.store.read<ToolCallRecord>('calls', callId) }
   /** Pending calls for a context, including ones persisted before the handler ran. */

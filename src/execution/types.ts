@@ -87,6 +87,8 @@ export interface ExecutionRecord {
   runId: string
   contextId: string
   observation?: ObservationOptions
+  /** Observation-only cleanup; never deletes execution, calls, auth or native sessions. */
+  observationCleanup?: { requestedAt: number; completedAt?: number }
   nativeSessionId?: string
   status: ExecutionStatus
   code?: ExecutionCode

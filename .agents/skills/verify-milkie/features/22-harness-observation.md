@@ -1,6 +1,6 @@
 # Harness 统一执行观测
 
-主票 [#278](https://github.com/xforce-io/milkie/issues/278)，依赖 [21-execution-sidecar](21-execution-sidecar.md)。细化验收以 [设计 v0.2](../../../../docs/design/278-harness-observation-tool-callbacks.md) §11 为准；没有观测浏览器页面。
+主票 [#278](https://github.com/xforce-io/milkie/issues/278)，依赖 [21-execution-sidecar](21-execution-sidecar.md)。细化验收以 [设计 v0.3](../../../../docs/design/278-harness-observation-tool-callbacks.md) §11 为准；没有观测浏览器页面。
 
 ## 入口
 
@@ -26,3 +26,7 @@ python3 .agents/skills/verify-milkie/scripts/check_map.py
 ```
 
 新套件覆盖来源容量/分页/损坏、上下文、共享工具分发及真实子进程协议；它使用确定性 CLI 夹具，不替代两种真实 Harness。原生 Codex 的离线协议探针仍按21执行，不调用真实模型，不能据此写 S1/S2 pass。
+
+## 公开保留清理（#278 v0.3 / TaskLoop #8）
+
+通过 SDK `purgeObservations(runId)` 或 Sidecar `observation.purge` 清理完成且原生停止、无 pending 工具的 Run。活动/停止未知/pending 必须 context_busy，原文件保留；成功及重复成功均核对仅观测文件消失，执行/认证/工具/原生会话不变。模拟删除中断后观察 cleanup_pending，重试后 expired，不能假 complete。对应确定性命令为 executionObservation.test.ts、execution-sidecar.test.ts；真实 Harness 和 TaskLoop 驱动另验。

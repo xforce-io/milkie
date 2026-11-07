@@ -50,6 +50,7 @@
 | SDK | `ExecutionClient.wait` | [16-agent-cli-execution](16-agent-cli-execution.md) |
 | SDK | `ExecutionClient.cancel` | [16-agent-cli-execution](16-agent-cli-execution.md) |
 | SDK | `ExecutionClient.observations` | [22-harness-observation](22-harness-observation.md) |
+| SDK | `ExecutionClient.purgeObservations` | [22-harness-observation](22-harness-observation.md) |
 | SDK | `ExecutionClient.toolCall` | [18-agent-cli-host-tools](18-agent-cli-host-tools.md) |
 | SDK | `ExecutionClient.reconcile` | [19-agent-cli-host-tool-resume](19-agent-cli-host-tool-resume.md) |
 | SDK | `ExecutionClient.pendingToolCalls` | [19-agent-cli-host-tool-resume](19-agent-cli-host-tool-resume.md) |

@@ -1,6 +1,6 @@
 # #278 Harness 观测事件与工具调用关联
 
-版本 v0.2；状态：已确认 Epic 架构范围的设计基线，真实 Harness 验收尚未完成。
+版本 v0.3；状态：已确认 Epic 架构范围的设计基线，真实 Harness 验收尚未完成。
 Issue：https://github.com/xforce-io/milkie/issues/278 。依赖 #277 的67fd96b；分支以其为堆叠基线，不改写 #277 的未完成验收。
 L1: reuse + 整理；来源为会话中「粒度到 Agent 内部工具调用」「Milkie 接入不同 Harness，TaskLoop 集成并统一治理 trace」及本票 S1/S2。仅提供显式启用的 Milkie 数据源，不决定 TaskLoop 默认采集、故障启动策略、查询出口或保留期限；这些原有待决项不视为已批准。
 L2: write；跨进程数据、上下文与公共增量查询需要契约。遵循用户 AGENTS 十三节结构；§11 对应 L1.8。
@@ -98,6 +98,14 @@ S1 为 A→B→C→G/H；S2 为 C→D→E→F→C/G。成功意味着可验证�
 - 标准：[W3C Trace Context](https://www.w3.org/TR/trace-context/)
 
 
-### v0.2 兼容补充：TaskLoop 的任意 JSON 槽位
+### v0.3 兼容补充：TaskLoop 的任意 JSON 槽位
 
 下游源码 `taskloop/src/phase.rs/Bridge::specs` 的 artifact.write.value 为 `{}`，即任意 JSON。宿主工具 Schema 增加空子 Schema 支持：输入仅经过 JSON 传输，根仍必须 type=object；缺少 type 但含其它关键字不冒充空 Schema。Pi 用 Type.Unsafe 原样保留 JSON Schema（对象省略 additionalProperties 时仍按既有约定补 false），Codex/Grok 原样传递 `{}`，不把任意 JSON 偷换成空对象。TaskLoop 仍用自己的输出 Schema 检查候选产物；本变化不弱化业务验收。同时显式校验并保留 Inquiry 工具已有 minLength/maxLength/minimum/maximum；字符串长度按 Unicode 码点计算。由 Unit 及三个适配器确定性协议覆盖。
+
+### 源端保留清理补充（v0.3）
+
+为 TaskLoop #8 提供公开 `ExecutionClient.purgeObservations(runId)` / Sidecar `observation.purge`，能力 `observation.purge=true`，协议 v1 增量兼容。该操作只删除本 Run 的 observations JSONL 和状态 JSON，不删执行记录、工具回执、原生功能会话或认证文件。持有 context 排他锁后重新检查：finishedAt 已发布、stopped=true、非 starting/running、该 Run 无 pending 工具；不满足时 context_busy，不启动或取消执行。
+
+Worker 的 finish 先结束 ObservationJournal 再发布执行终态，后续 Journal.emit 已禁止，因此可清理而不复活。先保存 requestedAt，再删除文件，最后保存 completedAt；中途失败留 cleanup_pending，可幂等重试，不谎报清理完成。已完成再次调用仍检查文件不存在并返回原 purgedAt。读取已清理源返回空页、complete=false、fault=expired；请求中为 cleanup_pending。原事件序号不补造，游标不回退；状态与业务成功/失败独立。
+
+验收：SDK 与真实分发 Sidecar 均覆盖完成、重复清理、运行/停止未知/待核对工具拒绝，以及文件清理中断恢复；原执行、认证、工具和会话文件保留。功能地图 22-harness-observation 覆盖此扩展；TaskLoop #8 的全链路清理必须另经实际适配器验证，不能由本单元测试代替。

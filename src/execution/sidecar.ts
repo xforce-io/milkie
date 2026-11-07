@@ -10,7 +10,7 @@ const MAX_PENDING = 64
 
 type Id = string | number
 type Params = Record<string, unknown>
-type Client = Pick<ExecutionClient, 'capabilities' | 'createContext' | 'getContext' | 'start' | 'query' | 'cancel' | 'toolCall' | 'pendingToolCalls' | 'reconcile' | 'observations'>
+type Client = Pick<ExecutionClient, 'capabilities' | 'createContext' | 'getContext' | 'start' | 'query' | 'cancel' | 'toolCall' | 'pendingToolCalls' | 'reconcile' | 'observations' | 'purgeObservations'>
 class RpcError extends Error {
   constructor(readonly code: number, message: string) { super(message) }
 }
@@ -107,6 +107,7 @@ export function serveExecutionSidecar(input: Readable, output: Writable, client:
           const p = params(raw, ['runId', 'afterSequence', 'limit'], ['runId'])
           return client.observations(string(p, 'runId'), p.afterSequence as number | undefined, p.limit as number | undefined)
         }
+        case 'observation.purge': { const p = params(raw, ['runId'], ['runId']); return client.purgeObservations(string(p, 'runId')) }
         case 'tool.get': { const p = params(raw, ['callId'], ['callId']); return client.toolCall(string(p, 'callId')) ?? null }
         case 'tool.pending': { const p = params(raw, ['contextId'], ['contextId']); return client.pendingToolCalls(string(p, 'contextId')) }
         case 'tool.reconcile': { const p = params(raw, ['callId', 'output'], ['callId', 'output']); return client.reconcile(string(p, 'callId'), string(p, 'output')) }

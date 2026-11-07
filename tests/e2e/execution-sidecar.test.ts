@@ -234,3 +234,19 @@ test.each(['pi', 'codex'])('%s observation notifications and incremental queries
   expect(JSON.stringify(pushed)).not.toContain('observation-sidecar-marker')
   expect((await s.rpc('observation.read', { runId: id, limit: 0 })).error.data.code).toBe('invalid_request')
 })
+
+test('public observation.purge rejects active execution and remains idempotent across sidecar restart', async () => {
+  const s = sidecar(); expect((await s.init()).result.capabilities.observation.purge).toBe(true)
+  const context = await s.context()
+  const started = await s.rpc('execution.start', { contextId: context.contextId, input: 'fixture:sleep', constraints: { timeoutMs: 30000, observation: { traceparent: '00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01', maxEvents: 100, maxBytes: 65536 } } })
+  const runId = started.result.runId
+  expect((await s.rpc('observation.purge', { runId })).error.data.code).toBe('context_busy')
+  expect((await s.rpc('execution.cancel', { runId })).result.stopped).toBe(true)
+  const clean = await s.rpc('observation.purge', { runId })
+  expect(clean.result).toMatchObject({ state: 'purged', runId, contextId: context.contextId })
+  expect((await s.rpc('observation.read', { runId })).result).toMatchObject({ events: [], status: { fault: 'expired', complete: false } })
+  s.child.stdin.end(); await until(() => s.child.exitCode !== null || s.child.signalCode !== null)
+  const again = sidecar(); await again.init()
+  expect((await again.rpc('observation.purge', { runId })).result).toEqual(clean.result)
+  expect((await again.rpc('execution.query', { runId })).result).toMatchObject({ status: 'cancelled', stopped: true })
+})
