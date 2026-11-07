@@ -1,3 +1,4 @@
+import { type ObservationJournal, reportedUsage } from './observation.js'
 import { spawn, execFile, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { isAbsolute, relative, dirname, basename, join } from 'node:path'
 import { realpathSync as realFile } from 'node:fs'
@@ -68,14 +69,15 @@ export class CodexExecution {
   private turnId?: string
   private output = ''
   private ended = false
+  private lastUsage?: string
   private readonly toolJobs = new Set<Promise<void>>()
   private readonly seenCalls = new Set<string>()
   private readonly requestIds = new Set<string | number>()
   private toolDispatch
-  constructor(private readonly request: WorkerRequest, private readonly store: ExecutionStore, onHost: (call: ToolCall) => Promise<unknown>, alive: () => boolean) {
+  constructor(private readonly request: WorkerRequest, private readonly store: ExecutionStore, onHost: (call: ToolCall) => Promise<unknown>, alive: () => boolean, private readonly observation?: ObservationJournal) {
     this.tracker = new ProcessTracker(request.record.runId)
     this.env = { ...cliEnvironment(process.env, request.context), [EXECUTION_TOKEN_ENV]: request.record.runId }
-    this.toolDispatch = createToolDispatcher({ tools: request.hostTools?.tools ?? [], forwarding: request.hostTools?.forwarding ?? 'serial', runId: request.record.runId, contextId: request.context.contextId, store, alive: () => alive() && !this.controller.signal.aborted, onHost })
+    this.toolDispatch = createToolDispatcher({ observation, tools: request.hostTools?.tools ?? [], forwarding: request.hostTools?.forwarding ?? 'serial', runId: request.record.runId, contextId: request.context.contextId, store, alive: () => alive() && !this.controller.signal.aborted, onHost })
     // stop can occur during preflight before a request starts waiting on fatal.
     void this.fatal.catch(() => undefined)
   }
@@ -156,14 +158,21 @@ export class CodexExecution {
       void this.send({ id: m.id, error: { code: -32601, message: 'Undeclared native request denied.' } })
       return
     }
+    if (m.method === 'thread/tokenUsage/updated') {
+      const usage = reportedUsage(p.tokenUsage?.total, 'native_session', 'cumulative', { inputTokens: 'inputTokens', outputTokens: 'outputTokens', totalTokens: 'totalTokens', cachedInputTokens: 'cachedInputTokens', reasoningOutputTokens: 'reasoningOutputTokens' })
+      const key = JSON.stringify(usage)
+      if (usage && key !== this.lastUsage) { this.lastUsage = key; this.observation?.emit('usage', usage, { sessionId: this.threadId }) }
+    }
     if (m.method === 'turn/started') {
       if (p.threadId !== this.threadId || typeof p.turn?.id !== 'string') throw new ExecutionError('protocol_error')
       if (this.turnId && this.turnId !== p.turn.id) throw new ExecutionError('session_mismatch')
       this.turnId = p.turn.id
+      this.observation?.emit('agent.activity', { category: 'turn' }, { sessionId: this.threadId, turnId: this.turnId })
     }
     if (m.method === 'item/started' || m.method === 'item/completed') {
       if (!this.threadId || p.threadId !== this.threadId || !this.turnId || p.turnId !== this.turnId || !record(p.item)) throw new ExecutionError('protocol_error')
       if (!['userMessage', 'agentMessage', 'plan', 'reasoning', 'dynamicToolCall', 'contextCompaction', 'functionCallOutput'].includes(p.item.type)) throw new ExecutionError('policy_mismatch')
+      if (m.method === 'item/started') this.observation?.emit('agent.activity', { category: p.item.type === 'reasoning' ? 'reasoning' : p.item.type === 'dynamicToolCall' ? 'tool' : p.item.type === 'contextCompaction' ? 'compaction' : 'message' }, { sessionId: this.threadId, turnId: this.turnId })
       if (m.method === 'item/completed' && p.item.type === 'agentMessage') {
         if (typeof p.item.text !== 'string') throw new ExecutionError('protocol_error')
         this.output += p.item.text

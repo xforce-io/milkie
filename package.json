@@ -32,7 +32,7 @@
     "test:e2e:redis": "sh tests/e2e/run-redis-e2e.sh",
     "lint": "eslint src --ext .ts",
     "test:package": "jest tests/e2e/package-distribution.test.ts --runInBand",
-    "test:execution": "npm run build && jest --runInBand --runTestsByPath src/__tests__/agentExecution.test.ts src/__tests__/codexExecution.test.ts tests/e2e/execution-sidecar.test.ts"
+    "test:execution": "npm run build && jest --runInBand --runTestsByPath src/__tests__/agentExecution.test.ts src/__tests__/codexExecution.test.ts src/__tests__/executionObservation.test.ts tests/e2e/execution-sidecar.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.52.0",

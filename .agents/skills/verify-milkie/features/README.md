@@ -34,6 +34,8 @@
 
 | [21-execution-sidecar](21-execution-sidecar.md) | 本地版本化执行协议与宿主生命周期 | #277 候选；Codex 与第二真实 Harness 验收尚未完成 |
 
+| [22-harness-observation](22-harness-observation.md) | 外部执行观测、关联、来源缓冲与安全摘要 | #278；真实 Harness 验收仍待完成 |
+
 ## 主入口逐项归属
 
 此表用于源码漂移检查；每个入口仅指定一个主归属，跨能力路径通过功能文件说明。
@@ -47,6 +49,8 @@
 | SDK | `ExecutionClient.query` | [16-agent-cli-execution](16-agent-cli-execution.md) |
 | SDK | `ExecutionClient.wait` | [16-agent-cli-execution](16-agent-cli-execution.md) |
 | SDK | `ExecutionClient.cancel` | [16-agent-cli-execution](16-agent-cli-execution.md) |
+| SDK | `ExecutionClient.observations` | [22-harness-observation](22-harness-observation.md) |
+| SDK | `ExecutionClient.purgeObservations` | [22-harness-observation](22-harness-observation.md) |
 | SDK | `ExecutionClient.toolCall` | [18-agent-cli-host-tools](18-agent-cli-host-tools.md) |
 | SDK | `ExecutionClient.reconcile` | [19-agent-cli-host-tool-resume](19-agent-cli-host-tool-resume.md) |
 | SDK | `ExecutionClient.pendingToolCalls` | [19-agent-cli-host-tool-resume](19-agent-cli-host-tool-resume.md) |

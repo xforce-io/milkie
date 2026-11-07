@@ -17,7 +17,7 @@ const server=http.createServer((req,res)=>{requests++;req.resume();res.writeHead
  fs.writeFileSync(path.join(configDir,'config.toml'),`model_provider = "fixture"\n[model_providers.fixture]\nname = "fixture"\nbase_url = "http://127.0.0.1:${port}/v1"\nwire_api = "responses"\nrequires_openai_auth = false\nrequest_max_retries = 0\nstream_max_retries = 0\n`)
  const client=new ExecutionClient({dataDir:path.join(root,'data'),connection:{contractVersion:1,fields:{transport:'agent-cli',runtime:'codex',model:'gpt-6-astra'}},env:{...process.env,PATH:process.env.PATH,NO_PROXY:'127.0.0.1,localhost',no_proxy:'127.0.0.1,localhost'},lifetime:'host'})
  const c=client.createContext(cwd,{configDir,sessionDir});safeToRemove=false
- const id=client.start(c.contextId,'Local fixture protocol probe. No real credentials.',{timeoutMs:15000})
+ const id=client.start(c.contextId,'Local fixture protocol probe. No real credentials.',{timeoutMs:15000,observation:{traceparent:'00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01',maxEvents:100,maxBytes:65536}})
  let r
  const end=Date.now()+25000
  while(Date.now()<end){r=client.query(id);if(r?.finishedAt)break;await new Promise(r=>setTimeout(r,50))}
@@ -25,8 +25,9 @@ const server=http.createServer((req,res)=>{requests++;req.resume();res.writeHead
  safeToRemove=r.stopped===true
  const context=client.getContext(c.contextId),file=context.nativeSessionFile
  const header=file&&fs.existsSync(file)?JSON.parse(fs.readFileSync(file,'utf8').split('\n')[0]):undefined
- const summary={status:r.status,code:r.code,stopped:r.stopped,providerRequests:requests,provider:'loopback fixture only',realCredentials:false,sessionFileExists:!!header,headerType:header?.type,sessionIdMatches:header?.payload?.id===context.nativeSessionId,cwdMatches:header?.payload?.cwd===context.cwd}
+ const observed=client.observations(id)
+ const summary={observationComplete:observed.status.complete,observationKinds:observed.events.map(e=>e.kind),status:r.status,code:r.code,stopped:r.stopped,providerRequests:requests,provider:'loopback fixture only',realCredentials:false,sessionFileExists:!!header,headerType:header?.type,sessionIdMatches:header?.payload?.id===context.nativeSessionId,cwdMatches:header?.payload?.cwd===context.cwd}
  fs.writeFileSync(path.join(evidence,'summary.json'),JSON.stringify(summary,null,2))
  console.log(JSON.stringify(summary))
- if(r.status!=='failed'||r.code!=='auth_failed'||!r.stopped||requests!==1||header?.type!=='session_meta'||header.payload.id!==context.nativeSessionId||header.payload.cwd!==context.cwd)process.exitCode=1
+ if(!observed.status.complete||observed.events.at(-1)?.kind!=='execution.finished'||r.status!=='failed'||r.code!=='auth_failed'||!r.stopped||requests!==1||header?.type!=='session_meta'||header.payload.id!==context.nativeSessionId||header.payload.cwd!==context.cwd)process.exitCode=1
 })().catch(e=>{console.error(e.message);process.exitCode=1}).finally(()=>{server.close();if(safeToRemove)fs.rmSync(root,{recursive:true,force:true});else console.error('Preserved unresolved fixture execution: '+root)})

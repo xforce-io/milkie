@@ -1,3 +1,4 @@
+import { ObservationJournal, observationCapabilities, reportedUsage } from './observation.js'
 import { spawn } from 'node:child_process'
 import { existsSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs'
 import { join } from 'node:path'
@@ -15,6 +16,8 @@ interface ParentLife { dead: boolean }
 
 export async function runExecution(request: WorkerRequest, life?: ParentLife): Promise<void> {
   const store = new ExecutionStore(request.dataDir), { context, record, constraints } = request
+  const observation = constraints.observation ? new ObservationJournal(store, record, constraints.observation) : undefined
+  observation?.emit('execution.started', { runtime: context.connection.runtime ?? 'api', capabilities: observationCapabilities(context.connection.runtime ?? 'api') })
   const hosted = request.hostTools
   const waiters = new Map<string, (result: unknown) => void>()
   if (hosted) {
@@ -26,6 +29,8 @@ export async function runExecution(request: WorkerRequest, life?: ParentLife): P
       resolve(message.result)
     })
   }
+  let gatewayPending = false
+  let hostLostObserved = false
   let stopping: 'cancelled' | 'timed_out' | undefined
   let stop: (() => void) | undefined
   let terminal = false
@@ -39,15 +44,20 @@ export async function runExecution(request: WorkerRequest, life?: ParentLife): P
     record.heartbeatAt = Date.now()
     if (tracker) record.resources = tracker.resources()
     store.write('runs', record.runId, record)
-    if (life?.dead) { stop?.(); return }
+    if (life?.dead) {
+      if (!hostLostObserved) { observation?.emit('execution.interrupted', { reason: 'host_lost' }); hostLostObserved = true }
+      stop?.(); return
+    }
     if (!stopping && (store.isCancelled(record.runId) || Date.now() - record.startedAt >= constraints.timeoutMs)) {
       stopping = store.isCancelled(record.runId) ? 'cancelled' : 'timed_out'
+      observation?.emit('execution.interrupted', { reason: stopping })
       stop?.()
     }
   }
   const timer = setInterval(() => { try { pulse() } catch { stopping = 'cancelled'; stop?.() } }, 50)
   const finish = (status: ExecutionStatus, stopped: boolean) => {
     if (terminal) return
+    observation?.finish(status, stopped, record.code, stopping ?? (life?.dead ? 'host_lost' : undefined))
     terminal = true; clearInterval(timer)
     if (tracker) record.resources = tracker.resources()
     record.status = status; record.stopped = stopped; record.finishedAt = Date.now(); record.heartbeatAt = Date.now()
@@ -78,7 +88,13 @@ export async function runExecution(request: WorkerRequest, life?: ParentLife): P
       const controller = new AbortController()
       stop = () => controller.abort()
       const { gateway } = assembleApiGateway(resolveAndParseConnection(request.connection))
+      gatewayPending = true
+      observation?.emit('model.requested', { scope: 'gateway-boundary' })
       const response = await gateway.complete({ model: context.connection.model!, messages: [{ role: 'user', content: [{ type: 'text', text: request.input }] }] }, { signal: controller.signal })
+      gatewayPending = false
+      observation?.emit('model.responded', { scope: 'gateway-boundary', outcome: 'succeeded' })
+      const usage = reportedUsage(response.usage, 'gateway', 'delta', { inputTokens: 'inputTokens', outputTokens: 'outputTokens', cachedInputTokens: 'cacheReadTokens' })
+      if (usage) observation?.emit('usage', usage)
       pulse() // Recheck the wall clock even when gateway work delayed the timer.
       record.output = response.content.filter(c => c.type === 'text').map(c => c.type === 'text' ? c.text : '').join('')
       finish(stopping ?? 'succeeded', true)
@@ -87,7 +103,7 @@ export async function runExecution(request: WorkerRequest, life?: ParentLife): P
     prepareCliStorage(context)
     assertNativeSession(context)
     if (context.connection.runtime === 'codex') {
-      const codex = new CodexExecution(request, store, onHost, () => !life?.dead && !terminal)
+      const codex = new CodexExecution(request, store, onHost, () => !life?.dead && !terminal, observation)
       tracker = codex.tracker
       stop = () => { void codex.stop() }
       cleanup = () => codex.stop()
@@ -116,7 +132,7 @@ export async function runExecution(request: WorkerRequest, life?: ParentLife): P
       bridge = await openToolBridge({
         tools: hosted.tools, forwarding: hosted.forwarding, runId: record.runId, contextId: context.contextId, store,
         alive: () => !life?.dead && !terminal,
-        onHost,
+        onHost, observation,
         onBroken: () => { record.code = 'process_failed'; stop?.() },
       })
       if (life?.dead) { finish('unknown', true); return }
@@ -143,7 +159,7 @@ export async function runExecution(request: WorkerRequest, life?: ParentLife): P
     const childEnv = cliEnvironment(process.env, context, hosted && bridge ? { socketPath: bridge.socketPath, forwarding: hosted.forwarding } : undefined)
     // Grok takes a file; Pi takes stdin. Never expose a prompt in process argv.
     if (context.connection.runtime === 'grok-cli') writeFileSync(promptFile, request.input, { mode: 0o600, flag: 'wx' })
-    const events = new CliEvents(context.connection.runtime as 'grok-cli' | 'pi')
+    const events = new CliEvents(context.connection.runtime as 'grok-cli' | 'pi', observation)
     tracker = new ProcessTracker(record.runId)
     const child = spawn(command.command, command.args, { cwd: context.cwd, env: { ...childEnv, [EXECUTION_TOKEN_ENV]: record.runId }, detached: !hosted, stdio: ['pipe', 'pipe', 'pipe'] })
     let stderr = '', processError = false, stopResult: Promise<boolean> | undefined
@@ -220,6 +236,7 @@ export async function runExecution(request: WorkerRequest, life?: ParentLife): P
     record.output = events.output
     finish('succeeded', true)
   } catch (e) {
+    if (gatewayPending) observation?.emit('model.responded', { scope: 'gateway-boundary', outcome: 'failed' })
     if (life?.dead) {
       const stopped = cleanup ? await cleanup() : true
       finish('unknown', stopped)

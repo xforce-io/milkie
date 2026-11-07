@@ -234,3 +234,7 @@ MIT
 ### 外部 CLI 执行
 
 统一执行、查询、取消与原生会话续接的 SDK 用法见[外部执行 SDK](docs/agent-cli-execution.md)。提供 Grok/Pi 适配，默认只读；支持范围与真实验收入口见文档。
+
+### 来源观测保留清理
+
+通过 `ExecutionClient.purgeObservations(runId)` 或 Sidecar `observation.purge`，可以幂等清理已结束且原生停止、无待核对工具的 Run 观测缓冲。能力以 `observation.purge=true` 声明；SDK/协议仍为版本 1 的增量扩展。读取清理中或已清理来源分别返回 `cleanup_pending` / `expired`，不伪造完整或业务成功。该操作保留执行/工具记录、原生功能会话与认证材料；活动或停止未确认时拒绝，不执行取消。详见 [#278 v0.3](docs/design/278-harness-observation-tool-callbacks.md)。

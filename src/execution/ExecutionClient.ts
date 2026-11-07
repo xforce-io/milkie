@@ -1,7 +1,8 @@
+import { assertObservation, observationCapabilities, readObservations } from './observation.js'
 import { fork, type ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
-import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, unlinkSync } from 'node:fs'
 import { setTimeout as delay } from 'node:timers/promises'
 import type { ConnectionInput } from '../connection/types.js'
 import { resolveAndParseConnection } from '../connection/parse.js'
@@ -40,6 +41,7 @@ export class ExecutionClient {
       supported: ready,
       ...(!supported ? { code: 'unsupported_runtime' as const } : !platform ? { code: 'platform_unsupported' as const } : {}),
       availability: 'unchecked',
+      ...(ready ? { observation: observationCapabilities(this.projection.runtime ?? 'api') } : {}),
       resume: cli,
       workingDirectory: ready,
       toolPolicies: ready ? (this.projection.runtime === 'codex' ? ['read-only'] : ['read-only', 'standard']) : [],
@@ -69,8 +71,10 @@ export class ExecutionClient {
     this.assertSupported()
     if (typeof input !== 'string' || !input.trim() || input.length > 1024 * 1024) throw new ExecutionError('invalid_request')
     if (!constraints || Array.isArray(constraints) || typeof constraints !== 'object') throw new ExecutionError('unsupported_constraint')
-    const allowed = new Set(['toolPolicy', 'timeoutMs', 'maxModelIterations', 'tools', 'forwarding'])
+    const allowed = new Set(['toolPolicy', 'timeoutMs', 'maxModelIterations', 'tools', 'forwarding', 'observation'])
     if (Object.keys(constraints).some(key => !allowed.has(key))) throw new ExecutionError('unsupported_constraint')
+    if (constraints.observation !== undefined) assertObservation(constraints.observation)
+    const observation = constraints.observation ? structuredClone(constraints.observation) : undefined
     const hasTools = constraints.tools !== undefined
     if (hasTools && constraints.toolPolicy !== undefined) throw new ExecutionError('unsupported_constraint')
     if (!hasTools && constraints.forwarding !== undefined) throw new ExecutionError('unsupported_constraint')
@@ -126,7 +130,7 @@ export class ExecutionClient {
           prepareCliStorage(context)
           assertNativeSession(context)
         }
-        const record: ExecutionRecord = { version: 1, runId, contextId, nativeSessionId: context.nativeSessionId, status: 'starting', startedAt: Date.now(), heartbeatAt: Date.now(), stopped: false }
+        const record: ExecutionRecord = { version: 1, runId, contextId, nativeSessionId: context.nativeSessionId, ...(observation ? { observation } : {}), status: 'starting', startedAt: Date.now(), heartbeatAt: Date.now(), stopped: false }
         this.store.write('runs', runId, record)
         const childEnv = context.connection.transport === 'agent-cli' ? supervisorEnvironment(this.env) : this.env
         const attached = !!hostTools || this.hostLifetime
@@ -150,12 +154,12 @@ export class ExecutionClient {
         if (hostTools && handler) {
           child.on('message', (message: WorkerToolMessage) => {
             if (!message || message.type !== 'tool-call' || !message.call) return
-            void Promise.resolve().then(() => handler(message.call)).then(result => normalizeToolResult(result), () => normalizeToolResult(undefined)).then(result => {
+            void Promise.resolve().then(() => handler(message.call)).then(result => normalizeToolResult(result), () => ({ ok: false as const, code: 'execution_failed' as const, message: 'Host tool execution failed.' })).then(result => {
               try { child?.send({ type: 'tool-result', callId: message.call.callId, result }) } catch { /* The worker has already exited. */ }
             })
           })
         }
-        const message: WorkerRequest = { hostLifetime: this.hostLifetime, dataDir: this.store.root, context, record, connection: this.connection, input, constraints: { toolPolicy: hostTools ? undefined : toolPolicy, timeoutMs, ...(maxModelIterations !== undefined ? { maxModelIterations } : {}) }, ...(hostTools ? { hostTools } : {}) }
+        const message: WorkerRequest = { hostLifetime: this.hostLifetime, dataDir: this.store.root, context, record, connection: this.connection, input, constraints: { ...(observation ? { observation } : {}), toolPolicy: hostTools ? undefined : toolPolicy, timeoutMs, ...(maxModelIterations !== undefined ? { maxModelIterations } : {}) }, ...(hostTools ? { hostTools } : {}) }
         child.send(message, err => { if (err) fail() })
         if (!attached) child.unref()
         return runId
@@ -163,6 +167,32 @@ export class ExecutionClient {
         if (child && child.exitCode === null) child.kill('SIGKILL')
         this.store.release(contextId, runId); throw e
       }
+    })
+  }
+  observations(runId: string, afterSequence = 0, limit = 100) {
+    const run = this.query(runId)
+    if (!run) throw new ExecutionError('invalid_request')
+    return readObservations(this.store, run, afterSequence, limit)
+  }
+  /** Idempotent observation-only retention operation. No execution is started or cancelled. */
+  purgeObservations(runId: string): { version: 1; runId: string; contextId: string; state: 'purged' | 'disabled'; purgedAt?: number } {
+    const initial = this.store.run(runId)
+    if (!initial) throw new ExecutionError('invalid_request')
+    return this.store.exclusive(initial.contextId, () => {
+      const run = this.store.run(runId)
+      if (!run || run.contextId !== initial.contextId) throw new ExecutionError('storage_error')
+      if (!run.observation) return { version: 1, runId, contextId: run.contextId, state: 'disabled' }
+      // finish() closes the journal before publishing finishedAt. Pending host
+      // effects must remain diagnosable until the caller reconciles them.
+      if (ACTIVE.has(run.status) || !run.finishedAt || !run.stopped || this.pendingCalls(run.contextId).some(c => c.runId === runId)) throw new ExecutionError('context_busy')
+      run.observationCleanup ??= { requestedAt: Date.now() }
+      this.store.write('runs', runId, run)
+      for (const file of [join(this.store.root, 'observations', `${runId}.jsonl`), this.store.path('observations', runId)]) {
+        try { unlinkSync(file) } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new ExecutionError('storage_error') }
+      }
+      run.observationCleanup.completedAt ??= Date.now()
+      this.store.write('runs', runId, run)
+      return { version: 1, runId, contextId: run.contextId, state: 'purged', purgedAt: run.observationCleanup.completedAt }
     })
   }
   toolCall(callId: string): ToolCallRecord | undefined { return this.store.read<ToolCallRecord>('calls', callId) }
