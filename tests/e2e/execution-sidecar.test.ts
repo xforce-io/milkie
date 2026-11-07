@@ -250,3 +250,56 @@ test('public observation.purge rejects active execution and remains idempotent a
   expect((await again.rpc('observation.purge', { runId })).result).toEqual(clean.result)
   expect((await again.rpc('execution.query', { runId })).result).toMatchObject({ status: 'cancelled', stopped: true })
 })
+
+test('terminal tool waiters release connection capacity and ignore late replies', async () => {
+  const { PassThrough } = require('node:stream') as typeof import('node:stream')
+  const { serveExecutionSidecar } = require('../../dist/execution/sidecar') as typeof import('../../src/execution/sidecar')
+  const input = new PassThrough(), output = new PassThrough()
+  const messages: any[] = [], runs = new Map<string, any>(), responses: unknown[] = []
+  let count = 0, buffer = '', finished = false
+  output.setEncoding('utf8'); output.on('data', (s: string) => {
+    buffer += s
+    let end: number
+    while ((end = buffer.indexOf('\n')) >= 0) { messages.push(JSON.parse(buffer.slice(0, end))); buffer = buffer.slice(end + 1) }
+  })
+  const client = {
+    capabilities: () => ({}),
+    start: (_: string, __: string, ___: unknown, onTool: (call: any) => Promise<unknown>) => {
+      const runId = `run-${++count}`
+      runs.set(runId, { runId, contextId: 'context', status: 'cancelled', stopped: true, finishedAt: 1 })
+      void onTool({ runId, contextId: 'context', callId: `call-${count}`, name: 'alpha', input: {} }).then(result => responses.push(result))
+      return runId
+    },
+    query: (id: string) => runs.get(id), cancel: async (id: string) => runs.get(id),
+  }
+  const serving = serveExecutionSidecar(input, output, client as any).then(() => { finished = true })
+  const rpc = async (id: number, method: string, params: unknown) => {
+    input.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n')
+    return until(() => messages.find(m => m.id === id && !m.method))
+  }
+  try {
+    await rpc(0, 'initialize', { protocolVersion: 1 })
+    for (let i = 1; i <= 64; i++) await rpc(i, 'execution.start', { contextId: 'context', input: 'synthetic', constraints: { tools: [] } })
+    await until(() => messages.some(m => m.method === 'execution.updated' && m.params.runId === 'run-64'))
+    await delay(10)
+    const retiredCall = messages.find(m => m.method === 'tool.call')
+    input.write(JSON.stringify({ jsonrpc: '2.0', id: retiredCall.id, result: { ok: true, output: 'late' } }) + '\n')
+    const next = await rpc(65, 'execution.start', { contextId: 'context', input: 'synthetic', constraints: { tools: [] } })
+    expect(next.result.runId).toBe('run-65')
+    expect(finished).toBe(false)
+    expect(responses).toHaveLength(64)
+    expect(responses.every((x: any) => x.ok === false)).toBe(true)
+  } finally { input.end(); await serving }
+})
+
+test('cancelled execution transport cleanup preserves pending effects and ignores late host success', async () => {
+  const s = sidecar(); await s.init(); const c = await s.context()
+  const runId = (await s.rpc('execution.start', { contextId: c.contextId, input: 'fixture:hold', constraints: { tools: [alpha], timeoutMs: 30000 } })).result.runId
+  const call = await until(() => s.messages.find(m => m.method === 'tool.call'))
+  await s.rpc('execution.cancel', { runId })
+  expect(await s.terminal(runId)).toMatchObject({ status: 'cancelled', stopped: true })
+  await delay(300)
+  s.write({ jsonrpc: '2.0', id: call.id, result: { ok: true, output: 'late-host-success' } })
+  expect((await s.rpc('tool.get', { callId: call.params.callId })).result).toMatchObject({ status: 'pending', runId })
+  expect((await s.rpc('execution.start', { contextId: c.contextId, input: 'must-not-replay' })).error.data.code).toBe('context_busy')
+})

@@ -1,9 +1,9 @@
 # #277 版本化 Sidecar 执行入口
 
-版本 v0.3；状态：已确认架构范围的技术契约，整票尚未完成设计与验收。
+版本 v0.4；状态：技术契约与真实环境矩阵已固定；验收证据及独立审查分别记账。
 Issue：https://github.com/xforce-io/milkie/issues/277 。
 
-L1: reuse + 整理。确认依据为本次会话中 TaskLoop 通过 Milkie 统一接入不同 Harness、采用本地 Sidecar、宿主保留工具授权与执行职责、异常停止必须可判定的讨论，以及 Epic #5 S1/S2/S5。用户目标为端到端交付 PR，未授权合入/部署。以下协议工作不选择第二真实 Harness、不改变既有执行预算或 TaskLoop 查询入口；这些尚待确认的选择不被本稿默认批准。
+L1: reuse + 整理。确认依据为本次会话中 TaskLoop 通过 Milkie 统一接入不同 Harness、采用本地 Sidecar、宿主保留工具授权与执行职责、异常停止必须可判定的讨论，以及 Epic #5 S1/S2/S5。用户目标为端到端交付 PR，未授权合入/部署。第二真实 Harness 固定为本机 Pi 1.2.0；选择依据为用户本轮“这台机器自己找环境，没有就建”的授权及本机真实验证。不改变既有执行预算或 TaskLoop 查询入口。
 L2: write。跨语言进程边界与公共协议需要固定契约。本稿采用用户 AGENTS 的十三节格式；L1 摘要放 Issue comment，细化可判定验收集中在 §11，属于 L1.8 语义映射。
 
 ## 1 背景
@@ -97,7 +97,7 @@ S1 覆盖 B→D→E→F→I，S2 覆盖两个独立上下文及 H/J。失败结�
 
 ## 12 开放问题
 
-第二真实 Harness 的最终选择与版本矩阵尚未确认；Codex 固定版本已用本机 app-server schema 与官方文档核对，但真实执行环境尚待提供。它们阻止 S1.A2/S2.A1 的整票完成，不阻止与 Harness 无关的协议及父生命周期代码。本稿不设 TaskLoop trace 默认策略和阶段时限。
+真实验收固定 Codex CLI 0.166.0 / gpt-6-astra / high 与 Pi 1.2.0 / openai-codex/gpt-5.6-sol / high；模型必须显式指定，不自动回退。宿主提供每类 Harness 的专用 config/session 目录与已有有效登录；本机 Node 进程显式继承已存在的系统网络设置，不修改全局配置。仅具备目录不算通过，仍须保留 §11 的真实成功、取消与隔离证据。本稿不设 TaskLoop trace 默认策略和阶段时限。
 
 ## 13 关联
 
@@ -108,7 +108,7 @@ S1 覆盖 B→D→E→F→I，S2 覆盖两个独立上下文及 H/J。失败结�
 
 ### v0.2 增量：Codex 固定版本边界
 
-本增量只补齐既有 S1/S2 的原生适配技术契约，不改变第二 Harness 的待决状态。依据为本机 `codex-cli 0.166.0` 生成的 experimental JSON Schema，以及 [官方 app-server 流程](https://learn.chatgpt.com/docs/app-server)。旧 v0.1 验收编号保持不变，验收不因实现差异减少。
+本增量只补齐既有 S1/S2 的原生适配技术契约，沿用 §12 固定的第二 Harness。依据为本机 `codex-cli 0.166.0` 生成的 experimental JSON Schema，以及 [官方 app-server 流程](https://learn.chatgpt.com/docs/app-server)。旧 v0.1 验收编号保持不变，验收不因实现差异减少。
 
 - Codex 使用 app-server stdio，版本必须精确为0.166.0、模型必须显式指定；PATH 由宿主提供，版本不匹配、CLI 缺失、认证失败均明确报错，不调用其它 Harness 或模型。能力报告支持与 readiness=unchecked 分离；原生模型迭代计数无法在该协议可靠强制，因此 modelIterations=false、设置此约束时启动前 unsupported_constraint。
 - 初始化禁用 shell、浏览器、图片、技能发现、hooks、远端插件、多 Agent 与 web search，并枚举及再次验证关闭所有继承 MCP。仅提供宿主工具；read-only 为原生进程防御边界，不提供原生读文件能力；standard 在启动前拒绝。未登记原生请求明确拒绝，发现原生效果项视为 policy_mismatch，停止进程。
