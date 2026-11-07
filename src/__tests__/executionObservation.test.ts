@@ -266,3 +266,43 @@ test('interrupted purge stays pending and retries even after partial deletion', 
   expect(a.purgeObservations(run.runId).state).toBe('purged')
   expect(a.observations(run.runId).status.fault).toBe('expired')
 })
+
+test('incremental source reads do not reparse historical records and still validate appended data', () => {
+  const { store, run, writer } = journal({ ...opts, maxEvents: 3000, maxBytes: 4 * 1024 * 1024 })
+  for (let n = 0; n < 2000; n++) writer.emit('agent.activity', { category: 'message' })
+  readObservations(store, run, 2000, 1)
+  const parse = jest.spyOn(JSON, 'parse')
+  try {
+    for (let n = 0; n < 5; n++) expect(readObservations(store, run, 2000, 1).events).toEqual([])
+    // Only the small state JSON may be parsed on an empty incremental page.
+    expect(parse.mock.calls.length).toBeLessThanOrEqual(5)
+    writer.emit('agent.activity', { category: 'turn' })
+    parse.mockClear()
+    expect(readObservations(store, run, 2000, 1).events.map(e => e.sequence)).toEqual([2001])
+    expect(parse.mock.calls.length).toBeLessThanOrEqual(3)
+    writer.finish('succeeded', true)
+    expect(readObservations(store, run, 2001, 1)).toMatchObject({ status: { complete: true }, nextSequence: 2002 })
+    appendFileSync(join(store.root, 'observations', `${run.runId}.jsonl`), '{bad-tail')
+    expect(readObservations(store, run, 2002, 1).status).toMatchObject({ complete: false, fault: 'corrupt' })
+  } finally { parse.mockRestore() }
+})
+
+test('source indexes invalidate on replacement truncation and same-size edits', () => {
+  const { renameSync, utimesSync } = require('node:fs') as typeof import('node:fs')
+  const { store, run, writer } = journal()
+  writer.emit('agent.activity', { category: 'message' }); writer.finish('succeeded', true)
+  const file = join(store.root, 'observations', `${run.runId}.jsonl`), original = readFileSync(file, 'utf8')
+  expect(readObservations(store, run).status.complete).toBe(true)
+  expect(readObservations(store, { ...run, contextId: 'wrong-context' }).status).toMatchObject({ complete: false, fault: 'corrupt' })
+  expect(readObservations(store, run).status.complete).toBe(true)
+  const rows = original.trim().split('\n').map(line => JSON.parse(line))
+  rows[0].id = rows[1].id
+  const edited = rows.map(row => JSON.stringify(row)).join('\n') + '\n'
+  expect(Buffer.byteLength(edited)).toBe(Buffer.byteLength(original))
+  writeFileSync(file, edited); utimesSync(file, new Date(), new Date(Date.now() + 2000))
+  expect(readObservations(store, run).status).toMatchObject({ complete: false, fault: 'corrupt' })
+  writeFileSync(file + '.replacement', original); renameSync(file + '.replacement', file)
+  expect(readObservations(store, run).status.complete).toBe(true)
+  writeFileSync(file, original.slice(0, 20))
+  expect(readObservations(store, run).status).toMatchObject({ complete: false, fault: 'corrupt' })
+})

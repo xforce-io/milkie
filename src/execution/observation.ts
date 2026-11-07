@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
-import { appendFileSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { appendFileSync, closeSync, mkdirSync, openSync, readSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { ExecutionError, type ExecutionRecord, type ExecutionStatus } from './types.js'
 import { ExecutionStore } from './store.js'
@@ -141,28 +141,84 @@ export class ObservationJournal {
   }
 }
 
-/** Parsing is intentionally conservative: a missing terminal or corrupt tail is incomplete. */
+interface IndexedSource {
+  contextId: string; traceId: string; dev: number; ino: number; size: number; mtimeMs: number; offset: number
+  rows: { sequence: number; offset: number; length: number }[]
+  ids: Set<string>; lastSequence: number; terminal: boolean; fault?: 'corrupt'
+}
+// Keep offsets and IDs, never event bodies. A client can watch at most 64 Runs.
+const readIndexes = new WeakMap<ExecutionStore, Map<string, IndexedSource>>()
+function sourceIndex(store: ExecutionStore, run: ExecutionRecord, file: string): IndexedSource {
+  const stat = statSync(file)
+  if (stat.size > 64 * 1024 * 1024) throw new Error('oversized')
+  let indexes = readIndexes.get(store)
+  if (!indexes) { indexes = new Map(); readIndexes.set(store, indexes) }
+  let index = indexes.get(run.runId)
+  // The journal is append-only. Replacement, truncation and same-size edits
+  // invalidate its validated prefix; a changed corrupt source is rechecked.
+  if (!index || index.contextId !== run.contextId || index.traceId !== run.observation!.traceparent.slice(3, 35) || index.dev !== stat.dev || index.ino !== stat.ino || stat.size < index.size ||
+      (stat.size === index.size && stat.mtimeMs !== index.mtimeMs) ||
+      (index.fault && (stat.size !== index.size || stat.mtimeMs !== index.mtimeMs))) {
+    index = { contextId: run.contextId, traceId: run.observation!.traceparent.slice(3, 35), dev: stat.dev, ino: stat.ino, size: 0, mtimeMs: 0, offset: 0, rows: [], ids: new Set(), lastSequence: 0, terminal: false }
+  }
+  indexes.delete(run.runId); indexes.set(run.runId, index)
+  if (indexes.size > 64) indexes.delete(indexes.keys().next().value!)
+  if (index.size === stat.size && index.mtimeMs === stat.mtimeMs) return index
+  index.size = stat.size; index.mtimeMs = stat.mtimeMs
+  if (index.offset === stat.size) return index
+  const fd = openSync(file, 'r')
+  try {
+    const tail = Buffer.alloc(stat.size - index.offset)
+    let count = 0
+    while (count < tail.length) { const n = readSync(fd, tail, count, tail.length - count, index.offset + count); if (!n) throw new Error('truncated'); count += n }
+    let from = 0
+    for (;;) {
+      const end = tail.indexOf(10, from)
+      if (end < 0) break
+      if (end > from) {
+        const event = JSON.parse(tail.subarray(from, end).toString('utf8')) as ExecutionObservation
+        if (event.version !== 1 || event.sourceId !== run.runId || event.runId !== run.runId || event.contextId !== run.contextId || !Number.isSafeInteger(event.sequence) || event.sequence <= index.lastSequence || typeof event.id !== 'string' || index.ids.has(event.id) || event.traceId !== run.observation!.traceparent.slice(3, 35) || index.rows.length >= 100000) throw new Error('corrupt')
+        index.ids.add(event.id); index.lastSequence = event.sequence; index.terminal = event.kind === 'execution.finished'
+        index.rows.push({ sequence: event.sequence, offset: index.offset + from, length: end - from })
+      }
+      from = end + 1
+    }
+    index.offset += from
+    if (from !== tail.length) index.fault = 'corrupt'
+  } catch { index.fault = 'corrupt' }
+  finally { closeSync(fd) }
+  return index
+}
+
+/** Validate appended bytes once; pages read only their indexed records. */
 export function readObservations(store: ExecutionStore, run: ExecutionRecord, afterSequence = 0, limit = 100): ObservationPage {
   if (!Number.isSafeInteger(afterSequence) || afterSequence < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 1000) throw new ExecutionError('invalid_request')
   if (!run.observation) return { enabled: false, events: [], nextSequence: afterSequence, status: { state: 'disabled', complete: false, lastSequence: 0, dropped: 0 } }
-  if (run.observationCleanup) return { enabled: true, events: [], nextSequence: afterSequence, status: { state: 'incomplete', complete: false, lastSequence: 0, dropped: 0, fault: run.observationCleanup.completedAt ? 'expired' : 'cleanup_pending' } }
+  if (run.observationCleanup) {
+    readIndexes.get(store)?.delete(run.runId)
+    return { enabled: true, events: [], nextSequence: afterSequence, status: { state: 'incomplete', complete: false, lastSequence: 0, dropped: 0, fault: run.observationCleanup.completedAt ? 'expired' : 'cleanup_pending' } }
+  }
   const events: ExecutionObservation[] = []
   let state: ObservationState | undefined, fault: ObservationPage['status']['fault'], previous = 0, terminal = false
   try {
     state = store.read<ObservationState>('observations', run.runId)
     const file = join(store.root, 'observations', `${run.runId}.jsonl`)
-    if (statSync(file).size > 64 * 1024 * 1024) throw new Error('oversized')
-    const text = readFileSync(file, 'utf8')
-    if (text && !text.endsWith('\n')) fault = 'corrupt'
-    const ids = new Set<string>()
-    for (const line of text.split('\n')) {
-      if (!line) continue
-      const e = JSON.parse(line) as ExecutionObservation
-      if (e.version !== 1 || e.sourceId !== run.runId || e.runId !== run.runId || e.contextId !== run.contextId || !Number.isSafeInteger(e.sequence) || e.sequence <= previous || typeof e.id !== 'string' || ids.has(e.id) || e.traceId !== run.observation.traceparent.slice(3, 35)) throw new Error('corrupt')
-      ids.add(e.id); previous = e.sequence; terminal = e.kind === 'execution.finished'
-      if (e.sequence > afterSequence && events.length < limit) events.push(e)
+    const index = sourceIndex(store, run, file)
+    previous = index.lastSequence; terminal = index.terminal; fault = index.fault
+    let low = 0, high = index.rows.length
+    while (low < high) { const mid = (low + high) >>> 1; if (index.rows[mid]!.sequence <= afterSequence) low = mid + 1; else high = mid }
+    if (low < index.rows.length) {
+      const fd = openSync(file, 'r')
+      try {
+        for (const row of index.rows.slice(low, low + limit)) {
+          const bytes = Buffer.alloc(row.length)
+          let count = 0
+          while (count < bytes.length) { const n = readSync(fd, bytes, count, bytes.length - count, row.offset + count); if (!n) throw new Error('truncated'); count += n }
+          events.push(JSON.parse(bytes.toString('utf8')) as ExecutionObservation)
+        }
+      } finally { closeSync(fd) }
     }
-    if ((!state || state.lastSequence < previous || state.recorded !== ids.size || state.bytes !== Buffer.byteLength(text)) && (state?.finished || run.finishedAt)) fault ??= 'corrupt'
+    if ((!state || state.lastSequence < previous || state.recorded !== index.ids.size || state.bytes !== index.size) && (state?.finished || run.finishedAt)) fault ??= 'corrupt'
   } catch (e) { fault ??= (e as NodeJS.ErrnoException).code === 'ENOENT' ? 'unavailable' : 'corrupt' }
   const complete = !fault && !!state?.finished && terminal && !state.dropped && !state.fault
   const pending = !state && !run.finishedAt && fault === 'unavailable'
