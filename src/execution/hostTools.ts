@@ -387,8 +387,8 @@ function deliverReply(socket: Socket, payload: string): Promise<boolean> {
     catch { socket.off('error', onError); finish(false) }
   })
 }
-export interface ToolBridge { socketPath: string; close(): Promise<void> }
-export async function openToolBridge(options: {
+export type ToolMessage = { id?: unknown; name?: unknown; nativeCallId?: unknown; input?: unknown }
+export type ToolDispatchOptions = {
   tools: HostToolSpec[]
   forwarding: 'serial' | 'parallel'
   runId: string
@@ -396,12 +396,10 @@ export async function openToolBridge(options: {
   store: ExecutionStore
   alive: () => boolean
   onHost: (call: ToolCall) => Promise<unknown>
-  onBroken: (error: unknown) => void
-}): Promise<ToolBridge> {
-  const socketPath = join('/tmp', `milkie-${options.runId}.sock`)
-  try { unlinkSync(socketPath) } catch { /* absent */ }
-  let failed = false
-  const broken = (error: unknown) => { if (failed) return; failed = true; options.onBroken(error) }
+}
+
+/** Persist before queuing; delivery belongs to the actual native transport. */
+export function createToolDispatcher(options: ToolDispatchOptions): (message: ToolMessage, encodedBytes: number, deliver: (result: ToolResult) => Promise<boolean>) => Promise<void> {
   let tail = Promise.resolve()
   const enqueue = (job: () => Promise<void>) => {
     if (options.forwarding === 'parallel') return job()
@@ -410,20 +408,19 @@ export async function openToolBridge(options: {
     return run
   }
   const tools = new Map(options.tools.map(tool => [tool.name, tool]))
-  const prepare = (socket: Socket, line: string): (() => Promise<void>) | undefined => {
-    const message = JSON.parse(line) as { id?: unknown; name?: unknown; nativeCallId?: unknown; input?: unknown }
+  const prepare = (message: ToolMessage, encodedBytes: number, deliver: (result: ToolResult) => Promise<boolean>): (() => Promise<void>) | undefined => {
     if (typeof message.id !== 'string' || typeof message.name !== 'string') throw new Error('Malformed tool call.')
     const name = message.name
     const nativeCallId = typeof message.nativeCallId === 'string' && message.nativeCallId ? message.nativeCallId : undefined
     const callId = randomUUID()
     const base: ToolCallRecord = { version: 1, callId, name, input: message.input, runId: options.runId, contextId: options.contextId, status: 'pending', ...(nativeCallId ? { nativeCallId } : {}) }
     const tool = tools.get(name)
-    const reply = (result: ToolResult) => socket.write(`${JSON.stringify({ id: message.id, ...result })}\n`)
-    if (Buffer.byteLength(line) > MAX_ENCODED_TOOL_REQUEST_BYTES || rawStringBytes(message.input) > MAX_TOOL_PAYLOAD_BYTES) {
+    const reply = (result: ToolResult) => { void deliver(result) }
+    if (encodedBytes > MAX_ENCODED_TOOL_REQUEST_BYTES || rawStringBytes(message.input) > MAX_TOOL_PAYLOAD_BYTES) {
       const rejected: ToolResult = {
         ok: false,
         code: 'invalid_input',
-        message: Buffer.byteLength(line) > MAX_ENCODED_TOOL_REQUEST_BYTES
+        message: encodedBytes > MAX_ENCODED_TOOL_REQUEST_BYTES
           ? 'Encoded tool request exceeds 2097152 bytes.'
           : 'Tool input exceeds 262144 bytes.',
       }
@@ -451,11 +448,33 @@ export async function openToolBridge(options: {
       try { result = normalizeToolResult(await options.onHost({ callId, ...(nativeCallId ? { nativeCallId } : {}), name, input: message.input, runId: options.runId, contextId: options.contextId })) }
       catch (error) { if (!options.alive()) return; throw error }
       if (!options.alive()) return
-      const delivered = await deliverReply(socket, `${JSON.stringify({ id: message.id, ...result })}\n`)
+      const delivered = await deliver(result)
       if (!delivered) return
       options.store.write('calls', callId, { ...base, status: result.ok ? 'succeeded' : result.code, ...(result.ok ? { output: result.output } : { message: result.message }) })
     }
   }
+  return (message, encodedBytes, deliver) => {
+    const job = prepare(message, encodedBytes, deliver)
+    return job ? enqueue(job) : Promise.resolve()
+  }
+}
+
+export interface ToolBridge { socketPath: string; close(): Promise<void> }
+export async function openToolBridge(options: {
+  tools: HostToolSpec[]
+  forwarding: 'serial' | 'parallel'
+  runId: string
+  contextId: string
+  store: ExecutionStore
+  alive: () => boolean
+  onHost: (call: ToolCall) => Promise<unknown>
+  onBroken: (error: unknown) => void
+}): Promise<ToolBridge> {
+  const socketPath = join('/tmp', `milkie-${options.runId}.sock`)
+  try { unlinkSync(socketPath) } catch { /* absent */ }
+  let failed = false
+  const broken = (error: unknown) => { if (failed) return; failed = true; options.onBroken(error) }
+  const dispatch = createToolDispatcher(options)
   const sockets = new Set<Socket>()
   const server = createServer(socket => {
     sockets.add(socket)
@@ -472,8 +491,8 @@ export async function openToolBridge(options: {
         buffer = buffer.slice(newline + 1)
         if (!line) continue
         try {
-          const job = prepare(socket, line)
-          if (job) void enqueue(job).catch(broken)
+          const message = JSON.parse(line) as ToolMessage
+          void dispatch(message, Buffer.byteLength(line), result => deliverReply(socket, `${JSON.stringify({ id: message.id, ...result })}\n`)).catch(broken)
         } catch (error) { broken(error) }
       }
     })

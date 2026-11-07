@@ -58,7 +58,7 @@ export function resolveCliStorage(runtime: string | undefined, storage: CliStora
   const sessionDir = directory(storage?.sessionDir, 'session_missing')
   if (configDir === sessionDir) throw new ExecutionError('invalid_request')
   assertLogin(configDir)
-  if (runtime === 'grok-cli') bindGrokSessions(configDir, sessionDir)
+  if (runtime === 'grok-cli' || runtime === 'codex') bindGrokSessions(configDir, sessionDir)
   return { configDir, sessionDir }
 }
 export function prepareCliStorage(context: ExecutionContext): void {
@@ -89,6 +89,8 @@ export function cliEnvironment(base: NodeJS.ProcessEnv, context: ExecutionContex
   } else if (context.connection.runtime === 'pi') {
     env.PI_CODING_AGENT_DIR = context.configDir
     env.PI_CODING_AGENT_SESSION_DIR = context.sessionDir
+  } else if (context.connection.runtime === 'codex') {
+    env.CODEX_HOME = context.configDir
   } else {
     throw new ExecutionError('unsupported_runtime')
   }
@@ -99,7 +101,10 @@ export function cliEnvironment(base: NodeJS.ProcessEnv, context: ExecutionContex
   return env
 }
 export function nativeFile(context: ExecutionContext): string {
-  if (context.connection.runtime === 'pi') return context.nativeSessionFile!
+  if (context.connection.runtime === 'pi' || context.connection.runtime === 'codex') {
+    if (!context.nativeSessionFile) throw new ExecutionError('session_missing')
+    return context.nativeSessionFile
+  }
   if (!context.sessionDir || !context.nativeSessionId) throw new ExecutionError('session_missing')
   return join(context.sessionDir, encodeURIComponent(context.cwd), context.nativeSessionId, 'chat_history.jsonl')
 }
@@ -107,8 +112,12 @@ export function assertNativeSession(context: ExecutionContext): void {
   if (!context.hasExecuted) return
   const file = nativeFile(context)
   try { if (statSync(file).size === 0) throw new Error() } catch { throw new ExecutionError('session_missing') }
-  if (context.connection.runtime === 'pi') {
+  if (context.connection.runtime === 'pi' || context.connection.runtime === 'codex') {
     try {
+      if (context.connection.runtime === 'codex') {
+        const path = relative(realpathSync(context.sessionDir!), realpathSync(file))
+        if (path.startsWith('..') || isAbsolute(path)) throw new Error()
+      }
       const fd = openSync(file, 'r')
       let firstLine: string
       try {
@@ -119,7 +128,9 @@ export function assertNativeSession(context: ExecutionContext): void {
         firstLine = bytes.subarray(0, newline).toString('utf8')
       } finally { closeSync(fd) }
       const header = JSON.parse(firstLine)
-      if (header.type !== 'session' || header.id !== context.nativeSessionId || header.cwd !== context.cwd) throw new Error()
+      if (context.connection.runtime === 'pi') {
+        if (header.type !== 'session' || header.id !== context.nativeSessionId || header.cwd !== context.cwd) throw new Error()
+      } else if (header.type !== 'session_meta' || header.payload?.id !== context.nativeSessionId || header.payload?.cwd !== context.cwd) throw new Error()
     } catch { throw new ExecutionError('session_missing') }
   }
 }

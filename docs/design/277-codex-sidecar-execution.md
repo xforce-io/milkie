@@ -1,6 +1,6 @@
 # #277 版本化 Sidecar 执行入口
 
-版本 v0.1；状态：已确认架构范围的技术契约，整票尚未完成设计与验收。
+版本 v0.2；状态：已确认架构范围的技术契约，整票尚未完成设计与验收。
 Issue：https://github.com/xforce-io/milkie/issues/277 。
 
 L1: reuse + 整理。确认依据为本次会话中 TaskLoop 通过 Milkie 统一接入不同 Harness、采用本地 Sidecar、宿主保留工具授权与执行职责、异常停止必须可判定的讨论，以及 Epic #5 S1/S2/S5。用户目标为端到端交付 PR，未授权合入/部署。以下协议工作不选择第二真实 Harness、不改变既有执行预算或 TaskLoop 查询入口；这些尚待确认的选择不被本稿默认批准。
@@ -8,7 +8,7 @@ L2: write。跨语言进程边界与公共协议需要固定契约。本稿采�
 
 ## 1 背景
 
-现有 `ExecutionClient` 统一管理执行上下文、执行记录、取消和宿主工具，Rust 调用方尚无稳定协议；Codex 仍未进入受支持列表。现有机制见 `src/execution/ExecutionClient.ts`、`worker.ts`、`types.ts`、`hostTools.ts`。本次先复用这些执行机制提供 stdio 入口，随后补 Codex，最后以两种真实 Harness 验收整票。
+现有 `ExecutionClient` 统一管理执行上下文、执行记录、取消和宿主工具，Rust 调用方尚无稳定协议；修改前 Codex 未进入受支持列表。现有机制见 `src/execution/ExecutionClient.ts`、`worker.ts`、`types.ts`、`hostTools.ts`。本次先复用这些执行机制提供 stdio 入口，随后补 Codex，最后以两种真实 Harness 验收整票。
 
 ## 2 名词解释
 
@@ -56,7 +56,7 @@ S1 覆盖 B→D→E→F→I，S2 覆盖两个独立上下文及 H/J。失败结�
 
 ## 7 模块
 
-协议解析、分发与双向工具关联归 execution/sidecar；CLI 仅提供参数和进程入口。ExecutionClient 增加显式宿主生命周期选项，默认独立行为保持不变；worker 统一监督父存活管道。Codex 适配器后续按固定 CLI 版本协议加入，不能先宣称支持。
+协议解析、分发与双向工具关联归 execution/sidecar；CLI 仅提供参数和进程入口。ExecutionClient 增加显式宿主生命周期选项，默认独立行为保持不变；worker 统一监督父存活管道。Codex 适配器按固定 CLI 版本协议加入；能力支持不等于已完成真实验收。
 
 ## 8 API/CLI
 
@@ -84,7 +84,7 @@ S1 覆盖 B→D→E→F→I，S2 覆盖两个独立上下文及 H/J。失败结�
 
 ## 11 测试计划
 
-下列均为必需；S1/S2 主功能文件均为 `.agents/skills/verify-milkie/features/21-execution-sidecar.md`，并链接16–20既有能力。设计 v0.1；冻结候选后另填结果，不在此写 pass。
+下列均为必需；S1/S2 主功能文件均为 `.agents/skills/verify-milkie/features/21-execution-sidecar.md`，并链接16–20既有能力。验收编号继承 v0.1；当前契约 v0.2；冻结候选后另填结果，不在此写 pass。
 
 | ID/归属 | 前置与真实入口 | 操作与判定结果/禁止结果 | 证据、执行与层级 |
 |---|---|---|---|
@@ -97,7 +97,7 @@ S1 覆盖 B→D→E→F→I，S2 覆盖两个独立上下文及 H/J。失败结�
 
 ## 12 开放问题
 
-第二真实 Harness 的最终选择与版本矩阵尚未确认；Codex 固定版本需用本机 app-server schema 与官方文档核对。它们阻止 S1.A2/S2.A1 的整票完成，不阻止与 Harness 无关的协议及父生命周期代码。本稿不设 TaskLoop trace 默认策略和阶段时限。
+第二真实 Harness 的最终选择与版本矩阵尚未确认；Codex 固定版本已用本机 app-server schema 与官方文档核对，但真实执行环境尚待提供。它们阻止 S1.A2/S2.A1 的整票完成，不阻止与 Harness 无关的协议及父生命周期代码。本稿不设 TaskLoop trace 默认策略和阶段时限。
 
 ## 13 关联
 
@@ -105,3 +105,16 @@ S1 覆盖 B→D→E→F→I，S2 覆盖两个独立上下文及 H/J。失败结�
 - 观测子票：https://github.com/xforce-io/milkie/issues/278
 - 下游执行接入：https://github.com/xforce-io/taskloop/issues/6
 - 已有心跳波动：https://github.com/xforce-io/milkie/issues/270
+
+### v0.2 增量：Codex 固定版本边界
+
+本增量只补齐既有 S1/S2 的原生适配技术契约，不改变第二 Harness 的待决状态。依据为本机 `codex-cli 0.166.0` 生成的 experimental JSON Schema，以及 [官方 app-server 流程](https://learn.chatgpt.com/docs/app-server)。旧 v0.1 验收编号保持不变，验收不因实现差异减少。
+
+- Codex 使用 app-server stdio，版本必须精确为0.166.0、模型必须显式指定；PATH 由宿主提供，版本不匹配、CLI 缺失、认证失败均明确报错，不调用其它 Harness 或模型。能力报告支持与 readiness=unchecked 分离；原生模型迭代计数无法在该协议可靠强制，因此 modelIterations=false、设置此约束时启动前 unsupported_constraint。
+- 初始化禁用 shell、浏览器、图片、技能发现、hooks、远端插件、多 Agent 与 web search，并枚举及再次验证关闭所有继承 MCP。仅提供宿主工具；read-only 为原生进程防御边界，不提供原生读文件能力；standard 在启动前拒绝。未登记原生请求明确拒绝，发现原生效果项视为 policy_mismatch，停止进程。
+- CODEX_HOME 指向宿主专用配置目录，sessions 精确绑定专用会话目录，不复制 auth.json。会话必须是持久化、legacy historyMode、非 ephemeral；保存返回的 thread id 和路径，路径 realpath 必须在专用会话目录内，原生 session_meta id/cwd 必须吻合，缺失或错配不能新建替代会话。
+- 先 initialize/initialized，再 thread/start 或精确 thread/resume，最后 turn/start。请求和通知只能归属当前 thread/turn。输出取当前回合 agentMessage 的完成文本，不混入历史或 reasoning。实际模型与请求模型不符时拒绝。
+- 0.166.0 的 thread/resume 不支持重新传入 dynamicTools。首次工具目录保存在执行上下文；后续只允许同一目录中 schema/description 不变的子集，撤销的名称仍可能出现在原生历史中，但当前授权层必须拒绝；新增或改变工具定义在启动前 unsupported_constraint，不能静默忽略。要更换目录由宿主显式创建新上下文。空工具目录同样记录，不能在第一次无工具后续接时偷偷增加工具。
+- 工具请求保留原生 callId，并使用 Milkie 独立 callId。工具输入校验、当前授权、serial/parallel、结果边界及持久化沿用共用分发器；执行结果写回 app-server 管道成功后才能记为送达。宿主已完成但写入失败仍 pending，不能因中间适配器读取到结果就提前记成功。
+- 正常回合结束后清理本次 app-server 及子进程，确认停止再公布 succeeded。取消、超时、宿主断开均复用 ProcessTracker；没有确认停止仍 unknown。主动停止不保证远端副作用撤销。任何故障不输出原始 stderr/原生错误对象。
+- S1.A2 追加真实 Codex 执行、宿主工具、精确续接；S2.A2 追加模型/版本/跨会话错误及不支持迭代约束、新增工具定义前置拒绝。确定性协议夹具与真实 CLI 验收分开记录。

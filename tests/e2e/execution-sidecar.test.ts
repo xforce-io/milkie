@@ -17,6 +17,9 @@ beforeEach(() => {
   const fixture = resolve('tests/fixtures/agent-cli.cjs')
   chmodSync(fixture, 0o755)
   symlinkSync(fixture, join(root, 'bin', 'pi'))
+  const codexFixture = resolve('tests/fixtures/codex-cli.cjs')
+  chmodSync(codexFixture, 0o755)
+  symlinkSync(codexFixture, join(root, 'bin', 'codex'))
   writeFileSync(join(root, 'connection.json'), JSON.stringify(connection))
 })
 afterEach(async () => {
@@ -33,7 +36,9 @@ async function until<T>(read: () => T, ms = 12000): Promise<NonNullable<T>> {
   while (Date.now() < deadline) { const v = read(); if (v) return v as NonNullable<T>; await delay(20) }
   throw new Error('Timed out waiting for sidecar evidence.')
 }
-function sidecar(extraArgs?: string[]) {
+function sidecar(extraArgs?: string[], runtime = 'pi') {
+  const selected = runtime === 'pi' ? connection : { contractVersion: 1, fields: { transport: 'agent-cli', runtime, model: 'test-model' } }
+  writeFileSync(join(root, 'connection.json'), JSON.stringify(selected))
   const child = spawn(process.execPath, [resolve('dist/cli/index.js'), 'execution-sidecar', ...(extraArgs ?? ['--data-dir', join(root, 'data'), '--connection-file', join(root, 'connection.json')])], {
     env: { ...process.env, PATH: `${join(root, 'bin')}:${process.env.PATH}` },
   })
@@ -188,4 +193,21 @@ test('a broken stdout channel stops its executions instead of leaving them detac
   const observer = new ExecutionClient({ dataDir: join(root, 'data'), connection })
   expect(observer.query(runId)).toMatchObject({ status: 'cancelled', stopped: true })
   expect(() => process.kill(pid, 0)).toThrow()
+})
+
+
+test('Codex uses the same distributed sidecar entry for host tools and exact session resume', async () => {
+  const s = sidecar(undefined, 'codex')
+  expect((await s.init()).result.capabilities).toMatchObject({ supported: true, nativeCallId: true, modelIterations: false })
+  const c = await s.context()
+  const first = (await s.rpc('execution.start', { contextId: c.contextId, input: 'fixture:tools', constraints: { tools: [alpha, beta], forwarding: 'parallel' } })).result.runId
+  const calls = await until(() => { const found = s.messages.filter(m => m.method === 'tool.call'); return found.length === 2 ? found : undefined })
+  for (const call of calls) s.write({ jsonrpc: '2.0', id: call.id, result: { ok: true, output: `sidecar-${call.params.name}` } })
+  const one = await s.terminal(first)
+  expect(one).toMatchObject({ status: 'succeeded', stopped: true })
+  expect(calls.map((m: any) => m.params.nativeCallId)).toEqual(['native-call-1', 'native-call-2'])
+  const second = (await s.rpc('execution.start', { contextId: c.contextId, input: 'sidecar-codex-marker' })).result.runId
+  expect(await s.terminal(second)).toMatchObject({ status: 'succeeded', output: 'sidecar-codex-marker', nativeSessionId: one.nativeSessionId })
+  const third = (await s.rpc('execution.start', { contextId: c.contextId, input: 'fixture:recall' })).result.runId
+  expect(await s.terminal(third)).toMatchObject({ status: 'succeeded', output: 'sidecar-codex-marker', nativeSessionId: one.nativeSessionId })
 })

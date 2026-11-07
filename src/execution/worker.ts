@@ -6,6 +6,7 @@ import { resolveAndParseConnection } from '../connection/parse.js'
 import { assembleApiGateway } from '../connection/assemble.js'
 import { CliEvents, assertNativeSession, classifyFailure, cliCommand, cliEnvironment, prepareCliStorage } from './adapters.js'
 import { acquireGrokConfigLock, assertPiHostConfig, inspectGrok, openToolBridge, visibleHostTools, watchParentPipe, writeGrokHostConfig, writePiExtension, type ToolBridge } from './hostTools.js'
+import { CodexExecution } from './codex.js'
 import { ProcessTracker, EXECUTION_TOKEN_ENV } from './processes.js'
 import { ExecutionStore } from './store.js'
 import { ExecutionError, type ToolCall, type WorkerRequest, type WorkerToolReply, type ExecutionStatus } from './types.js'
@@ -85,6 +86,21 @@ export async function runExecution(request: WorkerRequest, life?: ParentLife): P
     }
     prepareCliStorage(context)
     assertNativeSession(context)
+    if (context.connection.runtime === 'codex') {
+      const codex = new CodexExecution(request, store, onHost, () => !life?.dead && !terminal)
+      tracker = codex.tracker
+      stop = () => { void codex.stop() }
+      cleanup = () => codex.stop()
+      const output = await codex.run()
+      const stopped = await cleanup()
+      pulse()
+      if (life?.dead) { finish('unknown', stopped); return }
+      if (!stopped) { record.code = 'process_failed'; finish('unknown', false); return }
+      if (stopping) { finish(stopping, true); return }
+      record.output = output
+      finish('succeeded', true)
+      return
+    }
     const iterationLimit = constraints.maxModelIterations
     const iterationMarker = iterationLimit ? join(store.root, 'runs', `${record.runId}.iteration`) : undefined
     if (iterationLimit) {
