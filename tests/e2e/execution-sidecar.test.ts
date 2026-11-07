@@ -257,6 +257,7 @@ test('terminal tool waiters release connection capacity and ignore late replies'
   const input = new PassThrough(), output = new PassThrough()
   const messages: any[] = [], runs = new Map<string, any>(), responses: unknown[] = []
   let count = 0, buffer = '', finished = false
+  let hostHandler: ((call: any) => Promise<unknown>) | undefined
   output.setEncoding('utf8'); output.on('data', (s: string) => {
     buffer += s
     let end: number
@@ -266,8 +267,10 @@ test('terminal tool waiters release connection capacity and ignore late replies'
     capabilities: () => ({}),
     start: (_: string, __: string, ___: unknown, onTool: (call: any) => Promise<unknown>) => {
       const runId = `run-${++count}`
-      runs.set(runId, { runId, contextId: 'context', status: 'cancelled', stopped: true, finishedAt: 1 })
+      runs.set(runId, { runId, contextId: 'context', status: 'running', stopped: false })
+      hostHandler = onTool
       void onTool({ runId, contextId: 'context', callId: `call-${count}`, name: 'alpha', input: {} }).then(result => responses.push(result))
+      runs.set(runId, { runId, contextId: 'context', status: 'cancelled', stopped: true, finishedAt: 1 })
       return runId
     },
     query: (id: string) => runs.get(id), cancel: async (id: string) => runs.get(id),
@@ -282,6 +285,8 @@ test('terminal tool waiters release connection capacity and ignore late replies'
     for (let i = 1; i <= 64; i++) await rpc(i, 'execution.start', { contextId: 'context', input: 'synthetic', constraints: { tools: [] } })
     await until(() => messages.some(m => m.method === 'execution.updated' && m.params.runId === 'run-64'))
     await delay(10)
+    expect(await Promise.race([hostHandler!({ runId: 'run-1', contextId: 'context', callId: 'late-call', name: 'alpha', input: {} }), delay(100).then(() => undefined)])).toMatchObject({ ok: false })
+    expect(messages.filter(m => m.method === 'tool.call')).toHaveLength(64)
     const retiredCall = messages.find(m => m.method === 'tool.call')
     input.write(JSON.stringify({ jsonrpc: '2.0', id: retiredCall.id, result: { ok: true, output: 'late' } }) + '\n')
     const next = await rpc(65, 'execution.start', { contextId: 'context', input: 'synthetic', constraints: { tools: [] } })
