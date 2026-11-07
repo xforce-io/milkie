@@ -1,0 +1,26 @@
+name: Execution contract
+
+on:
+  pull_request:
+  push:
+    branches:
+      - feat/277-codex-sidecar-execution
+      - feat/278-harness-observation-tool-callbacks
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: python3 .agents/skills/verify-milkie/scripts/check_map.py

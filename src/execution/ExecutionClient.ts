@@ -11,21 +11,28 @@ import { assertHostTools, normalizeToolResult } from './hostTools.js'
 import { ExecutionError, type CliStorage, type ExecutionCapabilities, type ExecutionClientOptions, type ExecutionConstraints, type ExecutionContext, type ExecutionRecord, type HostToolSpec, type ToolCallRecord, type ToolHandler, type WorkerRequest, type WorkerToolMessage } from './types.js'
 
 const ACTIVE = new Set(['starting', 'running'])
+function canonicalTool(tool: HostToolSpec): string {
+  return JSON.stringify(tool, (_key, value) => value && typeof value === 'object' && !Array.isArray(value)
+    ? Object.fromEntries(Object.keys(value).sort().map(key => [key, value[key]])) : value)
+}
 export class ExecutionClient {
   private readonly store: ExecutionStore
   private readonly projection
   private readonly env: NodeJS.ProcessEnv
   private readonly connection: ConnectionInput
+  private readonly hostLifetime: boolean
   /** Host-lifetime pipes. Closing one tells the worker to stop the CLI. */
   private readonly parentPipes: unknown[] = []
   constructor(options: ExecutionClientOptions) {
+    if (options.lifetime !== undefined && options.lifetime !== 'host' && options.lifetime !== 'independent') throw new ExecutionError('invalid_request')
+    this.hostLifetime = options.lifetime === 'host'
     this.connection = structuredClone(options.connection)
     this.projection = resolveAndParseConnection(this.connection).projection
     this.store = new ExecutionStore(options.dataDir)
     this.env = { ...(options.env ?? process.env) }
   }
   capabilities(): ExecutionCapabilities {
-    const supported = this.projection.transport === 'api' || this.projection.runtime === 'grok-cli' || this.projection.runtime === 'pi'
+    const supported = this.projection.transport === 'api' || this.projection.runtime === 'grok-cli' || this.projection.runtime === 'pi' || this.projection.runtime === 'codex'
     const platform = process.platform !== 'win32'
     const ready = supported && platform
     const cli = ready && this.projection.transport === 'agent-cli'
@@ -35,12 +42,12 @@ export class ExecutionClient {
       availability: 'unchecked',
       resume: cli,
       workingDirectory: ready,
-      toolPolicies: ready ? ['read-only', 'standard'] : [],
+      toolPolicies: ready ? (this.projection.runtime === 'codex' ? ['read-only'] : ['read-only', 'standard']) : [],
       hostTools: cli,
-      nativeCallId: cli && this.projection.runtime === 'pi',
+      nativeCallId: cli && (this.projection.runtime === 'pi' || this.projection.runtime === 'codex'),
       forwarding: cli ? ['serial', 'parallel'] : [],
       timeout: ready,
-      modelIterations: cli,
+      modelIterations: cli && this.projection.runtime !== 'codex',
       cancel: ready,
     }
   }
@@ -72,7 +79,7 @@ export class ExecutionClient {
     const maxModelIterations = constraints.maxModelIterations
     if (maxModelIterations !== undefined) {
       if (!Number.isInteger(maxModelIterations) || maxModelIterations < 1 || maxModelIterations > 10000) throw new ExecutionError('unsupported_constraint')
-      if (this.projection.transport !== 'agent-cli') throw new ExecutionError('unsupported_constraint')
+      if (this.projection.transport !== 'agent-cli' || !this.capabilities().modelIterations) throw new ExecutionError('unsupported_constraint')
     }
     const toolPolicy = constraints.toolPolicy ?? 'read-only'
     let hostTools: { tools: HostToolSpec[]; forwarding: 'serial' | 'parallel' } | undefined
@@ -86,6 +93,10 @@ export class ExecutionClient {
       assertHostTools(tools)
       hostTools = { tools, forwarding }
     } else if (toolPolicy !== 'read-only' && toolPolicy !== 'standard') throw new ExecutionError('unsupported_constraint')
+    if (this.projection.runtime === 'codex') {
+      if (!this.projection.model) throw new ExecutionError('invalid_request')
+      if (!hasTools && toolPolicy !== 'read-only') throw new ExecutionError('unsupported_constraint')
+    }
     let context = this.store.context(contextId)
     if (JSON.stringify(context.connection) !== JSON.stringify(this.projection)) throw new ExecutionError('connection_mismatch')
     workingDirectory(context.cwd)
@@ -105,6 +116,12 @@ export class ExecutionClient {
         // The prior run may have finalized between the first read and this claim.
         context = this.store.context(contextId)
         if (JSON.stringify(context.connection) !== JSON.stringify(this.projection)) throw new ExecutionError('connection_mismatch')
+        if (this.projection.runtime === 'codex' && context.hasExecuted) {
+          if (!context.nativeTools) throw new ExecutionError('session_missing')
+          for (const tool of hostTools?.tools ?? []) {
+            if (!context.nativeTools.some(saved => canonicalTool(saved) === canonicalTool(tool))) throw new ExecutionError('unsupported_constraint')
+          }
+        }
         if (context.connection.transport === 'agent-cli') {
           prepareCliStorage(context)
           assertNativeSession(context)
@@ -112,9 +129,10 @@ export class ExecutionClient {
         const record: ExecutionRecord = { version: 1, runId, contextId, nativeSessionId: context.nativeSessionId, status: 'starting', startedAt: Date.now(), heartbeatAt: Date.now(), stopped: false }
         this.store.write('runs', runId, record)
         const childEnv = context.connection.transport === 'agent-cli' ? supervisorEnvironment(this.env) : this.env
-        child = fork(worker, [], { env: childEnv, detached: !hostTools, stdio: hostTools ? ['ignore', 'ignore', 'ignore', 'ipc', 'pipe'] : ['ignore', 'ignore', 'ignore', 'ipc'], execArgv: [] })
-        const pipe = hostTools ? child.stdio[4] : undefined
-        if (hostTools && (!pipe || typeof pipe === 'string' || !('on' in pipe))) throw new ExecutionError('process_failed')
+        const attached = !!hostTools || this.hostLifetime
+        child = fork(worker, [], { env: childEnv, detached: !attached, stdio: attached ? ['ignore', 'ignore', 'ignore', 'ipc', 'pipe'] : ['ignore', 'ignore', 'ignore', 'ipc'], execArgv: [] })
+        const pipe = attached ? child.stdio[4] : undefined
+        if (attached && (!pipe || typeof pipe === 'string' || !('on' in pipe))) throw new ExecutionError('process_failed')
         if (pipe && typeof pipe !== 'string') {
           const stream = pipe as NodeJS.EventEmitter & { unref?: () => void }
           stream.on('error', () => { /* Worker exit closes this end after the run is stored. */ })
@@ -137,9 +155,9 @@ export class ExecutionClient {
             })
           })
         }
-        const message: WorkerRequest = { dataDir: this.store.root, context, record, connection: this.connection, input, constraints: { toolPolicy: hostTools ? undefined : toolPolicy, timeoutMs, ...(maxModelIterations !== undefined ? { maxModelIterations } : {}) }, ...(hostTools ? { hostTools } : {}) }
+        const message: WorkerRequest = { hostLifetime: this.hostLifetime, dataDir: this.store.root, context, record, connection: this.connection, input, constraints: { toolPolicy: hostTools ? undefined : toolPolicy, timeoutMs, ...(maxModelIterations !== undefined ? { maxModelIterations } : {}) }, ...(hostTools ? { hostTools } : {}) }
         child.send(message, err => { if (err) fail() })
-        if (!hostTools) child.unref()
+        if (!attached) child.unref()
         return runId
       } catch (e) {
         if (child && child.exitCode === null) child.kill('SIGKILL')

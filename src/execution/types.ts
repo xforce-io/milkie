@@ -1,7 +1,7 @@
 import type { ConnectionInput, ConnectionProjection } from '../connection/types.js'
 
 export type ExecutionStatus = 'starting' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'timed_out' | 'unknown'
-export type ExecutionCode = 'invalid_request' | 'unsupported_runtime' | 'unsupported_constraint' | 'context_not_found' | 'connection_mismatch' | 'context_busy' | 'config_missing' | 'session_missing' | 'session_mismatch' | 'auth_failed' | 'process_failed' | 'native_cancelled' | 'protocol_error' | 'storage_error' | 'platform_unsupported' | 'policy_mismatch' | 'iteration_budget_exhausted'
+export type ExecutionCode = 'invalid_request' | 'unsupported_runtime' | 'unsupported_constraint' | 'context_not_found' | 'connection_mismatch' | 'context_busy' | 'config_missing' | 'session_missing' | 'session_mismatch' | 'auth_failed' | 'process_failed' | 'native_cancelled' | 'protocol_error' | 'storage_error' | 'platform_unsupported' | 'policy_mismatch' | 'iteration_budget_exhausted' | 'runtime_missing' | 'unsupported_version'
 export class ExecutionError extends Error {
   constructor(readonly code: ExecutionCode) {
     super(`Execution request failed: ${code}.`)
@@ -69,6 +69,8 @@ export interface ExecutionContext {
   sessionDir?: string
   nativeSessionId?: string
   nativeSessionFile?: string
+  /** Codex 0.166 restores this immutable model-facing catalog on resume. */
+  nativeTools?: HostToolSpec[]
   hasExecuted: boolean
 }
 export interface ExecutionRecord {
@@ -107,12 +109,15 @@ export interface ExecutionCapabilities {
   cancel: boolean
 }
 export interface ExecutionClientOptions {
+  /** Stop workers if this host exits. Default independent preserves the SDK contract. */
+  lifetime?: 'host' | 'independent'
   connection: ConnectionInput
   dataDir: string
   /** Explicit child environment; never persisted or included in diagnostics. */
   env?: NodeJS.ProcessEnv
 }
 export interface WorkerRequest {
+  hostLifetime?: boolean
   dataDir: string
   context: ExecutionContext
   record: ExecutionRecord
