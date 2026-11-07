@@ -78,7 +78,16 @@ export function assertHostTools(tools: HostToolSpec[]): void {
 }
 function assertSchema(schema: HostToolSchema, depth: number): void {
   if (depth > 8 || !schema || typeof schema !== 'object') throw new ExecutionError('invalid_request')
-  if (!['object', 'string', 'number', 'integer', 'boolean', 'array'].includes(schema.type)) throw new ExecutionError('invalid_request')
+  if (schema.type === undefined && Object.keys(schema).length === 0) return
+  if (!schema.type || !['object', 'string', 'number', 'integer', 'boolean', 'array'].includes(schema.type)) throw new ExecutionError('invalid_request')
+  for (const key of ['minLength', 'maxLength'] as const) {
+    const n = schema[key]
+    if (n !== undefined && (!Number.isSafeInteger(n) || n < 0 || schema.type !== 'string')) throw new ExecutionError('invalid_request')
+  }
+  for (const key of ['minimum', 'maximum'] as const) {
+    const n = schema[key]
+    if (n !== undefined && (!Number.isFinite(n) || !['number', 'integer'].includes(schema.type))) throw new ExecutionError('invalid_request')
+  }
   if (schema.type === 'object') {
     if (schema.properties !== undefined) {
       if (!schema.properties || typeof schema.properties !== 'object' || Array.isArray(schema.properties)) throw new ExecutionError('invalid_request')
@@ -96,15 +105,15 @@ export function validateToolInput(schema: HostToolSchema, value: unknown): boole
   return matchSchema(schema, value)
 }
 function matchSchema(schema: HostToolSchema, value: unknown): boolean {
-  if (schema.type === 'string') return typeof value === 'string'
-  if (schema.type === 'number') return typeof value === 'number' && Number.isFinite(value)
-  if (schema.type === 'integer') return typeof value === 'number' && Number.isInteger(value)
+  if (schema.type === undefined && Object.keys(schema).length === 0) return value !== undefined
+  if (schema.type === 'string') return typeof value === 'string' && (schema.minLength === undefined || [...value].length >= schema.minLength) && (schema.maxLength === undefined || [...value].length <= schema.maxLength)
+  if (schema.type === 'number' || schema.type === 'integer') return typeof value === 'number' && Number.isFinite(value) && (schema.type !== 'integer' || Number.isInteger(value)) && (schema.minimum === undefined || value >= schema.minimum) && (schema.maximum === undefined || value <= schema.maximum)
   if (schema.type === 'boolean') return typeof value === 'boolean'
   if (schema.type === 'array') return Array.isArray(value) && !!schema.items && value.every(item => matchSchema(schema.items!, item))
   if (schema.type !== 'object' || !value || typeof value !== 'object' || Array.isArray(value)) return false
   const record = value as Record<string, unknown>
   const properties = schema.properties ?? {}
-  for (const key of schema.required ?? []) if (!(key in record)) return false
+  for (const key of schema.required ?? []) if (!Object.hasOwn(record, key)) return false
   for (const key of Object.keys(record)) {
     const child = properties[key]
     if (!child) { if (schema.additionalProperties !== true) return false; continue }
@@ -294,17 +303,12 @@ ${providerHook}  let modelIterations = 0
 import { Type } from ${typebox}
 const spec = ${spec}
 function toType(schema) {
-  if (schema.type === 'string') return Type.String()
-  if (schema.type === 'number') return Type.Number()
-  if (schema.type === 'integer') return Type.Integer()
-  if (schema.type === 'boolean') return Type.Boolean()
-  if (schema.type === 'array') return Type.Array(toType(schema.items))
-  const properties = {}
-  for (const [key, value] of Object.entries(schema.properties || {})) {
-    const child = toType(value)
-    properties[key] = (schema.required || []).includes(key) ? child : Type.Optional(child)
-  }
-  return Type.Object(properties)
+  if (schema.type === 'object') return Type.Unsafe({ ...schema,
+    properties: Object.fromEntries(Object.entries(schema.properties || {}).map(([key, value]) => [key, toType(value)])),
+    additionalProperties: schema.additionalProperties ?? false,
+  })
+  if (schema.type === 'array') return Type.Unsafe({ ...schema, items: toType(schema.items) })
+  return Type.Unsafe(schema)
 }
 let buffer = ''
 let socket

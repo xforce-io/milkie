@@ -1,6 +1,6 @@
 # #278 Harness 观测事件与工具调用关联
 
-版本 v0.1；状态：已确认 Epic 架构范围的设计基线，真实 Harness 验收尚未完成。
+版本 v0.2；状态：已确认 Epic 架构范围的设计基线，真实 Harness 验收尚未完成。
 Issue：https://github.com/xforce-io/milkie/issues/278 。依赖 #277 的67fd96b；分支以其为堆叠基线，不改写 #277 的未完成验收。
 L1: reuse + 整理；来源为会话中「粒度到 Agent 内部工具调用」「Milkie 接入不同 Harness，TaskLoop 集成并统一治理 trace」及本票 S1/S2。仅提供显式启用的 Milkie 数据源，不决定 TaskLoop 默认采集、故障启动策略、查询出口或保留期限；这些原有待决项不视为已批准。
 L2: write；跨进程数据、上下文与公共增量查询需要契约。遵循用户 AGENTS 十三节结构；§11 对应 L1.8。
@@ -96,3 +96,8 @@ S1 为 A→B→C→G/H；S2 为 C→D→E→F→C/G。成功意味着可验证�
 - 下游接入：https://github.com/xforce-io/taskloop/issues/6
 - 统一查询/治理：https://github.com/xforce-io/taskloop/issues/7 、https://github.com/xforce-io/taskloop/issues/8
 - 标准：[W3C Trace Context](https://www.w3.org/TR/trace-context/)
+
+
+### v0.2 兼容补充：TaskLoop 的任意 JSON 槽位
+
+下游源码 `taskloop/src/phase.rs/Bridge::specs` 的 artifact.write.value 为 `{}`，即任意 JSON。宿主工具 Schema 增加空子 Schema 支持：输入仅经过 JSON 传输，根仍必须 type=object；缺少 type 但含其它关键字不冒充空 Schema。Pi 用 Type.Unsafe 原样保留 JSON Schema（对象省略 additionalProperties 时仍按既有约定补 false），Codex/Grok 原样传递 `{}`，不把任意 JSON 偷换成空对象。TaskLoop 仍用自己的输出 Schema 检查候选产物；本变化不弱化业务验收。同时显式校验并保留 Inquiry 工具已有 minLength/maxLength/minimum/maximum；字符串长度按 Unicode 码点计算。由 Unit 及三个适配器确定性协议覆盖。

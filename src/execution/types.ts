@@ -11,11 +11,16 @@ export class ExecutionError extends Error {
 }
 /** JSON Schema subset accepted for a host tool. Omitted additionalProperties means false. */
 export interface HostToolSchema {
-  type: 'object' | 'string' | 'number' | 'integer' | 'boolean' | 'array'
+  /** An empty schema accepts any transported JSON value; root tool schemas stay objects. */
+  type?: 'object' | 'string' | 'number' | 'integer' | 'boolean' | 'array'
   properties?: Record<string, HostToolSchema>
   required?: string[]
   additionalProperties?: boolean
   items?: HostToolSchema
+  minLength?: number
+  maxLength?: number
+  minimum?: number
+  maximum?: number
 }
 export interface HostToolSpec {
   name: string

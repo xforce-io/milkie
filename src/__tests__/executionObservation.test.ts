@@ -194,3 +194,25 @@ test('two concurrent executions keep independent trace and native-call namespace
     expect(page.events.every(e => e.runId === id && e.contextId === (i === 0 ? c.contextId : other.contextId) && e.traceId === (i === 0 ? opts : second).traceparent.slice(3, 35))).toBe(true)
   }
 })
+
+test('empty nested schemas preserve arbitrary transported JSON while roots remain typed', () => {
+  const { assertHostTools, validateToolInput, writePiExtension } = require('../execution/hostTools') as typeof import('../execution/hostTools')
+  const schema = { type: 'object' as const, properties: { slot: { type: 'string' as const }, value: {} }, required: ['slot', 'value'], additionalProperties: false }
+  expect(() => assertHostTools([{ name: 'candidate', description: 'Write JSON', inputSchema: schema }])).not.toThrow()
+  for (const value of [null, 1, 'text', [1, { x: true }], { any: ['JSON'] }]) expect(validateToolInput(schema, { slot: 'result', value })).toBe(true)
+  expect(validateToolInput(schema, { slot: 'result' })).toBe(false)
+  expect(() => assertHostTools([{ name: 'candidate', description: 'Bad root', inputSchema: {} }])).toThrow('invalid_request')
+  expect(() => assertHostTools([{ name: 'candidate', description: 'Ambiguous', inputSchema: { type: 'object', properties: { value: { required: ['x'] } } } }])).toThrow('invalid_request')
+  const extension = join(root, 'extension.mjs')
+  writePiExtension(extension, [{ name: 'candidate', description: 'Write JSON', inputSchema: schema }], '/tmp/test-not-connected.sock', 'serial')
+  expect(readFileSync(extension, 'utf8')).toContain('return Type.Unsafe(schema)')
+})
+
+
+test('string and numeric tool limits remain enforced, including Unicode scalar length', () => {
+  const { assertHostTools, validateToolInput } = require('../execution/hostTools') as typeof import('../execution/hostTools')
+  const schema = { type: 'object' as const, properties: { query: { type: 'string' as const, minLength: 1, maxLength: 2 }, count: { type: 'integer' as const, minimum: 1, maximum: 8 } }, required: ['query', 'count'], additionalProperties: false }
+  expect(() => assertHostTools([{ name: 'search', description: 'Bounded search', inputSchema: schema }])).not.toThrow()
+  expect(validateToolInput(schema, { query: '😀😀', count: 8 })).toBe(true)
+  for (const input of [{ query: '', count: 1 }, { query: 'abc', count: 1 }, { query: 'ok', count: 9 }, { query: 'ok', count: 1.5 }]) expect(validateToolInput(schema, input)).toBe(false)
+})
