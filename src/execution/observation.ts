@@ -143,7 +143,7 @@ export class ObservationJournal {
 
 interface IndexedSource {
   contextId: string; traceId: string; dev: number; ino: number; size: number; mtimeMs: number; offset: number
-  rows: { sequence: number; offset: number; length: number }[]
+  rows: { id: string; sequence: number; offset: number; length: number }[]
   ids: Set<string>; prefixHash: ReturnType<typeof createHash>; lastSequence: number; terminal: boolean; fault?: 'corrupt'
 }
 // Keep offsets and IDs, never event bodies. A client can watch at most 64 Runs.
@@ -194,7 +194,7 @@ function sourceIndex(store: ExecutionStore, run: ExecutionRecord, file: string):
         const event = JSON.parse(tail.subarray(from, end).toString('utf8')) as ExecutionObservation
         if (event.version !== 1 || event.sourceId !== run.runId || event.runId !== run.runId || event.contextId !== run.contextId || !Number.isSafeInteger(event.sequence) || event.sequence <= index.lastSequence || typeof event.id !== 'string' || index.ids.has(event.id) || event.traceId !== run.observation!.traceparent.slice(3, 35) || index.rows.length >= 100000) throw new Error('corrupt')
         index.ids.add(event.id); index.lastSequence = event.sequence; index.terminal = event.kind === 'execution.finished'
-        index.rows.push({ sequence: event.sequence, offset: index.offset + from, length: end - from })
+        index.rows.push({ id: event.id, sequence: event.sequence, offset: index.offset + from, length: end - from })
       }
       from = end + 1
     }
@@ -230,9 +230,12 @@ export function readObservations(store: ExecutionStore, run: ExecutionRecord, af
           const bytes = Buffer.alloc(row.length)
           let count = 0
           while (count < bytes.length) { const n = readSync(fd, bytes, count, bytes.length - count, row.offset + count); if (!n) throw new Error('truncated'); count += n }
-          events.push(JSON.parse(bytes.toString('utf8')) as ExecutionObservation)
+          const event = JSON.parse(bytes.toString('utf8')) as ExecutionObservation
+          if (event.version !== 1 || event.id !== row.id || event.sequence !== row.sequence || event.sourceId !== run.runId || event.runId !== run.runId || event.contextId !== run.contextId || event.traceId !== run.observation.traceparent.slice(3, 35)) throw new Error('corrupt')
+          events.push(event)
         }
-      } finally { closeSync(fd) }
+      } catch (error) { index.fault = 'corrupt'; throw error }
+      finally { closeSync(fd) }
     }
     if ((!state || state.lastSequence < previous || state.recorded !== index.ids.size || state.bytes !== index.size) && (state?.finished || run.finishedAt)) fault ??= 'corrupt'
   } catch (e) { fault ??= (e as NodeJS.ErrnoException).code === 'ENOENT' ? 'unavailable' : 'corrupt' }

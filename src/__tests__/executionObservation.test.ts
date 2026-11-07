@@ -323,3 +323,21 @@ test('historical prefix edits followed by append are corrupt in both hot and col
   expect(cold.status).toMatchObject({ complete: false, fault: 'corrupt' })
   expect(hot.events.every(e => e.contextId === run.contextId)).toBe(true)
 })
+
+test('cached page records remain validated when filesystem metadata is stale', () => {
+  const fs = require('node:fs') as typeof import('node:fs')
+  const { store, run, writer } = journal()
+  writer.emit('agent.activity', { category: 'message' }); writer.finish('succeeded', true)
+  const file = join(store.root, 'observations', `${run.runId}.jsonl`), original = readFileSync(file, 'utf8')
+  expect(readObservations(store, run).status.complete).toBe(true)
+  const stat = fs.statSync(file), originalStat = fs.statSync
+  const spy = jest.spyOn(fs, 'statSync').mockImplementation(((path: any, options: any) => path === file ? stat : originalStat(path, options)) as any)
+  try {
+    // Models an edit after stat returned but before the indexed records are read.
+    writeFileSync(file, original.replaceAll(run.contextId, randomUUID()))
+    const hot = readObservations(store, run)
+    expect(hot.status).toMatchObject({ complete: false, fault: 'corrupt' })
+    expect(hot.events.every(e => e.contextId === run.contextId)).toBe(true)
+    expect(readObservations(store, run, 100).status.complete).toBe(false)
+  } finally { spy.mockRestore() }
+})
