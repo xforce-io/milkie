@@ -66,6 +66,7 @@ export function serveExecutionSidecar(input: Readable, output: Writable, client:
       send({ jsonrpc: '2.0', id, error: { code, message, ...(data ? { data } : {}) } })
     }
     const onTool = (call: ToolCall): Promise<ToolResult> => new Promise(done => {
+      if (client.query(call.runId)?.finishedAt !== undefined) { done({ ok: false, code: 'rejected', message: 'Execution ended.' }); return }
       if (closing || tools.size >= MAX_PENDING) { close(); done({ ok: false, code: 'rejected', message: 'Host unavailable.' }); return }
       const id = `tool:${randomUUID()}`
       tools.set(id, { runId: call.runId, done })
