@@ -144,7 +144,7 @@ export class ObservationJournal {
 interface IndexedSource {
   contextId: string; traceId: string; dev: number; ino: number; size: number; mtimeMs: number; offset: number
   rows: { sequence: number; offset: number; length: number }[]
-  ids: Set<string>; lastSequence: number; terminal: boolean; fault?: 'corrupt'
+  ids: Set<string>; prefixHash: ReturnType<typeof createHash>; lastSequence: number; terminal: boolean; fault?: 'corrupt'
 }
 // Keep offsets and IDs, never event bodies. A client can watch at most 64 Runs.
 const readIndexes = new WeakMap<ExecutionStore, Map<string, IndexedSource>>()
@@ -159,7 +159,7 @@ function sourceIndex(store: ExecutionStore, run: ExecutionRecord, file: string):
   if (!index || index.contextId !== run.contextId || index.traceId !== run.observation!.traceparent.slice(3, 35) || index.dev !== stat.dev || index.ino !== stat.ino || stat.size < index.size ||
       (stat.size === index.size && stat.mtimeMs !== index.mtimeMs) ||
       (index.fault && (stat.size !== index.size || stat.mtimeMs !== index.mtimeMs))) {
-    index = { contextId: run.contextId, traceId: run.observation!.traceparent.slice(3, 35), dev: stat.dev, ino: stat.ino, size: 0, mtimeMs: 0, offset: 0, rows: [], ids: new Set(), lastSequence: 0, terminal: false }
+    index = { contextId: run.contextId, traceId: run.observation!.traceparent.slice(3, 35), dev: stat.dev, ino: stat.ino, size: 0, mtimeMs: 0, offset: 0, rows: [], ids: new Set(), prefixHash: createHash('sha256'), lastSequence: 0, terminal: false }
   }
   indexes.delete(run.runId); indexes.set(run.runId, index)
   if (indexes.size > 64) indexes.delete(indexes.keys().next().value!)
@@ -168,6 +168,21 @@ function sourceIndex(store: ExecutionStore, run: ExecutionRecord, file: string):
   if (index.offset === stat.size) return index
   const fd = openSync(file, 'r')
   try {
+    // Growth alone does not prove append-only history: validate the cached
+    // prefix before accepting new bytes. Hash bounded chunks, not JSON again.
+    if (index.offset > 0) {
+      const hash = createHash('sha256'), chunk = Buffer.alloc(Math.min(65536, index.offset))
+      let offset = 0
+      while (offset < index.offset) {
+        const n = readSync(fd, chunk, 0, Math.min(chunk.length, index.offset - offset), offset)
+        if (!n) throw new Error('truncated')
+        hash.update(chunk.subarray(0, n)); offset += n
+      }
+      if (hash.digest('hex') !== index.prefixHash.copy().digest('hex')) {
+        index.fault = 'corrupt'; index.rows = []; index.ids.clear(); index.lastSequence = 0; index.terminal = false
+        return index
+      }
+    }
     const tail = Buffer.alloc(stat.size - index.offset)
     let count = 0
     while (count < tail.length) { const n = readSync(fd, tail, count, tail.length - count, index.offset + count); if (!n) throw new Error('truncated'); count += n }
@@ -183,6 +198,7 @@ function sourceIndex(store: ExecutionStore, run: ExecutionRecord, file: string):
       }
       from = end + 1
     }
+    index.prefixHash.update(tail.subarray(0, from))
     index.offset += from
     if (from !== tail.length) index.fault = 'corrupt'
   } catch { index.fault = 'corrupt' }
