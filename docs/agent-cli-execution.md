@@ -57,3 +57,14 @@ Sidecar 使用 `lifetime: 'host'`，即使不登记工具，宿主失联也会�
 Codex 的 CODEX_HOME 使用宿主专用配置目录，sessions 绑定专用会话目录；原生 thread id、JSONL 路径及 session_meta id/cwd 必须一致。0.166 的续接恢复最初工具目录；同一上下文只能保留或撤销原有定义，增加工具或改变定义返回 unsupported_constraint。撤销不等于从历史中删除名称，调用仍由本轮授权校验拒绝。要改变工具目录应明确创建新上下文，不能悄悄切换原生会话。
 
 Codex 适配经 app-server initialize/initialized、thread/start 或 thread/resume、turn/start 驱动；原生 MCP、shell、web、插件与 Agent 能力启动前关闭，未登记请求拒绝。工具成功以结果写回原生管道为送达依据，失败写入保留 pending；这不证明业务副作用可撤销，也不提供 exactly-once。
+
+
+## 显式执行观测
+
+`start` 可额外指定 `observation: { traceparent, maxEvents, maxBytes }`。traceparent 使用 W3C 00 格式、非零 trace/span；maxEvents 为2–100000，maxBytes 为4096–67108864，均须显式给出。未指定不启用新来源缓冲，也不代替 TaskLoop 的默认采集策略。
+
+`capabilities().observation` 声明可观察范围。执行后或进行中，调用 `observations(runId, afterSequence = 0, limit = 100)` 增量读取；limit 为1–1000。返回稳定事件、nextSequence 及完整性状态；复读同一事件的 id 不变。Sidecar 对应方法为 observation.read，并推送 execution.observation 与 execution.observation.status 通知。超限、来源丢失、尾帧、未完成都不能当作完整；观测完整性与业务是否成功分别判断。
+
+工具请求、宿主响应、实际送达是独立事件；ToolCall 的 traceparent 可作为宿主实际执行 span 的父上下文。处理器抛错或明确返回 execution_failed 表示宿主执行失败，与 invalid_input/rejected 分开；观察到响应不等于原生 Agent 已收到，送达失败继续保留 pending，不重放。事件只记录类型化元数据与参数/成功结果的字节数、SHA-256，不复制完整正文或异常原文；低熵内容的哈希仍需访问控制。
+
+来源缓冲位于 dataDir/observations 下、每次执行独立，供宿主接纳与复读，不是 TaskLoop 的最终 trace 查询库或保留策略。用量只有原生/API 返回了字段才发出；Codex 累计会话用量不能直接当本次执行增量，reasoning 是 output 的子集，不再次相加。隐藏推理与未暴露模型请求不推断。具体契约和验收见 [278 设计](design/278-harness-observation-tool-callbacks.md)。

@@ -1,3 +1,4 @@
+import { type ObservationJournal, reportedUsage } from './observation.js'
 import { openSync, readSync, closeSync, lstatSync, statSync, symlinkSync, realpathSync } from 'node:fs'
 import { isAbsolute, join, relative } from 'node:path'
 import { GROK_NATIVE_TOOLS, grokLockEnv } from './hostTools.js'
@@ -165,11 +166,12 @@ export function classifyFailure(text: string): ExecutionCode {
 export class CliEvents {
   private buffer = ''
   private finalAssistant = false
+  private readonly seenResponses = new Set<string>()
   output = ''
   sessionId?: string
   ended = false
   code?: ExecutionCode
-  constructor(private runtime: 'grok-cli' | 'pi') {}
+  constructor(private runtime: 'grok-cli' | 'pi', private readonly observation?: ObservationJournal) {}
   push(chunk: string): void {
     this.buffer += chunk
     if (this.buffer.length > 4 * 1024 * 1024) { this.code = 'protocol_error'; this.buffer = ''; return }
@@ -184,6 +186,15 @@ export class CliEvents {
     let e: any
     try { e = JSON.parse(line) } catch { if (line.trim()) this.code = 'protocol_error'; return }
     if (!e || typeof e !== 'object') { this.code = 'protocol_error'; return }
+    if (e.type === 'text' || e.type === 'message_start' || e.type === 'message_end') this.observation?.emit('agent.activity', { category: 'message' }, { sessionId: this.sessionId })
+    if (this.runtime === 'pi' && e.type === 'message_end' && e.message?.role === 'assistant') {
+      const responseId = typeof e.message.responseId === 'string' ? e.message.responseId : undefined
+      const usage = reportedUsage(e.message.usage, 'message', 'delta', { inputTokens: 'input', outputTokens: 'output', totalTokens: 'totalTokens', cachedInputTokens: 'cacheRead', reasoningOutputTokens: 'reasoning' })
+      if (usage && (!responseId || !this.seenResponses.has(responseId))) {
+        if (responseId) this.seenResponses.add(responseId)
+        this.observation?.emit('usage', usage, { sessionId: this.sessionId, responseId })
+      }
+    }
     if (this.runtime === 'grok-cli') {
       if (e.type === 'text' && typeof e.data === 'string') this.output += e.data
       const budgetEvent = e.type === 'max_turns_reached' || e.stopReason === 'max_turns' || e.stopReason === 'error_max_turns'

@@ -10,7 +10,7 @@ const MAX_PENDING = 64
 
 type Id = string | number
 type Params = Record<string, unknown>
-type Client = Pick<ExecutionClient, 'capabilities' | 'createContext' | 'getContext' | 'start' | 'query' | 'cancel' | 'toolCall' | 'pendingToolCalls' | 'reconcile'>
+type Client = Pick<ExecutionClient, 'capabilities' | 'createContext' | 'getContext' | 'start' | 'query' | 'cancel' | 'toolCall' | 'pendingToolCalls' | 'reconcile' | 'observations'>
 class RpcError extends Error {
   constructor(readonly code: number, message: string) { super(message) }
 }
@@ -37,6 +37,7 @@ export function serveExecutionSidecar(input: Readable, output: Writable, client:
     const inFlight = new Set<Id>()
     const owned = new Set<string>()
     const watched = new Set<string>()
+    const observationWatch = new Map<string, { cursor: number; status?: string }>()
     const tools = new Map<Id, (result: ToolResult) => void>()
     const close = () => {
       if (closing) return
@@ -97,10 +98,15 @@ export function serveExecutionSidecar(input: Readable, output: Writable, client:
           if (watched.size >= MAX_PENDING) throw new RpcError(-32600, 'Too many active executions.')
           const runId = client.start(string(p, 'contextId'), string(p, 'input'), constraints, constraints?.tools !== undefined ? onTool : undefined)
           owned.add(runId); watched.add(runId)
+          if (constraints?.observation) observationWatch.set(runId, { cursor: 0 })
           return { runId }
         }
         case 'execution.query': { const p = params(raw, ['runId'], ['runId']); return client.query(string(p, 'runId')) ?? null }
         case 'execution.cancel': { const p = params(raw, ['runId'], ['runId']); return client.cancel(string(p, 'runId')) }
+        case 'observation.read': {
+          const p = params(raw, ['runId', 'afterSequence', 'limit'], ['runId'])
+          return client.observations(string(p, 'runId'), p.afterSequence as number | undefined, p.limit as number | undefined)
+        }
         case 'tool.get': { const p = params(raw, ['callId'], ['callId']); return client.toolCall(string(p, 'callId')) ?? null }
         case 'tool.pending': { const p = params(raw, ['contextId'], ['contextId']); return client.pendingToolCalls(string(p, 'contextId')) }
         case 'tool.reconcile': { const p = params(raw, ['callId', 'output'], ['callId', 'output']); return client.reconcile(string(p, 'callId'), string(p, 'output')) }
@@ -146,6 +152,17 @@ export function serveExecutionSidecar(input: Readable, output: Writable, client:
     const pulse = setInterval(() => {
       if (closing) return
       try {
+        for (const [runId, cursor] of observationWatch) {
+          const page = client.observations(runId, cursor.cursor, 100)
+          for (const event of page.events) send({ jsonrpc: '2.0', method: 'execution.observation', params: event })
+          cursor.cursor = page.nextSequence
+          const status = JSON.stringify(page.status)
+          if (status !== cursor.status) {
+            send({ jsonrpc: '2.0', method: 'execution.observation.status', params: { runId, ...page.status } })
+            cursor.status = status
+          }
+          if (client.query(runId)?.finishedAt && page.events.length < 100) observationWatch.delete(runId)
+        }
         for (const runId of watched) {
           const r: ExecutionRecord | undefined = client.query(runId)
           if (!r) continue

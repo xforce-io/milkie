@@ -1,3 +1,4 @@
+import { contentSummary, type ObservationJournal } from './observation.js'
 import { execFileSync, spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { existsSync, readFileSync, readdirSync, realpathSync, writeFileSync, unlinkSync, chmodSync } from 'node:fs'
@@ -118,7 +119,7 @@ export function normalizeToolResult(value: unknown): ToolResult {
     if (Buffer.byteLength(result.output) <= MAX_TOOL_PAYLOAD_BYTES) return { ok: true, output: result.output }
     return { ok: false, code: 'rejected', message: 'Tool result exceeds 262144 bytes.' }
   }
-  if (result.ok === false && (result.code === 'invalid_input' || result.code === 'rejected') && typeof result.message === 'string' && result.message.length > 0 && result.message.length <= MAX_MESSAGE) {
+  if (result.ok === false && (result.code === 'invalid_input' || result.code === 'rejected' || result.code === 'execution_failed') && typeof result.message === 'string' && result.message.length > 0 && result.message.length <= MAX_MESSAGE) {
     return { ok: false, code: result.code, message: result.message }
   }
   return { ok: false, code: 'rejected', message: 'Handler returned an invalid result.' }
@@ -389,6 +390,7 @@ function deliverReply(socket: Socket, payload: string): Promise<boolean> {
 }
 export type ToolMessage = { id?: unknown; name?: unknown; nativeCallId?: unknown; input?: unknown }
 export type ToolDispatchOptions = {
+  observation?: ObservationJournal
   tools: HostToolSpec[]
   forwarding: 'serial' | 'parallel'
   runId: string
@@ -400,6 +402,7 @@ export type ToolDispatchOptions = {
 
 /** Persist before queuing; delivery belongs to the actual native transport. */
 export function createToolDispatcher(options: ToolDispatchOptions): (message: ToolMessage, encodedBytes: number, deliver: (result: ToolResult) => Promise<boolean>) => Promise<void> {
+  const nativeCalls = new Set<string>()
   let tail = Promise.resolve()
   const enqueue = (job: () => Promise<void>) => {
     if (options.forwarding === 'parallel') return job()
@@ -412,10 +415,18 @@ export function createToolDispatcher(options: ToolDispatchOptions): (message: To
     if (typeof message.id !== 'string' || typeof message.name !== 'string') throw new Error('Malformed tool call.')
     const name = message.name
     const nativeCallId = typeof message.nativeCallId === 'string' && message.nativeCallId ? message.nativeCallId : undefined
+    if (nativeCallId && nativeCalls.has(nativeCallId)) throw new ExecutionError('protocol_error')
+    if (nativeCallId) nativeCalls.add(nativeCallId)
     const callId = randomUUID()
-    const base: ToolCallRecord = { version: 1, callId, name, input: message.input, runId: options.runId, contextId: options.contextId, status: 'pending', ...(nativeCallId ? { nativeCallId } : {}) }
+    const traceparent = options.observation?.toolTrace(callId)
+    const native = nativeCallId ? { callId: nativeCallId } : undefined
+    const base: ToolCallRecord = { version: 1, callId, name, input: message.input, runId: options.runId, contextId: options.contextId, status: 'pending', ...(traceparent ? { traceparent } : {}), ...(nativeCallId ? { nativeCallId } : {}) }
     const tool = tools.get(name)
-    const reply = (result: ToolResult) => { void deliver(result) }
+    options.observation?.emit('tool.requested', { callId, name, input: contentSummary(message.input) }, native, callId)
+    const reply = (result: ToolResult) => {
+      if (!result.ok && (result.code === 'invalid_input' || result.code === 'rejected')) options.observation?.emit('tool.rejected', { callId, code: result.code }, native, callId)
+      void deliver(result).then(delivered => options.observation?.emit('tool.delivery', { callId, outcome: delivered ? 'delivered' : 'unknown' }, native, callId), () => options.observation?.emit('tool.delivery', { callId, outcome: 'unknown' }, native, callId))
+    }
     if (encodedBytes > MAX_ENCODED_TOOL_REQUEST_BYTES || rawStringBytes(message.input) > MAX_TOOL_PAYLOAD_BYTES) {
       const rejected: ToolResult = {
         ok: false,
@@ -445,10 +456,13 @@ export function createToolDispatcher(options: ToolDispatchOptions): (message: To
     return async () => {
       if (!options.alive()) return
       let result: ToolResult
-      try { result = normalizeToolResult(await options.onHost({ callId, ...(nativeCallId ? { nativeCallId } : {}), name, input: message.input, runId: options.runId, contextId: options.contextId })) }
+      options.observation?.emit('tool.host.started', { callId }, native, callId)
+      try { result = normalizeToolResult(await options.onHost({ callId, ...(traceparent ? { traceparent } : {}), ...(nativeCallId ? { nativeCallId } : {}), name, input: message.input, runId: options.runId, contextId: options.contextId })) }
       catch (error) { if (!options.alive()) return; throw error }
       if (!options.alive()) return
+      options.observation?.emit('tool.host.responded', { callId, outcome: result.ok ? 'succeeded' : result.code, ...(result.ok ? { output: contentSummary(result.output) } : {}) }, native, callId)
       const delivered = await deliver(result)
+      options.observation?.emit('tool.delivery', { callId, outcome: delivered ? 'delivered' : 'unknown' }, native, callId)
       if (!delivered) return
       options.store.write('calls', callId, { ...base, status: result.ok ? 'succeeded' : result.code, ...(result.ok ? { output: result.output } : { message: result.message }) })
     }
@@ -461,6 +475,7 @@ export function createToolDispatcher(options: ToolDispatchOptions): (message: To
 
 export interface ToolBridge { socketPath: string; close(): Promise<void> }
 export async function openToolBridge(options: {
+  observation?: ObservationJournal
   tools: HostToolSpec[]
   forwarding: 'serial' | 'parallel'
   runId: string

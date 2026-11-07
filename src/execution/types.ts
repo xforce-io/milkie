@@ -1,3 +1,4 @@
+import type { ObservationOptions, ObservationCapabilities } from './observation.js'
 import type { ConnectionInput, ConnectionProjection } from '../connection/types.js'
 
 export type ExecutionStatus = 'starting' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'timed_out' | 'unknown'
@@ -29,10 +30,12 @@ export interface ToolCall {
   input: unknown
   runId: string
   contextId: string
+  traceparent?: string
 }
-export type ToolResult = { ok: true; output: string } | { ok: false; code: 'invalid_input' | 'rejected'; message: string }
+export type ToolResult = { ok: true; output: string } | { ok: false; code: 'invalid_input' | 'rejected' | 'execution_failed'; message: string }
 export type ToolHandler = (call: ToolCall) => Promise<ToolResult> | ToolResult
 export interface ToolCallRecord {
+  traceparent?: string
   version: 1
   callId: string
   nativeCallId?: string
@@ -40,11 +43,12 @@ export interface ToolCallRecord {
   input: unknown
   runId: string
   contextId: string
-  status: 'pending' | 'succeeded' | 'invalid_input' | 'rejected' | 'reconciled'
+  status: 'pending' | 'succeeded' | 'invalid_input' | 'rejected' | 'execution_failed' | 'reconciled'
   output?: string
   message?: string
 }
 export interface ExecutionConstraints {
+  observation?: ObservationOptions
   toolPolicy?: 'read-only' | 'standard'
   timeoutMs?: number
   /** Provider requests allowed in this execution. Not a tool-call count or a timeout. */
@@ -77,6 +81,7 @@ export interface ExecutionRecord {
   version: 1
   runId: string
   contextId: string
+  observation?: ObservationOptions
   nativeSessionId?: string
   status: ExecutionStatus
   code?: ExecutionCode
@@ -91,6 +96,7 @@ export interface ExecutionRecord {
   iterationBudget?: { limit: number; exhausted: boolean }
 }
 export interface ExecutionCapabilities {
+  observation?: ObservationCapabilities
   /** Adapter support is distinct from installed/authenticated readiness. */
   availability: 'unchecked'
   supported: boolean
@@ -123,7 +129,7 @@ export interface WorkerRequest {
   record: ExecutionRecord
   connection: ConnectionInput
   input: string
-  constraints: { toolPolicy?: 'read-only' | 'standard'; timeoutMs: number; maxModelIterations?: number }
+  constraints: { observation?: ObservationOptions; toolPolicy?: 'read-only' | 'standard'; timeoutMs: number; maxModelIterations?: number }
   hostTools?: { tools: HostToolSpec[]; forwarding: 'serial' | 'parallel' }
 }
 export interface WorkerToolMessage { type: 'tool-call'; call: ToolCall }

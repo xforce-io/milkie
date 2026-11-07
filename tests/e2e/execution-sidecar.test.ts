@@ -211,3 +211,26 @@ test('Codex uses the same distributed sidecar entry for host tools and exact ses
   const third = (await s.rpc('execution.start', { contextId: c.contextId, input: 'fixture:recall' })).result.runId
   expect(await s.terminal(third)).toMatchObject({ status: 'succeeded', output: 'sidecar-codex-marker', nativeSessionId: one.nativeSessionId })
 })
+
+test.each(['pi', 'codex'])('%s observation notifications and incremental queries share stable IDs', async runtime => {
+  const s = sidecar(undefined, runtime)
+  const caps = (await s.init()).result.capabilities.observation
+  expect(caps).toMatchObject({ version: 1, lifecycle: 'supervisor', hiddenReasoning: 'unavailable' })
+  const c = await s.context()
+  const observation = { traceparent: '00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01', maxEvents: 100, maxBytes: 65536 }
+  const id = (await s.rpc('execution.start', { contextId: c.contextId, input: 'observation-sidecar-marker', constraints: { observation } })).result.runId
+  expect(await s.terminal(id)).toMatchObject({ status: 'succeeded', stopped: true })
+  const first = (await s.rpc('observation.read', { runId: id, limit: 2 })).result
+  expect(first.events).toHaveLength(2)
+  const all = (await s.rpc('observation.read', { runId: id, limit: 100 })).result
+  expect(all.status).toMatchObject({ complete: true, state: 'finished' })
+  expect(all.events.slice(0, 2)).toEqual(first.events)
+  const remaining = (await s.rpc('observation.read', { runId: id, afterSequence: first.nextSequence })).result
+  expect(remaining.events).toEqual(all.events.slice(2))
+  await until(() => s.messages.some(m => m.method === 'execution.observation' && m.params.kind === 'execution.finished'))
+  const pushed = s.messages.filter(m => m.method === 'execution.observation' && m.params.runId === id).map(m => m.params)
+  expect(pushed).toEqual(all.events)
+  expect(new Set(pushed.map(m => m.id)).size).toBe(pushed.length)
+  expect(JSON.stringify(pushed)).not.toContain('observation-sidecar-marker')
+  expect((await s.rpc('observation.read', { runId: id, limit: 0 })).error.data.code).toBe('invalid_request')
+})
