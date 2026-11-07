@@ -530,7 +530,7 @@ test.each([false, true])('budgeted Pi extension cancels uncounted compaction (ho
   writePiExtension(file, hosted ? [alpha] : [], hosted ? '/tmp/test.sock' : undefined, 'serial', { limit: 2, markerFile: marker })
   const source = readFileSync(file, 'utf8').replace(/^import .*$/gm, '').replace('export default function', 'return function')
   const hooks = new Map<string, (...args: any[]) => any>()
-  const type = { String: () => ({}), Integer: () => ({}), Object: () => ({}) }
+  const type = { Unsafe: (schema: unknown) => schema }
   const initialize = new Function('writeFileSync', 'Type', source)(writeFileSync, type)
   let wrapped: any
   const provider = { id: 'fixture', auth: {}, getModels: () => [], streamSimple: (_model: unknown, _context: unknown, options: unknown) => options }

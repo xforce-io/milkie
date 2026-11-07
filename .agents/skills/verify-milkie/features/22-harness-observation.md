@@ -1,6 +1,6 @@
 # Harness 统一执行观测
 
-主票 [#278](https://github.com/xforce-io/milkie/issues/278)，依赖 [21-execution-sidecar](21-execution-sidecar.md)。细化验收以 [设计 v0.1](../../../../docs/design/278-harness-observation-tool-callbacks.md) §11 为准；没有观测浏览器页面。
+主票 [#278](https://github.com/xforce-io/milkie/issues/278)，依赖 [21-execution-sidecar](21-execution-sidecar.md)。细化验收以 [设计 v0.2](../../../../docs/design/278-harness-observation-tool-callbacks.md) §11 为准；没有观测浏览器页面。
 
 ## 入口
 

@@ -68,3 +68,5 @@ Codex 适配经 app-server initialize/initialized、thread/start 或 thread/resu
 工具请求、宿主响应、实际送达是独立事件；ToolCall 的 traceparent 可作为宿主实际执行 span 的父上下文。处理器抛错或明确返回 execution_failed 表示宿主执行失败，与 invalid_input/rejected 分开；观察到响应不等于原生 Agent 已收到，送达失败继续保留 pending，不重放。事件只记录类型化元数据与参数/成功结果的字节数、SHA-256，不复制完整正文或异常原文；低熵内容的哈希仍需访问控制。
 
 来源缓冲位于 dataDir/observations 下、每次执行独立，供宿主接纳与复读，不是 TaskLoop 的最终 trace 查询库或保留策略。用量只有原生/API 返回了字段才发出；Codex 累计会话用量不能直接当本次执行增量，reasoning 是 output 的子集，不再次相加。隐藏推理与未暴露模型请求不推断。具体契约和验收见 [278 设计](design/278-harness-observation-tool-callbacks.md)。
+
+宿主工具的空子 Schema `{}` 表示任意 JSON；根仍须 type=object。字符串 minLength/maxLength 和数字 minimum/maximum 显式校验，Pi 原样保留这些 Schema 关键字，不把任意 JSON 变成空对象。
