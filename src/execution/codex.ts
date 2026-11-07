@@ -1,5 +1,5 @@
 import { spawn, execFile, type ChildProcessWithoutNullStreams } from 'node:child_process'
-import { isAbsolute, relative } from 'node:path'
+import { isAbsolute, relative, dirname, basename, join } from 'node:path'
 import { realpathSync as realFile } from 'node:fs'
 import { assertNativeSession, cliEnvironment, classifyFailure } from './adapters.js'
 import { createToolDispatcher } from './hostTools.js'
@@ -31,6 +31,24 @@ export function disabledCodexMcp(inventory: unknown): string {
     return `${JSON.stringify(row.name)}={${disabled}}`
   })
   return `mcp_servers={${entries.join(',')}}`
+}
+
+/** thread/start returns a future rollout path; Codex creates it after turn/start. */
+function futureSessionPath(path: string, sessionDir: string): string {
+  if (!isAbsolute(path)) throw new ExecutionError('session_mismatch')
+  const suffix: string[] = []
+  let ancestor = path, real: string
+  for (;;) {
+    try { real = realFile(ancestor); break }
+    catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== 'ENOENT' || dirname(ancestor) === ancestor) throw new ExecutionError('session_mismatch')
+      suffix.unshift(basename(ancestor)); ancestor = dirname(ancestor)
+    }
+  }
+  const resolved = join(real, ...suffix)
+  const within = relative(realFile(sessionDir), resolved)
+  if (!within || within.startsWith('..') || isAbsolute(within)) throw new ExecutionError('session_mismatch')
+  return resolved
 }
 
 /** One bounded native process tree. No prompt, inherited inventory or stderr is logged. */
@@ -206,22 +224,21 @@ export class CodexExecution {
     const started = await this.rpc(wasExecuted ? 'thread/resume' : 'thread/start', wasExecuted ? { ...options, threadId: context.nativeSessionId, path: context.nativeSessionFile, excludeTurns: true } : { ...options, allowProviderModelFallback: false, ephemeral: false, historyMode: 'legacy', selectedCapabilityRoots: [], dynamicTools: (this.request.hostTools?.tools ?? []).map(t => ({ type: 'function', ...t })) })
     if (!record(started) || started.model !== context.connection.model || started.cwd !== context.cwd || !record(started.thread) || typeof started.thread.id !== 'string' || typeof started.thread.path !== 'string' || started.thread.cwd !== context.cwd || started.thread.ephemeral !== false) throw new ExecutionError('policy_mismatch')
     if (wasExecuted && (started.thread.id !== context.nativeSessionId || realFile(started.thread.path) !== realFile(context.nativeSessionFile!))) throw new ExecutionError('session_mismatch')
-    const path = started.thread.path
-    if (!isAbsolute(path)) throw new ExecutionError('session_mismatch')
-    const within = relative(realFile(context.sessionDir!), realFile(path))
-    if (within.startsWith('..') || isAbsolute(within)) throw new ExecutionError('session_mismatch')
+    const path = futureSessionPath(started.thread.path, context.sessionDir!)
     this.threadId = started.thread.id
     context.nativeSessionId = this.threadId
-    context.nativeSessionFile = realFile(path)
+    context.nativeSessionFile = path
     context.nativeTools ??= structuredClone(this.request.hostTools?.tools ?? [])
     context.hasExecuted = true
-    assertNativeSession(context)
+    if (wasExecuted) assertNativeSession(context)
     this.request.record.nativeSessionId = this.threadId
     this.store.write('contexts', context.contextId, context)
     const turn = await this.rpc('turn/start', { threadId: this.threadId, input: [{ type: 'text', text: this.request.input }] })
     if (typeof turn?.turn?.id !== 'string') throw new ExecutionError('protocol_error')
     if (this.turnId && this.turnId !== turn.turn.id) throw new ExecutionError('session_mismatch')
     this.turnId = turn.turn.id
-    return Promise.race([this.completed, this.fatal])
+    const output = await Promise.race([this.completed, this.fatal])
+    assertNativeSession(context)
+    return output
   }
 }

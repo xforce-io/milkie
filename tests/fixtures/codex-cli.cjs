@@ -37,8 +37,7 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
   if (m.method === 'thread/start') {
     threadId = crypto.randomUUID(); tools = m.params.dynamicTools
     file = path.join(process.env.CODEX_HOME, 'sessions', `rollout-${threadId}.jsonl`)
-    fs.writeFileSync(file, JSON.stringify({ type: 'session_meta', payload: { id: threadId, cwd: process.cwd() } }) + '\n')
-    fs.appendFileSync(file, JSON.stringify({ type: 'fixture_state', tools, memory: '' }) + '\n')
+
   }
   if (m.method === 'thread/resume') {
     file = m.params.path
@@ -51,6 +50,10 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
     emit({ id: m.id, result: { model: scenario.modelMismatch ? 'fallback-model' : m.params.model, cwd: process.cwd(), thread: { id: threadId, path: file, cwd: process.cwd(), ephemeral: false } } }); return
   }
   if (m.method === 'turn/start') {
+    if (!fs.existsSync(file)) {
+      fs.writeFileSync(file, JSON.stringify({ type: 'session_meta', payload: { id: threadId, cwd: process.cwd() } }) + '\n')
+      fs.appendFileSync(file, JSON.stringify({ type: 'fixture_state', tools, memory: '' }) + '\n')
+    }
     if (scenario.authError) { emit({ id: m.id, error: { code: -32000, message: '401 Authentication failed DO-NOT-LEAK-SECRET' } }); return }
     turnId = crypto.randomUUID()
     emit({ id: m.id, result: { turn: { id: turnId } } })

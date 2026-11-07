@@ -1,6 +1,6 @@
 # 本地执行 Sidecar
 
-主票 [Milkie #277](https://github.com/xforce-io/milkie/issues/277)，S1/S2 及细化验收以 [设计 v0.2](../../../../docs/design/277-codex-sidecar-execution.md) §11 为准。本功能文件是驾驶方法，不代表整票通过。
+主票 [Milkie #277](https://github.com/xforce-io/milkie/issues/277)，S1/S2 及细化验收以 [设计 v0.3](../../../../docs/design/277-codex-sidecar-execution.md) §11 为准。本功能文件是驾驶方法，不代表整票通过。
 
 ## 入口与前置
 
@@ -29,3 +29,8 @@ python3 .agents/skills/verify-milkie/scripts/check_map.py
 ```
 
 Sidecar 套件使用已有 tests/fixtures/agent-cli.cjs；只证明跨进程协议、隔离、工具关联、宿主存活契约，不证明原生 Codex/Pi/Grok 行为。运行时应保留命令、候选 SHA、退出码、原始日志与未覆盖验收。整票 S1/S2 不可由本套件单独记 pass。
+
+
+## 原生协议探针（无真实模型）
+
+将宿主安装的0.166.0加入 PATH，运行 `MILKIE_LIVE_CODEX_PROTOCOL=1 node tests/e2e/codex-native-protocol.live.cjs`。探针使用本次临时专用目录、明确的假凭据和本地 HTTP 401 提供方，断言 auth_failed、原生进程停止及真实 JSONL 的 id/cwd；不访问真实供应商、不复制登录材料。输出在 test-output/verify-milkie 下，不能作为 S1.A2/S2.A1 真实模型成功证据。它补充了 thread/start 路径先出现、文件在 turn/start 后才创建的原生差异；确定性套件同样覆盖延迟创建。
