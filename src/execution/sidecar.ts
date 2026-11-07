@@ -37,7 +37,7 @@ export function serveExecutionSidecar(input: Readable, output: Writable, client:
     const inFlight = new Set<Id>()
     const owned = new Set<string>()
     const watched = new Set<string>()
-    const tools = new Map<Id, (result: ToolResult) => void>()
+    const tools = new Map<Id, { runId: string; done: (result: ToolResult) => void }>()
     const close = () => {
       if (closing) return
       closing = true
@@ -46,7 +46,7 @@ export function serveExecutionSidecar(input: Readable, output: Writable, client:
       input.off('data', onData)
       // Cancellation stays concurrent with pending tool calls. Never replay a tool.
       void Promise.allSettled([...owned].map(runId => Promise.resolve().then(() => client.cancel(runId)))).then(() => {
-        for (const done of tools.values()) done({ ok: false, code: 'rejected', message: 'Host disconnected.' })
+        for (const { done } of tools.values()) done({ ok: false, code: 'rejected', message: 'Host disconnected.' })
         tools.clear()
         if (output.destroyed || output.writableFinished) { resolve(); return }
         // Flush already accepted replies on normal EOF; never hang shutdown if
@@ -68,7 +68,7 @@ export function serveExecutionSidecar(input: Readable, output: Writable, client:
     const onTool = (call: ToolCall): Promise<ToolResult> => new Promise(done => {
       if (closing || tools.size >= MAX_PENDING) { close(); done({ ok: false, code: 'rejected', message: 'Host unavailable.' }); return }
       const id = `tool:${randomUUID()}`
-      tools.set(id, done)
+      tools.set(id, { runId: call.runId, done })
       send({ jsonrpc: '2.0', id, method: 'tool.call', params: call })
     })
     const dispatch = async (method: string, raw: unknown): Promise<unknown> => {
@@ -114,12 +114,12 @@ export function serveExecutionSidecar(input: Readable, output: Writable, client:
       if (!object(m) || m.jsonrpc !== '2.0' || !validId(m.id)) { error(null, -32600, 'Invalid request.'); return }
       const id = m.id
       if (!('method' in m)) {
-        const done = tools.get(id)
+        const pending = tools.get(id)
         // Unknown/late responses cannot be interpreted as new commands.
-        if (!done) return
+        if (!pending) return
         if (Object.keys(m).some(k => !['jsonrpc', 'id', 'result', 'error'].includes(k)) || ('result' in m) === ('error' in m)) { error(id, -32600, 'Invalid response.'); return }
         tools.delete(id)
-        done('error' in m ? { ok: false, code: 'rejected', message: 'Host rejected the tool call.' } : m.result as ToolResult)
+        pending.done('error' in m ? { ok: false, code: 'rejected', message: 'Host rejected the tool call.' } : m.result as ToolResult)
         return
       }
       if (typeof m.method !== 'string' || Object.keys(m).some(k => !['jsonrpc', 'id', 'method', 'params'].includes(k))) { error(id, -32600, 'Invalid request.'); return }
@@ -152,7 +152,15 @@ export function serveExecutionSidecar(input: Readable, output: Writable, client:
           const { contextId, status, heartbeatAt, stopped, finishedAt, code } = r
           send({ jsonrpc: '2.0', method: 'execution.updated', params: { runId, contextId, status, heartbeatAt, stopped, finishedAt, code } })
           // A stale heartbeat can report unknown before a genuine terminal record exists.
-          if (r.finishedAt !== undefined) { watched.delete(runId); owned.delete(runId) }
+          if (r.finishedAt !== undefined) {
+            watched.delete(runId); owned.delete(runId)
+            // The worker has already ended this invocation. Drop its transport
+            // waiters without completing a persistent pending business effect.
+            for (const [id, pending] of tools) if (pending.runId === runId) {
+              tools.delete(id)
+              pending.done({ ok: false, code: 'rejected', message: 'Execution ended.' })
+            }
+          }
         }
       } catch { close() }
     }, 250)
