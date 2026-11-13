@@ -16,12 +16,18 @@ fs.writeFileSync(path.join(process.cwd(), 'codex-launch.json'), JSON.stringify({
 let threadId, file, tools = [], memory = '', turnId, toolResponses = [], expected = 0
 const emit = x => process.stdout.write(JSON.stringify(x) + '\n')
 function complete(text) {
+  if (scenario.warning) {
+    const params = { message: 'Synthetic warning DO-NOT-LEAK-WARNING' }
+    if (scenario.warning !== 'omitted') params.threadId = scenario.warning === 'global' ? null : scenario.warning === 'foreign' ? crypto.randomUUID() : threadId
+    if (scenario.warningTurn) params.turnId = crypto.randomUUID()
+    emit({ ...(scenario.warningRequest ? { id: 'warning-request' } : {}), method: 'warning', params })
+  }
   const p = { threadId, turnId, item: { type: 'agentMessage', id: 'answer', text } }
   emit({ method: 'item/started', params: p }); emit({ method: 'item/completed', params: p })
   emit({ method: 'turn/completed', params: { threadId, turn: { id: turnId, status: 'completed' } } })
 }
 function nativeCall(name, n) {
-  emit({ id: `native-request-${n}`, method: 'item/tool/call', params: { threadId: scenario.foreign ? crypto.randomUUID() : threadId, turnId, callId: `native-call-${n}`, tool: name, arguments: { n } } })
+  emit({ id: `native-request-${n}`, method: 'item/tool/call', params: { threadId: scenario.nullToolThread ? null : scenario.foreign ? crypto.randomUUID() : threadId, turnId: scenario.wrongToolTurn ? crypto.randomUUID() : turnId, callId: `native-call-${n}`, tool: name, arguments: { n } } })
 }
 readline.createInterface({ input: process.stdin }).on('line', line => {
   const m = JSON.parse(line)

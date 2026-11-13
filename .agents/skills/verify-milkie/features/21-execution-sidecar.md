@@ -1,5 +1,7 @@
 # 本地执行 Sidecar
 
+#281 警告兼容修复的S1/S2沿用本功能文件；细化标准见[设计v0.1](../../../../docs/design/281-codex-global-warning.md)§11。原#277真实矩阵不因本修复重标通过。
+
 主票 [Milkie #277](https://github.com/xforce-io/milkie/issues/277)，S1/S2 及细化验收以 [设计 v0.4](../../../../docs/design/277-codex-sidecar-execution.md) §11 为准。本功能文件是驾驶方法，不代表整票通过。
 
 ## 入口与前置
@@ -34,3 +36,9 @@ Sidecar 套件使用已有 tests/fixtures/agent-cli.cjs；只证明跨进程协�
 ## 原生协议探针（无真实模型）
 
 将宿主安装的0.166.0加入 PATH，运行 `MILKIE_LIVE_CODEX_PROTOCOL=1 node tests/e2e/codex-native-protocol.live.cjs`。探针使用本次临时专用目录、明确的假凭据和本地 HTTP 401 提供方，断言 auth_failed、原生进程停止及真实 JSONL 的 id/cwd；不访问真实供应商、不复制登录材料。输出在 test-output/verify-milkie 下，不能作为 S1.A2/S2.A1 真实模型成功证据。它补充了 thread/start 路径先出现、文件在 turn/start 后才创建的原生差异；确定性套件同样覆盖延迟创建。
+
+## #281 警告与身份边界
+
+执行`npm run test:execution`，核对codexExecution中的global/omitted/targeted警告均在一次宿主工具送达后完成，效果只发生一次且执行记录无警告正文。foreign警告保持失败，null tool thread及wrong tool turn在宿主效果前拒绝；不能将所有可空身份普遍放行。固定原生CLI与本机合成提供者的额外验证单独记为零真实模型，原生Sol文章路径归Inquiry #7，不能用夹具替代。
+
+显式指定固定二进制后运行`MILKIE_NATIVE_CODEX=/absolute/codex0.166.0 MILKIE_EVIDENCE_DIR=/absolute/unique-evidence node tests/e2e/codex-global-warning.native.cjs`：本地Responses提供者返回合成工具脚本及OK，真实app-server在一次宿主结果送达后的dynamicToolCall完成事件前注入合法全局warning。要求注入确实发生、2次本地提供者请求、1次宿主效果、succeeded/OK且stopped。只使用临时目录和假凭据，不使用用户登录；这是原生协议回归，不是真实模型结果。

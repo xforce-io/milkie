@@ -136,7 +136,9 @@ export class CodexExecution {
     }
     if (typeof m.method !== 'string' || !record(m.params)) throw new ExecutionError('protocol_error')
     const p = m.params
-    if (p.threadId !== undefined && this.threadId && p.threadId !== this.threadId) throw new ExecutionError('session_mismatch')
+    // Codex 0.166.0 permits an untargeted warning; execution/tool frames still require exact identity.
+    const globalWarning = m.method === 'warning' && !('id' in m) && p.threadId === null && typeof p.message === 'string'
+    if (p.threadId !== undefined && this.threadId && p.threadId !== this.threadId && !globalWarning) throw new ExecutionError('session_mismatch')
     if (p.turnId !== undefined && this.turnId && p.turnId !== this.turnId) throw new ExecutionError('session_mismatch')
     if (m.method === 'item/tool/call') {
       if (this.ended) throw new ExecutionError('protocol_error')
