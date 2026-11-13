@@ -32,7 +32,7 @@
 | [19-agent-cli-host-tool-resume](19-agent-cli-host-tool-resume.md) | 续接时重装宿主工具并核对未回复调用 | #267；真实 CLI 验收 |
 | [20-cli-iteration-tool-bounds](20-cli-iteration-tool-bounds.md) | CLI 模型迭代预算与工具数据边界 | #275；压缩取消与 MCP 拒绝记录 |
 
-| [21-execution-sidecar](21-execution-sidecar.md) | 本地版本化执行协议与宿主生命周期 | #277 候选；Codex 与第二真实 Harness 验收尚未完成 |
+| [21-execution-sidecar](21-execution-sidecar.md) | 本地版本化执行协议与宿主生命周期 | #281 警告兼容及身份边界；#277 历史结果另列 |
 
 | [22-harness-observation](22-harness-observation.md) | 外部执行观测、关联、来源缓冲与安全摘要 | #278；真实 Harness 验收仍待完成 |
 

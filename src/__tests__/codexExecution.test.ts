@@ -68,6 +68,29 @@ test.each(['serial', 'parallel'] as const)('%s dynamic tool forwarding retains n
   ]))
 })
 
+test.each(['global', 'omitted', 'targeted'])('a %s warning after tool delivery does not change execution ownership', async warning => {
+  const a = client(), c = context(a, { warning })
+  let effects = 0
+  const r = await terminal(a, a.start(c.contextId, 'fixture:hold', { tools: [alpha] }, () => {
+    effects++; return { ok: true, output: 'accepted-once' }
+  }))
+  expect(r).toMatchObject({ status: 'succeeded', stopped: true })
+  expect(effects).toBe(1)
+  expect(r.output).toContain('accepted-once')
+  expect(JSON.stringify(r)).not.toContain('DO-NOT-LEAK-WARNING')
+})
+
+test.each([{ warning: 'foreign' }, { warning: 'global', warningRequest: true }, { warning: 'global', warningTurn: true }])('invalid warning scope %j still fails after the authorized tool result', async scenario => {
+  const a = client(), c = context(a, scenario)
+  let effects = 0
+  const r = await terminal(a, a.start(c.contextId, 'fixture:hold', { tools: [alpha] }, () => {
+    effects++; return { ok: true, output: 'accepted-once' }
+  }))
+  expect(r).toMatchObject({ status: 'failed', stopped: true, code: 'session_mismatch' })
+  expect(effects).toBe(1)
+  expect(JSON.stringify(r)).not.toContain('DO-NOT-LEAK-WARNING')
+})
+
 test('resume rejects new/changed tools before launch and revoked tools never reach the host', async () => {
   const a = client(), c = context(a)
   expect((await terminal(a, a.start(c.contextId, 'first', { tools: [alpha, beta] }, () => ({ ok: true, output: 'ok' })))).status).toBe('succeeded')
@@ -87,6 +110,8 @@ test.each([
   [{ nativeTool: true }, 'policy_mismatch'],
   [{ authError: true }, 'auth_failed'],
   [{ foreign: true }, 'session_mismatch'],
+  [{ nullToolThread: true }, 'session_mismatch'],
+  [{ wrongToolTurn: true }, 'session_mismatch'],
 ] as const)('native failure %j is explicit and has no host effects', async (scenario, code) => {
   const a = client(), c = context(a, scenario)
   let effects = 0
