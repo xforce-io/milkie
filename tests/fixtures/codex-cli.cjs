@@ -65,6 +65,17 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
     emit({ id: m.id, result: { turn: { id: turnId } } })
     emit({ method: 'turn/started', params: { threadId, turn: { id: turnId, status: 'inProgress' } } })
     const input = m.params.input[0].text
+    if (input.startsWith('fixture:search')) {
+      for (let n=1;n<=(scenario.searchCount??1);n++){
+      const item={id:'native-search-'+n,type:'webSearch',query:'sensitive-search-query',action:{type:'search',query:'sensitive-search-query',queries:null},results:null}
+      emit({method:'item/started',params:{threadId:scenario.foreignSearch?crypto.randomUUID():threadId,turnId,item}})
+      if (input==='fixture:search-sleep') return
+      if (scenario.malformedSearch) item.action={type:'unknown'}
+      item.results=scenario.nullSearch ? null : [{url:'https://example.com/source',title:'source',content:scenario.largeSearch?'x'.repeat(2*1024*1024):'sensitive-search-result'}]
+      emit({method:'item/completed',params:{threadId,turnId,item}})
+      }
+      complete('search-recorded');return
+    }
     if (scenario.nativeTool) { emit({ method: 'item/started', params: { threadId, turnId, item: { id: 'native-bash', type: 'commandExecution' } } }); return }
     if (input === 'fixture:sleep') return
     if (input === 'fixture:tools' || input === 'fixture:hold') {

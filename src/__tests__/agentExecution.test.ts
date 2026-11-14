@@ -1156,3 +1156,10 @@ test('API transport cannot register host tools', () => {
   expect(() => a.start(c.contextId, 'hello', { maxModelIterations: 2 })).toThrow('unsupported_constraint')
   expect(existsSync(join(root, 'cwd', 'runner.pid'))).toBe(false)
 })
+
+test.each(['pi','grok-cli'])('native search is rejected before launch for %s', runtime => {
+  const a=client(runtime), c=cliContext(a)
+  expect(a.capabilities().webSearch).toEqual(['disabled'])
+  expect(()=>a.start(c.contextId,'must-not-start',{webSearch:'live'})).toThrow('unsupported_constraint')
+  expect(()=>a.start(c.contextId,'must-not-start',{webSearch:'cached'})).toThrow('unsupported_constraint')
+})

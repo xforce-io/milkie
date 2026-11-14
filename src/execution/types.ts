@@ -2,7 +2,7 @@ import type { ObservationOptions, ObservationCapabilities } from './observation.
 import type { ConnectionInput, ConnectionProjection } from '../connection/types.js'
 
 export type ExecutionStatus = 'starting' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'timed_out' | 'unknown'
-export type ExecutionCode = 'invalid_request' | 'unsupported_runtime' | 'unsupported_constraint' | 'context_not_found' | 'connection_mismatch' | 'context_busy' | 'config_missing' | 'session_missing' | 'session_mismatch' | 'auth_failed' | 'process_failed' | 'native_cancelled' | 'protocol_error' | 'storage_error' | 'platform_unsupported' | 'policy_mismatch' | 'iteration_budget_exhausted' | 'runtime_missing' | 'unsupported_version'
+export type ExecutionCode = 'invalid_request' | 'unsupported_runtime' | 'unsupported_constraint' | 'context_not_found' | 'connection_mismatch' | 'context_busy' | 'config_missing' | 'session_missing' | 'session_mismatch' | 'auth_failed' | 'process_failed' | 'native_cancelled' | 'protocol_error' | 'storage_error' | 'platform_unsupported' | 'policy_mismatch' | 'iteration_budget_exhausted' | 'runtime_missing' | 'unsupported_version' | 'native_search_limit_exceeded'
 export class ExecutionError extends Error {
   constructor(readonly code: ExecutionCode) {
     super(`Execution request failed: ${code}.`)
@@ -52,7 +52,27 @@ export interface ToolCallRecord {
   output?: string
   message?: string
 }
+export type WebSearchMode = 'disabled' | 'cached' | 'live'
+export interface NativeWebSearchItem {
+  nativeItemId: string
+  phase: 'started' | 'completed'
+  query: string
+  action: Record<string, unknown> | null
+  /** Exactly native-returned JSON. null means unavailable, never author-inferred. */
+  results: unknown[] | null
+}
+export interface NativeWebSearchPage {
+  version: 1
+  runId: string
+  contextId: string
+  mode: WebSearchMode
+  items: NativeWebSearchItem[]
+  /** Collection lifecycle only; does not imply non-null results or successful discovery. */
+  complete: boolean
+}
 export interface ExecutionConstraints {
+  /** Default disabled. Only Codex supports cached/live; immutable on resume. */
+  webSearch?: WebSearchMode
   observation?: ObservationOptions
   toolPolicy?: 'read-only' | 'standard'
   timeoutMs?: number
@@ -80,9 +100,11 @@ export interface ExecutionContext {
   nativeSessionFile?: string
   /** Codex 0.166 restores this immutable model-facing catalog on resume. */
   nativeTools?: HostToolSpec[]
+  nativeWebSearch?: WebSearchMode
   hasExecuted: boolean
 }
 export interface ExecutionRecord {
+  webSearch?: WebSearchMode
   version: 1
   runId: string
   contextId: string
@@ -103,6 +125,7 @@ export interface ExecutionRecord {
   iterationBudget?: { limit: number; exhausted: boolean }
 }
 export interface ExecutionCapabilities {
+  webSearch: WebSearchMode[]
   observation?: ObservationCapabilities
   /** Adapter support is distinct from installed/authenticated readiness. */
   availability: 'unchecked'
@@ -136,7 +159,7 @@ export interface WorkerRequest {
   record: ExecutionRecord
   connection: ConnectionInput
   input: string
-  constraints: { observation?: ObservationOptions; toolPolicy?: 'read-only' | 'standard'; timeoutMs: number; maxModelIterations?: number }
+  constraints: { webSearch?: WebSearchMode; observation?: ObservationOptions; toolPolicy?: 'read-only' | 'standard'; timeoutMs: number; maxModelIterations?: number }
   hostTools?: { tools: HostToolSpec[]; forwarding: 'serial' | 'parallel' }
 }
 export interface WorkerToolMessage { type: 'tool-call'; call: ToolCall }

@@ -10,7 +10,7 @@ const MAX_PENDING = 64
 
 type Id = string | number
 type Params = Record<string, unknown>
-type Client = Pick<ExecutionClient, 'capabilities' | 'createContext' | 'getContext' | 'start' | 'query' | 'cancel' | 'toolCall' | 'pendingToolCalls' | 'reconcile' | 'observations' | 'purgeObservations'>
+type Client = Pick<ExecutionClient, 'capabilities' | 'createContext' | 'getContext' | 'start' | 'query' | 'cancel' | 'toolCall' | 'pendingToolCalls' | 'reconcile' | 'observations' | 'purgeObservations' | 'webSearches'>
 class RpcError extends Error {
   constructor(readonly code: number, message: string) { super(message) }
 }
@@ -103,6 +103,7 @@ export function serveExecutionSidecar(input: Readable, output: Writable, client:
           return { runId }
         }
         case 'execution.query': { const p = params(raw, ['runId'], ['runId']); return client.query(string(p, 'runId')) ?? null }
+        case 'web_search.read': { const p = params(raw, ['runId'], ['runId']); return client.webSearches(string(p, 'runId')) ?? null }
         case 'execution.cancel': { const p = params(raw, ['runId'], ['runId']); return client.cancel(string(p, 'runId')) }
         case 'observation.read': {
           const p = params(raw, ['runId', 'afterSequence', 'limit'], ['runId'])

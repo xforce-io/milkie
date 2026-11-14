@@ -163,3 +163,65 @@ test('native completion cannot mark an unresolved host tool as succeeded', async
   expect(r.output).toBeUndefined()
   expect(a.pendingToolCalls(c.contextId)).toEqual([expect.objectContaining({ runId: r.runId, status: 'pending' })])
 })
+
+
+test.each(['cached', 'live'] as const)('explicit %s search exports only native-owned results and resumes unchanged', async webSearch => {
+  const a=client(), c=context(a)
+  const id=a.start(c.contextId,'fixture:search',{webSearch,observation:{traceparent:'00-'+'1'.repeat(32)+'-'+'2'.repeat(16)+'-01',maxEvents:100,maxBytes:65536}})
+  expect(await terminal(a,id)).toMatchObject({status:'succeeded',stopped:true,webSearch})
+  expect(client().webSearches(id)).toMatchObject({runId:id,contextId:c.contextId,mode:webSearch,complete:true,items:[{nativeItemId:'native-search-1',phase:'completed',query:'sensitive-search-query',results:[{url:'https://example.com/source',content:'sensitive-search-result'}]}]})
+  const trace=JSON.stringify(a.observations(id))
+  expect(trace).not.toContain('sensitive-search')
+  expect(trace).toContain('agent.activity')
+  const launch=JSON.parse(readFileSync(join(c.cwd,'codex-launch.json'),'utf8'))
+  expect(launch.args).toContain('web_search='+JSON.stringify(webSearch))
+  expect(launch.args).toContain('features.shell_tool=false')
+  expect(launch.args).toContain('features.multi_agent=false')
+  expect(() => client().start(c.contextId,'x')).toThrow('unsupported_constraint')
+  const resumed=a.start(c.contextId,'fixture:search',{webSearch})
+  expect(await terminal(a,resumed)).toMatchObject({status:'succeeded',stopped:true})
+  expect(a.webSearches(resumed)?.runId).toBe(resumed)
+  expect(a.webSearches(id)?.runId).toBe(id)
+})
+
+test('default search remains disabled and cannot be enabled by a native event', async () => {
+  const a=client(),c=context(a),id=a.start(c.contextId,'fixture:search')
+  expect(await terminal(a,id)).toMatchObject({status:'failed',code:'policy_mismatch',stopped:true})
+  expect(a.webSearches(id)).toMatchObject({mode:'disabled',items:[]})
+  expect(() => a.start(c.contextId,'x',{webSearch:'live'})).toThrow('unsupported_constraint')
+  expect(() => a.start(c.contextId,'x',{webSearch:'invalid' as any})).toThrow('unsupported_constraint')
+})
+
+test.each([{foreignSearch:true},{malformedSearch:true},{largeSearch:true}])('search protocol/identity/capacity failure %j is explicit', async scenario => {
+  const a=client(),c=context(a,scenario),id=a.start(c.contextId,'fixture:search',{webSearch:'live'})
+  expect(await terminal(a,id)).toMatchObject({status:'failed',stopped:true,code:scenario.foreignSearch?'session_mismatch':scenario.malformedSearch?'protocol_error':'native_search_limit_exceeded'})
+  expect(a.webSearches(id)?.items.every(x=>x.results===null)).toBe(true)
+  expect(a.webSearches(id)?.complete).toBe(false)
+})
+
+test('null native results stay unknown and cancelled search stays started', async () => {
+  const a=client(),c=context(a,{nullSearch:true}),id=a.start(c.contextId,'fixture:search',{webSearch:'live'})
+  expect(await terminal(a,id)).toMatchObject({status:'succeeded',stopped:true})
+  expect(a.webSearches(id)).toMatchObject({complete:true,items:[{results:null}]})
+  const d=context(a),sleep=a.start(d.contextId,'fixture:search-sleep',{webSearch:'live'})
+  for(let i=0;i<200&&a.webSearches(sleep)?.items.length===0;i++)await delay(20)
+  expect(a.webSearches(sleep)?.items).toHaveLength(1)
+  expect(await a.cancel(sleep)).toMatchObject({status:'cancelled',stopped:true})
+  expect(client().webSearches(sleep)).toMatchObject({complete:false,items:[{phase:'started',results:null}]})
+  rmSync(join(root,'data','native-searches',id+'.json'))
+  expect(()=>a.webSearches(id)).toThrow('storage_error')
+})
+
+
+test('native shell is still rejected with explicit web search authorization', async () => {
+ const a=client(),c=context(a,{nativeTool:true})
+ expect(await terminal(a,a.start(c.contextId,'x',{webSearch:'live'}))).toMatchObject({status:'failed',code:'policy_mismatch',stopped:true})
+})
+
+
+test('the 65th native search fails without silently truncating a complete result', async () => {
+ const a=client(),c=context(a,{searchCount:65}),id=a.start(c.contextId,'fixture:search',{webSearch:'live'})
+ expect(await terminal(a,id)).toMatchObject({status:'failed',code:'native_search_limit_exceeded',stopped:true})
+ expect(a.webSearches(id)).toMatchObject({complete:false})
+ expect(a.webSearches(id)?.items).toHaveLength(64)
+})

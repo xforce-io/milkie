@@ -238,3 +238,6 @@ MIT
 ### 来源观测保留清理
 
 通过 `ExecutionClient.purgeObservations(runId)` 或 Sidecar `observation.purge`，可以幂等清理已结束且原生停止、无待核对工具的 Run 观测缓冲。能力以 `observation.purge=true` 声明；SDK/协议仍为版本 1 的增量扩展。读取清理中或已清理来源分别返回 `cleanup_pending` / `expired`，不伪造完整或业务成功。该操作保留执行/工具记录、原生功能会话与认证材料；活动或停止未确认时拒绝，不执行取消。详见 [#278 v0.3](docs/design/278-harness-observation-tool-callbacks.md)。
+
+
+Codex原生搜索候选（[#283](https://github.com/xforce-io/milkie/issues/283)）：`ExecutionClient.start(contextId, input, { webSearch: "live", timeoutMs: 180000 })`可显式选择`disabled`/`cached`/`live`，默认禁用；只有Codex支持启用，恢复同Context须使用首次模式。`client.webSearches(runId)`或Sidecar `web_search.read({runId})`读取原生返回的查询、动作及可得results。null不是已取得结果，complete仅表示成功执行的记录生命周期已完整；没有返回来源时不能从作者文本补造。其它原生能力保持关闭，原生搜索计量与宿主工具计量分开；目前不承诺请求前搜索次数限制。真实联网及Inquiry消费尚待验证，不能据确定性/原生本机夹具称已解阻。契约见[设计v0.1](docs/design/283-codex-native-web-search.md)。
