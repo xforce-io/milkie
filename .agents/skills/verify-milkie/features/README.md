@@ -36,12 +36,15 @@
 
 | [22-harness-observation](22-harness-observation.md) | 外部执行观测、关联、来源缓冲与安全摘要 | #278；真实 Harness 验收仍待完成 |
 
+| [23-codex-native-web-search](23-codex-native-web-search.md) | Codex显式联网搜索及归属记录 | #283；真实联网验证另列，默认禁用 |
+
 ## 主入口逐项归属
 
 此表用于源码漂移检查；每个入口仅指定一个主归属，跨能力路径通过功能文件说明。
 
 | 类型 | 入口 | 功能文件 |
 |---|---|---|
+| SDK | `ExecutionClient.webSearches` | [23-codex-native-web-search](23-codex-native-web-search.md) |
 | SDK | `ExecutionClient.capabilities` | [16-agent-cli-execution](16-agent-cli-execution.md) |
 | SDK | `ExecutionClient.createContext` | [16-agent-cli-execution](16-agent-cli-execution.md) |
 | SDK | `ExecutionClient.getContext` | [16-agent-cli-execution](16-agent-cli-execution.md) |

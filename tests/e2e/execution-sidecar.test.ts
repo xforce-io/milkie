@@ -308,3 +308,20 @@ test('cancelled execution transport cleanup preserves pending effects and ignore
   expect((await s.rpc('tool.get', { callId: call.params.callId })).result).toMatchObject({ status: 'pending', runId })
   expect((await s.rpc('execution.start', { contextId: c.contextId, input: 'must-not-replay' })).error.data.code).toBe('context_busy')
 })
+
+test('Sidecar explicitly authorizes Codex search and reads native records by run id', async () => {
+  const s=sidecar(undefined,'codex')
+  expect((await s.init()).result.capabilities.webSearch).toEqual(['disabled','cached','live'])
+  const c=await s.context(), d=await s.context()
+  const first=await s.rpc('execution.start',{contextId:c.contextId,input:'fixture:search',constraints:{webSearch:'live'}})
+  expect(first.error).toBeUndefined()
+  const id=first.result.runId
+  expect(await s.terminal(id)).toMatchObject({status:'succeeded',stopped:true})
+  expect((await s.rpc('web_search.read',{runId:id})).result).toMatchObject({runId:id,contextId:c.contextId,mode:'live',complete:true,items:[{nativeItemId:'native-search-1',results:[{url:'https://example.com/source'}]}]})
+  const other=await s.rpc('execution.start',{contextId:d.contextId,input:'no-search'})
+  expect(await s.terminal(other.result.runId)).toMatchObject({status:'succeeded'})
+  expect((await s.rpc('web_search.read',{runId:other.result.runId})).result).toMatchObject({contextId:d.contextId,mode:'disabled',items:[]})
+  expect((await s.rpc('web_search.read',{runId:id})).result.contextId).toBe(c.contextId)
+  expect((await s.rpc('web_search.read',{runId:id,contextId:d.contextId})).error.code).toBe(-32602)
+  expect((await s.rpc('execution.start',{contextId:c.contextId,input:'incompatible',constraints:{webSearch:'cached'}})).error).toBeDefined()
+})

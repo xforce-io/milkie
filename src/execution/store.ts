@@ -17,7 +17,7 @@ export class ExecutionStore {
   constructor(root: string) {
     this.root = resolve(root)
     mkdirSync(this.root, { recursive: true, mode: 0o700 })
-    for (const dir of ['contexts', 'runs', 'active', 'cancel', 'native', 'calls', 'locks']) mkdirSync(join(this.root, dir), { recursive: true, mode: 0o700 })
+    for (const dir of ['contexts', 'runs', 'active', 'cancel', 'native', 'calls', 'locks', 'native-searches']) mkdirSync(join(this.root, dir), { recursive: true, mode: 0o700 })
   }
   /** One context at a time. The process exit releases the database lock. */
   exclusive<T>(contextId: string, body: () => T): T {

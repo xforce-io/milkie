@@ -1,3 +1,4 @@
+import { initializeWebSearches, readWebSearches } from './webSearch.js'
 import { assertObservation, observationCapabilities, readObservations } from './observation.js'
 import { fork, type ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
@@ -39,6 +40,7 @@ export class ExecutionClient {
     const cli = ready && this.projection.transport === 'agent-cli'
     return {
       supported: ready,
+      webSearch: cli && this.projection.runtime === 'codex' ? ['disabled', 'cached', 'live'] : ['disabled'],
       ...(!supported ? { code: 'unsupported_runtime' as const } : !platform ? { code: 'platform_unsupported' as const } : {}),
       availability: 'unchecked',
       ...(ready ? { observation: observationCapabilities(this.projection.runtime ?? 'api') } : {}),
@@ -71,7 +73,7 @@ export class ExecutionClient {
     this.assertSupported()
     if (typeof input !== 'string' || !input.trim() || input.length > 1024 * 1024) throw new ExecutionError('invalid_request')
     if (!constraints || Array.isArray(constraints) || typeof constraints !== 'object') throw new ExecutionError('unsupported_constraint')
-    const allowed = new Set(['toolPolicy', 'timeoutMs', 'maxModelIterations', 'tools', 'forwarding', 'observation'])
+    const allowed = new Set(['toolPolicy', 'timeoutMs', 'maxModelIterations', 'tools', 'forwarding', 'observation', 'webSearch'])
     if (Object.keys(constraints).some(key => !allowed.has(key))) throw new ExecutionError('unsupported_constraint')
     if (constraints.observation !== undefined) assertObservation(constraints.observation)
     const observation = constraints.observation ? structuredClone(constraints.observation) : undefined
@@ -85,6 +87,8 @@ export class ExecutionClient {
       if (!Number.isInteger(maxModelIterations) || maxModelIterations < 1 || maxModelIterations > 10000) throw new ExecutionError('unsupported_constraint')
       if (this.projection.transport !== 'agent-cli' || !this.capabilities().modelIterations) throw new ExecutionError('unsupported_constraint')
     }
+    const webSearch = constraints.webSearch ?? 'disabled'
+    if (!['disabled', 'cached', 'live'].includes(webSearch) || (webSearch !== 'disabled' && (this.projection.transport !== 'agent-cli' || this.projection.runtime !== 'codex'))) throw new ExecutionError('unsupported_constraint')
     const toolPolicy = constraints.toolPolicy ?? 'read-only'
     let hostTools: { tools: HostToolSpec[]; forwarding: 'serial' | 'parallel' } | undefined
     if (hasTools) {
@@ -121,6 +125,7 @@ export class ExecutionClient {
         context = this.store.context(contextId)
         if (JSON.stringify(context.connection) !== JSON.stringify(this.projection)) throw new ExecutionError('connection_mismatch')
         if (this.projection.runtime === 'codex' && context.hasExecuted) {
+          if ((context.nativeWebSearch ?? 'disabled') !== webSearch) throw new ExecutionError('unsupported_constraint')
           if (!context.nativeTools) throw new ExecutionError('session_missing')
           for (const tool of hostTools?.tools ?? []) {
             if (!context.nativeTools.some(saved => canonicalTool(saved) === canonicalTool(tool))) throw new ExecutionError('unsupported_constraint')
@@ -130,8 +135,9 @@ export class ExecutionClient {
           prepareCliStorage(context)
           assertNativeSession(context)
         }
-        const record: ExecutionRecord = { version: 1, runId, contextId, nativeSessionId: context.nativeSessionId, ...(observation ? { observation } : {}), status: 'starting', startedAt: Date.now(), heartbeatAt: Date.now(), stopped: false }
+        const record: ExecutionRecord = { version: 1, runId, contextId, webSearch, nativeSessionId: context.nativeSessionId, ...(observation ? { observation } : {}), status: 'starting', startedAt: Date.now(), heartbeatAt: Date.now(), stopped: false }
         this.store.write('runs', runId, record)
+        initializeWebSearches(this.store, record)
         const childEnv = context.connection.transport === 'agent-cli' ? supervisorEnvironment(this.env) : this.env
         const attached = !!hostTools || this.hostLifetime
         child = fork(worker, [], { env: childEnv, detached: !attached, stdio: attached ? ['ignore', 'ignore', 'ignore', 'ipc', 'pipe'] : ['ignore', 'ignore', 'ignore', 'ipc'], execArgv: [] })
@@ -159,7 +165,7 @@ export class ExecutionClient {
             })
           })
         }
-        const message: WorkerRequest = { hostLifetime: this.hostLifetime, dataDir: this.store.root, context, record, connection: this.connection, input, constraints: { ...(observation ? { observation } : {}), toolPolicy: hostTools ? undefined : toolPolicy, timeoutMs, ...(maxModelIterations !== undefined ? { maxModelIterations } : {}) }, ...(hostTools ? { hostTools } : {}) }
+        const message: WorkerRequest = { hostLifetime: this.hostLifetime, dataDir: this.store.root, context, record, connection: this.connection, input, constraints: { webSearch, ...(observation ? { observation } : {}), toolPolicy: hostTools ? undefined : toolPolicy, timeoutMs, ...(maxModelIterations !== undefined ? { maxModelIterations } : {}) }, ...(hostTools ? { hostTools } : {}) }
         child.send(message, err => { if (err) fail() })
         if (!attached) child.unref()
         return runId
@@ -168,6 +174,10 @@ export class ExecutionClient {
         this.store.release(contextId, runId); throw e
       }
     })
+  }
+  webSearches(runId: string) {
+    const run = this.query(runId)
+    return run ? readWebSearches(this.store, run) : undefined
   }
   observations(runId: string, afterSequence = 0, limit = 100) {
     const run = this.query(runId)
